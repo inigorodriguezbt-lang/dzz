@@ -58,13 +58,12 @@ export const LOOT_TABLES = {
 	] },
 	house_living: { rolls: [ 1, 3 ], items: [
 		[ 'newspaper', 2 ], [ 'cash', 1.2, [ 5, 60 ] ], [ 'phone', 1 ], [ 'lighter', 1 ], [ 'matches', 0.6 ], [ 'candy_bar', 1 ], [ 'potato_chips', 0.8 ],
-		[ 'arare', 0.6 ], [ 'soda_cola', 0.8 ], [ 'beer_can', 0.8 ], [ 'comic_book', 0.6 ], [ 'ukulele', 0.4 ], [ 'tiki', 0.3 ], [ 'kukui_lei', 0.3 ], [ 'family_photo', 0.7 ],
-		[ 'flashlight', 0.7 ], [ 'batteries', 0.8, [ 1, 2 ] ], [ 'radio', 0.3 ], [ 'map_hawaii', 0.4 ], [ 'baseball_bat', 0.3 ], [ 'rubber_duck', 0.1 ], [ 'laptop', 0.3 ],
-		[ 'evac_notice', 0.4 ], [ 'diary_page', 0.3 ], [ 'watch', 0.3 ], [ 'macadamia_nuts', 0.4 ],
+		[ 'arare', 0.6 ], [ 'soda_cola', 0.8 ], [ 'beer_can', 0.8 ], [ 'comic_book', 0.6 ], [ 'ukulele', 0.4 ], [ 'tiki', 0.3 ], [ 'kukui_lei', 0.3 ],
+		[ 'flashlight', 0.7 ], [ 'batteries', 0.8, [ 1, 2 ] ], [ 'radio', 0.3 ], [ 'map_hawaii', 0.4 ], [ 'baseball_bat', 0.3 ], [ 'rubber_duck', 0.1 ], [ 'laptop', 0.3 ], [ 'watch', 0.3 ], [ 'macadamia_nuts', 0.4 ],
 	] },
 	house_bedroom: { rolls: [ 1, 4 ], items: [
 		T( 'casual', 8, { cat: 'clothing' } ), T( 'clothing', 1, { cat: 'clothing', not: [ 'military', 'police', 'fire', 'hazmat' ] } ), [ 'backpack_school', 0.8 ], [ 'tote_bag', 0.6 ], [ 'duffel_bag', 0.3 ],
-		[ 'cash', 1, [ 10, 120 ] ], [ 'gold_chain', 0.3 ], [ 'diamond_ring', 0.08 ], [ 'watch', 0.5 ], [ 'phone', 0.6 ], [ 'family_photo', 0.5 ], [ 'diary_page', 0.4 ],
+		[ 'cash', 1, [ 10, 120 ] ], [ 'gold_chain', 0.3 ], [ 'diamond_ring', 0.08 ], [ 'watch', 0.5 ], [ 'phone', 0.6 ],
 		[ 'flashlight', 0.6 ], [ 'batteries', 0.4 ], [ 'painkillers', 0.4 ], [ 'sleeping_bag', 0.2 ], [ 'bible', 0.2 ], [ 'kukui_lei', 0.2 ],
 		I( PISTOLS_CIV, 0.25 ), I( [ 'ammo_9mm', 'ammo_45acp', 'ammo_357', 'ammo_22lr' ], 0.3 ), [ 'baseball_bat', 0.3 ], [ 'sewing_kit', 0.4 ], [ 'laptop', 0.2 ],
 	] },
@@ -156,7 +155,7 @@ export const LOOT_TABLES = {
 	// ================= services =================
 	police: { rolls: [ 1, 4 ], items: [
 		T( 'police', 8 ), I( PISTOLS_POLICE, 1.5 ), [ 'remington_870', 0.6 ], [ 'm4a1', 0.2 ], [ 'mp5', 0.2 ], [ 'ammo_9mm', 3, [ 10, 40 ] ], [ 'ammo_12ga_buck', 1.2 ],
-		[ 'mag_glock17', 1.5 ], [ 'mag_m9', 0.6 ], [ 'police_baton', 1 ], [ 'flashlight', 1.5 ], [ 'walkie_talkie', 1 ], [ 'bandage', 1 ], [ 'road_flare', 1 ], [ 'evac_notice', 0.6 ],
+		[ 'mag_glock17', 1.5 ], [ 'mag_m9', 0.6 ], [ 'police_baton', 1 ], [ 'flashlight', 1.5 ], [ 'walkie_talkie', 1 ], [ 'bandage', 1 ], [ 'road_flare', 1 ],
 	] },
 	police_locker: { rolls: [ 1, 4 ], items: [
 		[ 'police_shirt', 2 ], [ 'police_pants', 2 ], [ 'police_boots', 1.2 ], [ 'police_cap', 1.2 ], [ 'police_vest', 1 ], [ 'riot_helmet', 0.3 ], [ 'holster_belt', 0.8 ],
@@ -221,29 +220,27 @@ export const LOOT_TABLES = {
 		[ 'khaki_pants', 0.3 ], [ 'dress_shoes', 0.2 ], [ 'alcohol_wipes', 0.5, [ 2, 6 ] ], [ 'solar_charger', 0.1 ],
 	] },
 	desk: { rolls: [ 1, 2 ], items: [
-		[ 'candy_bar', 1.5 ], [ 'granola_bar', 1.2 ], [ 'painkillers', 0.8 ], [ 'cash', 0.8, [ 5, 40 ] ], [ 'phone', 0.6 ], [ 'lighter', 0.5 ], [ 'batteries', 0.6 ], [ 'car_keys', 0.4 ],
-		[ 'family_photo', 0.6 ], [ 'diary_page', 0.3 ], [ 'watch', 0.3 ], [ 'canned_coffee', 0.6 ], [ 'alcohol_wipes', 0.5, [ 2, 5 ] ], [ 'lockpick', 0.03 ],
+		[ 'candy_bar', 1.5 ], [ 'granola_bar', 1.2 ], [ 'painkillers', 0.8 ], [ 'cash', 0.8, [ 5, 40 ] ], [ 'phone', 0.6 ], [ 'lighter', 0.5 ], [ 'batteries', 0.6 ], [ 'car_keys', 0.4 ], [ 'watch', 0.3 ], [ 'canned_coffee', 0.6 ], [ 'alcohol_wipes', 0.5, [ 2, 5 ] ], [ 'lockpick', 0.03 ],
 	] },
 	school: { rolls: [ 1, 3 ], items: [
 		[ 'backpack_school', 2 ], [ 'lilikoi_juicebox', 2, [ 1, 3 ] ], [ 'granola_bar', 1.5 ], [ 'candy_bar', 1 ], [ 'hoodie_green', 0.6 ], [ 'hoodie', 0.8 ], [ 'comic_book', 1 ],
 		[ 'field_guide', 0.6 ], [ 'first_aid_manual', 0.4 ], [ 'phrasebook', 0.4 ], [ 'first_aid_kit', 0.4 ], [ 'whistle', 0.6 ], [ 'epinephrine', 0.2 ], [ 'baseball_bat', 0.4 ],
-		[ 'water_bottle', 1 ], [ 'pog_juice', 0.8 ], [ 'evac_notice', 0.4 ], [ 'ukulele', 0.3 ],
+		[ 'water_bottle', 1 ], [ 'pog_juice', 0.8 ], [ 'ukulele', 0.3 ],
 	] },
 	church: { rolls: [ 1, 3 ], items: [
 		[ 'bible', 2 ], [ 'kukui_lei', 0.8 ], [ 'lei', 1 ], [ 'butter_mochi', 1.2 ], [ 'sweet_bread', 1 ], [ 'matches', 1 ], [ 'water_jug', 0.8 ], [ 'water_bottle', 1 ],
-		[ 'muumuu', 0.8 ], [ 'dress_shoes', 0.4 ], [ 'first_aid_kit', 0.3 ], [ 'evac_notice', 0.6 ], [ 'diary_page', 0.4 ], [ 'sleeping_bag', 0.3 ], [ 'canned_soup', 0.8 ],
+		[ 'muumuu', 0.8 ], [ 'dress_shoes', 0.4 ], [ 'first_aid_kit', 0.3 ], [ 'sleeping_bag', 0.3 ], [ 'canned_soup', 0.8 ],
 	] },
 	bank: { rolls: [ 1, 3 ], items: [
 		[ 'cash', 6, [ 60, 500 ] ], [ 'gold_chain', 0.6 ], [ 'diamond_ring', 0.3 ], [ 'security_shirt', 0.6 ], [ 'walkie_talkie', 0.4 ], [ 'flashlight', 0.4 ], I( PISTOLS_POLICE, 0.2 ),
 	] },
 	post: { rolls: [ 1, 3 ], items: [
-		[ 'newspaper', 2 ], [ 'evac_notice', 1 ], [ 'map_hawaii', 0.8 ], [ 'duct_tape', 0.8 ], [ 'batteries', 0.6 ], [ 'rope', 0.4 ], [ 'macadamia_nuts', 0.6 ], [ 'chocolate_macnuts', 0.5 ],
+		[ 'newspaper', 2 ], [ 'map_hawaii', 0.8 ], [ 'duct_tape', 0.8 ], [ 'batteries', 0.6 ], [ 'rope', 0.4 ], [ 'macadamia_nuts', 0.6 ], [ 'chocolate_macnuts', 0.5 ],
 		[ 'dried_mango', 0.5 ], [ 'comic_book', 0.4 ], [ 'phone', 0.3 ], [ 'laptop', 0.2 ], [ 'radio', 0.2 ], [ 'tote_bag', 0.4 ],
 	] },
 	hotel_room: { rolls: [ 1, 4 ], items: [
 		T( 'tourist', 6 ), [ 'aloha_shirt', 1 ], [ 'board_shorts', 0.8 ], [ 'sunglasses', 1 ], [ 'slippers', 0.8 ], [ 'macadamia_nuts', 1 ], [ 'chocolate_macnuts', 1 ],
-		[ 'water_bottle', 1.2 ], [ 'soda_cola', 0.8 ], [ 'rum', 0.3 ], [ 'aloe_gel', 1 ], [ 'map_hawaii', 0.8 ], [ 'phone', 0.6 ], [ 'cash', 0.8, [ 10, 200 ] ], [ 'lei', 0.6 ],
-		[ 'diary_page', 0.3 ], [ 'duffel_bag', 0.4 ], [ 'fanny_pack', 0.5 ], [ 'bible', 0.2 ], [ 'watch', 0.3 ],
+		[ 'water_bottle', 1.2 ], [ 'soda_cola', 0.8 ], [ 'rum', 0.3 ], [ 'aloe_gel', 1 ], [ 'map_hawaii', 0.8 ], [ 'phone', 0.6 ], [ 'cash', 0.8, [ 10, 200 ] ], [ 'lei', 0.6 ], [ 'duffel_bag', 0.4 ], [ 'fanny_pack', 0.5 ], [ 'bible', 0.2 ], [ 'watch', 0.3 ],
 	] },
 	warehouse: { rolls: [ 1, 5 ], items: [
 		T( 'canned', 5, { cat: 'food' } ), [ 'rice_bag', 2 ], [ 'water_jug', 2 ], [ 'spam', 1.5 ], [ 'tarp', 1.5 ], [ 'rope', 1 ], [ 'planks', 1.2, [ 1, 4 ] ], [ 'nails', 1, [ 20, 60 ] ],
@@ -269,13 +266,13 @@ export const LOOT_TABLES = {
 		[ 'spam_musubi', 0.4 ], [ 'charcoal', 0.4 ], [ 'swim_goggles', 0.5 ], [ 'canoe_paddle', 0.3 ], [ 'fishing_spear', 0.3 ],
 	] },
 	street: { rolls: [ 1, 2 ], items: [
-		[ 'newspaper', 2 ], [ 'evac_notice', 1.5 ], [ 'empty_bottle', 1.2 ], [ 'soda_cola', 0.8 ], [ 'cash', 0.8, [ 1, 30 ] ], [ 'phone', 0.6 ], [ 'lighter', 0.6 ], [ 'rags', 0.8 ],
-		[ 'scrap_metal', 0.6 ], [ 'lead_pipe', 0.4 ], [ 'broken_bottle', 0.5 ], [ 'bandage_rag', 0.3 ], [ 'road_flare', 0.3 ], [ 'car_keys', 0.3 ], [ 'diary_page', 0.3 ], [ 'water_bottle', 0.6 ],
+		[ 'newspaper', 2 ], [ 'empty_bottle', 1.2 ], [ 'soda_cola', 0.8 ], [ 'cash', 0.8, [ 1, 30 ] ], [ 'phone', 0.6 ], [ 'lighter', 0.6 ], [ 'rags', 0.8 ],
+		[ 'scrap_metal', 0.6 ], [ 'lead_pipe', 0.4 ], [ 'broken_bottle', 0.5 ], [ 'bandage_rag', 0.3 ], [ 'road_flare', 0.3 ], [ 'car_keys', 0.3 ], [ 'water_bottle', 0.6 ],
 		[ 'slippers', 0.3 ], [ 'baseball_cap', 0.3 ],
 	] },
 	trash: { rolls: [ 0, 2 ], items: [
 		[ 'empty_bottle', 3 ], [ 'newspaper', 2 ], [ 'rags', 1.5, [ 1, 3 ] ], [ 'scrap_metal', 1 ], [ 'broken_bottle', 1 ], [ 'wire', 0.4 ], [ 'water_bottle', 1 ],
-		[ 'potato_chips', 0.3 ], [ 'spam_musubi', 0.3 ], [ 'diary_page', 0.3 ], [ 'duct_tape', 0.2 ], [ 'batteries', 0.2 ], [ 'phone', 0.1 ], [ 'cash', 0.2, [ 1, 10 ] ],
+		[ 'potato_chips', 0.3 ], [ 'spam_musubi', 0.3 ], [ 'duct_tape', 0.2 ], [ 'batteries', 0.2 ], [ 'phone', 0.1 ], [ 'cash', 0.2, [ 1, 10 ] ],
 	] },
 	car_trunk: { rolls: [ 1, 4 ], items: [
 		[ 'tire', 1.2 ], [ 'tire_iron', 1.5 ], [ 'gas_can', 1.2 ], [ 'jerrycan', 0.3 ], [ 'first_aid_kit', 0.8 ], [ 'road_flare', 1.2, [ 1, 3 ] ], [ 'water_jug', 0.8 ], [ 'water_bottle', 1 ],
@@ -285,14 +282,14 @@ export const LOOT_TABLES = {
 	] },
 	car_glovebox: { rolls: [ 1, 3 ], items: [
 		[ 'map_hawaii', 2 ], [ 'car_keys', 0.8 ], [ 'flashlight', 1 ], [ 'batteries', 0.8 ], [ 'lighter', 0.8 ], [ 'sunglasses', 1 ], [ 'cash', 1, [ 1, 40 ] ], [ 'phone', 0.5 ],
-		[ 'candy_bar', 0.8 ], [ 'granola_bar', 0.6 ], [ 'painkillers', 0.6 ], [ 'bandage', 0.5 ], [ 'road_flare', 0.5 ], [ 'family_photo', 0.4 ], [ 'diary_page', 0.3 ],
+		[ 'candy_bar', 0.8 ], [ 'granola_bar', 0.6 ], [ 'painkillers', 0.6 ], [ 'bandage', 0.5 ], [ 'road_flare', 0.5 ],
 		[ 'multitool', 0.2 ], I( PISTOLS_CIV, 0.15 ), [ 'ammo_9mm', 0.2 ], [ 'li_hing_mui', 0.5 ], [ 'watch', 0.2 ],
 	] },
 
 	// ================= the infected (pockets; their clothing is dressed by the creatures module) =================
 	zombie_civilian: { rolls: [ 0, 2 ], items: [
 		[ 'cash', 2, [ 1, 60 ] ], [ 'phone', 1.2 ], [ 'lighter', 1 ], [ 'car_keys', 0.6 ], [ 'candy_bar', 0.8 ], [ 'granola_bar', 0.6 ], [ 'bandage_rag', 0.6 ], [ 'rags', 0.6 ],
-		[ 'painkillers', 0.5 ], [ 'water_bottle', 0.5 ], [ 'soda_cola', 0.4 ], [ 'family_photo', 0.4 ], [ 'watch', 0.3 ], [ 'diary_page', 0.3 ], [ 'matches', 0.3 ], [ 'li_hing_mui', 0.3 ],
+		[ 'painkillers', 0.5 ], [ 'water_bottle', 0.5 ], [ 'soda_cola', 0.4 ], [ 'watch', 0.3 ], [ 'matches', 0.3 ], [ 'li_hing_mui', 0.3 ],
 		[ 'kitchen_knife', 0.15 ], [ 'gold_chain', 0.08 ],
 	] },
 	zombie_tourist: { rolls: [ 0, 3 ], items: [
