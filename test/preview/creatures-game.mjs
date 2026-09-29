@@ -11,7 +11,8 @@ import { chromium } from 'playwright';
 
 const [ port, prefix, query, body ] = process.argv.slice( 2 );
 const browser = await chromium.launch( { args: [ '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist' ] } );
-const page = await browser.newPage( { viewport: { width: 1280, height: 720 } } );
+// SHOT_W / SHOT_H: a smaller viewport renders much faster under SwiftShader
+const page = await browser.newPage( { viewport: { width: + ( process.env.SHOT_W || 1280 ), height: + ( process.env.SHOT_H || 720 ) } } );
 const logs = [];
 const t0 = Date.now();
 const T = () => ( ( Date.now() - t0 ) / 1000 ).toFixed( 0 ) + 's';

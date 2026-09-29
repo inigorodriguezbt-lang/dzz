@@ -1,24 +1,37 @@
-/* Rules moved unchanged from the old ui.css so nothing breaks while this screen is rebuilt to
-   docs/UI_SPEC.md. They use the legacy --tw-* aliases from tokens.css; replace them with the spec
-   rules (section 9 and 22) and delete what is no longer used. */
+/* ---- chat (docs/UI_SPEC.md 9, 22) ---------------------------------------------------------------------------- */
+.chat { position: absolute; left: var(--edge); bottom: calc(160 * var(--u)); z-index: 2; width: calc(440 * var(--u)); display: flex; flex-direction: column; gap: var(--s-2); pointer-events: none; transition: opacity var(--d-4) var(--ease-out); }
+/* the closed log hides under screens and with Hide HUD (UI.js sets .under / .off) */
+.chat.under:not(.open), .chat.off:not(.open) { opacity: 0; }
+.chat.open { pointer-events: auto; }
 
-/* ── chat ──────────────────────────────────────────────────────────────── */
-
-.chat { position: absolute; left: var(--tw-edge); bottom: calc(150 * var(--tw-u)); width: min(560px, 50vw); display: flex; flex-direction: column; gap: 4px; }
-.chat-log { display: flex; flex-direction: column; gap: 2px; max-height: 32vh; overflow: hidden; -webkit-mask-image: linear-gradient(0deg, #000 80%, transparent); mask-image: linear-gradient(0deg, #000 80%, transparent); }
-.chat.open .chat-log { overflow: auto; pointer-events: auto; }
-.chat-line { padding: 2px 8px; border-radius: 4px; font-size: var(--tw-fs-md); background: rgba(0, 0, 0, 0.4); width: fit-content; max-width: 100%; transition: opacity 1s; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8); word-wrap: break-word; }
+.chat-log { display: flex; flex-direction: column; align-items: flex-start; gap: var(--s-1); }
+.chat:not(.open) .chat-line:nth-last-child(n+7) { display: none; } /* closed: last 6 lines */
+.chat-line { max-width: 100%; padding: 1px var(--s-2); border-radius: var(--r-sm); background: var(--m-hud); color: var(--hud-1); transition: opacity var(--d-4); white-space: pre-wrap; overflow-wrap: anywhere; }
+.chat-line.sys { color: var(--hud-2); }
+.chat-line.cmd { color: var(--hud-2); font: 500 calc(12 * var(--u)) / calc(18 * var(--u)) var(--mono); }
+.chat-line.err { background: linear-gradient(var(--tint-alarm), var(--tint-alarm)), var(--m-hud); }
 .chat-line.faded { opacity: 0; }
+
+.chat.open .chat-log { align-items: stretch; max-height: calc(280 * var(--u)); overflow-y: auto; padding: var(--s-2); border-radius: var(--r-md); background: var(--m-panel); box-shadow: inset 0 0 0 1px var(--line-2); scrollbar-width: thin; scrollbar-color: var(--fill-4) transparent; }
+.chat.open .chat-log:empty { display: none; }
+.chat.open .chat-line { align-self: flex-start; background: none; padding: 0; }
 .chat.open .chat-line.faded { opacity: 1; }
-.chat-line.sys { color: var(--tw-sun); }
-.chat-line.err { color: var(--tw-coral); }
-.chat-line.ok { color: var(--tw-aqua); }
-.chat-line.cmd { color: var(--tw-ink-3); font-family: var(--tw-mono); font-size: var(--tw-fs-sm); }
-.chat-input { display: none; pointer-events: auto; }
+/* errors keep their tint on the open panel too */
+.chat.open .chat-line.err { background: var(--tint-alarm); margin: 0 calc(-4 * var(--u)); padding: 0 var(--s-1); }
+
+.chat-input { position: relative; display: none; }
 .chat.open .chat-input { display: block; }
-.chat-input input { font-family: var(--tw-mono); }
-.chat-input .input { width: 100%; }
-.suggest { display: flex; flex-direction: column; border-radius: var(--tw-r-sm); overflow: hidden; pointer-events: auto; max-height: 30vh; overflow-y: auto; }
-.suggest div { padding: 3px 10px; font-family: var(--tw-mono); font-size: var(--tw-fs-sm); color: var(--tw-ink-2); cursor: pointer; display: flex; justify-content: space-between; gap: 16px; }
-.suggest div.on, .suggest div:hover { background: rgba(var(--tw-aqua-rgb), 0.18); color: var(--tw-ink); }
-.suggest div .dim { font-family: var(--tw-font); }
+.chat-input .input { width: 100%; letter-spacing: inherit; }
+.chat-input.cmd .input, .chat-input.cmd .ghost { font: 500 calc(12 * var(--u)) / calc(16 * var(--u)) var(--mono); letter-spacing: 0; }
+/* ghost completion: the typed text (invisible) then the rest of the suggestion, over the field */
+.chat-input .ghost { position: absolute; left: 0; top: 0; right: 0; height: 100%; padding: 0 var(--s-3); display: flex; align-items: center; overflow: hidden; color: var(--ink-4); white-space: pre; pointer-events: none; }
+.chat-input .ghost .typed { visibility: hidden; }
+.chat:not(.open) .ghost { display: none; }
+
+/* suggestions: a .pop.menu in the flow above the input, full width, 24u rows, 8 visible */
+.suggest { position: relative; z-index: auto; max-width: none; width: 100%; max-height: calc(8 * 24 * var(--u) + 8 * var(--u)); overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--fill-4) transparent; }
+.suggest > button { height: calc(24 * var(--u)); cursor: pointer; }
+.suggest > button > span:first-child { font: 500 calc(12 * var(--u)) / 1 var(--mono); color: var(--ink-1); }
+.suggest > button .args { color: var(--ink-3); }
+.suggest > button > .h { max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.suggest > button.on { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }

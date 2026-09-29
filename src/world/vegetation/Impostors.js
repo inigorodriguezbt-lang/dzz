@@ -5,6 +5,7 @@
 // the upper hemisphere (hemi-octahedral layout) into two atlases:
 //   A: base colour (leaf texel x vertex colour x baked exposure, gamma-2 encoded), coverage
 //   B: plant-local normal * 0.5 + 0.5, leaf flag (1 foliage, 0 bark / solid parts)
+//   C: (half resolution) leaf exposure, for the indirect light (the near models' ambient occlusion)
 // Each species owns one IMP_N x IMP_N block of frames; the whole bake is one draw per atlas.
 // Everything outside a plant is cleared to 0, so after mip filtering colour, normal and leaf flag
 // are premultiplied by the coverage and the shader divides it back out (no dark fringes at distance).
@@ -16,7 +17,7 @@
 // direction. Colours use the same per-species tints as the near models, so the hand-over at the LOD
 // distance is a dithered cross-fade between matching images.
 import * as THREE from 'three';
-import { patchMaterial } from '../../render/Materials.js';
+import { G, patchMaterial } from '../../render/Materials.js';
 import { SP, NSP, PALM_H } from './species.js';
 import { KIND, VG } from './VegMaterial.js';
 import { InstanceTarget } from './InstanceTarget.js';
@@ -49,8 +50,8 @@ const BAKE_VERT = /* glsl */`
 		if ( aMat.x < 0.5 ) vUv.y *= ${( PALM_H / 1.6 ).toFixed( 4 )};
 		vMat = aMat; vCol = aCol; vN = normal;
 		vec3 p = position;
-		// fruit hangs on some plants only: left out of the shared image
-		if ( aMat.w > 98.5 ) p = vec3( 0.0, - 1e4, 0.0 );
+		// fruit and grass seed heads show on some plants only: left out of the shared image
+		if ( aMat.w > 98.5 || ( aMat.w > 29.5 && aMat.w < 30.5 ) ) p = vec3( 0.0, - 1e4, 0.0 );
 		gl_Position = projectionMatrix * viewMatrix * instanceMatrix * vec4( p, 1.0 );
 	}
 `;
@@ -72,9 +73,12 @@ const BAKE_FRAG = /* glsl */`
 			if ( c.a < mix( 0.5, 0.2, clamp( lod / 4.0, 0.0, 1.0 ) ) ) discard;
 			leaf = part < 2.5 ? 1.0 : 0.0;
 		}
-		vec3 col = c.rgb * vCol * ( part < 1.5 ? mix( 0.45, 1.0, vMat.y ) : mix( 0.42, 1.05, vMat.y ) );
+		// the near shader's albedo (VegMaterial FRAG_COLOR) before the per-plant tints
+		float ao = vMat.y;
+		vec3 col = c.rgb * vCol * ( part < 1.5 ? vec3( mix( 0.6, 1.0, ao ) ) : mix( 0.55, 1.0, ao ) * mix( vec3( 1.0 ), vec3( 1.16, 1.22, 0.92 ), smoothstep( 0.62, 1.0, ao ) * 0.7 ) );
 		if ( uPass < 0.5 ) gl_FragColor = vec4( sqrt( max( col, vec3( 0.0 ) ) ), 1.0 );
-		else gl_FragColor = vec4( normalize( vN ) * 0.5 + 0.5, leaf );
+		else if ( uPass < 1.5 ) gl_FragColor = vec4( normalize( vN ) * 0.5 + 0.5, leaf );
+		else gl_FragColor = vec4( ao, 0.0, 0.0, 1.0 );
 	}
 `;
 
@@ -86,8 +90,8 @@ const VERT_PARS = /* glsl */`
 	uniform float uWindStr; uniform float uDensity;
 	uniform vec4 uImpA[ IMP_SLOTS ]; uniform vec4 uImpB[ IMP_SLOTS ]; uniform vec4 uImpRange[ IMP_SLOTS ];
 	uniform vec3 uImpTintA[ IMP_SLOTS ]; uniform vec3 uImpTintB[ IMP_SLOTS ]; uniform vec3 uImpBark[ IMP_SLOTS ];
-	uniform vec4 uImpThin;
-	varying vec3 vImpC; varying vec4 vImpX; varying vec4 vImpY; varying vec4 vImpZ; varying vec3 vImpTint; varying vec3 vImpBarkC; varying vec2 vImpQ;
+	uniform vec4 uImpThin; uniform float uImpFar; uniform vec3 uSunDir; uniform float uShadowFar;
+	varying vec3 vImpC; varying vec4 vImpX; varying vec4 vImpY; varying vec4 vImpZ; varying vec3 vImpTint; varying vec3 vImpBarkC; varying vec2 vImpQ; varying vec3 vImpWP;
 
 	float impHash( vec2 p ) { vec3 p3 = fract( vec3( p.xyx ) * 0.1031 ); p3 += dot( p3, p3.yzx + 33.33 ); return fract( ( p3.x + p3.y ) * p3.z ); }
 	float impNoise( vec2 p ) {
@@ -104,20 +108,30 @@ const VERT_PARS = /* glsl */`
 		vec3 wbase = base + modelMatrix[ 3 ].xyz;
 		float s = iPos.w, yaw = iDat.x, pa = iDat.z, pb = iDat.w;
 		float d = distance( wbase, uCamPos );
-		// fade in: a dithered cross-fade with the near / mid model (complementary, the plant stays
-		// solid). Everything past that shrinks instead of dissolving: the plants the distance
-		// thinning drops (by rank) and all of them at the end of the range, so the far canopy
-		// never turns into dither noise
-		float fin = smoothstep( Rg.x, Rg.y, d );
-		float fend = 1.0 - smoothstep( Rg.z, Rg.w, d );
+		// fade in: a short dithered cross-fade with the near / mid model at the plant's own jittered
+		// switch distance (as VegMaterial: complementary, the plant stays solid). Everything past
+		// that shrinks instead of dissolving: the plants the distance thinning drops (by rank) and all
+		// of them at the end of the range, so the far canopy never turns into dither noise. The far
+		// canopy's end is not jittered: the CPU streams it to a fixed radius.
+		float jit = 0.92 + 0.16 * fract( rank * 7.77 + 0.31 );
+		float fin = smoothstep( Rg.x, Rg.y, d / jit );
+		float fend = 1.0 - smoothstep( Rg.z, Rg.w, uImpFar > 0.5 ? d : d / jit );
 		float thinK = uImpThin.y > 0.0 ? smoothstep( uImpThin.x, uImpThin.y, d ) : 0.0;
 		float rn = rank / max( uDensity, 0.01 );
 		float vis = clamp( ( mix( 1.0, uImpThin.z, thinK ) - rn ) / 0.15 + 1.0 - thinK, 0.0, 1.0 ) * fend;
-		vImpZ = vec4( fin, 0.0, B.y, B.z );
+		vImpZ = vec4( fin, B.x == ${KIND.TREE.toFixed( 1 )} || B.x == ${KIND.PINE.toFixed( 1 )} ? 0.0 : 1.0, B.y, B.z );
 		impN = vec3( 0.0, 1.0, 0.0 );
+		vImpWP = wbase;
+		#ifdef IMP_DEPTH
+		// past the sun's shadow maps: nothing to cast
+		if ( d > uShadowFar ) fin = 0.0;
+		#endif
 		if ( fin <= 0.0 || vis <= 0.0 ) { impP = base; return; }
 		// the survivors of a thinned forest grow so the canopy stays closed
 		float grow = ( 1.0 + thinK * ( inversesqrt( max( uImpThin.z, 0.1 ) ) - 1.0 ) * 0.7 ) * sqrt( vis );
+		// far crowns lose their thin edges to the coarse mips and the coverage cut: a little extra size
+		// keeps a distant forest closed
+		if ( uImpFar > 0.5 ) grow *= 1.0 + 0.12 * smoothstep( 250.0, 900.0, d );
 		// instance transform: horizontal / vertical scale and a lean (shear per metre of height)
 		float kind = B.x;
 		float sh = s, sv = s;
@@ -139,19 +153,29 @@ const VERT_PARS = /* glsl */`
 		float sway = ( w * w * amp * ( 0.35 + gust ) + sin( uTime * 1.2 + rank * 6.2832 ) * w * amp * 0.5 * ( 0.4 + gust ) ) * cy * 0.5;
 		C.xz += wd * sway;
 		// a camera-facing quad covering the plant's projected extent, pulled towards the camera so
-		// that it never sinks into the ground under it when seen from above
+		// that it never sinks into the ground under it when seen from above. In the shadow pass it
+		// faces the sun through the crown's centre (the fragment shader reads the frame seen from there)
+		#ifdef IMP_DEPTH
+		vec3 toCam = normalize( uSunDir );
+		#else
 		vec3 toCam = normalize( uCamPos - C );
+		#endif
 		float ty = abs( toCam.y );
 		float lean = length( L ) * A.w * sv;
 		float halfW = A.z * sh + lean;
 		float halfH = A.w * sv * sqrt( max( 1.0 - ty * ty, 0.0 ) ) + A.z * sh * ty + lean;
 		vec3 right = normalize( cross( vec3( 0.0, 1.0, 0.0 ), toCam ) + vec3( 1e-5, 0.0, 0.0 ) );
 		vec3 up = cross( toCam, right );
+		#ifdef IMP_DEPTH
+		vec3 Q = C;
+		#else
 		vec3 Q = C + toCam * min( A.y * max( sh, sv ) * ( 0.2 + 0.8 * ty ), d * 0.5 );
+		#endif
 		vec3 wp = Q + right * position.x * halfW + up * position.y * halfH;
 		vImpQ = position.xy * vec2( halfW, halfH ) / max( A.y * max( sh, sv ), 1e-3 );
 		impP = wp - modelMatrix[ 3 ].xyz;
 		impN = toCam;
+		vImpWP = wp;
 		vImpC = C;
 		vImpX = vec4( cos( yaw ), sin( yaw ), sh, sv );
 		vImpY = vec4( L, A.y, d < uImpThin.w ? 1.0 : 0.0 );
@@ -164,14 +188,10 @@ const VERT_PARS = /* glsl */`
 `;
 
 const FRAG_PARS = /* glsl */`
-	uniform sampler2D tImpA; uniform sampler2D tImpB; uniform vec2 uImpGrid;
-	varying vec3 vImpC; varying vec4 vImpX; varying vec4 vImpY; varying vec4 vImpZ; varying vec3 vImpTint; varying vec3 vImpBarkC; varying vec2 vImpQ;
-	float impBayer( vec2 p ) {
-		ivec2 q = ivec2( mod( p, 4.0 ) );
-		int i = q.x + q.y * 4;
-		float m[ 16 ] = float[ 16 ]( 0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0 );
-		return ( m[ i ] + 0.5 ) / 16.0;
-	}
+	uniform sampler2D tImpA; uniform sampler2D tImpB; uniform sampler2D tImpC; uniform vec2 uImpGrid; uniform float uVegFrame;
+	varying vec3 vImpC; varying vec4 vImpX; varying vec4 vImpY; varying vec4 vImpZ; varying vec3 vImpTint; varying vec3 vImpBarkC; varying vec2 vImpQ; varying vec3 vImpWP;
+	// the same per-pixel cross-fade threshold as the plant models (interleaved gradient noise)
+	float impDither( vec2 p ) { return fract( 52.9829189 * fract( dot( p + uVegFrame * 5.588238, vec2( 0.06711056, 0.00583715 ) ) ) ); }
 	// world direction -> plant-local (un-shear, inverse yaw, inverse scale)
 	vec3 impLocal( vec3 v ) {
 		v.xz -= vImpY.xy * v.y;
@@ -179,7 +199,7 @@ const FRAG_PARS = /* glsl */`
 	}
 	vec3 impOctDecode( vec2 e ) { float x = ( e.x - e.y ) * 0.5, z = ( e.x + e.y ) * 0.5; return normalize( vec3( x, 1.0 - abs( x ) - abs( z ), z ) ); }
 	vec2 impOctEncode( vec3 d ) { vec3 p = d / ( abs( d.x ) + abs( d.y ) + abs( d.z ) ); return vec2( p.x + p.z, p.z - p.x ); }
-	vec4 impA; vec4 impB;
+	vec4 impA; vec4 impB; vec2 impC;
 	void impFrame( vec2 ij, vec3 O, vec3 D, float w ) {
 		vec3 dF = impOctDecode( ij / ( IMP_N - 1.0 ) * 2.0 - 1.0 );
 		vec3 right = normalize( cross( vec3( 0.0, 1.0, 0.0 ), dF ) );
@@ -191,10 +211,12 @@ const FRAG_PARS = /* glsl */`
 		float k = w * step( abs( ab.x ), 0.999 ) * step( abs( ab.y ), 0.999 );
 		impA += texture2D( tImpA, st ) * k;
 		impB += texture2D( tImpB, st ) * k;
+		impC += texture2D( tImpC, st ).ra * k;
 	}
-	void impSample() {
-		vec3 O = impLocal( uCamPos - vImpC );
-		vec3 D = impLocal( vWorldPos - uCamPos );
+	// the frames around the direction a ray ro + t rd comes from (three blended, or the nearest)
+	void impSampleRay( vec3 ro, vec3 rd, bool blend ) {
+		vec3 O = impLocal( ro - vImpC );
+		vec3 D = impLocal( rd );
 		vec3 vd = normalize( O );
 		vd = normalize( vec3( vd.x, max( vd.y, 0.02 ), vd.z ) );
 		vec2 g = ( impOctEncode( vd ) * 0.5 + 0.5 ) * ( IMP_N - 1.0 );
@@ -207,8 +229,8 @@ const FRAG_PARS = /* glsl */`
 		float w0 = upper ? f.x + f.y - 1.0 : 1.0 - f.x - f.y;
 		float w1 = upper ? 1.0 - f.x : f.x;
 		float w2 = upper ? 1.0 - f.y : f.y;
-		impA = vec4( 0.0 ); impB = vec4( 0.0 );
-		if ( vImpY.w > 0.5 ) {
+		impA = vec4( 0.0 ); impB = vec4( 0.0 ); impC = vec2( 0.0 );
+		if ( blend ) {
 			impFrame( i0, O, D, w0 ); impFrame( i1, O, D, w1 ); impFrame( i2, O, D, w2 );
 		} else {
 			impFrame( w0 >= max( w1, w2 ) ? i0 : w1 >= w2 ? i1 : i2, O, D, 1.0 );
@@ -216,10 +238,19 @@ const FRAG_PARS = /* glsl */`
 	}
 `;
 
+// the colour pass reads the view ray; the shadow pass the ray along the sun
+const FRAG_SAMPLE = /* glsl */`
+	void impSample() { impSampleRay( uCamPos, vImpWP - uCamPos, vImpY.w > 0.5 ); }
+`;
+const DEPTH_TEST = /* glsl */`
+	impSampleRay( vImpWP + uSunDir * 60.0, - uSunDir, false );
+	if ( impA.a < 0.4 || impDither( gl_FragCoord.xy ) >= vImpZ.x ) discard;
+`;
+
 const FRAG_COLOR = /* glsl */`
 	impSample();
 	float impCov = impA.a;
-	float impBt = impBayer( gl_FragCoord.xy );
+	float impBt = impDither( gl_FragCoord.xy );
 	// small on screen the atlas is read from its coarse mips, where coverage averages out: lower the
 	// cut-off with the footprint (as the near foliage does) so distant crowns keep their size
 	float impLod = log2( max( max( length( dFdx( vImpQ ) ), length( dFdy( vImpQ ) ) ) * ${( FRAME / 2 ).toFixed( 1 )}, 1e-4 ) );
@@ -227,8 +258,30 @@ const FRAG_COLOR = /* glsl */`
 	vec3 impCol = impA.rgb / impCov;
 	impCol *= impCol;
 	float impLeaf = clamp( impB.a / impCov, 0.0, 1.0 );
+	float impAo = clamp( impC.x / max( impC.y, 1e-3 ), 0.0, 1.0 );
 	impCol *= mix( vImpBarkC, vImpTint, impLeaf );
 	diffuseColor.rgb = impCol;
+	// the near models' surface terms (VegMaterial): small specular on leaves, exposure on the indirect
+	// light, translucency
+	bool impCanopy = vImpZ.y < 0.5;
+	float impSpec = mix( 0.3, impCanopy ? 0.15 : 0.4, impLeaf );
+	float impAoI = mix( 0.4, 1.0, impAo );
+	float impTrans = impLeaf * ( impCanopy ? 0.5 * ( impAo * 0.6 + 0.4 ) : 0.3 );
+`;
+
+// small leaf specular (F0 and F90 scaled like MeshPhysicalMaterial's specularIntensity)
+const FRAG_SPECULAR = /* glsl */`
+	material.specularColor *= impSpec;
+	material.specularColorBlended *= impSpec;
+	material.specularF90 = impSpec;
+`;
+
+const FRAG_AO = /* glsl */`
+	{
+		reflectedLight.indirectDiffuse *= impAoI;
+		float impNV = saturate( dot( geometryNormal, geometryViewDir ) );
+		reflectedLight.indirectSpecular *= computeSpecularOcclusion( impNV, impAoI, material.roughness );
+	}
 `;
 
 const FRAG_NORMAL = /* glsl */`
@@ -238,17 +291,18 @@ const FRAG_NORMAL = /* glsl */`
 		vec3 ns = nl / vec3( vImpX.z, vImpX.w, vImpX.z );
 		vec3 nw = vec3( ns.x * vImpX.x + ns.z * vImpX.y, ns.y, - ns.x * vImpX.y + ns.z * vImpX.x );
 		normal = normalize( ( viewMatrix * vec4( nw, 0.0 ) ).xyz );
-		// foliage is lit like the near canopy: normals bent towards the viewer
-		normal = normalize( normal + normalize( vViewPosition ) * 0.4 * impLeaf );
+		// foliage is lit like the near models: normals bent towards the viewer
+		normal = normalize( normal + normalize( vViewPosition ) * ( impCanopy ? 0.7 : 0.2 ) * impLeaf );
 	}
 `;
 
 const FRAG_TRANSLUCENT = /* glsl */`
 	#if NUM_DIR_LIGHTS > 0
-	{
+	if ( impTrans > 0.0 ) {
 		float back = clamp( dot( - normal, directLight.direction ), 0.0, 1.0 );
-		float fwd = pow( clamp( dot( - geometryViewDir, directLight.direction ), 0.0, 1.0 ), 4.0 ) * 0.6 + 0.4;
-		reflectedLight.directDiffuse += diffuseColor.rgb * vec3( 1.05, 1.25, 0.5 ) * directLight.color * back * fwd * 0.5 * impLeaf;
+		float fwd = pow( clamp( dot( - geometryViewDir, directLight.direction ), 0.0, 1.0 ), 3.0 ) * 0.7 + 0.3;
+		vec3 tcol = diffuseColor.rgb * vec3( 1.25, 1.45, 0.55 ) + vec3( 0.012, 0.018, 0.0 );
+		reflectedLight.directDiffuse += tcol * directLight.color * back * fwd * impTrans * ( 1.0 - uNight );
 	}
 	#endif
 `;
@@ -276,7 +330,7 @@ export class Impostors {
 			uImpA: { value: V4() }, uImpB: { value: V4() }, uImpRange: { value: V4() },
 			uImpTintA: { value: C3() }, uImpTintB: { value: C3() }, uImpBark: { value: C3() },
 			uImpGrid: { value: new THREE.Vector2( this.cols, this.rows ) },
-			tImpA: { value: null }, tImpB: { value: null },
+			tImpA: { value: null }, tImpB: { value: null }, tImpC: { value: null },
 		};
 		this.species.forEach( ( s, k ) => {
 			const b = this.bounds[ k ], cfg = spec[ s ];
@@ -288,8 +342,8 @@ export class Impostors {
 			this.uniforms.uImpBark.value[ k ].setRGB( ...( cfg.bark || [ 1, 1, 1 ] ) );
 			this.uniforms.uImpRange.value[ k ].set( 1e6, 1e6, 1e6, 1e6 );
 		} );
-		const make = ( name ) => {
-			const rt = new THREE.WebGLRenderTarget( this.cols * FRAME, this.rows * FRAME, {
+		const make = ( name, k = 1 ) => {
+			const rt = new THREE.WebGLRenderTarget( this.cols * FRAME * k, this.rows * FRAME * k, {
 				type: THREE.UnsignedByteType, depthBuffer: true, generateMipmaps: true, samples: 0,
 				minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter,
 			} );
@@ -299,8 +353,10 @@ export class Impostors {
 		};
 		this.rtA = make( 'vegImpostorA' );
 		this.rtB = make( 'vegImpostorB' );
+		this.rtC = make( 'vegImpostorC', 0.5 );
 		this.uniforms.tImpA.value = this.rtA.texture;
 		this.uniforms.tImpB.value = this.rtB.texture;
+		this.uniforms.tImpC.value = this.rtC.texture;
 		this.models = models;
 		this.targets = [];
 		this.thin = new THREE.Vector4( 0, 0, 1, BLEND_DIST );
@@ -376,7 +432,7 @@ export class Impostors {
 		const prevShadow = gl.shadowMap.enabled;
 		gl.autoClear = false;
 		gl.shadowMap.enabled = false;
-		for ( const [ rt, pass ] of [ [ this.rtA, 0 ], [ this.rtB, 1 ] ] ) {
+		for ( const [ rt, pass ] of [ [ this.rtA, 0 ], [ this.rtB, 1 ], [ this.rtC, 2 ] ] ) {
 			mat.uniforms.uPass.value = pass;
 			gl.setRenderTarget( rt );
 			gl.setClearColor( 0x000000, 0 );
@@ -394,28 +450,52 @@ export class Impostors {
 
 	// an instance buffer drawn with the impostor material: 'far' (thinned with distance) or 'mid'
 	makeTarget( band ) {
-		const U = { uImpThin: { value: band === 'far' ? this.thin : this.thinMid } };
+		const U = { uImpThin: { value: band === 'far' ? this.thin : this.thinMid }, uImpFar: { value: band === 'far' ? 1 : 0 } };
 		const m = new THREE.MeshStandardMaterial( { roughness: 0.8, metalness: 0 } );
+		// the shadow pass draws the side facing the sun (three's default renders the back faces)
+		m.shadowSide = THREE.DoubleSide;
 		patchMaterial( m, 'veg-impostor', ( shader ) => {
 			Object.assign( shader.uniforms, VG, this.uniforms, U );
 			const defs = `#define IMP_SLOTS ${this.species.length}\n#define IMP_N ${IMP_N.toFixed( 1 )}\n`;
 			shader.vertexShader = shader.vertexShader
 				.replace( '#include <common>', '#include <common>\n' + defs + VERT_PARS )
 				.replace( '#include <beginnormal_vertex>', 'impDeform();\nvec3 objectNormal = impN;' )
-				.replace( '#include <begin_vertex>', 'vec3 transformed = impP;' );
+				.replace( '#include <begin_vertex>', 'vec3 transformed = impP;' )
+				// the sun's shadow is looked up a crown's radius sunwards of the quad: past the plant's own
+				// shadow-pass quad (which goes through the crown's centre), still inside everything else's
+				.replace( '#include <worldpos_vertex>', '#include <worldpos_vertex>\n\tvWorldPos += uSunDir * vImpY.z * max( vImpX.z, vImpX.w );' );
+			// the exposure: through patchMaterial's material AO (dtAO) where it has one, else FRAG_AO
+			const dtAO = shader.fragmentShader.includes( 'float dtAO' );
 			shader.fragmentShader = shader.fragmentShader
 				// after all declarations (the shared uniforms and vWorldPos come in with patchMaterial)
-				.replace( 'void main() {', defs + FRAG_PARS + '\nvoid main() {' )
-				.replace( '#include <map_fragment>', FRAG_COLOR )
+				.replace( 'void main() {', defs + FRAG_PARS + FRAG_SAMPLE + '\nvoid main() {' )
+				.replace( '#include <map_fragment>', FRAG_COLOR + ( dtAO ? '\ndtAO = impAoI;' : '' ) )
 				.replace( '#include <normal_fragment_maps>', FRAG_NORMAL )
-				.replace( '#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix( 0.9, 0.72, impLeaf );' )
+				.replace( '#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix( 0.92, impCanopy ? 0.8 : 0.66, impLeaf );' )
+				.replace( '#include <lights_physical_fragment>', '#include <lights_physical_fragment>\n' + FRAG_SPECULAR )
 				.replace( '#include <lights_fragment_maps>', FRAG_TRANSLUCENT + '\n#include <lights_fragment_maps>' );
+			if ( ! dtAO ) shader.fragmentShader = shader.fragmentShader.replace( '#include <aomap_fragment>', '#include <aomap_fragment>\n' + FRAG_AO );
 		} );
-		const t = new InstanceTarget( 'impostor-' + band, this.quad, m, null, band === 'far' ? 16384 : 4096 );
+		// the shadow pass: quads facing the sun, cut out by the frame seen from it (distant forests shade
+		// the ground and each other in the far shadow cascade)
+		const dm = new THREE.MeshDepthMaterial( { depthPacking: THREE.RGBADepthPacking } );
+		dm.onBeforeCompile = ( shader ) => {
+			Object.assign( shader.uniforms, G, VG, this.uniforms, U );
+			const defs = `#define IMP_SLOTS ${this.species.length}\n#define IMP_N ${IMP_N.toFixed( 1 )}\n#define IMP_DEPTH\n`;
+			shader.vertexShader = shader.vertexShader
+				.replace( '#include <common>', '#include <common>\n' + defs + VERT_PARS )
+				.replace( '#include <begin_vertex>', 'impDeform();\nvec3 transformed = impP;' );
+			shader.fragmentShader = shader.fragmentShader
+				.replace( '#include <common>', '#include <common>\n' + defs + 'uniform vec3 uSunDir;\n' + FRAG_PARS )
+				.replace( '#include <alphatest_fragment>', DEPTH_TEST );
+		};
+		dm.customProgramCacheKey = () => 'veg-impostor-depth';
+		const t = new InstanceTarget( 'impostor-' + band, this.quad, m, dm, band === 'far' ? 16384 : 4096 );
 		t.U = U;
-		t.mesh.castShadow = false;
-		// the far ones are all beyond the sun's shadow map
-		t.mesh.receiveShadow = band !== 'far';
+		t.mesh.castShadow = true;
+		// three's own shadow lookup would find each quad's shadow-pass twin: the cascaded sun shadows of
+		// the shared lighting (patchMaterial) read the shifted vWorldPos instead
+		t.mesh.receiveShadow = false;
 		this.targets.push( t );
 		return t;
 	}
@@ -460,6 +540,7 @@ export class Impostors {
 		this.quad.dispose();
 		this.rtA.dispose();
 		this.rtB.dispose();
+		this.rtC.dispose();
 	}
 }
 
@@ -470,7 +551,7 @@ function measure( g ) {
 	const p = g.attributes.position, am = g.attributes.aMat;
 	let y0 = Infinity, y1 = - Infinity, rh = 0;
 	for ( let i = 0; i < p.count; i ++ ) {
-		if ( am && am.getW( i ) > 98.5 ) continue;
+		if ( am && ( am.getW( i ) > 98.5 || Math.abs( am.getW( i ) - 30 ) < 0.5 ) ) continue;
 		const x = p.getX( i ), y = p.getY( i ), z = p.getZ( i );
 		y0 = Math.min( y0, y ); y1 = Math.max( y1, y );
 		rh = Math.max( rh, Math.hypot( x, z ) );
@@ -478,7 +559,7 @@ function measure( g ) {
 	const cy = ( y0 + y1 ) / 2;
 	let r = 0;
 	for ( let i = 0; i < p.count; i ++ ) {
-		if ( am && am.getW( i ) > 98.5 ) continue;
+		if ( am && ( am.getW( i ) > 98.5 || Math.abs( am.getW( i ) - 30 ) < 0.5 ) ) continue;
 		r = Math.max( r, Math.hypot( p.getX( i ), p.getY( i ) - cy, p.getZ( i ) ) );
 	}
 	return { cy, hv: ( y1 - y0 ) / 2, rh: rh * 1.02, r: r * 1.02 };

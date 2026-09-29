@@ -3,7 +3,7 @@
 // the shell can hide it while the real interior of that storey is loaded (the interior rebuilds it).
 import { L, hash32, rng, pick, pumpsOf } from './data.js';
 import { M, slabT } from './plan.js';
-import { signFor } from './names.js';
+import { signFor, signUV, SIGNS } from './names.js';
 
 const WHITE = [ 255, 255, 255 ];
 
@@ -50,8 +50,12 @@ export function storeyOutside( g, P, st, lod, opts = {} ) {
 			// the porch steps leave a gap in front of the front door
 			const gaps = [];
 			if ( st.i === 0 && rm.k === 'porch' && P.feats.steps ) for ( const s of P.feats.steps ) if ( s.side === rl.side ) gaps.push( s );
-			railing( g, P, a, b, y0, gaps, lod, rm.k );
+			railing( g, P, a, b, y0, gaps, opts.interior ? 0 : lod + 0.5, rm.k );
 		}
+	}
+	// open stairs of walk-ups: a sloped slab per flight on the shell (the interior builds the real steps)
+	if ( lod === 0 && ! opts.interior ) {
+		for ( const rm of st.rooms ) if ( rm.k === 'stair' && rm.open && st.i < S.n - 1 ) openStairShell( g, P, rm, y0, st.h );
 	}
 	// walls between neighbouring loggias
 	if ( lod === 0 || opts.interior ) {
@@ -64,6 +68,7 @@ export function storeyOutside( g, P, st, lod, opts = {} ) {
 	}
 }
 
+// lod: 0 real balusters (interiors), 0.5 near shell (rails, posts and a painted bar panel), >= 1 far (solid panel)
 function railing( g, P, a, b, y, gaps, lod, kind ) {
 	const len = Math.hypot( b[ 0 ] - a[ 0 ], b[ 1 ] - a[ 1 ] );
 	if ( len < 0.1 ) return;
@@ -84,21 +89,36 @@ function railing( g, P, a, b, y, gaps, lod, kind ) {
 	const inset = 0.06;
 	for ( const [ p, q ] of cuts ) {
 		const x0 = a[ 0 ] + tx * p, z0 = a[ 1 ] + tz * p, x1 = a[ 0 ] + tx * q, z1 = a[ 1 ] + tz * q;
-		const bx = ( ax, az, bx2, bz2, y0, y1, th ) => {
+		const bx = ( ax, az, bx2, bz2, y0, y1, th, M = rm ) => {
 			const minx = Math.min( ax, bx2 ) - ( Math.abs( tz ) > 0.5 ? th : 0 ), maxx = Math.max( ax, bx2 ) + ( Math.abs( tz ) > 0.5 ? th : 0 );
 			const minz = Math.min( az, bz2 ) - ( Math.abs( tx ) > 0.5 ? th : 0 ), maxz = Math.max( az, bz2 ) + ( Math.abs( tx ) > 0.5 ? th : 0 );
-			g.box( minx, y0, minz, maxx, y1, maxz, rm );
+			g.box( minx, y0, minz, maxx, y1, maxz, M );
 		};
 		// move the rail a little inside the edge
 		const ix = - tz * inset, iz = tx * inset;
-		if ( kind === 'loggia' || kind === 'gallery' && lod > 0 ) {
+		if ( kind === 'loggia' || ( kind === 'gallery' && lod >= 1 ) ) {
 			// solid parapet panel
-			bx( x0 + ix, z0 + iz, x1 + ix, z1 + iz, y, y + h, 0.05 );
+			bx( x0 + ix, z0 + iz, x1 + ix, z1 + iz, y, y + h, 0.05, kind === 'loggia' ? P.mat.ext : rm );
 			continue;
 		}
 		bx( x0 + ix, z0 + iz, x1 + ix, z1 + iz, y + h - 0.06, y + h, 0.04 );
-		if ( lod > 0 ) continue;
+		if ( lod >= 1 ) continue;
 		bx( x0 + ix, z0 + iz, x1 + ix, z1 + iz, y + 0.08, y + 0.14, 0.03 );
+		if ( lod > 0 ) {
+			// near shell: posts every ~1.6 m and the balusters painted on a thin panel by the facade shader
+			const n = Math.max( 1, Math.round( ( q - p ) / 1.6 ) );
+			for ( let k = 0; k <= n; k ++ ) {
+				const t = k / n;
+				const px = x0 + ( x1 - x0 ) * t + ix, pz = z0 + ( z1 - z0 ) * t + iz;
+				g.box( px - 0.035, y + 0.14, pz - 0.035, px + 0.035, y + h - 0.06, pz + 0.035, rm, 12 );
+			}
+			const fr = railFrame( P );
+			const win = { bay: q - p, w: q - p, h: h - 0.2, sill: 0, style: 15 | ( fr << 5 ), seed: 1, v0: 0 };
+			// both faces: outward along the right-hand normal of a->b, then the reverse
+			g.facade( x0 + ix, z0 + iz, x1 + ix, z1 + iz, y + 0.14, y + h - 0.06, rm, win );
+			g.facade( x1 + ix, z1 + iz, x0 + ix, z0 + iz, y + 0.14, y + h - 0.06, rm, win );
+			continue;
+		}
 		const n = Math.max( 1, Math.round( ( q - p ) / 0.14 ) );
 		for ( let k = 0; k <= n; k ++ ) {
 			const t = k / n;
@@ -108,6 +128,49 @@ function railing( g, P, a, b, y, gaps, lod, kind ) {
 	}
 }
 
+// the facade shader's frame colour closest to the rail paint
+function railFrame( P ) {
+	const c = P.mat.rail.c;
+	const l = c[ 0 ] + c[ 1 ] + c[ 2 ];
+	if ( l > 600 ) return 0;
+	if ( l < 200 ) return 3;
+	if ( c[ 1 ] > c[ 0 ] + 15 ) return 4;
+	if ( c[ 0 ] > c[ 2 ] + 15 ) return 5;
+	return 2;
+}
+
+// a walk-up's open stair seen from outside: the two flights as sloped slabs and the half landing
+function openStairShell( g, P, rm, y0, H ) {
+	const s = P.stair;
+	if ( ! s ) return;
+	const along = s.e === 0 || s.e === 2 ? 'z' : 'x';
+	const len = along === 'z' ? rm.z1 - rm.z0 : rm.x1 - rm.x0, sw = along === 'z' ? rm.x1 - rm.x0 : rm.z1 - rm.z0;
+	const run = Math.max( 0.5, len - 2.2 );
+	const cm = M( L.concrete, [ 196, 192, 184 ], 2 );
+	const pt = ( a, b ) => {
+		if ( s.e === 0 ) return [ rm.x0 + b, rm.z0 + a ];
+		if ( s.e === 2 ) return [ rm.x0 + b, rm.z1 - a ];
+		if ( s.e === 3 ) return [ rm.x0 + a, rm.z0 + b ];
+		return [ rm.x1 - a, rm.z0 + b ];
+	};
+	const slope = ( a0, a1, ya, yb, b0, b1 ) => {
+		const p00 = pt( a0, b0 ), p01 = pt( a0, b1 ), p10 = pt( a1, b0 ), p11 = pt( a1, b1 );
+		// top and underside
+		const q = [ [ p00[ 0 ], ya, p00[ 1 ] ], [ p01[ 0 ], ya, p01[ 1 ] ], [ p11[ 0 ], yb, p11[ 1 ] ], [ p10[ 0 ], yb, p10[ 1 ] ] ];
+		const n = [ ( q[ 1 ][ 1 ] - q[ 0 ][ 1 ] ), 0 ];
+		void n;
+		g.quad( q[ 0 ], q[ 1 ], q[ 2 ], q[ 3 ], cm );
+		g.quad( q[ 3 ], q[ 2 ], q[ 1 ], q[ 0 ], cm );
+		const d = [ [ p00[ 0 ], ya - 0.25, p00[ 1 ] ], [ p01[ 0 ], ya - 0.25, p01[ 1 ] ], [ p11[ 0 ], yb - 0.25, p11[ 1 ] ], [ p10[ 0 ], yb - 0.25, p10[ 1 ] ] ];
+		g.quad( d[ 3 ], d[ 2 ], d[ 1 ], d[ 0 ], cm );
+		g.quad( d[ 0 ], d[ 1 ], d[ 2 ], d[ 3 ], cm );
+	};
+	slope( 1.2, 1.2 + run, y0, y0 + H / 2, 0, sw / 2 - 0.05 );
+	slope( 1.2 + run, 1.2, y0 + H / 2, y0 + H, sw / 2 + 0.05, sw );
+	const a = pt( 1.2 + run, 0 ), b = pt( len, sw );
+	g.box( Math.min( a[ 0 ], b[ 0 ] ), y0 + H / 2 - 0.2, Math.min( a[ 1 ], b[ 1 ] ), Math.max( a[ 0 ], b[ 0 ] ), y0 + H / 2, Math.max( a[ 1 ], b[ 1 ] ), cm );
+}
+
 // the whole shell of one building. g's frame must be set to the building (local -> output).
 // lod 0 = near (full detail), 1 = far (massing, facades, roof). gh = ground height grid (or null)
 export function buildShell( g, P, lod, gh ) {
@@ -115,8 +178,9 @@ export function buildShell( g, P, lod, gh ) {
 	const bid = r.i + 1;
 	const sT = slabT( P );
 	P.feats.steps = frontSteps( P, gh );
-	// plinth down to the lowest ground (with a lattice skirt under raised plantation houses)
-	g.setTag( 0, 255 );
+	// plinth down to the lowest ground (with a lattice skirt under raised plantation houses). Every vertex carries
+	// the building id (the far shell hides by it); storey 255 = never hidden with the interior.
+	g.setTag( bid, 255 );
 	const lo = r.lo - 0.8;
 	if ( S.arch === 'dome' ) {
 		g.cyl( ( rect.x0 + rect.x1 ) / 2, lo, ( rect.z0 + rect.z1 ) / 2, S.bw / 2 + 0.3, S.fy - lo, 28, mat.plinth, 1 );
@@ -131,7 +195,7 @@ export function buildShell( g, P, lod, gh ) {
 		shellStorey( g, P, st, lod );
 		storeyOutside( g, P, st, lod );
 	}
-	g.setTag( 0, 255 );
+	g.setTag( bid, 255 );
 	roof( g, P, lod );
 	features( g, P, lod, gh );
 	void sT;
@@ -230,7 +294,10 @@ function roof( g, P, lod ) {
 function flatRoof( g, P, x0, z0, x1, z1, top, lod ) {
 	const { mat, S } = P;
 	const deck = M( L.bitumen, [ 170, 168, 162 ], 4 );
+	// with a roof stair, the deck belongs to the top storey: its interior rebuilds it with the stair opening
+	if ( P.stair && P.stair.roof && S.n > 1 ) g.setTag( P.r.i + 1, S.n - 1 );
 	g.box( x0, top - 0.02, z0, x1, top + 0.08, z1, { py: deck, px: mat.ext, nx: mat.ext, pz: mat.ext, nz: mat.ext } );
+	g.setTag( P.r.i + 1, 255 );
 	// parapet
 	const ph = S.arch === 'tower' ? 1.1 : S.arch === 'house' ? 0.35 : 0.8;
 	const t = 0.22;
@@ -277,7 +344,7 @@ function flatRoof( g, P, x0, z0, x1, z1, top, lod ) {
 	}
 }
 
-function bulkhead( g, P, s, top ) {
+export function bulkhead( g, P, s, top ) {
 	const { mat } = P;
 	const h = 2.6;
 	const t = 0.2;
@@ -525,7 +592,7 @@ function tentRoof( g, P, lod ) {
 		const fm = M( L.fabric, [ 90, 88, 60 ], 1.5 );
 		g.box( x + s * 0.01 - 0.01, y0, cz - 0.7, x + s * 0.01 + 0.01, y0 + 1.9, cz + 0.7, fm );
 	}
-	g.setTag( 0, 255 );
+	g.setTag( P.r.i + 1, 255 );
 	g.quad( [ x1 + 0.2, y0 + wall - 0.1, z0 - 0.2 ], [ x0 - 0.2, y0 + wall - 0.1, z0 - 0.2 ], [ x0 - 0.2, y0 + ridge, cz ], [ x1 + 0.2, y0 + ridge, cz ], cm );
 	g.quad( [ x0 - 0.2, y0 + wall - 0.1, z1 + 0.2 ], [ x1 + 0.2, y0 + wall - 0.1, z1 + 0.2 ], [ x1 + 0.2, y0 + ridge, cz ], [ x0 - 0.2, y0 + ridge, cz ], cm );
 	// inside of the canvas roof
@@ -544,7 +611,7 @@ function tentRoof( g, P, lod ) {
 // ---- steps, lots, awnings, signs, canopies -------------------------------------------------------------
 
 // steps from raised floors (porches, front doors) down to the ground
-function frontSteps( P, gh ) {
+export function frontSteps( P, gh ) {
 	const out = [];
 	const { S, rect } = P;
 	const st = P.storeys[ 0 ];
@@ -562,8 +629,10 @@ function frontSteps( P, gh ) {
 			} else if ( f.out ) continue;
 			const gy = groundAt( P, gh, x + f.nx * 1.5, z + f.nz * 1.5 );
 			const rise = fy - gy;
-			if ( rise < 0.25 || op.kind === 'roll' || op.kind === 'hangar' ) continue;
-			out.push( { x, z, nx: f.nx, nz: f.nz, side, w: Math.max( 1.2, op.w + 0.4 ), rise, gy, kind: op.kind } );
+			if ( rise < 0.25 ) continue;
+			// garage and hangar doors get a driveway ramp instead of steps
+			const ramp = op.kind === 'roll' || op.kind === 'hangar';
+			out.push( { x, z, nx: f.nx, nz: f.nz, side, w: ramp ? op.w + 0.8 : Math.max( 1.2, op.w + 0.4 ), rise, gy, kind: op.kind, ramp, len: ramp ? Math.min( 14, Math.max( 2, rise / 0.14 ) ) : 0 } );
 		}
 	}
 	void rect;
@@ -581,10 +650,24 @@ export function groundAt( P, gh, lx, lz ) {
 	return a * ( 1 - tz ) + b * tz;
 }
 
+// a sloped concrete driveway from a raised roll-up door down to the ground
+function rampOf( g, P, s ) {
+	const cm = M( L.concrete, [ 200, 196, 188 ], 3 );
+	const tx = - s.nz, tz = s.nx, hw = s.w / 2, fy = P.S.fy;
+	const p = ( a, d, y ) => [ s.x + tx * a + s.nx * d, y, s.z + tz * a + s.nz * d ];
+	const top0 = p( - hw, 0, fy ), top1 = p( hw, 0, fy ), end0 = p( - hw, s.len, s.gy + 0.02 ), end1 = p( hw, s.len, s.gy + 0.02 );
+	// the slope (with t = ( -nz, nx ) this winding faces up)
+	g.quad( top1, end1, end0, top0, cm );
+	// side walls down to below the ground
+	const b0 = p( - hw, 0, s.gy - 0.5 ), b1 = p( hw, 0, s.gy - 0.5 ), e0 = p( - hw, s.len, s.gy - 0.5 ), e1 = p( hw, s.len, s.gy - 0.5 );
+	g.quad( b0, e0, end0, top0, cm ); g.quad( top0, end0, e0, b0, cm );
+	g.quad( e1, b1, top1, end1, cm ); g.quad( end1, top1, b1, e1, cm );
+}
+
 export function stepBoxes( P, s ) {
 	// boxes (local coords) for a flight of steps: [x0,y0,z0,x1,y1,z1]
-	const n = Math.max( 1, Math.ceil( s.rise / 0.18 ) );
-	const rh = s.rise / n, run = 0.3;
+	const n = Math.max( 1, Math.ceil( s.rise / ( s.ramp ? 0.1 : 0.18 ) ) );
+	const rh = s.rise / n, run = s.ramp ? s.len / n : 0.3;
 	const out = [];
 	const tx = - s.nz, tz = s.nx; // along the edge
 	for ( let k = 0; k < n; k ++ ) {
@@ -623,20 +706,28 @@ function features( g, P, lod, gh ) {
 	const st = P.storeys[ 0 ];
 	// steps
 	for ( const s of P.feats.steps || [] ) {
+		if ( s.ramp ) { rampOf( g, P, s ); continue; }
 		const sm = S.arch === 'house' && S.variant.startsWith( 'plantation' ) ? M( L.planks, [ 170, 150, 120 ], 1.5 ) : M( L.concrete, [ 205, 200, 190 ], 2 );
 		for ( const b of stepBoxes( P, s ) ) g.box( b[ 0 ], b[ 1 ], b[ 2 ], b[ 3 ], b[ 4 ], b[ 5 ], sm, 8 );
 	}
 	// awnings and signs over storefronts
 	if ( S.arch === 'shop' || S.arch === 'food' || S.arch === 'bigbox' || S.arch === 'gas' || ( S.arch === 'tower' && S.shop ) ) storefronts( g, P, lod );
 	else if ( [ 'police', 'fire', 'hospital', 'clinic', 'school', 'church', 'hq', 'armory', 'office', 'tower', 'walkup' ].includes( S.arch ) ) nameSign( g, P, lod );
-	if ( P.feats.canopy ) gasCanopy( g, P, lod );
+	if ( P.feats.canopy ) gasCanopy( g, P, lod, gh );
 	if ( S.arch === 'fire' && lod === 0 ) {
 		// the hose-drying tower
+		// behind the building (the stairwell fills the back corner inside)
 		const tm = M( L.cmu, [ 210, 200, 186 ], 2.4 );
-		g.box( rect.x1 - 3.2, S.fy, rect.z1 - 3.2, rect.x1, S.top + 5, rect.z1, tm, 8 );
-		flatCap( g, rect.x1 - 3.3, rect.z1 - 3.3, rect.x1 + 0.1, rect.z1 + 0.1, S.top + 5 );
+		const [ x0, z0, x1, z1 ] = hoseTower( P );
+		g.box( x0, P.r.lo - 0.5, z0, x1, S.top + 5, z1, tm, 8 );
+		flatCap( g, x0 - 0.1, z0 - 0.1, x1 + 0.1, z1 + 0.1, S.top + 5 );
 	}
 	void st; void mat; void r; void gh;
+}
+
+export function hoseTower( P ) {
+	const r = P.rect;
+	return [ r.x1 - 3.2, r.z1, r.x1, r.z1 + 3.2 ];
 }
 
 function flatCap( g, x0, z0, x1, z1, y ) {
@@ -681,19 +772,14 @@ function storefronts( g, P, lod ) {
 }
 const PAL_AWN = ( R ) => [ [ 170, 40, 36 ], [ 36, 96, 70 ], [ 38, 70, 128 ], [ 214, 170, 50 ], [ 60, 60, 64 ], [ 200, 90, 40 ], [ 30, 120, 130 ], [ 120, 40, 90 ] ][ Math.floor( R() * 8 ) ];
 
-// a board with the sign texture on its face (front faces -z in local coords)
+// a board with the sign atlas on its face (front faces -z in local coords)
 function signBoard( g, x0, x1, y0, y1, z, sg ) {
 	const back = M( L.plain, sg.board || [ 40, 40, 44 ], 1 );
 	g.box( x0, y0, z, x1, y1, z + 0.1, { px: back, nx: back, py: back, ny: back, pz: back } );
-	// the face: fit the slot of the sign atlas, cropped to the board's aspect
-	const asp = ( x1 - x0 ) / ( y1 - y0 );
-	const slotAsp = 8;
-	const cu = Math.min( 1, asp / slotAsp );
-	const u0 = 0.5 - cu / 2, u1 = 0.5 + cu / 2;
-	// uv in [0,1] of the slot -> atlas uv (8 slots per layer, stacked in v)
-	const v0 = sg.slot / 8, v1 = ( sg.slot + 1 ) / 8;
-	const face = M( L.sign0 + sg.layer, WHITE, 1 );
-	g.quadUV( [ x1, y0, z ], [ x0, y0, z ], [ x0, y1, z ], [ x1, y1, z ], [ u0, v0, u1, v0, u1, v1, u0, v1 ], face, [ 0, 0, - 1 ] );
+	// the face: the sign's atlas slot, cropped to the board's aspect
+	const uv = signUV( sg.idx, ( x1 - x0 ) / ( y1 - y0 ) );
+	const face = M( L.sign0, WHITE, 1 );
+	g.quadUV( [ x1, y0, z ], [ x0, y0, z ], [ x0, y1, z ], [ x1, y1, z ], [ uv[ 0 ], uv[ 1 ], uv[ 2 ], uv[ 1 ], uv[ 2 ], uv[ 3 ], uv[ 0 ], uv[ 3 ] ], face, [ 0, 0, - 1 ] );
 }
 
 // institutional name boards over the entrance
@@ -717,15 +803,19 @@ function nameSign( g, P, lod ) {
 	}
 }
 
-function gasCanopy( g, P, lod ) {
+function gasCanopy( g, P, lod, gh ) {
 	const { r, S } = P;
 	const R = rng( hash32( P.bid, 0x9a5 ) );
 	const pumps = pumpsOf( r, S );
 	if ( ! pumps.length ) return;
 	const xs = pumps.map( p => p[ 0 ] ), zs = pumps.map( p => p[ 1 ] );
 	const x0 = Math.min( ...xs ) - 4, x1 = Math.max( ...xs ) + 4, z0 = Math.min( ...zs ) - 3.4, z1 = Math.max( ...zs ) + 3.4;
-	const h = S.fy + 5.0;
-	const brand = PAL_AWN( R );
+	// the forecourt follows the ground, not the kiosk's floor
+	const gy = ( x, z ) => gh ? groundAt( P, gh, x, z ) : S.fy;
+	const base = Math.max( ...pumps.map( p => gy( p[ 0 ], p[ 1 ] ) ) );
+	const h = base + 5.0;
+	const sg = signFor( P, 0, 'gas' );
+	const brand = sg ? SIGNS[ sg.idx ].bg : PAL_AWN( R );
 	const fm = M( L.plain, brand, 1 );
 	const white = M( L.plain, [ 236, 236, 232 ], 1 );
 	const under = M( L.plain, [ 220, 220, 216 ], 1 );
@@ -734,7 +824,8 @@ function gasCanopy( g, P, lod ) {
 	const cm = M( L.plain, [ 230, 230, 226 ], 1 );
 	for ( const [ px, pz ] of pumps ) {
 		if ( pz > ( z0 + z1 ) / 2 ) continue;
-		g.box( px - 0.2, S.fy, ( z0 + z1 ) / 2 - 0.2, px + 0.2, h, ( z0 + z1 ) / 2 + 0.2, cm );
+		const cz = ( z0 + z1 ) / 2;
+		g.box( px - 0.2, gy( px, cz ) - 0.3, cz - 0.2, px + 0.2, h, cz + 0.2, cm );
 	}
 	// islands and pumps
 	const curb = M( L.concrete, [ 215, 212, 205 ], 2 );
@@ -742,22 +833,22 @@ function gasCanopy( g, P, lod ) {
 	const panel = M( L.plain, brand, 1 );
 	const dark = M( L.plain, [ 30, 32, 36 ], 1 );
 	for ( const [ px, pz ] of pumps ) {
-		g.box( px - 0.7, S.fy - 0.3, pz - 1.3, px + 0.7, S.fy + 0.15, pz + 1.3, curb );
-		g.box( px - 0.35, S.fy + 0.15, pz - 0.28, px + 0.35, S.fy + 1.7, pz + 0.28, pumpM );
-		g.box( px - 0.36, S.fy + 1.2, pz - 0.29, px + 0.36, S.fy + 1.65, pz + 0.29, panel );
+		const y = gy( px, pz );
+		g.box( px - 0.7, y - 0.5, pz - 1.3, px + 0.7, y + 0.15, pz + 1.3, curb );
+		g.box( px - 0.35, y + 0.15, pz - 0.28, px + 0.35, y + 1.7, pz + 0.28, pumpM );
+		g.box( px - 0.36, y + 1.2, pz - 0.29, px + 0.36, y + 1.65, pz + 0.29, panel );
 		if ( lod === 0 ) {
-			g.box( px - 0.2, S.fy + 0.9, pz - 0.3, px + 0.2, S.fy + 1.15, pz - 0.28, dark );
-			g.box( px - 0.2, S.fy + 0.9, pz + 0.28, px + 0.2, S.fy + 1.15, pz + 0.3, dark );
+			g.box( px - 0.2, y + 0.9, pz - 0.3, px + 0.2, y + 1.15, pz - 0.28, dark );
+			g.box( px - 0.2, y + 0.9, pz + 0.28, px + 0.2, y + 1.15, pz + 0.3, dark );
 			// hoses
-			g.box( px + 0.36, S.fy + 0.6, pz - 0.2, px + 0.42, S.fy + 1.3, pz - 0.14, dark );
-			g.box( px - 0.42, S.fy + 0.6, pz + 0.14, px - 0.36, S.fy + 1.3, pz + 0.2, dark );
+			g.box( px + 0.36, y + 0.6, pz - 0.2, px + 0.42, y + 1.3, pz - 0.14, dark );
+			g.box( px - 0.42, y + 0.6, pz + 0.14, px - 0.36, y + 1.3, pz + 0.2, dark );
 		}
 	}
 	// price sign by the street
-	const sx = r.w / 2 - 2, sz = - r.d / 2 + 2;
-	g.box( sx - 0.12, S.fy - 0.5, sz - 0.12, sx + 0.12, S.fy + 5.5, sz + 0.12, M( L.metal, [ 180, 180, 180 ], 1 ) );
-	g.box( sx - 1.2, S.fy + 5.5, sz - 0.2, sx + 1.2, S.fy + 7.5, sz + 0.2, { px: fm, nx: fm, py: fm, ny: fm, pz: white, nz: white } );
-	const sg = signFor( P, 0, 'gas' );
+	const sx = r.w / 2 - 2, sz = - r.d / 2 + 2, sy = gy( sx, sz );
+	g.box( sx - 0.12, sy - 0.5, sz - 0.12, sx + 0.12, sy + 5.5, sz + 0.12, M( L.metal, [ 180, 180, 180 ], 1 ) );
+	g.box( sx - 1.2, sy + 5.5, sz - 0.2, sx + 1.2, sy + 7.5, sz + 0.2, { px: fm, nx: fm, py: fm, ny: fm, pz: white, nz: white } );
 	if ( sg ) signBoard( g, x0 + 1, x1 - 1, h + 0.1, h + 0.8, z0 - 0.02, sg );
 	void lod;
 }

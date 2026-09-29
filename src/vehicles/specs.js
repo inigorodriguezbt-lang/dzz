@@ -2,7 +2,7 @@
 // follow the real vehicle each type is modelled on (kg, kW, N·m, m); fuel burn is shortened for play
 // (a car's tank lasts roughly 20-35 minutes of driving).
 //
-//   kind        'car' | 'boat' | 'heli' | 'plane'
+//   kind        'car' | 'bike' | 'boat' | 'heli' | 'plane'
 //   model       geometry key in models/
 //   engine      power (kW), torque (N·m peak), idle / redline (rpm), gears, reverse, final drive, drive: 'fwd'|'rwd'|'awd',
 //               sound (loop name), pitch (loop rate at idle)
@@ -99,13 +99,28 @@ export const SPECS = {
 		fuel: { tank: 95, burn: 0.06, idleBurn: 0.0025 },
 		containers: { trunk: 80, glovebox: 8, trunkLabel: 'Cargo', loot: 'military' }, paints: PAINTS.army, metallic: [ 0, 0.05 ],
 	} ),
+	// ---- motorcycle ----
+	motorbike: {
+		kind: 'bike', name: 'Motorcycle', model: 'motorbike', mass: 290, health: 450, open: true,
+		engine: { power: 52, torque: 64, idle: 1300, redline: 9500, gears: [ 2.75, 1.94, 1.55, 1.3, 1.15, 1.04 ], reverse: 30, final: 5.5, drive: 'rwd', sound: 'engine_bike', pitch: 0.9 },
+		brake: 5200, handbrake: 1800, steer: 0.5, steerSpeed: 3.2,
+		susp: { k: 24000, c: 2000, rest: 0.14, travel: 0.12 },
+		grip: 1.15, rollInfluence: 0, antiRoll: 0, dragArea: 0.36, downforce: 0, offroad: 0.2,
+		fuel: { tank: 15, burn: 0.02, idleBurn: 0.0008 },
+		containers: { trunk: 8, glovebox: 0, trunkLabel: 'Top box' },
+		seats: [
+			{ pos: [ 0, 0.84, 0.08 ], eye: [ 0, 1.5, - 0.12 ], exit: - 1, driver: true },
+			{ pos: [ 0, 0.9, 0.46 ], eye: [ 0, 1.6, 0.4 ], exit: 1 },
+		],
+		paints: [ 0x0e0f10, 0xc81d1d, 0x1d5fd1, 0xf2f2f0, 0x2e8b57, 0xe0591b, 0x55595e ], paints2: [ 0x0e0f10, 0x1b1c1e, 0x9ea2a8 ], metallic: [ 0.3, 0.7 ],
+	},
 	// ---- boats ----
 	speedboat: {
 		kind: 'boat', name: 'Speedboat', model: 'speedboat', mass: 1400, health: 900,
 		engine: { power: 185, idle: 700, redline: 5800, sound: 'engine_boat', pitch: 1.15 },
 		thrust: 11500, reverse: 0.35, steer: 0.6, steerSpeed: 2.2, draft: 0.2, planing: 1, drag: [ 60, 30 ], lateral: 2600,
 		fuel: { tank: 150, burn: 0.06, idleBurn: 0.002 },
-		containers: { trunk: 40, glovebox: 6, trunkLabel: 'Storage', loot: 'boat' },
+		containers: { trunk: 40, glovebox: 6, trunkLabel: 'Storage', loot: 'beach' },
 		seats: [
 			{ pos: [ 0.55, 0.58, 0.05 ], eye: [ 0.55, 1.36, 0.12 ], exit: 1, driver: true },
 			{ pos: [ - 0.55, 0.58, 0.05 ], eye: [ - 0.55, 1.36, 0.12 ], exit: - 1 },
@@ -119,7 +134,7 @@ export const SPECS = {
 		engine: { power: 250, idle: 650, redline: 2800, sound: 'engine_truck', pitch: 0.62 },
 		thrust: 26000, reverse: 0.4, rudder: true, steer: 0.55, steerSpeed: 1.2, draft: 0.5, planing: 0.15, drag: [ 400, 200 ], lateral: 9000,
 		fuel: { tank: 600, burn: 0.07, idleBurn: 0.003 },
-		containers: { trunk: 90, glovebox: 10, trunkLabel: 'Fish hold', loot: 'boat' },
+		containers: { trunk: 90, glovebox: 10, trunkLabel: 'Fish hold', loot: 'beach' },
 		seats: [
 			{ pos: [ 0.45, 1.0, - 1.25 ], eye: [ 0.45, 1.72, - 1.18 ], exit: 1, driver: true },
 			{ pos: [ - 0.5, 1.0, - 1.3 ], eye: [ - 0.5, 1.72, - 1.25 ], exit: - 1 },
@@ -130,9 +145,9 @@ export const SPECS = {
 	jetski: {
 		kind: 'boat', name: 'Jet ski', model: 'jetski', mass: 400, health: 400, open: true,
 		engine: { power: 130, idle: 1200, redline: 7800, sound: 'engine_bike', pitch: 1.1 },
-		thrust: 5200, reverse: 0.25, steer: 0.5, steerSpeed: 3.5, draft: 0.12, planing: 1, drag: [ 20, 8 ], lateral: 900, jet: true,
+		thrust: 4600, reverse: 0.25, steer: 0.5, steerSpeed: 3.5, draft: 0.12, planing: 1, drag: [ 20, 8 ], lateral: 900, jet: true,
 		fuel: { tank: 70, burn: 0.04, idleBurn: 0.002 },
-		containers: { trunk: 10, glovebox: 0, trunkLabel: 'Storage' },
+		containers: { trunk: 10, glovebox: 0, trunkLabel: 'Storage', loot: 'beach' },
 		seats: [
 			{ pos: [ 0, 0.82, 0.45 ], eye: [ 0, 1.52, 0.5 ], exit: 1, driver: true },
 			{ pos: [ 0, 0.84, 1.0 ], eye: [ 0, 1.55, 1.05 ], exit: - 1 },
@@ -146,7 +161,7 @@ export const SPECS = {
 		lift: 2.1, climb: 6, tilt: 0.42, yawRate: 1.3, drag: 1.6, rotorR: 5.35, spool: 6,
 		susp: { k: 70000, c: 7000, rest: 0.12, travel: 0.1 }, grip: 1.2,
 		fuel: { tank: 540, burn: 0.16, idleBurn: 0.05 },
-		containers: { trunk: 30, glovebox: 6, trunkLabel: 'Baggage' },
+		containers: { trunk: 30, glovebox: 6, trunkLabel: 'Baggage', loot: 'hangar' },
 		seats: [
 			{ pos: [ 0.42, 0.98, - 0.55 ], eye: [ 0.42, 1.72, - 0.45 ], exit: 1, driver: true },
 			{ pos: [ - 0.42, 0.98, - 0.55 ], eye: [ - 0.42, 1.72, - 0.45 ], exit: - 1 },
@@ -162,7 +177,7 @@ export const SPECS = {
 		pitchRate: 1.1, rollRate: 1.6, yawRate: 0.5,
 		susp: { k: 42000, c: 3000, rest: 0.12, travel: 0.1 }, brake: 5500, steer: 0.45, grip: 0.9,
 		fuel: { tank: 200, burn: 0.03, idleBurn: 0.002 },
-		containers: { trunk: 25, glovebox: 4, trunkLabel: 'Baggage' },
+		containers: { trunk: 25, glovebox: 4, trunkLabel: 'Baggage', loot: 'hangar' },
 		seats: [
 			{ pos: [ - 0.27, 1.2, - 0.2 ], eye: [ - 0.27, 1.92, - 0.12 ], exit: - 1, driver: true },
 			{ pos: [ 0.27, 1.2, - 0.2 ], eye: [ 0.27, 1.92, - 0.12 ], exit: 1 },

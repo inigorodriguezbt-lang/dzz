@@ -177,7 +177,8 @@ function card( b, o ) {
 		const ext = Math.min( 1, 0.45 * Math.min( 1, dl.length() ) + 0.4 * Math.min( 1, dc.length() ) + 0.3 * Math.max( 0, dc.y ) );
 		atlasUV( o.tile, o.u0 + u * ( o.u1 - o.u0 ), o.v0 + v * ( o.v1 - o.v0 ), _uv );
 		const hf = Math.max( 0, p.y / o.H );
-		ids.push( b.vertex( p, nn, _uv[ 0 ], _uv[ 1 ], [ hf, o.flex( p ), 1, o.phase ], [ PART.LEAF, 0.25 + 0.75 * ext * ext, o.cr, 0 ], o.col ) );
+		const ao = o.aoAt ? o.aoAt( p ) : 0.25 + 0.75 * ext * ext;
+		ids.push( b.vertex( p, nn, _uv[ 0 ], _uv[ 1 ], [ hf, o.flex( p ), 1, o.phase ], [ PART.LEAF, ao, o.cr, 0 ], o.col ) );
 	}
 	b.quad( ids[ 0 ], ids[ 1 ], ids[ 2 ], ids[ 3 ] );
 }
@@ -230,18 +231,19 @@ function palmFronds( rand, count ) {
 			twist: ( rand() - 0.5 ) * 0.3,
 			length: dead ? len * 0.85 : len,
 			attachY: 0.3 - 0.45 * a,
-			phase: rand(),
+			phase: rand(), cr: rand(),
 		} );
 	}
 	return list;
 }
 
 export function buildPalm( lod = 0, seed = 11 ) {
-	const rand = mulberry32( seed );
+	// separate random streams for the nuts and the fronds: both levels get the same fronds
+	const rand = mulberry32( seed ), randF = mulberry32( seed * 13 + 7 );
 	const b = new GeoBuilder();
 	const H = PALM_H;
 	// trunk: the vertex shader maps u (aVeg.x) to the instance height, bends it and moves the crown
-	const rows = lod === 0 ? [ - 0.03, 0, 0.015, 0.04, 0.08, 0.14, 0.22, 0.32, 0.43, 0.54, 0.65, 0.76, 0.86, 0.94, 0.975, 0.992, 1.005 ] : [ - 0.03, 0.03, 0.2, 0.5, 0.8, 1.0 ];
+	const rows = lod === 0 ? [ - 0.03, 0, 0.015, 0.04, 0.08, 0.14, 0.22, 0.32, 0.43, 0.54, 0.65, 0.76, 0.86, 0.94, 0.975, 0.992, 1.005 ] : [ - 0.03, 0.02, 0.2, 0.45, 0.7, 0.9, 0.96, 0.99, 1.005 ];
 	const radial = lod === 0 ? 10 : 5;
 	const start = b.count;
 	for ( const u of rows ) {
@@ -268,24 +270,24 @@ export function buildPalm( lod = 0, seed = 11 ) {
 		const s = 0.12 + rand() * 0.035;
 		const ripe = rand();
 		const col = ripe < 0.6 ? lin( 0x6f7f2a ) : ripe < 0.85 ? lin( 0xa08a30 ) : lin( 0x6a4a26 );
-		blob( b, c, new THREE.Vector3( s, s * 1.12, s ), lod === 0 ? 1 : 0, { part: PART.SOLID, crown: 20, col, ao: () => 0.6 } );
+		// (20 faces with smooth normals: a nut is a few pixels even under the palm)
+		blob( b, c, new THREE.Vector3( s, s * 1.12, s ), 0, { part: PART.SOLID, crown: 20, col, ao: () => 0.6 } );
 	}
-	const fronds = palmFronds( rand, 16 );
-	const use = lod === 0 ? fronds : fronds.filter( ( f, i ) => i % 3 !== 1 );
-	for ( const f of use ) {
+	const fronds = palmFronds( randF, 16 );
+	for ( const f of fronds ) {
 		const origin = new THREE.Vector3( Math.cos( f.azimuth ) * 0.14, H + f.attachY, Math.sin( f.azimuth ) * 0.14 );
 		const Lf = f.length;
 		// colour by age: young fronds a fresh yellow-green, old ones yellowing, the dead one brown (its own tile)
 		const col = f.dead ? [ 1, 1, 1 ] : [ 1 + 0.12 * ( 1 - f.a ) - 0.05, 1.02, 0.85 + 0.1 * f.a ].map( ( v, q ) => v * ( q === 2 ? 1 - 0.25 * smooth( 0.75, 1, f.a ) : 1 ) );
 		frond( b, {
 			origin, azimuth: f.azimuth, elevation: f.elevation, bend: f.bend, twist: f.twist, length: Lf,
-			segs: lod === 0 ? 9 : 4, cross: lod === 0 ? 2 : 1, tile: f.dead ? 'DEADFROND' : 'FROND',
-			leafLen: ( s ) => ( lod === 0 ? 1 : 1.1 ) * 0.2 * Lf * ( smooth( 0.03, 0.22, s ) * ( 1 - 0.6 * smooth( 0.35, 1.0, s ) ) ),
+			segs: lod === 0 ? 9 : 5, cross: lod === 0 ? 2 : 1, tile: f.dead ? 'DEADFROND' : 'FROND',
+			leafLen: ( s ) => 0.2 * Lf * ( smooth( 0.03, 0.22, s ) * ( 1 - 0.6 * smooth( 0.35, 1.0, s ) ) ),
 			leafAngle: ( s ) => 1.05 - 0.4 * s,
 			droop: ( s ) => ( f.dead ? 1.25 : 0.45 + 0.5 * f.a ) + 0.32 * s,
 			curl: f.dead ? 0.1 : 0.22, minWidth: 0.05,
 			veg: { u0: 1, flutter: f.dead ? 0.3 : 1, phase: f.phase },
-			mat: [ PART.LEAF, 0.55 + 0.45 * ( 1 - f.a ), rand(), 1 + f.k ], col,
+			mat: [ PART.LEAF, 0.55 + 0.45 * ( 1 - f.a ), f.cr, 1 + f.k ], col,
 		} );
 	}
 	return b.build();
@@ -352,7 +354,7 @@ const LEAF_STYLE = {
 	kukui: { tile: 'BROAD', size: 1.6, clumpR: 0.85, clumpsPerR: 3.6, cardsPer: 3, col: [ 1, 1, 1 ] },
 	ohia: { tile: 'SMALL', size: 1.25, clumpR: 0.7, clumpsPerR: 4.2, cardsPer: 3, col: [ 1, 1, 1 ] },
 	kiawe: { tile: 'FINE', size: 1.5, clumpR: 0.8, clumpsPerR: 3.2, cardsPer: 2, col: [ 1.15, 1.12, 0.85 ] },
-	ironwood: { tile: 'NEEDLE', size: 1.9, clumpR: 0.9, clumpsPerR: 2.6, cardsPer: 3, col: [ 1, 1, 1 ], hang: true, upBias: 0.1 },
+	ironwood: { tile: 'NEEDLE', size: 2.1, clumpR: 0.95, clumpsPerR: 2.8, cardsPer: 3, col: [ 1, 1, 1 ], upBias: 0.3 },
 };
 
 export function buildBroadleaf( kind, lod = 0, seed = 21 ) {
@@ -384,7 +386,8 @@ export function buildBroadleaf( kind, lod = 0, seed = 21 ) {
 		forks.push( fork );
 	}
 	// limbs from the fork(s) to the lobes; lobes far from the fork get a secondary limb
-	const limbRows = lod === 0 ? 5 : 2, limbRadial = lod === 0 ? 6 : 4;
+	// limbs mostly hide in the crown: few sides, fewer still on the mid level
+	const limbRows = lod === 0 ? 4 : 2, limbRadial = lod === 0 ? 5 : 3;
 	cr.lobes.forEach( ( L, i ) => {
 		const lc = new THREE.Vector3( L[ 0 ], L[ 1 ] - L[ 3 ] * 0.35, L[ 2 ] );
 		let best = forks[ 0 ];
@@ -393,30 +396,41 @@ export function buildBroadleaf( kind, lod = 0, seed = 21 ) {
 		const d = lc.clone().sub( start );
 		const ctrl = start.clone().lerp( lc, 0.5 ).add( new THREE.Vector3( - d.x * 0.22, d.length() * 0.18, - d.z * 0.22 ) )
 			.add( new THREE.Vector3( rand() - 0.5, ( rand() - 0.5 ) * 0.6, rand() - 0.5 ).multiplyScalar( d.length() * 0.2 ) );
-		if ( lod === 1 && i % 2 ) return;
 		const pts = bezier( start, ctrl, lc, limbRows );
 		const r0 = cr.limbR * ( i < 5 ? 1 : 0.7 ), r1 = 0.04;
 		tube( b, pts, ( f ) => r0 + ( r1 - r0 ) * Math.pow( f, 0.8 ), { radial: limbRadial, part: PART.BARK, veg: barkVeg, ao: ( f ) => 0.5 + 0.2 * f, col: barkCol, texAround: 1, texLen: 2 } );
 	} );
-	// leaf cards (outermost first)
+	// leaf cards: one set for both levels, drawn outermost first (early depth rejection of the inner ones)
 	const specs = [];
 	for ( const L of cr.lobes ) {
 		specs.push( ...lobeClumps( b, L, {
-			clumpsPerR: style.clumpsPerR * ( lod === 0 ? 1 : 0.4 ), clumpR: style.clumpR * ( lod === 0 ? 1 : 1.6 ), cardsPer: lod === 0 ? style.cardsPer : 2,
-			size: style.size * ( lod === 0 ? 1 : 1.65 ), flatten: cr.flatten, hang: style.hang, upBias: style.upBias,
+			clumpsPerR: style.clumpsPerR, clumpR: style.clumpR, cardsPer: style.cardsPer,
+			size: style.size, flatten: cr.flatten, hang: style.hang, upBias: style.upBias,
 		}, rand ) );
 	}
-	specs.sort( ( a, c ) => c.center.distanceToSquared( crownC ) - a.center.distanceToSquared( crownC ) );
-	for ( const s of specs ) {
-		card( b, {
-			...s, tile: style.tile, u0: 0, u1: 1, v0: 0, v1: 1, crownC, crownR, H, flex, phase: rand(), cr: rand(), col: style.col,
-		} );
-	}
+	for ( const s of specs ) { s.phase = rand(); s.cr = rand(); }
+	emitCrown( b, specs, lod, ( s ) => ( { tile: style.tile, u0: 0, u1: 1, v0: 0, v1: 1, crownC, crownR, H, flex, col: style.col } ), crownC, crownR );
 	return b.build();
 }
 
-// ---- Cook pine: a tall column of short whorled branches covered in foxtail branchlets ------------------------
+// Leaf cards of a crown. The mid level keeps the outer shell of every lobe (a little enlarged) and
+// drops the cards buried inside: the crown keeps the full model's silhouette and outer shading, so
+// the short dithered hand-over between the two levels doesn't show.
+const MID_KEEP = 0.5, MID_GROW = 1.15;
+function emitCrown( b, specs, lod, extra, crownC, crownR ) {
+	let list = specs;
+	if ( lod > 0 ) {
+		const depth = ( s ) => s.center.distanceTo( s.lobeC ) / s.lobeR + 0.35 * s.center.clone().sub( crownC ).divide( crownR ).length();
+		list = specs.map( ( s ) => [ depth( s ), s ] ).sort( ( a, c ) => c[ 0 ] - a[ 0 ] ).slice( 0, Math.ceil( specs.length * MID_KEEP ) ).map( ( e ) => e[ 1 ] );
+	}
+	list = list.slice().sort( ( a, c ) => c.center.clone().sub( crownC ).divide( crownR ).lengthSq() - a.center.clone().sub( crownC ).divide( crownR ).lengthSq() );
+	for ( const s of list ) card( b, { ...s, ...extra( s ), size: s.size * ( lod > 0 ? MID_GROW : 1 ) } );
+}
 
+// ---- Cook pine: a tall column of short whorled branches covered in foxtail branchlets ------------------------
+// Each branch is three cards of the foxtail tile crossed around the branch axis (two at the mid level:
+// the same branches, so the levels hand over cleanly), which reads as a tuft from every side instead
+// of a flat comb. Whorls every ~0.75 m, irregular; the upper branches rise, the crown ends in a spire.
 export function buildPine( lod = 0, seed = 41 ) {
 	const rand = mulberry32( seed );
 	const b = new GeoBuilder();
@@ -425,33 +439,43 @@ export function buildPine( lod = 0, seed = 41 ) {
 	const veg = ( p ) => [ Math.max( 0, p.y / H ), flex( p ), 0, 0 ];
 	const barkCol = lin( 0x8a7560 );
 	const pts = [];
-	for ( let k = 0; k <= ( lod === 0 ? 10 : 4 ); k ++ ) pts.push( new THREE.Vector3( 0, - 0.3 + k / ( lod === 0 ? 10 : 4 ) * ( H + 0.3 ), 0 ) );
+	const tr = lod === 0 ? 10 : 5;
+	for ( let k = 0; k <= tr; k ++ ) pts.push( new THREE.Vector3( 0, - 0.3 + k / tr * ( H + 0.3 ), 0 ) );
 	tube( b, pts, ( f ) => 0.36 * ( 1 - f * 0.9 ) + 0.1 * Math.exp( - f * 30 ), { radial: lod === 0 ? 8 : 5, part: PART.BARK, veg, ao: () => 0.6, col: barkCol, texAround: 1, texLen: 2.2 } );
-	const step = lod === 0 ? 0.85 : 1.15;
-	for ( let y = 2.4; y < H - 0.3; y += step * ( 0.85 + rand() * 0.3 ) ) {
+	const branches = [];
+	for ( let y = 2.2; y < H - 0.2; y += 0.75 * ( 0.8 + rand() * 0.4 ) ) {
 		const f = y / H;
-		// narrow column, a little wider low down, tapering to the spire
-		const Lmax = ( 1.2 + 2.2 * Math.sin( Math.min( 1, f * 1.4 ) * Math.PI * 0.5 ) * ( 1 - Math.pow( f, 2.2 ) ) ) * ( 0.75 + 0.5 * rand() );
-		const nb = lod === 0 ? 5 : 4;
+		// narrow column, widest low down, tapering into the spire
+		const Lmax = ( 0.7 + 2.1 * Math.sin( Math.min( 1, f * 1.35 ) * Math.PI * 0.5 ) * ( 1 - Math.pow( f, 2.3 ) ) ) * ( 0.8 + 0.4 * rand() );
 		const a0 = rand() * 6.28;
-		for ( let k = 0; k < nb; k ++ ) {
-			if ( rand() < 0.12 ) continue;
-			const a = a0 + k / nb * Math.PI * 2 + ( rand() - 0.5 ) * 0.5;
-			const L = Math.max( 0.35, Lmax * ( 0.7 + 0.5 * rand() ) );
-			const dir = new THREE.Vector3( Math.cos( a ), - 0.08 + rand() * 0.12, Math.sin( a ) ).normalize();
-			const c = new THREE.Vector3( 0, y, 0 ).addScaledVector( dir, L * 0.5 + 0.1 );
-			// horizontal card along the branch plus a vertical one (the foxtails hang)
-			const side = new THREE.Vector3( - dir.z, 0, dir.x );
-			const nH = new THREE.Vector3().crossVectors( dir, side ).normalize();
-			if ( nH.y < 0 ) nH.negate();
-			const ph = rand(), crr = rand();
-			for ( const [ n, w ] of lod === 0 ? [ [ nH, 1.1 ], [ side, 1.0 ] ] : [ [ nH.clone().lerp( side, 0.5 ).normalize(), 1.6 ] ] ) {
-				card( b, {
-					center: c, w: L + 0.2, h: w * ( 0.6 + 0.3 * f ), normal: n, spin: Math.atan2( dir.y, 1 ) * 0 + angleInPlane( n, dir ),
-					tile: 'PINEBR', u0: 0, u1: 1, v0: 0, v1: 1, lobeC: new THREE.Vector3( 0, y, 0 ), lobeR: L + 0.3,
-					crownC: new THREE.Vector3( 0, H * 0.5, 0 ), crownR: new THREE.Vector3( 3, H * 0.5, 3 ), H, flex, phase: ph, cr: crr, col: [ 1, 1, 1 ],
-				} );
-			}
+		for ( let k = 0; k < 5; k ++ ) {
+			const skip = rand() < 0.1;
+			const a = a0 + k / 5 * Math.PI * 2 + ( rand() - 0.5 ) * 0.5;
+			const L = Math.max( 0.3, Lmax * ( 0.7 + 0.5 * rand() ) );
+			const up = - 0.12 + rand() * 0.16 + Math.pow( f, 2 ) * 0.9;
+			const ph = rand(), cr = rand(), spin = rand() * Math.PI;
+			if ( ! skip ) branches.push( { y, f, a, L, up, ph, cr, spin } );
+		}
+	}
+	const cards = lod === 0 ? [ 0, Math.PI / 3, Math.PI * 2 / 3 ] : [ 0, Math.PI / 2 ];
+	const crownC = new THREE.Vector3( 0, H * 0.5, 0 ), crownR = new THREE.Vector3( 3, H * 0.5, 3 );
+	for ( const br of branches ) {
+		const dir = new THREE.Vector3( Math.cos( br.a ), br.up, Math.sin( br.a ) ).normalize();
+		const c = new THREE.Vector3( 0, br.y, 0 ).addScaledVector( dir, br.L * 0.5 + 0.12 );
+		const side = new THREE.Vector3( - dir.z, 0, dir.x ).normalize();
+		const nUp = new THREE.Vector3().crossVectors( dir, side ).normalize();
+		if ( nUp.y < 0 ) nUp.negate();
+		const hgt = ( 0.75 + 0.35 * ( 1 - br.f ) ) * ( lod === 0 ? 1 : 1.12 );
+		for ( const phi of cards ) {
+			// card plane contains the branch: its normal turns around the branch axis
+			const n = nUp.clone().multiplyScalar( Math.cos( br.spin + phi ) ).addScaledVector( side, Math.sin( br.spin + phi ) ).normalize();
+			card( b, {
+				center: c, w: br.L + 0.3, h: hgt, normal: n, spin: angleInPlane( n, dir ),
+				tile: 'PINEBR', u0: 0, u1: 1, v0: 0, v1: 1, lobeC: new THREE.Vector3( 0, br.y, 0 ), lobeR: br.L + 0.4,
+				crownC, crownR, H, flex, phase: br.ph, cr: br.cr, col: [ 1, 1, 1 ],
+				// a narrow column: the branch tips are out in the light, the trunk end is shaded
+				aoAt: ( p ) => Math.min( 1, 0.42 + 0.45 * Math.hypot( p.x, p.z ) / ( br.L + 0.3 ) + 0.15 * br.f ),
+			} );
 		}
 	}
 	return b.build();
@@ -682,45 +706,52 @@ export function buildFern( lod = 0, seed = 111 ) {
 	return b.build();
 }
 
-// grass clump for the dense ground cover: geometric blades (no alpha test, cheap to fill)
-export function buildGrassClump( seed = 121 ) {
+// Grass clump for the dense ground cover: geometric blades (no alpha test, cheap to fill), after
+// Tidewater's GrassField (MIT). Nine blades in three tiers: with distance the tier 2 and then the tier 1
+// blades narrow away while the survivors widen, so the sward keeps its cover with a third of the
+// blades (VegMaterial). lod 1 (the far level) is the three tier 0 blades, one triangle each: by then
+// the near level shows the same three blades, so the hand-over doesn't show.
+// Vertex layout (kind GRASS): position = point on the blade's centre line, uv = sideways offset of the
+// vertex from it (xz, m), aVeg = ( height fraction, -, -, phase ), aMat.w = tier.
+export function buildGrassClump( lod = 0, seed = 121 ) {
 	const rand = mulberry32( seed );
 	const b = new GeoBuilder();
-	const blades = 11;
+	const blades = 9;
 	for ( let k = 0; k < blades; k ++ ) {
+		// the same random numbers for both levels: tier 0 blades are identical in both
+		const tier = k % 3;
 		const a = rand() * Math.PI * 2;
-		const r = Math.sqrt( rand() ) * 0.22;
+		const r = Math.sqrt( rand() ) * 0.2;
 		const bx = Math.cos( a ) * r, bz = Math.sin( a ) * r;
 		const dirA = rand() * Math.PI * 2;
 		const dx = Math.cos( dirA ), dz = Math.sin( dirA );
 		const lean = 0.15 + rand() * 0.45;
-		const h = 0.28 + rand() * 0.34;
-		const wd = 0.012 + rand() * 0.01;
+		const h = ( 0.3 + rand() * 0.32 ) * ( tier === 0 ? 1.08 : 1 );
+		const wd = ( 0.02 + rand() * 0.012 ) * ( tier === 0 ? 1.15 : 1 );
 		const curve = 0.2 + rand() * 0.35;
 		const ph = rand();
-		const tone = 0.8 + rand() * 0.4;
+		const tone = 0.82 + rand() * 0.36;
+		const cr = rand();
+		if ( lod === 1 && tier > 0 ) continue;
 		const col = [ tone, tone, tone ];
+		const rows = lod === 1 ? [ 0, 1 ] : tier === 0 ? [ 0, 0.38, 0.72, 1 ] : [ 0, 0.55, 1 ];
+		// normals mostly up: the sward is lit like the ground under it
+		const n = new THREE.Vector3( dx * 0.3, 1, dz * 0.3 ).normalize();
 		const ids = [];
-		const rows = [ 0, 0.4, 0.75, 1 ];
 		for ( let q = 0; q < rows.length; q ++ ) {
 			const f = rows[ q ];
 			const out = ( Math.sin( lean ) * f + curve * f * f ) * h;
 			const up = ( Math.cos( lean ) * f - curve * 0.3 * f * f ) * h;
 			const p = new THREE.Vector3( bx + dx * out, up, bz + dz * out );
-			const w = wd * ( 1 - f * 0.85 );
-			const side = new THREE.Vector3( - dz, 0, dx );
-			// normals mostly up: the lawn is lit like the ground under it
-			const n = new THREE.Vector3( dx * 0.3, 1, dz * 0.3 ).normalize();
-			if ( q === rows.length - 1 ) {
-				ids.push( b.vertex( p, n, WHITE[ 0 ], WHITE[ 1 ], [ f, f, f, ph ], [ PART.SOLID, 0.35 + 0.65 * f, rand(), 0 ], col ) );
-			} else {
-				ids.push( b.vertex( p.clone().addScaledVector( side, - w ), n, WHITE[ 0 ], WHITE[ 1 ], [ f, f, f, ph ], [ PART.SOLID, 0.35 + 0.65 * f, 0.5, 0 ], col ) );
-				ids.push( b.vertex( p.clone().addScaledVector( side, w ), n, WHITE[ 0 ], WHITE[ 1 ], [ f, f, f, ph ], [ PART.SOLID, 0.35 + 0.65 * f, 0.5, 0 ], col ) );
-			}
+			// a single triangle (far level) is a little wider at the base: the same area as the blade
+			const w = wd * ( 1 - f * 0.85 ) * ( lod === 1 ? 1.3 : 1 );
+			const mat = [ PART.SOLID, 0.35 + 0.65 * f, cr, tier ];
+			if ( q === rows.length - 1 ) ids.push( b.vertex( p, n, 0, 0, [ f, 0, 0, ph ], mat, col ) );
+			else for ( const sd of [ - 1, 1 ] ) ids.push( b.vertex( p, n, - dz * w * sd, dx * w * sd, [ f, 0, 0, ph ], mat, col ) );
 		}
-		b.quad( ids[ 0 ], ids[ 1 ], ids[ 3 ], ids[ 2 ] );
-		b.quad( ids[ 2 ], ids[ 3 ], ids[ 5 ], ids[ 4 ] );
-		b.tri( ids[ 4 ], ids[ 5 ], ids[ 6 ] );
+		for ( let q = 0; q < rows.length - 2; q ++ ) b.quad( ids[ q * 2 ], ids[ q * 2 + 1 ], ids[ q * 2 + 3 ], ids[ q * 2 + 2 ] );
+		const t = ( rows.length - 2 ) * 2;
+		b.tri( ids[ t ], ids[ t + 1 ], ids[ t + 2 ] );
 	}
 	return b.build();
 }

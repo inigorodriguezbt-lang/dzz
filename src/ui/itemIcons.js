@@ -20,10 +20,11 @@ const GLYPH = {
 	misc: '<circle cx="12" cy="12" r="7"/>', material: '<path d="m4 16 8-10 8 10z"/>',
 };
 
+// the glyph drawn with a margin (a 33-unit box around the 24 grid) so it reads at 32u where a render gets 44u
 export function glyphFor( id ) {
 	const d = getItem( id );
 	const g = GLYPH[ d?.cat ] || GLYPH.misc;
-	return 'data:image/svg+xml;utf8,' + encodeURIComponent( `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#B6BAC1" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round">${g}</svg>` );
+	return 'data:image/svg+xml;utf8,' + encodeURIComponent( `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-4.5 -4.5 33 33" fill="none" stroke="#B6BAC1" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round">${g}</svg>` );
 }
 
 // sets img.src to the best icon now and upgrades it when the rendered one arrives

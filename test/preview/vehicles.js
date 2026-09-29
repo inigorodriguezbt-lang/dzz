@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { G } from '../../src/render/Materials.js';
 import { VehicleVisual, EMIT } from '../../src/vehicles/visual.js';
 import { modelNames, getModel } from '../../src/vehicles/models/index.js';
+import { SPECS, seatsFromModel } from '../../src/vehicles/specs.js';
 
 const q = new URLSearchParams( location.search );
 const W = + ( q.get( 'w' ) || 1280 ), H = + ( q.get( 'h' ) || 720 );
@@ -87,11 +88,13 @@ window.show = ( list ) => {
 	shown.length = 0;
 	const out = [];
 	for ( const it of list ) {
-		const v = new VehicleVisual( it.name, { paint: it.paint ?? 0x9a1b1b, paint2: it.paint2 ?? 0xf2f2f0, metallic: it.metal ?? 0.5, dirt: it.dirt ?? 0, rust: it.rust ?? 0, fade: it.fade ?? 0, burnt: it.burnt ?? 0, crack: it.crack ?? 0, gdirt: it.gdirt ?? 0 } );
+		const v = new VehicleVisual( it.name, { paint: it.paint ?? 0x9a1b1b, paint2: it.paint2 ?? 0xf2f2f0, metallic: it.metal ?? 0.5, dirt: it.dirt ?? 0, rust: it.rust ?? 0, fade: it.fade ?? 0, burnt: it.burnt ?? 0, crack: it.crack ?? 0, gdirt: it.gdirt ?? 0, dent: it.dent ?? 0 } );
 		v.setLOD( it.lod || 'active' );
 		for ( const k in it.emit || {} ) v.emit[ EMIT[ k ] ] = it.emit[ k ];
 		if ( it.wheels ) v.poseWheels( it.wheels );
 		if ( it.parts ) for ( const k in it.parts ) if ( v.parts[ k ] ) v.parts[ k ].rotation.fromArray( it.parts[ k ] );
+		if ( it.rider != null ) { const spec = SPECS[ it.name ]; v.setRider( spec.seats || seatsFromModel( v.model.P ), spec.kind, it.rider, it.head !== false ); }
+		if ( it.lean ) v.group.rotation.z = it.lean;
 		v.group.position.set( it.x || 0, it.y || 0, it.z || 0 );
 		v.group.rotation.y = it.yaw || 0;
 		scene.add( v.group );

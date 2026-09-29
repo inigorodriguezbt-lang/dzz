@@ -1,6 +1,8 @@
 // Creatures preview (dev only, not shipped): the infected, survivors and animals from src/ai in a bare lit
 // scene, posed by the same code the game runs. Driven from test/preview/creatures-shot.mjs:
-//   await lineup( { ids, clip, t, cam } )          avatars side by side playing a clip
+//   await lineup( { ids, clip, t, cam, zlook, kind, seed, over } )   avatars side by side playing a clip (zlook: the
+//                                                  game's random infected look for `kind`, `over` overrides fields)
+//   redraw()                                       render again (after changing instances by hand)
 //   await bodies( { list: [ { id, state, t } ], cam } )   HumanBody states (walk, run, attack, crawl, ragdoll…)
 //   await animals( { kinds, t, cam } )             procedural animals
 import * as THREE from 'three';
@@ -8,6 +10,7 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import { G } from '../../src/render/Materials.js';
 import { CharacterLib, AVATARS, ALOHA } from '../../src/ai/Characters.js';
 import { HumanBody } from '../../src/ai/Body.js';
+import { rollLook, lookParams, ZTYPES } from '../../src/ai/Zombie.js';
 import { animalTemplate, animalInstance } from '../../src/ai/AnimalModels.js';
 
 const q = new URLSearchParams( location.search );
@@ -68,7 +71,14 @@ window.lineup = async ( o = {} ) => {
 	ts.forEach( ( t, i ) => {
 		if ( ! t ) return;
 		const inst = lib.acquire( t );
-		inst.setLook( {
+		if ( o.zlook ) {
+			// the game's own random look, seeded per slot, with overrides
+			let sd = ( o.seed ?? 1 ) * 9301 + i * 49297;
+			const r = () => ( sd = ( sd * 16807 + 11 ) % 2147483647 ) / 2147483647;
+			for ( let k = 0; k < 5; k ++ ) r();
+			const kind = o.kind || 'civilian';
+			inst.setLook( lookParams( { ...rollLook( ZTYPES[ kind ], kind, r ), ...( o.over || {} ) }, ALOHA ) );
+		} else inst.setLook( {
 			infect: o.infect ?? 1, seed: i * 7.3, hue: o.hue ?? 0, dirt: o.dirt ?? 0.55, blood: o.blood ?? 0.35,
 			aloha: o.aloha ? ALOHA[ i % ALOHA.length ] : null, skin: o.skin ? new THREE.Color( ...o.skin ) : null,
 		} );
@@ -176,4 +186,5 @@ window.animals = async ( o = {} ) => {
 	return { ...render(), out };
 };
 
+window.redraw = () => render();
 window.__ready = true;

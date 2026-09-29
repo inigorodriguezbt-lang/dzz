@@ -21,6 +21,7 @@ setq( 'grass', 'grass', ( v ) => v !== '0' );
 setq( 'shadows', 'shadows' );
 setq( 'aa', 'antialias' );
 setq( 'fov', 'fov', Number );
+setq( 'clouds', 'clouds' );
 
 const canvas = document.getElementById( 'view' );
 const renderer = new Renderer( canvas, settings );
@@ -83,6 +84,15 @@ const game = {
 };
 const t0 = performance.now();
 const veg = install( game );
+// ?hide=veg|far|mid|near|grass: hide parts to find out what draws what
+const hide = q.get( 'hide' ) || '';
+if ( hide === 'veg' ) veg.group.visible = false;
+else if ( hide ) for ( const b of hide.split( ',' ) ) for ( const t of veg.bandTargets[ b ] || [] ) t.mesh.layers.set( 5 );
+// ?sbias=x: the sun's shadow bias (reversed depth test)
+if ( q.has( 'sbias' ) ) world.sun.shadow.bias = + q.get( 'sbias' );
+// ?noreceive=1: vegetation doesn't receive the sun's shadow; ?nocast=1: doesn't cast it
+if ( q.get( 'noreceive' ) ) veg.group.traverse( ( o ) => { if ( o.isMesh ) { o.receiveShadow = false; o.material.needsUpdate = true; } } );
+if ( q.get( 'nocast' ) ) veg.group.traverse( ( o ) => { if ( o.isMesh ) o.castShadow = false; } );
 const installMs = performance.now() - t0;
 window.__veg = veg;
 window.__world = world;
@@ -99,7 +109,7 @@ function frame( dt ) {
 	world.update( dt );
 	renderer.render( { scene: world.scene, camera: cam, viewScene: null, grade: { exposure: 1.0 + world.sky.night * 1.4, night: world.sky.night, time: world.clock } } );
 }
-window.__grab = () => { frame( 0.016 ); return canvas.toDataURL( 'image/png' ); };
+window.__grab = ( jpg ) => { frame( 0.016 ); return jpg ? canvas.toDataURL( 'image/jpeg', 0.88 ) : canvas.toDataURL( 'image/png' ); };
 function loop() {
 	const now = performance.now(), dt = Math.min( 0.1, ( now - last ) / 1000 );
 	last = now;

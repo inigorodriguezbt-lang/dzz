@@ -136,7 +136,8 @@ function palette( P ) {
 			break;
 		case 'dome':
 			mat.ext = M( L.stucco, [ 236, 236, 232 ], 3 );
-			mat.roof = M( L.metal, [ 250, 250, 250 ], 3 );
+			// the Mauna Kea domes are painted white steel
+			mat.roof = M( L.plain, [ 246, 246, 244 ], 3 );
 			P.winStyle = 0;
 			break;
 		default:
@@ -1060,7 +1061,11 @@ function addFacade( P, st, inside, out, e, ops ) {
 	// pieces: window runs between doors
 	let a = 0;
 	let pi = 0;
-	const seedOf = () => hash32( P.bid, st.i * 1024 + f.idx * 16 + pi ) & 0xffff;
+	// low 12 bits vary the windows, the top 4 carry the building's boarded-up share (see data.js winState)
+	// (people boarded up the ground floor; high up hardly anyone did)
+	const share = P.boarded * ( st.i === 0 ? 1 : st.i === 1 ? 0.45 : 0.06 );
+	const boardBits = Math.min( 15, Math.round( share * 20 ) ) << 12;
+	const seedOf = () => ( hash32( P.bid, st.i * 1024 + f.idx * 16 + pi ) & 0x0fff ) | boardBits;
 	const winRun = ( a0, a1 ) => {
 		const L = a1 - a0;
 		if ( L < 0.05 ) return;

@@ -36,6 +36,35 @@ export function seg( options, value, onChange, { fill = false, disabled = null, 
 	return el;
 }
 
+// Vertical tab rail (4.8, Options). tabs: [ [ value, label ] ]. Up / Down move between tabs while it
+// has focus. el.set( v ) updates it without firing onChange.
+export function rail( tabs, value, onChange, { audio = null } = {} ) {
+	const el = h( 'div.rail', { role: 'tablist', 'aria-orientation': 'vertical' } );
+	const btns = tabs.map( ( [ v, label ] ) => {
+		const b = h( 'button', { type: 'button', role: 'tab', onclick: () => pick( v ) }, label );
+		b._v = v;
+		return b;
+	} );
+	el.append( ...btns );
+	const paint = () => { for ( const b of btns ) { const on = b._v === value; b.classList.toggle( 'on', on ); b.setAttribute( 'aria-selected', on ); b.tabIndex = on ? 0 : - 1; } };
+	const pick = ( v, focus = false ) => {
+		if ( focus ) btns.find( b => b._v === v )?.focus();
+		if ( v === value ) return;
+		value = v; paint();
+		audio?.ui?.();
+		onChange?.( v );
+	};
+	el.addEventListener( 'keydown', e => {
+		if ( e.code !== 'ArrowUp' && e.code !== 'ArrowDown' ) return;
+		e.preventDefault();
+		const i = btns.findIndex( b => b._v === value );
+		pick( btns[ ( i + ( e.code === 'ArrowDown' ? 1 : - 1 ) + btns.length ) % btns.length ]._v, true );
+	} );
+	el.set = v => { value = v; paint(); };
+	paint();
+	return el;
+}
+
 // Toggle switch (button role=switch). el.set( on ) updates it without firing onChange.
 export function toggle( on, onChange, { audio = null } = {} ) {
 	const el = h( 'button.toggle', { type: 'button', role: 'switch' } );

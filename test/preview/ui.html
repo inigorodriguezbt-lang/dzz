@@ -18,7 +18,7 @@
 		#bg.night { background: linear-gradient(180deg, #05070c 0%, #0b1220 60%, #111a12 61%, #070a07 100%); }
 		#bg.dusk { background: linear-gradient(180deg, #2a2f5a 0%, #e0875a 55%, #f3c08a 62%, #3a3024 63%, #1d1a14 100%); }
 		#app canvas { opacity: 0; }
-		.kit { position: absolute; inset: 0; overflow: auto; pointer-events: auto; padding: 24px; display: grid; grid-template-columns: repeat(auto-fill, minmax(calc(420 * var(--u)), 1fr)); gap: 16px; align-content: start; }
+		.kit { position: absolute; inset: 0; overflow: auto; pointer-events: auto; padding: 24px; display: grid; grid-template-columns: repeat(auto-fill, minmax(calc(420 * var(--u)), 1fr)); grid-auto-rows: max-content; gap: 16px; align-content: start; }
 		.kit > section { padding: 16px; }
 		.kit h5 { margin: 0 0 8px; }
 		.kit .r { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }

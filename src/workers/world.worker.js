@@ -4,6 +4,9 @@ import { HeightField, FLAG, vnoise, hash2 } from '../world/HeightField.js';
 import { scatterCell } from '../world/scatter.js';
 import { buildStreetCell } from '../world/streetgen.js';
 import { renderMapTile } from '../ui/maptile.js';
+import { buildingJob } from '../city/buildings/worker.js';
+import { vertexAO, heightGrid, bounceGrid } from '../world/terrain/terrainJobs.js';
+import { buildDetailData } from '../world/terrain/detailData.js';
 
 let hf = null;
 let world = null;
@@ -76,6 +79,8 @@ const handlers = {
 			}
 			parentY[ k ] = py;
 		}
+		// baked horizon AO x cavity into the normals' spare byte (before the skirts copy them)
+		vertexAO( hf, x0, z0, size, step, V, nor );
 		// skirts: copies of the edge vertices pulled down
 		const edges = [];
 		for ( let i = 0; i < V; i ++ ) edges.push( i ); // north (j = 0)
@@ -103,6 +108,13 @@ const handlers = {
 	},
 
 	maptile( msg ) { const r = renderMapTile( hf, msg ); return { result: r, transfer: r.transfer }; },
+
+	buildings( msg ) { return buildingJob( hf, world, msg ); },
+
+	// terrain bakes: the shared detail texture, the hill shadow's height grid, the ground bounce's land cover
+	detailTexture() { const data = buildDetailData(); return { result: { data }, transfer: [ data.buffer ] }; },
+	heightGrid( msg ) { return heightGrid( hf, msg ); },
+	bounceGrid( msg ) { return bounceGrid( hf, msg ); },
 
 	heights( { pts } ) {
 		const out = new Float32Array( pts.length / 2 );

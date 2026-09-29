@@ -216,7 +216,7 @@ const BODY_VERT_PARS = /* glsl */`
 `;
 const BODY_FRAG_PARS = /* glsl */`
 	uniform vec3 uPaint; uniform vec3 uPaint2; uniform float uPaintMetal; uniform float uPaintRough;
-	uniform float uDirt; uniform float uRust; uniform float uBurnt; uniform float uFade; uniform float uHeight;
+	uniform float uDirt; uniform float uRust; uniform float uBurnt; uniform float uFade; uniform float uHeight; uniform float uDent;
 	uniform float uEmit[ ${EMIT_CHANNELS} ];
 	varying vec4 vMat;
 	varying vec3 vObj;
@@ -226,6 +226,14 @@ const BODY_FRAG_PARS = /* glsl */`
 	float triNoise( vec3 p, vec3 n, float s ) {
 		vec3 w = abs( n ); w /= ( w.x + w.y + w.z + 1e-4 );
 		return fbm2( p.zy * s ) * w.x + fbm2( p.xz * s + 7.3 ) * w.y + fbm2( p.xy * s + 3.1 ) * w.z;
+	}
+	// dents: rounded dips where a smooth noise peaks (metres, <= 0), in the vehicle's own frame
+	float dentH( vec3 p, vec3 n ) {
+		vec3 w = abs( n ); w /= ( w.x + w.y + w.z + 1e-4 );
+		float v = vnoise2( p.zy * 2.7 ) * w.x + vnoise2( p.xz * 2.7 + 3.7 ) * w.y + vnoise2( p.xy * 2.7 + 1.3 ) * w.z;
+		v = v * 0.7 + ( vnoise2( p.zy * 6.1 + 9.0 ) * w.x + vnoise2( p.xz * 6.1 + 5.1 ) * w.y + vnoise2( p.xy * 6.1 + 2.2 ) * w.z ) * 0.3;
+		float d = smoothstep( 0.5, 0.85, v );
+		return - d * d;
 	}
 `;
 
@@ -240,6 +248,7 @@ export function makeBodyMaterial( opts = {} ) {
 		uBurnt: { value: 0 },
 		uFade: { value: opts.fade ?? 0 },
 		uHeight: { value: opts.height ?? 1.5 },
+		uDent: { value: opts.dent ?? 0 },
 		uEmit: { value: new Array( EMIT_CHANNELS ).fill( 0 ) },
 	};
 	const m = new THREE.MeshPhysicalMaterial( {
@@ -251,7 +260,7 @@ export function makeBodyMaterial( opts = {} ) {
 		Object.assign( shader.uniforms, u );
 		shader.vertexShader = shader.vertexShader
 			.replace( '#include <common>', '#include <common>\n' + BODY_VERT_PARS )
-			.replace( '#include <begin_vertex>', '#include <begin_vertex>\n vMat = aMat; vObj = position; vObjN = normal;' );
+			.replace( '#include <begin_vertex>', '#include <begin_vertex>\n vMat = vec4( aMat.xy * ( 1.0 / 255.0 ), aMat.zw ); vObj = position; vObjN = normal;' );
 		shader.fragmentShader = shader.fragmentShader
 			.replace( '#include <map_pars_fragment>', BODY_FRAG_PARS + '\n#include <map_pars_fragment>' )
 			.replace( '#include <color_fragment>', /* glsl */`#include <color_fragment>
@@ -272,6 +281,8 @@ export function makeBodyMaterial( opts = {} ) {
 					float low = 1.0 - smoothstep( 0.05, 0.55, h );
 					float settle = smoothstep( 0.6, 0.95, on.y ) * 0.55;
 					vehDirt = clamp( uDirt * ( low * 1.2 + settle + 0.25 ) * ( 0.55 + nd * 0.9 ) - ( 1.0 - uDirt ) * 0.2, 0.0, 1.0 );
+					// tyres (rough, unpainted) only take a light dusting: caked in pale dust they read as plastic
+					vehDirt *= 1.0 - step( 0.9, vMat.x ) * ( 1.0 - vehPaint ) * 0.65;
 					vec3 dirtCol = mix( vec3( 0.20, 0.155, 0.11 ), vec3( 0.34, 0.28, 0.21 ), nd2 );
 					// rust: blotches on paint and bare steel, worst low down and on the edges of panels
 					float rn = triNoise( vObj * 1.3 + 11.0, on, 1.4 ) * 0.75 + nd2 * 0.35 + low * 0.25;
@@ -296,6 +307,21 @@ export function makeBodyMaterial( opts = {} ) {
 					int ch = int( vMat.w + 0.5 );
 					if ( ch > 0 ) totalEmissiveRadiance += vehLamp * uEmit[ ch ] * ( 1.0 - uBurnt );
 				}` )
+			.replace( '#include <normal_fragment_maps>', /* glsl */`#include <normal_fragment_maps>
+				// dented panels: a height field bumped into the normal with screen-space derivatives (no seams
+				// in the geometry, and the clear coat reflections ripple over the dents)
+				if ( uDent > 0.001 ) {
+					float hgt = dentH( vObj, normalize( vObjN ) ) * uDent * vehPaint * 0.035;
+					vec3 sx = dFdx( - vViewPosition ), sy = dFdy( - vViewPosition );
+					vec3 R1 = cross( sy, normal ), R2 = cross( normal, sx );
+					float det = dot( sx, R1 ) * faceDirection;
+					vec2 dh = vec2( dFdx( hgt ), dFdy( hgt ) );
+					normal = normalize( abs( det ) * normal - sign( det ) * ( dh.x * R1 + dh.y * R2 ) );
+				}` )
+			.replace( '#include <clearcoat_normal_fragment_begin>', /* glsl */`#include <clearcoat_normal_fragment_begin>
+				#ifdef USE_CLEARCOAT
+					if ( uDent > 0.001 ) clearcoatNormal = normal;
+				#endif` )
 			.replace( '#include <lights_physical_fragment>', /* glsl */`#include <lights_physical_fragment>
 				#ifdef USE_CLEARCOAT
 					material.clearcoat = vehPaint * ( 1.0 - max( vehRust, vehDirt ) ) * ( 1.0 - uFade * 0.7 ) * ( 1.0 - uBurnt );

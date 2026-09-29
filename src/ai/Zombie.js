@@ -12,11 +12,11 @@ export const ZTYPES = {
 	civilian: { hp: 100, role: 'civilian', loot: 'zombie_civilian', label: 'Body' },
 	tourist: { hp: 100, role: 'tourist', loot: 'zombie_tourist', label: 'Tourist', aloha: 0.8 },
 	worker: { hp: 110, role: 'worker', loot: 'zombie_civilian', label: 'Body' },
-	pilot: { hp: 100, role: 'pilot', loot: 'zombie_civilian', label: 'Pilot' },
-	police: { hp: 120, role: 'police', loot: 'zombie_police', label: 'Police officer', armor: 0.3 },
-	military: { hp: 150, role: 'military', loot: 'zombie_military', label: 'Soldier', armor: 0.45, helmet: 0.6 },
-	medic: { hp: 100, role: 'medic', loot: 'zombie_medic', label: 'Paramedic' },
-	firefighter: { hp: 130, role: 'firefighter', loot: 'zombie_civilian', label: 'Firefighter', armor: 0.15 },
+	pilot: { hp: 100, role: 'pilot', loot: 'zombie_civilian', label: 'Pilot', uniform: true },
+	police: { hp: 120, role: 'police', loot: 'zombie_police', label: 'Police officer', armor: 0.3, uniform: true },
+	military: { hp: 150, role: 'military', loot: 'zombie_military', label: 'Soldier', armor: 0.45, helmet: 0.5, uniform: true },
+	medic: { hp: 100, role: 'medic', loot: 'zombie_medic', label: 'Paramedic', uniform: true },
+	firefighter: { hp: 130, role: 'firefighter', loot: 'zombie_civilian', label: 'Firefighter', armor: 0.15, uniform: true },
 	runner: { hp: 80, role: 'runner', loot: 'zombie_civilian', label: 'Body', runner: true },
 	crawler: { hp: 60, role: 'civilian', loot: 'zombie_civilian', label: 'Body', crawler: true },
 	brute: { hp: 380, role: 'brute', loot: 'zombie_civilian', label: 'Body', brute: true },
@@ -38,8 +38,30 @@ export const WORN = {
 	m_medic: [ 'hivis_vest', 'latex_gloves', 'sneakers' ], f_nurse: [ 'scrubs_top', 'scrubs_pants', 'latex_gloves' ], m_surgeon: [ 'scrubs_top', 'scrubs_pants', 'surgical_mask' ],
 	m_fire: [ 'firefighter_jacket', 'firefighter_pants', 'firefighter_boots', 'firefighter_helmet', 'firefighter_gloves' ],
 };
+// avatars that wear what the armour numbers stand for (a vest, a plate carrier, turnout gear)
+const ARMOURED = new Set( [ 'm_police1', 'm_army1', 'm_army2', 'f_army', 'm_fire' ] );
 // aloha print palette index -> the shirt item it is
 export const ALOHA_ITEM = [ 'aloha_shirt', 'aloha_shirt_blue', 'aloha_shirt_black', 'aloha_shirt_yellow', 'aloha_shirt_turtle', 'aloha_shirt_green', 'aloha_shirt', 'aloha_shirt_green' ];
+
+// a random infected look (plain numbers, so a corpse or a save can keep it): skin family, rot, grime, blood,
+// clothes hue, torn clothes, the bite that turned them, milky or bloodshot eyes, an aloha print on tourists' shirts
+const SKINS = [ [ 0.6, 0.65, 0.54 ], [ 0.68, 0.66, 0.5 ], [ 0.6, 0.62, 0.62 ], [ 0.66, 0.6, 0.6 ], [ 0.56, 0.62, 0.5 ], [ 0.62, 0.62, 0.56 ] ];
+export function rollLook( T = ZTYPES.civilian, kind = 'civilian', r = Math.random ) {
+	const sk = SKINS[ Math.floor( r() * SKINS.length ) ];
+	const tint = 0.78 + r() * 0.2;
+	return {
+		infect: 1, rot: 0.45 + r() * 0.55, hue: ( r() - 0.5 ) * ( T.uniform ? 0.03 : 0.2 ), dirt: 0.4 + r() * 0.55, blood: 0.3 + r() * 0.65, seed: r() * 100,
+		skin: sk.map( v => v * ( 0.88 + r() * 0.2 ) ), tint: [ tint * ( 0.95 + r() * 0.1 ), tint * ( 0.95 + r() * 0.1 ), tint * ( 0.92 + r() * 0.1 ) ],
+		alohaI: ( T.aloha && r() < T.aloha ) || ( kind === 'civilian' && r() < 0.2 ) ? Math.floor( r() * 8 ) : - 1,
+		// uniforms keep their colours (a pink camo or a green police shirt would read wrong)
+		mouthBlood: r() < 0.85 ? 0.7 + r() * 0.5 : 0.15, handBlood: 0.35 + r() * 0.65, tear: T.military || T.armor ? r() * 0.4 : 0.2 + r() * 0.8,
+		bite: r() < 0.8 ? Math.floor( r() * 16 ) : - 1, eyeRed: r() < 0.22 ? 1 : 0,
+	};
+}
+// the look as CharacterInstance.setLook() takes it
+export function lookParams( look, ALOHA ) {
+	return { ...look, skin: _c1.setRGB( ...look.skin ), tint: _c2.setRGB( ...look.tint ), aloha: look.alohaI >= 0 ? ALOHA[ look.alohaI ] : null };
+}
 
 const clamp = ( v, a, b ) => v < a ? a : v > b ? b : v;
 const wrap = ( a ) => Math.atan2( Math.sin( a ), Math.cos( a ) );
@@ -64,21 +86,10 @@ export class Zombie extends Entity {
 		this.maxHealth = this.health = T.hp * ( 0.85 + rnd() * 0.3 );
 		const inst = this.inst = mgr.lib.acquire( t );
 		inst.scale = T.brute ? 1.1 + rnd() * 0.07 : 0.93 + rnd() * 0.12;
-		this.height = t.height * inst.scale;
+		this.standH = this.height = t.height * inst.scale;
 		this.female = t.sex === 'f';
-		// the look: bloodless skin in a few families, grime, blood, garments shifted in hue
-		const skins = [ [ 0.62, 0.68, 0.56 ], [ 0.7, 0.68, 0.52 ], [ 0.6, 0.63, 0.66 ], [ 0.66, 0.6, 0.62 ], [ 0.56, 0.62, 0.5 ] ];
-		const sk = pick( skins );
-		const alohaI = ( T.aloha && rnd() < T.aloha ) || ( kind === 'civilian' && rnd() < 0.25 ) ? Math.floor( rnd() * 8 ) : - 1;
-		this.look = o.look || {
-			infect: 1, rot: 0.45 + rnd() * 0.5, hue: ( rnd() - 0.5 ) * 0.25, dirt: 0.35 + rnd() * 0.5, blood: 0.25 + rnd() * 0.6, seed: rnd() * 100,
-			skin: sk.map( v => v * ( 0.85 + rnd() * 0.25 ) ), tint: [ 0.8 + rnd() * 0.2, 0.8 + rnd() * 0.2, 0.8 + rnd() * 0.2 ], alohaI,
-			mouthBlood: rnd() < 0.8 ? 0.6 + rnd() * 0.6 : 0.1, handBlood: 0.3 + rnd() * 0.7,
-		};
-		inst.setLook( {
-			...this.look, skin: _c1.setRGB( ...this.look.skin ), tint: _c2.setRGB( ...this.look.tint ),
-			aloha: this.look.alohaI >= 0 ? mgr.ALOHA[ this.look.alohaI ] : null,
-		} );
+		this.look = o.look || rollLook( T, kind );
+		inst.setLook( lookParams( this.look, mgr.ALOHA ) );
 		this.object = inst.root;
 		// gait and carriage
 		const runner = !! T.runner, brute = !! T.brute;
@@ -354,14 +365,16 @@ export class Zombie extends Entity {
 		const g = this.game, mgr = this.mgr, T = this.target;
 		if ( ! T || ( T.alive === false && T !== mgr.pi.entity ) || ( T === mgr.pi.entity && ! mgr.pi.alive ) ) { this.target = null; this._setState( 'search' ); this.goal.copy( this.lastSeen ); return; }
 		const isPlayer = T === mgr.pi.entity;
-		const tp = isPlayer ? mgr.pi.pos : T.pos;
+		const vehicle = isPlayer ? mgr.pi.vehicle : null;
+		// in a car: the closest point of its body is what they claw at
+		const tp = vehicle ? vehicleNearest( vehicle, this.pos, _vn ) : isPlayer ? mgr.pi.pos : T.pos;
 		const lost = now - this.lastSeenT;
 		if ( lost > 12 ) { this.target = null; this.goal.copy( this.lastSeen ); this._setState( 'investigate' ); this.urgent = true; return; }
 		this.body.aggro = 1;
-		this.body.look.set( tp.x, tp.y + 1.5, tp.z ); this.body.lookW = 1;
+		this.body.look.set( tp.x, tp.y + ( vehicle ? 1.0 : 1.5 ), tp.z ); this.body.lookW = 1;
 		const d = Math.hypot( tp.x - this.pos.x, tp.z - this.pos.z );
-		const vehicle = isPlayer ? mgr.pi.vehicle : null;
-		const reach = ( vehicle ? ( vehicle.radius || 2 ) : 0.35 ) + ( this.body.mode === 'crawl' ? 0.9 : 1.05 );
+		// close in to arm's length (from the player's centre; from a car's skin)
+		const reach = vehicle ? 0.7 : 0.35 + ( this.body.mode === 'crawl' ? 0.85 : 0.85 );
 		this.body.reachW = d < 7 && this.body.style.arms !== 'reach' ? clamp( 1 - ( d - 1 ) / 6, 0, 1 ) : 0;
 		// in reach: face and strike
 		if ( d < reach && Math.abs( tp.y - this.pos.y ) < 1.6 ) {
@@ -451,15 +464,18 @@ export class Zombie extends Entity {
 			const mgr = this.mgr, g = this.game, T = this.target;
 			if ( ! T ) return;
 			const isPlayer = T === mgr.pi.entity;
-			const tp = isPlayer ? mgr.pi.pos : T.pos;
+			const veh = isPlayer && a.vehicle && mgr.pi.vehicle === a.vehicle ? a.vehicle : null;
+			const tp = veh ? vehicleNearest( veh, this.pos, _vn ) : isPlayer ? mgr.pi.pos : T.pos;
 			const dx = tp.x - this.pos.x, dz = tp.z - this.pos.z;
 			const d = Math.hypot( dx, dz );
-			const reach = ( a.vehicle ? ( a.vehicle.radius || 2 ) + 0.6 : 0.35 ) + 1.3;
-			const ang = Math.abs( wrap( Math.atan2( - dx, - dz ) - this.yaw ) );
-			if ( d < reach && ang < 1.0 ) {
+			const reach = ( veh ? 0.3 : 0.35 ) + 1.3;
+			const ang = d < 0.3 ? 0 : Math.abs( wrap( Math.atan2( - dx, - dz ) - this.yaw ) );
+			// the rider of a motorbike, a jet ski or an open boat is in reach of the hands
+			const exposed = veh && ( veh.spec?.kind === 'bike' || veh.spec?.open );
+			if ( d < reach && ang < 1.0 && ( ! isPlayer || ! a.vehicle || veh ) ) {
 				const brute = this.T.brute ? 1.8 : 1;
-				if ( a.vehicle ) {
-					a.vehicle.damage?.( ( a.kind === 'bite' ? 3 : 5 ) * brute, { source: this, kind: 'zombie', dir: _v.set( dx, 0, dz ).normalize().clone() } );
+				if ( veh && ! exposed ) {
+					veh.damage?.( ( a.kind === 'bite' ? 3 : 5 ) * brute, { source: this, kind: 'zombie', dir: _v.set( dx, 0, dz ).normalize().clone() } );
 					g.audio?.play( 'hit_metal', { pos: tp, vol: 0.5, max: 40 } );
 				} else if ( isPlayer ) {
 					const dir = new THREE.Vector3( dx, 0, dz ).normalize();
@@ -486,12 +502,13 @@ export class Zombie extends Entity {
 		const zone = info.zone || 'torso';
 		const ballistic = kind === 'bullet' || kind === 'arrow';
 		if ( kind === 'vehicle' ) this.vehicleHitT = this.mgr.time;
-		// helmets turn some light rounds, body armour takes the edge off
-		if ( ballistic && zone === 'head' && T.helmet && amount < 110 && rnd() < T.helmet ) {
+		// a helmet turns half the pistol rounds and buckshot that find it (the damage arrives with the head
+		// multiplier: rifle rounds come in over 160 and go through), body armour takes the edge off
+		if ( ballistic && zone === 'head' && T.helmet && amount < 160 && rnd() < T.helmet ) {
 			amount *= 0.15;
 			g.audio?.play( 'hit_metal', { pos: info.point || this.pos, vol: 0.7, max: 60 } );
 		} else if ( ballistic && zone === 'head' ) amount = Math.max( amount, this.health + 1 ); // a round through the head drops them
-		if ( ballistic && ( zone === 'torso' || zone === 'chest' ) && T.armor ) amount *= 1 - T.armor;
+		if ( ballistic && ( zone === 'torso' || zone === 'chest' ) && T.armor && ARMOURED.has( this.avatar ) ) amount *= 1 - T.armor;
 		if ( kind === 'melee' && zone === 'head' ) amount *= 1.4;
 		if ( this.state === 'dormant' ) this._wake();
 		this.health -= amount;
@@ -613,6 +630,7 @@ export class Zombie extends Entity {
 		const body = this.body;
 		body.speed = this.speed;
 		body.yaw = this.yaw;
+		body.searching = this.state === 'search';
 		// how often the skeleton is re-posed depends on distance and visibility (manager decides per frame)
 		this.anim.acc += dt;
 		if ( ! this.mgr.animNow( this ) ) return;
@@ -624,6 +642,8 @@ export class Zombie extends Entity {
 
 	_place( force ) {
 		const body = this.body, inst = this.inst;
+		// low to the ground while crawling or lying (melee aims at a height fraction of this)
+		this.height = body.mode === 'crawl' || body.mode === 'lying' || body.mode === 'ragdoll' ? 0.5 : this.standH;
 		if ( body.mode === 'ragdoll' ) return;
 		if ( body.mode === 'crawl' ) {
 			// the root pivots at the feet, which trail behind the chest
@@ -633,7 +653,11 @@ export class Zombie extends Entity {
 			return;
 		}
 		if ( body.mode === 'rise' || body.mode === 'lying' ) {
-			inst.place( this.pos, this.yaw, body.tiltQuat( body.mode === 'lying' ? Math.PI / 2 : body.tiltAngle, body.riseFace, _q ) );
+			// pivot at the feet; lifted by half the body's thickness as it tips over, so the back (or the chest) rests
+			// on the ground instead of the spine's line
+			const a = body.mode === 'lying' ? Math.PI / 2 : body.tiltAngle;
+			_v.set( this.pos.x, this.pos.y + 0.12 * inst.scale * Math.sin( a ), this.pos.z );
+			inst.place( _v, this.yaw, body.tiltQuat( a, body.riseFace, _q ) );
 			return;
 		}
 		inst.place( this.pos, this.yaw );
@@ -653,6 +677,13 @@ export class Zombie extends Entity {
 		this.groanT -= dt;
 		if ( this.jawHold > 0 ) { this.jawHold -= dt; if ( this.jawHold <= 0 ) this.body.jawOpen = 0; }
 		if ( this.groanT > 0 ) return;
+		if ( this.state === 'feed' ) {
+			// wet tearing and chewing over the body, a low growl now and then: heard before it is seen
+			this.groanT = 1.2 + rnd() * 2.2;
+			this.mgr.audio( this, rnd() < 0.7 ? 'eat' : 'hit_flesh', 0.55, 26, 2 );
+			if ( rnd() < 0.25 ) this.mgr.audio( this, 'z_groan' + ( 1 + Math.floor( rnd() * 4 ) ), 0.4, 30 );
+			return;
+		}
 		const hunting = this.state === 'chase' || this.state === 'attack';
 		this.groanT = hunting ? 2.5 + rnd() * 3.5 : 6 + rnd() * 16;
 		if ( this.state === 'dormant' && rnd() < 0.7 ) return;
@@ -686,5 +717,16 @@ export class Zombie extends Entity {
 	}
 }
 
-const _c1 = new THREE.Color(), _c2 = new THREE.Color();
+const _c1 = new THREE.Color(), _c2 = new THREE.Color(), _vn = new THREE.Vector3();
+
+// the point of a vehicle's footprint (its model bounds, turned by its yaw) nearest to p, at p's height
+export function vehicleNearest( v, p, out ) {
+	const yaw = v.yaw || 0, c = Math.cos( yaw ), s = Math.sin( yaw );
+	const dx = p.x - v.pos.x, dz = p.z - v.pos.z;
+	// into the vehicle frame (three.js rotation.y: local x runs along ( c, -s ), local z along ( s, c ))
+	const lx = dx * c - dz * s, lz = dx * s + dz * c;
+	const b = v.bounds, hx = ( v.size?.x || 1.8 ) / 2, hz = ( v.size?.z || 4.4 ) / 2;
+	const cx = clamp( lx, b ? b.min.x : - hx, b ? b.max.x : hx ), cz = clamp( lz, b ? b.min.z : - hz, b ? b.max.z : hz );
+	return out.set( v.pos.x + cx * c + cz * s, p.y, v.pos.z - cx * s + cz * c );
+}
 const _hitInfo = { point: new THREE.Vector3(), dir: new THREE.Vector3(), strength: 1 };

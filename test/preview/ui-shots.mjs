@@ -4,7 +4,7 @@
 // Each shot is saved as <outdir>/<name>-<w>x<h>.png. Console errors and page errors are printed per shot.
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { chromium } from 'playwright';
+import { launch } from '../lib/browser.mjs';
 
 const args = process.argv.slice( 2 );
 const [ port, outdir ] = args;
@@ -28,7 +28,8 @@ async function fonts( route ) {
 		await route.fulfill( { status: 200, body: hit.body, contentType: hit.contentType, headers: { 'access-control-allow-origin': '*' } } );
 	} catch ( e ) { await route.abort(); }
 }
-const browser = await chromium.launch( { args: [ '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist' ] } );
+// lavapipe when available (test/lib/browser.mjs): the item renders are WebGL and SwiftShader is slow
+const browser = await launch();
 let failed = 0;
 for ( const [ w, hh ] of sizes ) {
 	const ctx = await browser.newContext( { viewport: { width: w, height: hh } } );
@@ -41,7 +42,7 @@ for ( const [ w, hh ] of sizes ) {
 		await page.goto( `http://127.0.0.1:${port}/test/preview/ui.html?${query}` );
 		try { await page.waitForFunction( () => window.__ready === true, null, { timeout: 90000 } ); } catch ( e ) { logs.push( 'TIMEOUT waiting for __ready' ); failed ++; }
 		const file = `${outdir}/${name}-${w}x${hh}.png`;
-		// the first in-game page renders the 3D item icons (slow under SwiftShader); later pages read them from IndexedDB
+		// the first in-game page renders the 3D item icons (slow on a CPU driver); later pages read them from IndexedDB
 		try { await page.screenshot( { path: file, timeout: 240000 } ); } catch ( e ) { logs.push( 'screenshot failed: ' + e.message.split( '\n' )[ 0 ] ); failed ++; }
 		console.log( 'shot', file, logs.length ? '\n  ' + logs.join( '\n  ' ) : '' );
 		if ( logs.some( l => l.startsWith( '[pageerror]' ) || l.startsWith( '[error]' ) ) ) failed ++;

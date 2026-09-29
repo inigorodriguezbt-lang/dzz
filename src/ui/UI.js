@@ -1,7 +1,8 @@
 // UI manager: owns the HUD, chat, menus, inventory and map, routes the menu hotkeys, and handles
 // pointer lock (losing it in game opens the pause menu).
-import { h, clear, unitPx } from './dom.js';
-import { HUD } from './HUD.js';
+import { h, unitPx, fmtDur, fmtDist } from './dom.js';
+import { icon } from './icons.js';
+import { HUD, COND_ICON } from './HUD.js';
 import { Chat } from './Chat.js';
 import { Menus } from './Menus.js';
 import { InventoryUI } from './InventoryUI.js';
@@ -10,13 +11,28 @@ import { MapView } from './MapView.js';
 import { loadIcons } from './itemIcons.js';
 import { getItem } from '../game/items/ItemDB.js';
 
-const TIPS = [
-	{ id: 'move', text: k => `Move with ${k( 'forward' )}${k( 'left' )}${k( 'back' )}${k( 'right' )}, sprint with ${k( 'sprint' )}, crouch ${k( 'crouch' )}.`, until: g => g.player.distance > 30 },
-	{ id: 'inv', text: k => `Press ${k( 'inventory' )} to check what you washed up with. Drag items onto your clothes to carry more.`, until: ( g, ui ) => ui.seenInventory },
-	{ id: 'loot', text: k => `Find a town. Look at loot and press ${k( 'interact' )} to take it; cupboards, fridges and lockers can be searched.`, until: g => g.stats.looted > 2 },
-	{ id: 'map', text: k => `${k( 'map' )} opens the map. Double-click it to place a marker you'll see on the compass.`, until: ( g, ui ) => ui.seenMap },
-	{ id: 'chat', text: k => `${k( 'chat' )} opens chat — type /help for commands (/give, /tp, /time, /locate, /summon…).`, until: ( g, ui ) => ui.seenChat },
-];
+// Key hints (spec 5.11): one set at a time while Key hints (the `tutorial` setting) is on, each once per game
+// session. keys: [ [ actions, verb, suffix ] ]; every cap comes from input.label() so rebinding updates it.
+const HINTS = {
+	survival: [
+		{ keys: [ [ [ 'forward', 'left', 'back', 'right' ], 'Move' ], [ [ 'sprint' ], 'Sprint' ], [ [ 'crouch' ], 'Crouch' ] ], until: g => g.player.distance > 30 },
+		{ keys: [ [ [ 'inventory' ], 'Inventory' ] ], until: ( g, ui ) => ui.seenInventory },
+		{ keys: [ [ [ 'map' ], 'Map' ] ], until: ( g, ui ) => ui.seenMap, when: ( g, ui ) => ui.mapAllowed() },
+	],
+	creative: [
+		{ keys: [ [ [ 'jump' ], 'Fly', '×2' ] ], until: g => g.player.flying },
+		{ keys: [ [ [ 'chat' ], 'Chat' ] ], until: ( g, ui ) => ui.seenChat },
+	],
+};
+
+// Status screen (spec 7): 1-2 word remedy per condition id, and the item property that counts as carrying it
+const REMEDY = {
+	bleed: [ 'Bandage', d => d?.medical?.bleed ],
+	inf: [ 'Antibiotics', d => d?.medical?.infection ],
+	sick: [ 'Charcoal', d => d?.medical?.sick ],
+	hot: [ 'Shade' ], wet: [ 'Shelter' ], tired: [ 'Sleep' ], heavy: [ 'Drop weight' ],
+	blood: [ 'Saline', d => d?.medical?.blood ],
+};
 
 export class UI {
 	constructor( app ) {
@@ -32,12 +48,11 @@ export class UI {
 		this.inventory = new InventoryUI( this );
 		this.map = new MapUI( this );
 		this.mapView = null;
-		this.hud.el.hidden = true; this.chat.el.hidden = true;
-		this.tipEl = h( 'div.plate', { style: { position: 'absolute', left: '50%', top: 'calc(var(--edge) + 64px)', transform: 'translateX(-50%)', maxWidth: 'calc(520 * var(--u))', padding: 'calc(6 * var(--u)) calc(12 * var(--u))' }, hidden: true } );
-		this.lockHint = h( 'div.prompt-main.tw-glass', { style: { position: 'absolute', left: '50%', top: '58%', transform: 'translateX(-50%)', pointerEvents: 'none' }, hidden: true, text: 'Click to resume' } );
-		this.root.append( this.hud.el, this.chat.el, this.tipEl, this.lockHint );
+		this.hud.el.hidden = true; this.chat.el.hidden = true; this.hud.feed.hidden = true;
+		this.lockHint = h( 'div.lock.plate', { hidden: true, text: 'Click to resume' } );
 		this.menuToasts = h( 'div.menu-toasts' );
-		this.root.appendChild( this.menuToasts );
+		// layers (z-index in css): hud 1, chat 2, lock 3, screens 10, toast feed 20 (stays over the inventory), menu toasts 30
+		this.root.append( this.hud.el, this.chat.el, this.lockHint, this.hud.feed, this.menuToasts );
 		// px per u for canvas code (minimap, map): re-measured when the window or the GUI scale changes
 		this.u = unitPx();
 		addEventListener( 'resize', () => { this.u = unitPx(); } );
@@ -106,22 +121,22 @@ export class UI {
 		if ( ! this.mapView ) this.mapView = new MapView( this.app );
 		this.hud.attach( game );
 		this.chat.attach( game );
-		this.hud.el.hidden = false; this.chat.el.hidden = false;
+		this.hud.el.hidden = false; this.chat.el.hidden = false; this.hud.feed.hidden = false;
 		this._removeScreen();
 		this.seenInventory = this.seenMap = this.seenChat = false;
-		this.tipIdx = 0; this.tipT = 0;
+		this.hintIdx = 0; this.hintT = 0;
 		this.offs.push( game.events.on( 'item:pick', () => { game.stats.looted = ( game.stats.looted || 0 ) + 1; } ) );
 		this.lockHint.hidden = true;
 		this.app.input.lock();
 		this.announceSpawn();
 	}
 
+	// a new life: the location card says where (the creative Fly hint follows from HINTS)
 	announceSpawn() {
 		const g = this.game;
 		if ( ! g?.justSpawned ) return;
 		g.justSpawned = false;
-		const where = this.locationName( g.player.pos, true );
-		setTimeout( () => g.toast( g.mode === 'creative' ? `Creative mode — ${where}. Double-tap Space to fly.` : `You wake up on the shore. ${where}.`, 'info' ), 1200 );
+		this.hud.showPlace( true );
 	}
 
 	exitGame() {
@@ -129,7 +144,8 @@ export class UI {
 		this.offs = [];
 		this.game = null;
 		this.hud.game = null;
-		this.hud.el.hidden = true; this.chat.el.hidden = true; this.tipEl.hidden = true; this.lockHint.hidden = true;
+		this.hud.el.hidden = true; this.chat.el.hidden = true; this.hud.feed.hidden = true; this.lockHint.hidden = true;
+		this.hud.setHint( null );
 		this.chat.open && this.chat.hide();
 		this._removeScreen();
 		this.app.placeTitleCamera?.();
@@ -191,50 +207,73 @@ export class UI {
 		setTimeout( () => { el.classList.add( 'out' ); setTimeout( () => el.remove(), 240 ); }, kind === 'bad' ? 5000 : 2500 );
 	}
 
-	locationName( p, long = false ) {
+	// { name, island, near, nr, inTown }: name is the town when inside one, else the island ('Coast' off the
+	// island outlines, 'Pacific Ocean' at sea); nr = distance to the nearest town in multiples of its radius
+	placeOf( p ) {
 		const meta = this.app.world.meta, hf = this.app.world.hf;
 		const isl = meta.islands.find( i => i.id === hf.islandAt( p.x, p.z ) );
-		let near = null, nd = Infinity;
+		let near = null, nr = Infinity;
 		// relative to each town's size, so a big metro wins over a small neighbour whose centre is closer
-		let nr = Infinity;
-		for ( const c of meta.cities ) { const d = Math.hypot( c.x - p.x, c.z - p.z ), r = d / c.radius; if ( r < nr ) { nr = r; nd = d; near = c; } }
-		const inTown = near && nr < 1.35;
-		if ( ! isl ) return hf.baseHeight( p.x, p.z ) < 0 ? 'Pacific Ocean' : ( inTown ? near.name : 'Coast' );
-		if ( inTown ) return long ? `${near.name}, ${isl.name}` : near.name;
-		return long && near ? `${isl.name} — near ${near.name}` : isl.name;
+		for ( const c of meta.cities ) { const r = Math.hypot( c.x - p.x, c.z - p.z ) / c.radius; if ( r < nr ) { nr = r; near = c; } }
+		const inTown = !! near && nr < 1.35;
+		if ( ! isl ) return { name: hf.baseHeight( p.x, p.z ) < 0 ? 'Pacific Ocean' : ( inTown ? near.name : 'Coast' ), island: null, near, nr, inTown };
+		return { name: inTown ? near.name : isl.name, island: isl.name, near, nr, inTown };
 	}
 
+	// short: Waikīkī / Oʻahu. long: Waikīkī, Oʻahu / Near Hilo, Hawaiʻi / Maui
+	locationName( p, long = false ) {
+		const pl = this.placeOf( p );
+		if ( ! long || ! pl.island ) return pl.name;
+		if ( pl.inTown ) return `${pl.name}, ${pl.island}`;
+		return pl.near && pl.nr < 3 ? `Near ${pl.near.name}, ${pl.island}` : pl.island;
+	}
+
+	mapAllowed() {
+		const g = this.game;
+		return ! this.app.settings.get( 'realisticMap' ) || g.mode === 'creative' || g.player.inventory.count( 'map_hawaii' ) > 0;
+	}
+
+	// Status (spec 7): conditions with remedies, body values, this life, all lives. No sentences.
 	journal() {
-		const g = this.game, S = g.survival;
-		const tips = [];
-		if ( S.bleeding ) tips.push( 'You are bleeding. Use a bandage or rags (right-click → Bandage) — blood loss kills.' );
-		if ( S.fracture && ! S.splint ) tips.push( 'Your leg is broken. A splint (sticks + rags) lets you walk while it heals.' );
-		if ( S.infected ) tips.push( 'A bite wound is infected. Antibiotics from a pharmacy, clinic or hospital will cure it.' );
-		if ( S.sick > 0.2 ) tips.push( 'Food poisoning: drink plenty. Charcoal tablets settle the stomach.' );
-		if ( S.hunger < 30 ) tips.push( 'You are hungry. Houses, stores and fruit trees have food; cans need an opener or a blade.' );
-		if ( S.thirst < 30 ) tips.push( 'You are thirsty. Taps in some buildings still run; coconuts and rain barrels help. Seawater only makes it worse.' );
-		if ( S.temp < 36 ) tips.push( 'You are cold. Get out of the wind and the rain, put on warmer clothes, or make a fire.' );
-		if ( S.temp > 38 ) tips.push( 'You are overheating. Take off heavy layers, rest in the shade, drink.' );
-		if ( S.energy < 25 ) tips.push( 'You are exhausted. Coffee and energy drinks help for a while.' );
-		if ( ! tips.length ) tips.push( 'You are holding up. Keep water and a bandage on you at all times.' );
-		const st = g.stats;
-		const days = ( g.time.hours - ( st.lifeStart || 0 ) ) / 24;
-		const body = h( 'div.journal', {},
-			h( 'div.opt-section', { text: 'Condition' } ), ...tips.map( t => h( 'p', { text: t } ) ),
-			h( 'div.opt-section', { text: 'This life' } ),
-			h( 'div.char-stats', {},
-				h( 'span', { text: 'Survived' } ), h( 'span', { text: days < 1 ? Math.round( days * 24 ) + ' h' : days.toFixed( 1 ) + ' days' } ),
-				h( 'span', { text: 'Infected killed' } ), h( 'span', { text: st.lifeKills || 0 } ),
-				h( 'span', { text: 'Distance travelled' } ), h( 'span', { text: ( g.player.distance / 1000 ).toFixed( 2 ) + ' km' } ),
-				h( 'span', { text: 'Items looted' } ), h( 'span', { text: st.looted || 0 } ),
-				h( 'span', { text: 'Lives' } ), h( 'span', { text: st.lives || 1 } ),
-				h( 'span', { text: 'Total infected killed' } ), h( 'span', { text: st.zombies || 0 } ) ),
-			h( 'div.opt-section', { text: 'Where' } ), h( 'p', { text: this.locationName( g.player.pos, true ) } ),
+		const g = this.game, S = g.survival, inv = g.player.inventory, st = g.stats, p = g.player;
+		const sec = t => h( 'div.sec-head', {}, h( 'span.t-label', { text: t } ) );
+		const kv = ( a, b, c = '' ) => h( 'div', {}, h( 'span', { text: a } ), h( 'span' + ( c ? '.' + c : '' ), { text: b } ) );
+		const pct = v => Math.round( v ) + '%';
+		const tone = ( v, low, crit ) => v < crit ? 'alarm' : v < low ? 'warn' : '';
+		const weight = inv.totalWeight();
+		const conds = g.mode === 'creative' ? [] : S.conditions();
+		const rows = conds.map( c => {
+			let rem = REMEDY[ c.id ] || null;
+			if ( c.id === 'frac' ) rem = S.splint ? [ 'Rest' ] : [ 'Splint', d => d?.medical?.splint ];
+			if ( c.id === 'cold' ) rem = [ S.temp < 35.2 ? 'Fire' : 'Warm clothes' ];
+			const val = c.id === 'cold' || c.id === 'hot' ? S.temp.toFixed( 1 ) + '°' : c.id === 'wet' ? pct( S.wet * 100 ) : c.id === 'blood' ? pct( S.blood / 50 )
+				: c.id === 'tired' ? pct( S.energy ) : c.id === 'heavy' ? weight.toFixed( 1 ) + ' kg' : '';
+			const has = !! rem?.[ 1 ] && !! inv.find( ( s, d ) => rem[ 1 ]( d ) );
+			return h( 'div.st-row.' + c.kind, {}, icon( COND_ICON[ c.id ] || c.id ), h( 'span.lab', { text: c.label } ),
+				val ? h( 'span.v', { text: val } ) : null, rem ? h( 'span.rem' + ( has ? '.has' : '' ), { text: rem[ 0 ] } ) : null );
+		} );
+		const temp = S.temp;
+		const body = h( 'div.panel-body', {},
+			rows.length ? [ sec( 'Conditions' ), h( 'div', {}, ...rows ) ] : null,
+			sec( 'Body' ),
+			h( 'div.stats', {},
+				kv( 'Health', pct( S.health ), tone( S.health, 50, 25 ) ), kv( 'Food', pct( Math.min( 100, S.hunger ) ), tone( S.hunger, 30, 10 ) ),
+				kv( 'Blood', pct( S.blood / 50 ), tone( S.blood / 50, 76, 60 ) ), kv( 'Water', pct( Math.min( 100, S.thirst ) ), tone( S.thirst, 30, 10 ) ),
+				kv( 'Body', temp.toFixed( 1 ) + '°', temp < 35.2 || temp > 38.6 ? 'alarm' : temp < 36 ? 'cold' : temp > 38 ? 'warn' : '' ), kv( 'Energy', pct( S.energy ), tone( S.energy, 25, 10 ) ),
+				kv( 'Air', Math.round( S.envTemp ) + '°' ), kv( 'Stamina', `${Math.round( S.stamina )}/${Math.round( S.maxStamina() )}` ),
+				kv( 'Wet', pct( S.wet * 100 ) ), kv( 'Weight', weight.toFixed( 1 ) + ' kg', weight > 30 ? 'warn' : '' ) ),
+			sec( 'This life' ),
+			h( 'div.stats', {},
+				kv( 'Survived', fmtDur( g.time.hours - ( st.lifeStart || 0 ) ) ), kv( 'Kills', st.lifeKills || 0 ),
+				kv( 'Distance', fmtDist( p.distance || 0 ) ), kv( 'Looted', st.looted || 0 ) ),
+			sec( 'All lives' ),
+			h( 'div.stats', {}, kv( 'Lives', st.lives || 1 ), kv( 'Kills', st.zombies || 0 ) ),
 		);
-		const panel = h( 'div.panel', { style: { width: 'min(620px, 94vw)' } },
-			h( 'div.panel-head', {}, h( 'div', {}, h( 'h2', { text: 'Survival journal' } ), h( 'div.sub', { text: `Day ${g.day}` } ) ), h( 'button.x-btn', { text: '✕', onclick: () => this.closeScreen() } ) ),
-			h( 'div.panel-body', {}, body ) );
-		const el = h( 'div.screen.clear', {}, panel );
+		const panel = h( 'div.panel.status-panel', { role: 'dialog', 'aria-label': 'Status' },
+			h( 'div.panel-head', {}, h( 'div.t-title', { text: 'Status' } ), h( 'span.meta', { text: `Day ${g.day}` } ),
+				h( 'button.btn.icon', { type: 'button', title: 'Close', 'aria-label': 'Close', onclick: () => this.closeScreen() }, icon( 'close' ) ) ),
+			body );
+		const el = h( 'div.screen', {}, panel );
 		const key = e => { if ( e.code === 'Escape' || this.app.input.codes( 'log' ).includes( e.code ) ) { e.preventDefault(); this.closeScreen(); } };
 		window.addEventListener( 'keydown', key, true );
 		this.show( el, { onClose: () => window.removeEventListener( 'keydown', key, true ) } );
@@ -264,23 +303,28 @@ export class UI {
 			const raw = c => input.codePressed( c );
 			const hit = a => input.codes( a ).some( raw );
 			if ( hit( 'inventory' ) ) this.openInventory();
-			else if ( hit( 'map' ) ) { const ok = ! this.app.settings.get( 'realisticMap' ) || g.player.inventory.count( 'map_hawaii' ) || g.mode === 'creative'; if ( ok ) { this.seenMap = true; this.map.open(); } else g.toast( 'No map', 'warn' ); }
+			else if ( hit( 'map' ) ) { if ( this.mapAllowed() ) { this.seenMap = true; this.map.open(); } else g.toast( 'No map', 'warn' ); }
 			else if ( hit( 'chat' ) ) { this.seenChat = true; this.chat.show( '' ); }
 			else if ( hit( 'command' ) ) { this.seenChat = true; this.chat.show( '/' ); }
 			else if ( hit( 'craft' ) ) { this.inventory.leftTab = 'craft'; this.openInventory(); }
 			else if ( hit( 'log' ) ) this.journal();
 			if ( hit( 'hideHud' ) ) this.hud.hidden = ! this.hud.hidden;
-			if ( hit( 'debug' ) ) { this.hud.debugOn = ! this.hud.debugOn; this.hud.debug.hidden = ! this.hud.debugOn; }
+			if ( hit( 'debug' ) ) this.hud.toggleDebug();
 			if ( hit( 'screenshot' ) ) this.screenshot();
 			if ( hit( 'quickHeal' ) && g.inputActive ) this._quickHeal();
 			// hotbar slots are also handled by the hands module; this fallback selects when it's absent
 			if ( ! g.hands && g.inputActive ) for ( let i = 1; i <= 9; i ++ ) if ( hit( 'slot' + i ) ) { const s = g.player.inventory.findUid( g.player.inventory.hotbar[ i - 1 ] ); if ( s ) g.player.inventory.hands = s.uid; }
 		}
 		this.lockHint.hidden = ! ( g && ! this.screen && ! this.chat.open && ! input.locked && ! g.dead );
+		// the closed chat log hides under screens and with F1 (Hide HUD), like the HUD
+		const c = this.chat.el;
+		if ( c._under !== !! this.screen ) { c._under = !! this.screen; c.classList.toggle( 'under', c._under ); }
+		const off = !! this.hud.hidden || !! g.dead;
+		if ( c._off !== off ) { c._off = off; c.classList.toggle( 'off', off ); }
+		this._hints( dt );
 		this.hud.update( dt );
 		if ( this.screenOpts.map ) this.map.update( dt );
 		if ( this.screenOpts.inventory ) this.inventory.update( dt );
-		this._tips( dt );
 	}
 
 	_quickHeal() {
@@ -292,17 +336,21 @@ export class UI {
 		else g.actions.start( { label: 'Bandaging', time: 4, sound: 'bandage', onDone: () => { g.survival.medicate( getItem( med.id ) ); med.qty --; if ( med.qty <= 0 ) inv.remove( med ); inv.changed(); } } );
 	}
 
-	_tips( dt ) {
-		const g = this.game;
-		if ( ! this.app.settings.get( 'tutorial' ) || g.mode === 'creative' || this.tipIdx >= TIPS.length ) { this.tipEl.hidden = true; return; }
-		const tip = TIPS[ this.tipIdx ];
-		if ( tip.until( g, this ) ) { this.tipIdx ++; this.tipT = 0; this.tipEl.hidden = true; return; }
-		this.tipT += dt;
-		if ( this.tipT < 2.5 ) { this.tipEl.hidden = true; return; }
-		const k = a => `<kbd>${this.app.input.label( a )}</kbd>`;
-		const html = tip.text( k );
-		if ( this.tipEl.innerHTML !== html ) this.tipEl.innerHTML = html;
-		this.tipEl.hidden = !! this.screen;
-		if ( this.tipT > 30 ) { this.tipIdx ++; this.tipT = 0; }
+	// one key-hint set at a time (spec 5.11): 2.5 s after spawn, then each after the previous ends (its rule
+	// is met, or 20 s on screen). Paused while a screen, the chat or the sights are up.
+	_hints( dt ) {
+		const g = this.game, list = HINTS[ g.mode === 'creative' ? 'creative' : 'survival' ];
+		const hint = list[ this.hintIdx ];
+		if ( ! hint || ! this.app.settings.get( 'tutorial' ) ) { this.hud.setHint( null ); return; }
+		if ( hint.until( g, this ) || ( hint.when && ! hint.when( g, this ) ) || this.hintT > 20 + this._hintDelay() ) {
+			this.hintIdx ++; this.hintT = 0;
+			this.hud.setHint( null );
+			return;
+		}
+		const paused = !! this.screen || this.chat.open || g.dead || !! g.hands?.aiming;
+		if ( ! paused ) this.hintT += dt;
+		this.hud.setHint( ! paused && this.hintT >= this._hintDelay() ? hint : null );
 	}
+
+	_hintDelay() { return this.hintIdx === 0 ? 2.5 : 1; }
 }

@@ -98,16 +98,24 @@ for ( const [ name, x, z, want ] of extra.length ? extra : SPOTS ) {
 	for ( const sp of want ) ok( seen.has( sp ), `${name}: expected ${SPECIES[ sp ].name}` );
 }
 
-// ---- towns: lawns, yard and street trees only; no wild understory, no meadow grass off the lawns ------
-for ( const [ name, x, z ] of [ [ 'Waikiki city', - 3880, - 9660 ], [ 'Honolulu downtown', - 4390, - 10255 ], [ 'Hilo town', 31722, 11967 ] ] ) {
+// ---- towns: lawns, yard and street trees only; no wild understory, no meadow grass off the lawns, the
+// streets and their sidewalks clear (trunks in the verge beside them) ------------------------------------------
+for ( const [ name, x, z ] of [ [ 'Waikiki city', - 3880, - 9660 ], [ 'Waikiki hotels', - 3850, - 9640 ], [ 'Honolulu downtown', - 4390, - 10255 ], [ 'Hilo town', 31722, 11967 ], [ 'Kailua-Kona', 19997, 13038 ], [ 'Haleiwa', - 7530, - 14151 ] ] ) {
 	const can = scatterArea( x, z, 120, LAYER.CANOPY ), det = scatterArea( x, z, 120, LAYER.DETAIL ), gr = scatterArea( x, z, 40, LAYER.GRASS );
 	const area = Math.PI * 120 * 120;
 	console.log( `\n${name}: canopy ${fmt( can.counts )} | detail ${fmt( det.counts )} | grass ${gr.all.length}` );
-	ok( det.all.filter( a => Math.hypot( a[ 1 ] - x, a[ 3 ] - z ) < 120 ).length === 0, `${name}: no wild understory in town (${fmt( det.counts )})` );
-	const trees = can.all.filter( a => Math.hypot( a[ 1 ] - x, a[ 3 ] - z ) < 120 ).length;
+	const inCity = ( a ) => hf.flagsNear( a[ 1 ], a[ 3 ] ) & FLAG.CITY;
+	ok( det.all.filter( a => inCity( a ) && a[ 0 ] !== SP.ROCK ).length === 0, `${name}: no wild understory on the town blocks (${fmt( det.counts )})` );
+	const trees = can.all.filter( a => Math.hypot( a[ 1 ] - x, a[ 3 ] - z ) < 120 && inCity( a ) ).length;
 	ok( trees < area / 250, `${name}: sparse town trees (${trees} in ${( area / 1e4 ).toFixed( 1 )} ha)` );
-	const offLawn = gr.all.filter( a => ! ( hf.flagsNear( a[ 1 ], a[ 3 ] ) & FLAG.CITY ) ).length;
-	ok( offLawn === 0, `${name}: grass only on the town lawns (${offLawn} off them)` );
+	// pavement: street (incl. sidewalk) and road surfaces stay clear
+	const onWalk = ( list, gap ) => list.filter( a => roadGap( a[ 1 ], a[ 3 ] ) < gap ).length;
+	ok( onWalk( gr.all, 0.2 ) === 0, `${name}: grass on streets or sidewalks (${onWalk( gr.all, 0.2 )})` );
+	ok( onWalk( det.all, 0.5 ) === 0, `${name}: understory on streets or sidewalks (${onWalk( det.all, 0.5 )})` );
+	ok( onWalk( can.all, 0.5 ) === 0, `${name}: trunks on streets or sidewalks (${onWalk( can.all, 0.5 )})` );
+	// lawns are mown short
+	const tall = gr.all.filter( a => inCity( a ) && a[ 4 ] > 0.3 ).length;
+	ok( tall === 0, `${name}: town lawn grass is short (${tall} tall clumps)` );
 }
 
 // ---- altitude: the summits are bare, no trees above the tree line, palms stay low ------------------

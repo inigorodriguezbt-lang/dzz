@@ -106,7 +106,7 @@ class App {
 
 	async startGame( save, opts = {} ) {
 		loaderEl.classList.remove( 'tw-hidden' );
-		status( 'Entering the world', 0.72 );
+		status( 'Entering world', 0.72 );
 		this.ui.hideAll();
 		if ( this.game ) await this.quit( false );
 		const game = new Game( this, this.world, save );
@@ -125,7 +125,7 @@ class App {
 			game.update( 0.001 );
 			this.world.update( 0.001 );
 			const busy = this.world.pool.busy;
-			status( 'Populating the area', 0.9 + i / 40 * 0.1 );
+			status( 'Spawning', 0.9 + i / 40 * 0.1 );
 			if ( busy === 0 && i > 6 ) break;
 			await new Promise( r => setTimeout( r, 60 ) );
 		}
@@ -207,5 +207,5 @@ const app = new App();
 app.boot().catch( e => {
 	console.error( e );
 	loaderEl.classList.add( 'tw-error' );
-	status( 'Failed to start: ' + e.message, 1 );
+	status( 'Failed: ' + e.message, 1 );
 } );

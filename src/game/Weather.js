@@ -2,21 +2,24 @@
 // Drives cloud cover, rain, wind, sea state and fog; transitions are slow and seeded by the clock.
 import * as THREE from 'three';
 import { G } from '../render/Materials.js';
+import { LAYER_OVERLAY } from '../render/Renderer.js';
 
+// cover: cloud coverage of the volumetric clouds (Tidewater's "Partly cloudy" preset is 0.49); heavy:
+// overcast skies are denser and darker underneath (density x1.3, ambient x0.7)
 export const WEATHERS = {
-	clear: { cover: 0.18, rain: 0, wind: 0.35, sea: 0.35, fog: 0.8 },
-	fair: { cover: 0.34, rain: 0, wind: 0.45, sea: 0.45, fog: 1 },
-	cloudy: { cover: 0.58, rain: 0, wind: 0.55, sea: 0.55, fog: 1.3 },
-	showers: { cover: 0.68, rain: 0.45, wind: 0.6, sea: 0.6, fog: 1.8 },
-	overcast: { cover: 0.85, rain: 0.15, wind: 0.5, sea: 0.5, fog: 2.2 },
-	storm: { cover: 0.96, rain: 1, wind: 1, sea: 1, fog: 3.2 },
+	clear: { cover: 0.35, rain: 0, wind: 0.35, sea: 0.35, fog: 0.8, heavy: 0 },
+	fair: { cover: 0.49, rain: 0, wind: 0.45, sea: 0.45, fog: 1, heavy: 0 },
+	cloudy: { cover: 0.62, rain: 0, wind: 0.55, sea: 0.55, fog: 1.3, heavy: 0 },
+	showers: { cover: 0.72, rain: 0.45, wind: 0.6, sea: 0.6, fog: 1.8, heavy: 0 },
+	overcast: { cover: 0.88, rain: 0.15, wind: 0.5, sea: 0.5, fog: 2.2, heavy: 1 },
+	storm: { cover: 0.96, rain: 1, wind: 1, sea: 1, fog: 3.2, heavy: 1 },
 };
 
 export class Weather {
 	constructor( game ) {
 		this.game = game;
 		this.state = 'fair';
-		this.cover = 0.34; this.rain = 0; this.wind = 0.45; this.sea = 0.45; this.fog = 1;
+		this.cover = 0.49; this.rain = 0; this.wind = 0.45; this.sea = 0.45; this.fog = 1; this.heavy = 0;
 		this.nextChange = 0.6; // game hours until the next change
 		this.locked = false;
 		this.lightningT = 5;
@@ -44,6 +47,7 @@ export class Weather {
 			}
 		}
 		const w = WEATHERS[ this.state ];
+		if ( ! ( this.heavy >= 0 ) ) this.heavy = 0; // (saves from before the field)
 		const k = Math.min( 1, dt * 0.02 );
 		this.cover += ( w.cover - this.cover ) * k;
 		// windward showers are local: more rain over the wet side of the islands
@@ -54,9 +58,13 @@ export class Weather {
 		this.wind += ( w.wind - this.wind ) * k;
 		this.sea += ( w.sea - this.sea ) * k;
 		this.fog += ( w.fog - this.fog ) * k;
+		this.heavy += ( w.heavy - this.heavy ) * k;
 		const sky = g.world.sky;
 		sky.cloudCover = this.cover;
-		sky.haze = 0.5 + this.fog * 0.22;
+		sky.cloudDensityK = 1 + 0.3 * this.heavy;
+		sky.cloudAmbientK = 1 - 0.3 * this.heavy;
+		// marine haze (Tidewater AirHaze density 1.6 on a humid tropical day), thicker in bad weather
+		G.uHazeDensity.value = 1.6 * this.fog;
 		G.uFogBoost.value = this.fog;
 		G.uWet.value += ( ( this.rain > 0.05 ? Math.min( 1, this.rain * 1.4 ) : 0 ) - G.uWet.value ) * Math.min( 1, dt * ( this.rain > 0.05 ? 0.05 : 0.01 ) );
 		g.world.ocean.seaState = this.sea;
@@ -108,7 +116,8 @@ export class Weather {
 			} );
 			this.rainMesh = new THREE.LineSegments( geo, mat );
 			this.rainMesh.frustumCulled = false;
-			this.rainMesh.layers.set( 1 );
+			// drawn after the TAA resolve (thin fast streaks would smear through the history)
+			this.rainMesh.layers.set( LAYER_OVERLAY );
 			this.rainMesh.renderOrder = 20;
 			g.scene.add( this.rainMesh );
 		}
@@ -122,8 +131,8 @@ export class Weather {
 		this.rainMesh.visible = this.rain > 0.01;
 	}
 
-	serialize() { return { state: this.state, cover: this.cover, rain: this.rain, wind: this.wind, sea: this.sea, fog: this.fog, nextChange: this.nextChange, locked: this.locked }; }
+	serialize() { return { state: this.state, cover: this.cover, rain: this.rain, wind: this.wind, sea: this.sea, fog: this.fog, heavy: this.heavy, nextChange: this.nextChange, locked: this.locked }; }
 	load( o ) { if ( o ) Object.assign( this, o ); }
 }
 
-function pick( w ) { return { cover: w.cover, rain: w.rain, wind: w.wind, sea: w.sea, fog: w.fog }; }
+function pick( w ) { return { cover: w.cover, rain: w.rain, wind: w.wind, sea: w.sea, fog: w.fog, heavy: w.heavy }; }

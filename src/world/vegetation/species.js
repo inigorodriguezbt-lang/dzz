@@ -40,7 +40,7 @@ export const SPECIES = [
 	{ id: SP.CANE, name: 'sugar cane', layer: 1, collider: null, params: 'a -, b tint' },
 	{ id: SP.ROCK, name: 'rock', layer: 1, collider: { r: 0.8, h: 1.1, mat: 'rock' }, params: 'a squash, b lava (0 grey .. 1 black)' },
 	{ id: SP.FERN, name: 'fern', layer: 1, collider: null, params: 'a -, b tint' },
-	{ id: SP.GRASS, name: 'grass', layer: 2, collider: null, params: 'a dryness, b lawn (short)' },
+	{ id: SP.GRASS, name: 'grass', layer: 2, collider: null, params: 'a moisture, slope, south exposure (8 bits each), b lawn (short)' },
 ];
 
 export const SPECIES_OF_LAYER = [ 0, 1, 2 ].map( l => SPECIES.filter( s => s.layer === l ).map( s => s.id ) );

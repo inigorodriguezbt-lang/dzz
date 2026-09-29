@@ -17,7 +17,7 @@ const pick = ( a ) => a[ Math.floor( rnd() * a.length ) ];
 const CIV_GUNS = [ 'akm', 'ar15_civ', 'remington_870', 'mossberg_500', 'mini14', 'sks', 'lever_3030', 'glock17', 'm1911', 'revolver_357', 'double_barrel', 'cz527' ];
 const MIL_GUNS = [ 'm4a1', 'm16a4', 'ak74', 'hk416', 'm249', 'scar_l' ];
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3(), _eye = new THREE.Vector3(), _tgt = new THREE.Vector3();
-const _m = new THREE.Matrix4(), _z = new THREE.Vector3(), _nb = [];
+const _m = new THREE.Matrix4(), _z = new THREE.Vector3(), _nb = [], _boxes = [];
 let GunModels = null;
 import( '../weapons/GunModels.js' ).then( m => { GunModels = m; } ).catch( () => {} );
 
@@ -55,7 +55,7 @@ export class Bandit extends Entity {
 		const f = wd?.firearm || {};
 		this.fire = { rpm: f.rpm || 300, auto: ( f.modes || [] ).includes( 'auto' ), cap: f.capacity || this.magCap( wd ), reload: ( f.reload || 2.5 ) * 1.2, pellets: f.pellets || 1, range: f.range || 80 };
 		this.rounds = this.fire.cap;
-		this.shotT = 0; this.burst = 0; this.burstT = 1;
+		this.shotT = 0; this.burst = 0; this.burstT = 1; this.sightT = 0; this.seenPrev = false;
 		this.gun = null;
 		// state
 		this.state = 'patrol';
@@ -118,6 +118,8 @@ export class Bandit extends Entity {
 			if ( d < zd && ( e.target === this || d < 14 ) ) { zd = d; z = e; }
 		}
 		if ( z && ( ! seen || zd < 10 ) ) seen = z;
+		if ( seen && ( ! this.seenPrev || this.target !== seen ) ) this.sightT = M.time;
+		this.seenPrev = !! seen;
 		if ( seen ) {
 			if ( this.state !== 'combat' ) this._alertGroup( seen );
 			this.target = seen;
@@ -157,47 +159,72 @@ export class Bandit extends Entity {
 		const g = this.game, M = this.mgr.mgr;
 		const T = this.target;
 		const lost = M.time - this.lastSeenT;
-		if ( ! T || ( T !== M.pi.entity && ! T.alive ) || ( T === M.pi.entity && ! M.pi.alive ) || lost > 25 ) { this.target = null; this.state = 'patrol'; this.stateT = 0; return; }
+		if ( ! T || ( T !== M.pi.entity && ! T.alive ) || ( T === M.pi.entity && ! M.pi.alive ) || lost > 25 ) { this.target = null; this.state = 'patrol'; this.stateT = 0; this.moving = false; return; }
 		const tp = T === M.pi.entity ? M.pi.pos : T.pos;
 		const d = this.pos.distanceTo( tp );
 		this.facing = Math.atan2( - ( tp.x - this.pos.x ), - ( tp.z - this.pos.z ) );
 		this.moveT -= 0.25;
-		// shift position now and then: a spot nearby the target can't see, or closer when out of range
-		if ( this.moveT <= 0 && ! this.moving ) {
-			this.moveT = 5 + rnd() * 5;
-			const spot = this._coverSpot( tp, d );
-			if ( spot ) { this.goal.copy( spot ); this.moving = true; }
+		// reposition when the spot has gone stale, when the target is out of sight (once the gun is ready), or out of range
+		const want = this.moveT <= 0 || ( ! seen && lost > 1.5 && ! ( this.reloadT > 0 ) ) || d > this.fire.range * 1.2;
+		if ( want && ! this.moving ) {
+			this.moveT = 6 + rnd() * 6;
+			const spot = this._firingSpot( tp, d );
+			if ( spot ) { this.goal.copy( spot.pos ); this.peek = spot.peek; this.moving = true; this.stateT = 0; }
+			else if ( ! seen && lost > 6 ) { this.goal.copy( this.lastSeen ); this.peek = false; this.moving = true; this.stateT = 0; }
 		}
 		if ( this.moving ) {
 			const dd = steer( g, this, this.mover, this.goal.x, this.goal.z, 0.25, g.entities.near( this.pos, 1.5, 'npc', _nb ) );
-			this.wantV = 3.6; this.crouchW = 0;
-			if ( dd < 1 || this.stateT > 40 ) { this.moving = false; this.stateT = 0; }
+			// a dash between spots; a short shift at a walk
+			this.wantV = dd > 6 ? 3.6 : 2.0; this.crouchW = 0;
+			if ( dd < 0.8 || this.stateT > 15 ) { this.moving = false; this.stateT = 0; }
 		} else {
 			this.wantV = 0;
-			this.crouchW = d > 25 && seen ? 1 : 0.3;
+			// behind low cover: duck to reload and between bursts, up to shoot; in the open, kneel at range
+			if ( this.peek ) this.crouchW = this.reloadT > 0 || this.burstT > 0.4 ? 1 : 0;
+			else this.crouchW = d > 25 && seen ? 1 : 0.3;
 			this.mover.dir.set( tp.x - this.pos.x, 0, tp.z - this.pos.z ).normalize();
 		}
-		// hunt the last known position if it went quiet
-		if ( ! seen && lost > 6 && ! this.moving ) { this.goal.copy( this.lastSeen ); this.moving = true; }
-		this.canShoot = !! seen && d < this.fire.range * 2.2;
+		this.canShoot = !! seen && d < this.fire.range * 2.2 && ! this.moving;
 	}
 
-	// a point 5-12 m away that breaks the target's line of sight (or closes in when far)
-	_coverSpot( tp, d ) {
-		const g = this.game;
-		_tgt.set( tp.x, tp.y + 1.5, tp.z );
-		for ( let k = 0; k < 8; k ++ ) {
-			const a = rnd() * Math.PI * 2, r = 5 + rnd() * 7;
-			const x = this.pos.x + Math.cos( a ) * r, z = this.pos.z + Math.sin( a ) * r;
+	// the range this gun is worked at
+	_idealRange() {
+		const f = this.fire;
+		return f.pellets > 1 ? 14 : Math.min( f.range * 0.6, f.rpm > 500 && f.cap > 20 ? 30 : f.cap <= 17 && f.range < 80 ? 20 : 40 );
+	}
+
+	// somewhere 4-14 m away to fight from: sees the target when standing, best with low cover in front (up to shoot,
+	// down to hide), near the gun's working range. Returns { pos, peek } or null (stay).
+	_firingSpot( tp, d ) {
+		const g = this.game, P = g.physics;
+		const ideal = this._idealRange();
+		_tgt.set( tp.x, tp.y + 1.3, tp.z );
+		let best = null, bestS = - 1e9;
+		const score = ( x, y, z ) => {
+			_v.set( x, y + 1.5, z );
+			const stand = P.lineOfSight( _v, _tgt );
+			_v.set( x, y + 0.8, z );
+			const low = stand && P.lineOfSight( _v, _tgt );
+			let cover = false;
+			for ( const b of P.near( x, z, 1.3, _boxes ) ) if ( b.maxY > y + 0.6 && b.minY < y + 1.2 ) { cover = true; break; }
 			const nd = Math.hypot( tp.x - x, tp.z - z );
-			if ( nd < 10 || nd > Math.max( d + 4, 60 ) ) continue;
-			const y = g.physics.ground( x, z, this.pos.y + 1, 0.45, 0.3 ).y;
+			return { s: ( stand ? 3 : - 2 ) + ( stand && ! low ? 2 : 0 ) + ( cover ? 1 : 0 ) - Math.abs( nd - ideal ) / 15 - ( nd < 8 ? 3 : 0 ), peek: stand && ! low };
+		};
+		const here = score( this.pos.x, this.pos.y, this.pos.z );
+		bestS = here.s + 0.8; // moving has to be worth it
+		for ( let k = 0; k < 10; k ++ ) {
+			const a = rnd() * Math.PI * 2, r = 4 + rnd() * 10;
+			const x = this.pos.x + Math.cos( a ) * r, z = this.pos.z + Math.sin( a ) * r;
+			const y = P.ground( x, z, this.pos.y + 1, 0.45, 0.3 ).y;
 			if ( Math.abs( y - this.pos.y ) > 2 || g.hf.heightAt( x, z ) < 0.2 ) continue;
-			_v.set( x, y + 1.0, z );
-			if ( ! g.physics.lineOfSight( _v, _tgt ) ) return _v2.set( x, y, z ).clone();
+			_v3.set( x, y, z );
+			if ( P.resolveCylinder( _v3, 0.3, 1.7, 0.45 ) ) continue; // inside something
+			const sc = score( x, y, z );
+			const s = sc.s + rnd() * 0.5;
+			if ( s > bestS ) { bestS = s; best = { pos: new THREE.Vector3( x, y, z ), peek: sc.peek }; }
 		}
-		if ( d > this.fire.range ) return _v2.set( this.pos.x + ( tp.x - this.pos.x ) * 0.3, this.pos.y, this.pos.z + ( tp.z - this.pos.z ) * 0.3 ).clone();
-		return null;
+		if ( ! best && ! here.peek ) this.peek = false;
+		return best;
 	}
 
 	// bursts with human inaccuracy: worse far away, on the move and when hurt
@@ -230,9 +257,13 @@ export class Bandit extends Entity {
 		const d = dir.length();
 		dir.divideScalar( d );
 		origin.addScaledVector( dir, 0.6 );
-		const moving = this.speed > 0.5 ? 0.035 : 0;
-		const hurt = ( 1 - this.health / this.maxHealth ) * 0.02;
-		const spread = 0.01 + d * 0.00045 + moving + hurt + ( T === M.pi.entity && g.player.stance !== 'stand' ? 0.004 : 0 );
+		// human aim: a wide cone that tightens while the target stays in sight, worse far away, hurt, at night,
+		// against a crouching or prone target, and on the easier difficulties
+		const moving = this.speed > 0.5 ? 0.04 : 0;
+		const hurt = ( 1 - this.health / this.maxHealth ) * 0.025;
+		const stance = T === M.pi.entity ? ( g.player.stance === 'prone' ? 0.02 : g.player.stance === 'crouch' ? 0.01 : 0 ) : 0;
+		const settle = 1 + 1.5 * Math.exp( - ( M.time - this.sightT ) / 1.5 );
+		const spread = ( 0.028 + d * 0.0008 + moving + hurt + stance ) * settle * ( 1 + M.night * 0.5 ) / M.diff.attack;
 		g.ballistics?.npcShot?.( this, this.weapon, origin.clone(), dir.clone(), { spread } );
 		this.rounds --;
 		this.burst --;

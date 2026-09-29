@@ -13,23 +13,28 @@ import { Zombie, ZTYPES, WORN, ALOHA_ITEM } from './Zombie.js';
 import { Population } from './Population.js';
 import { Animals } from './Animals.js';
 import { Bandits } from './Bandit.js';
+import { nav } from './Steer.js';
 import { rollLoot } from '../game/items/Loot.js';
 import { getItem, makeStack } from '../game/items/ItemDB.js';
 
 const rnd = Math.random;
 const clamp = ( v, a, b ) => v < a ? a : v > b ? b : v;
 const TRAIL = 64;
-const CORPSE_LIFE = 600; // s
-const TEMPLATE_BUDGET = 10; // avatars kept loaded
+const CORPSE_LIFE = 600; // s a body stays
+const MAX_CORPSES = 36;
+const LOOK_BONES = [ 'pelvis', 'spine2', 'head' ];
+const TEMPLATE_BUDGET = 10; // avatars kept loaded (each is ~10 MB of textures on the GPU)
+const TEMPLATE_HARD = 14; // more only while every loaded one is in use
+// difficulty: movement speed, how keenly they see and hear, how fast they strike (and survivors aim), how many
 const DIFF = {
-	easy: { speed: 0.85, sense: 0.8, attack: 0.8 },
-	normal: { speed: 1, sense: 1, attack: 1 },
-	hard: { speed: 1.12, sense: 1.2, attack: 1.2 },
+	easy: { speed: 0.85, sense: 0.8, attack: 0.8, pop: 0.75 },
+	normal: { speed: 1, sense: 1, attack: 1, pop: 1 },
+	hard: { speed: 1.12, sense: 1.2, attack: 1.2, pop: 1.25 },
 };
 const CAP = { low: 30, medium: 50, high: 72, ultra: 90 };
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3();
 const _frustum = new THREE.Frustum(), _pm = new THREE.Matrix4(), _sphere = new THREE.Sphere();
-const _eye = new THREE.Vector3(), _near = [];
+const _eye = new THREE.Vector3(), _near = [], _c = new THREE.Color();
 
 export function install( game ) {
 	const mgr = new Creatures( game );
@@ -55,7 +60,8 @@ export class Creatures {
 		this.night = 0;
 		this.sightRange = 50;
 		this.diff = DIFF[ game.difficulty ] || DIFF.normal;
-		this.cap = CAP[ game.settings.get( 'quality' ) ] || 72;
+		this.quality = game.settings.get( 'quality' );
+		this.cap = CAP[ this.quality ] || 72;
 		this.spawnT = 0;
 		this.first = true;
 		this.lastPlayer = new THREE.Vector3( 1e9, 0, 1e9 );
@@ -90,10 +96,12 @@ export class Creatures {
 		this.dt = dt;
 		this.time += dt;
 		this.frame ++;
+		nav.budget = 2; // path plans allowed this frame (shared by the infected, animals and survivors)
 		const sky = g.world.sky;
 		this.night = clamp( sky.night ?? 0, 0, 1 );
 		const rain = g.weather?.rain || 0;
 		this.sightRange = 52 * ( 1 - 0.68 * this.night ) * ( 1 - 0.3 * rain ) * this.diff.sense;
+		this.quality = g.settings.get( 'quality' );
 		this._playerInfo();
 		this._camera();
 		this._trail();
@@ -108,7 +116,6 @@ export class Creatures {
 		this.alive = alive;
 		this.npcs.length = 0;
 		for ( const b of this.bandits.list ) if ( b.alive && ! b.removed ) this.npcs.push( b );
-		this._vehicleHits();
 		this.spawnT -= dt;
 		if ( this.spawnT <= 0 ) { this.spawnT = this.first ? 0.15 : 0.5; this._populate(); }
 		this.animals.update( dt );
@@ -194,7 +201,7 @@ export class Creatures {
 		_sphere.radius = z.alive ? 1.3 : 2;
 		const vis = _frustum.intersectsSphere( _sphere );
 		z.inView = vis;
-		const q = this.game.settings.get( 'quality' );
+		const q = this.quality;
 		const near = q === 'low' ? 12 : q === 'medium' ? 18 : 26;
 		const draw = q === 'low' ? 110 : 170;
 		inst.setLOD( d < near ? 0 : d < draw ? 1 : 2, d < ( q === 'low' ? 25 : 55 ) );
@@ -223,10 +230,20 @@ export class Creatures {
 		}
 		this.lastPlayer.copy( p );
 		// despawn the far ones (the population keeps them; only kills count)
+		let corpses = 0;
 		for ( const z of this.zombies ) {
 			if ( z.removed ) continue;
 			const d = z.pos.distanceTo( p );
 			if ( z.alive ? d > 230 && ! ( z.inView && d < 300 ) : ( z.corpseT > CORPSE_LIFE || ( d > 200 && z.corpseT > 30 ) ) ) g.entities.remove( z );
+			else if ( ! z.alive ) corpses ++;
+		}
+		// after a massacre: the oldest bodies nobody is looking at go first (each is a posed character on the GPU)
+		while ( corpses > MAX_CORPSES ) {
+			let old = null;
+			for ( const z of this.zombies ) if ( ! z.alive && ! z.removed && ! ( z.inView && z.distCam < 40 ) && ( ! old || z.corpseT > old.corpseT ) ) old = z;
+			if ( ! old ) break;
+			g.entities.remove( old );
+			corpses --;
 		}
 		// how many should be around: local density, kills, night
 		const hour = g.time.hours;
@@ -237,7 +254,7 @@ export class Creatures {
 			n ++;
 		}
 		const dens = dsum / n;
-		let target = Math.round( this.cap * clamp( dens * 1.25, 0, 1 ) * ( 1 + this.night * 0.25 ) );
+		let target = Math.round( this.cap * clamp( dens * 1.25 * this.diff.pop, 0, 1 ) * ( 1 + this.night * 0.25 ) );
 		if ( this.pull ) { this.pull.t -= 0.5; target += this.pull.n; if ( this.pull.t <= 0 ) this.pull = null; }
 		target = Math.min( target, this.cap + 10 );
 		this.target = target;
@@ -264,7 +281,8 @@ export class Creatures {
 	// one infected at a random unseen spot in the ring around the player, weighted by density
 	_spawnOne() {
 		const g = this.game, p = g.player.pos, pop = this.pop;
-		const rMin = this.first ? 32 : 58, rMax = this.first ? 150 : 150;
+		// never closer than 45 m (58 m once the area is filled) and never in view: they walk in, they don't pop in
+		const rMin = this.first ? 45 : 58, rMax = 150;
 		for ( let tries = 0; tries < 10; tries ++ ) {
 			let a = rnd() * Math.PI * 2;
 			const pull = this.pull;
@@ -315,24 +333,40 @@ export class Creatures {
 		return this.game.physics.lineOfSight( this.camPos, _v3 );
 	}
 
-	// avatars for a kind: loaded ones first; start loading more variety while under budget
+	// avatars for a kind: a loaded one, or null while the right avatar streams in (the request is queued here).
+	// Each role asks for a second and third look now and then so a crowd is not all one person.
 	_avatarFor( kind ) {
 		const role = ZTYPES[ kind ]?.role || 'civilian';
 		let ids = avatarsFor( role );
 		if ( ! ids.length ) ids = avatarsFor( 'civilian' );
-		const loaded = ids.filter( id => this.lib.isLoaded( id ) );
-		const want = ids.filter( id => ! this.lib.isLoaded( id ) && ! this.lib.failed.has( id ) );
-		if ( want.length && ( ! loaded.length || rnd() < 0.15 ) && this.lib.loadedIds().length + this.lib.loading < TEMPLATE_BUDGET + 2 ) this.lib.load( want[ Math.floor( rnd() * want.length ) ] );
-		if ( loaded.length ) return loaded[ Math.floor( rnd() * loaded.length ) ];
-		return null;
+		const lib = this.lib;
+		let nLoaded = 0, pickId = null, nWant = 0, wantId = null;
+		for ( const id of ids ) {
+			if ( lib.isLoaded( id ) ) { if ( rnd() * ++ nLoaded < 1 ) pickId = id; }
+			else if ( ! lib.failed.has( id ) && ! lib.templates.has( id ) && rnd() * ++ nWant < 1 ) wantId = id;
+		}
+		if ( wantId && ( ! nLoaded || ( nLoaded < 3 && rnd() < 0.08 ) ) ) this._request( wantId );
+		return pickId;
 	}
 
-	// o: { yaw, state, summoned, victim }. Returns the zombie, or null (its avatar is still loading; summoned ones
-	// appear when it arrives)
+	// stream an avatar in: one or two at a time, making room by unloading the least recently used idle one
+	_request( id ) {
+		const lib = this.lib;
+		if ( lib.loading >= 2 ) return;
+		if ( lib.loadedIds().length >= TEMPLATE_BUDGET ) {
+			lib.trim( TEMPLATE_BUDGET - 1 );
+			if ( lib.loadedIds().length >= TEMPLATE_HARD ) return; // every one of them is walking about
+		}
+		lib.load( id );
+	}
+
+	// o: { yaw, state, summoned, victim, wait }. Returns the zombie, null (its avatar is still streaming in: the
+	// spawner tries again later), or a promise for summoned ones (they appear when the avatar arrives).
 	spawnZombie( kind = 'civilian', pos, o = {} ) {
 		if ( ! ZTYPES[ kind ] ) kind = 'civilian';
 		let id = this._avatarFor( kind );
-		if ( ! id && kind !== 'civilian' && ! o.summoned ) { id = this._avatarFor( 'civilian' ); kind = kind === 'crawler' || kind === 'runner' || kind === 'brute' ? kind : 'civilian'; }
+		// kinds that are about behaviour, not dress, can wear any everyday avatar meanwhile
+		if ( ! id && ! o.summoned && ( kind === 'crawler' || kind === 'runner' || kind === 'brute' || kind === 'tourist' ) ) id = this._avatarFor( 'civilian' );
 		if ( ! id ) {
 			if ( o.summoned || o.wait ) {
 				const role = ZTYPES[ kind ].role;
@@ -357,8 +391,9 @@ export class Creatures {
 
 	// a fresh body on the ground (not infected yet): the prey of a feeding one
 	_killQuiet( z ) {
-		z.inst.setLook( { infect: 0.25, rot: 0.1, dirt: 0.4, blood: 0.9, seed: rnd() * 100, mouthBlood: 0, handBlood: 0.4,
-			aloha: z.look.alohaI >= 0 ? ALOHA[ z.look.alohaI ] : null, skin: new THREE.Color( 0.75, 0.68, 0.6 ) } );
+		// torn open where it is being eaten, clothes ripped, blood everywhere; the skin not yet grey
+		z.inst.setLook( { infect: 0.25, rot: 0.1, dirt: 0.4, blood: 1, seed: rnd() * 100, mouthBlood: 0, handBlood: 0.5, tear: 0.8,
+			bite: Math.floor( rnd() * 16 ), aloha: z.look.alohaI >= 0 ? ALOHA[ z.look.alohaI ] : null, skin: _c.setRGB( 0.75, 0.68, 0.6 ) } );
 		z.victim = true;
 		z.health = 0; z.alive = false;
 		z.body.update( 0.02 );
@@ -451,35 +486,6 @@ export class Creatures {
 		this.bandits.onNoise( e );
 	}
 
-	// ---- vehicles ---------------------------------------------------------------------------------------------------
-
-	// the car the player drives knocks the infected (and animals, survivors) down or over
-	_vehicleHits() {
-		const g = this.game, v = this.pi.vehicle;
-		if ( ! v || ! v.pos ) return;
-		const vel = v.vel || _v3.set( 0, 0, 0 );
-		const speed = Math.hypot( vel.x, vel.z );
-		if ( speed < 3 ) return;
-		const R = ( v.radius && v.radius > 0.8 ? v.radius : 2.2 ) + 0.4;
-		for ( const e of g.entities.near( v.pos, R + 1, null, _near ) ) {
-			if ( ! e.alive || ( e.type !== 'zombie' && e.type !== 'animal' && e.type !== 'npc' ) ) continue;
-			if ( this.time - ( e.vehicleHitT ?? - 10 ) < 1 ) continue;
-			const dx = e.pos.x - v.pos.x, dz = e.pos.z - v.pos.z;
-			if ( dx * vel.x + dz * vel.z < 0 || Math.hypot( dx, dz ) > R ) continue;
-			e.vehicleHitT = this.time;
-			const dir = new THREE.Vector3( vel.x, 0.2, vel.z ).normalize();
-			const dmg = speed * speed * 1.25;
-			const point = new THREE.Vector3( e.pos.x, e.pos.y + 1, e.pos.z );
-			e.damage( dmg, { source: g.player, kind: 'vehicle', dir, zone: 'torso', weapon: 'vehicle', point } );
-			if ( ! e.alive ) g.events.emit( 'kill', { target: e, source: g.player, weapon: 'vehicle' } );
-			else e.knockback?.( dir, speed * 0.7 );
-			v.damage?.( Math.min( 25, speed * ( e.type === 'animal' && e.size > 1 ? 2 : 0.6 ) ), { source: e, kind: 'impact', dir } );
-			g.audio?.play( 'hit_flesh', { pos: point, vol: 1, max: 60 } );
-			if ( speed > 12 ) g.audio?.play( 'crash', { pos: point, vol: 0.5, max: 60 } );
-			g.fx?.blood?.( point, dir, 1.5 );
-		}
-	}
-
 	// ---- bodies: search the infected and survivors, butcher animals ----------------------------------------------
 
 	provide( ray ) {
@@ -487,10 +493,17 @@ export class Creatures {
 		const o = ray.origin, d = ray.dir;
 		for ( const e of g.entities.near( o, 4, 'corpse', _near ) ) {
 			if ( e.removed || ! e.centre ) continue;
-			e.centre( _v );
-			const t = rayPoint( o, d, _v, e.butcherable || e.species ? Math.max( 0.35, ( e.size || 1 ) * 0.5 ) : 0.55 );
+			let t = null;
+			if ( e.inst ) {
+				// a body lies along the ground: the hips, the chest or the head will do
+				for ( const k of LOOK_BONES ) {
+					const tk = rayPoint( o, d, e.inst.bonePos( k, _v ), 0.42 );
+					if ( tk !== null && ( t === null || tk < t ) ) t = tk;
+				}
+			} else t = rayPoint( o, d, e.centre( _v ), Math.max( 0.35, ( e.size || 1 ) * 0.5 ) );
 			if ( t === null ) continue;
 			if ( e.butcherable ) out.push( e.butcherPrompt( t ) );
+			else if ( e.species ) continue; // nothing to take from a dead honu
 			else out.push( { id: 'zc' + e.id, t, label: 'Search body', owner: e, noOcclusion: true, action: () => this.search( e ) } );
 		}
 		return out;

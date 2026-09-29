@@ -26,13 +26,16 @@ const LINKS = [
 // joints that must not fold flat: [ a, b, min fraction of the straight length, via ]
 const MINS = [ [ LHP, LF, 0.55, LK ], [ RHP, RF, 0.55, RK ], [ LS, LH, 0.35, LE ], [ RS, RH, 0.35, RE ] ];
 
-// hit capsules: [ bone a, bone b | null (a + extension), radius, zone ]
+// hit capsules: [ point a, point b, radius (m at scale 1), zone ]. The torso stops short of the neck so its round end
+// cap does not swallow the jaw and face (a shot at the head must count as a headshot); the skull is its own capsule
+// from the head joint (top of the neck) up to the crown, the throat a thin one below it.
 const CAPS = [
-	[ 'neck', 'headTop', 0.105, 'head' ], [ 'pelvis', 'neck', 0.17, 'torso' ],
+	[ 'head', 'headTop', 0.1, 'head' ], [ 'neck', 'head', 0.06, 'neck' ],
+	[ 'pelvis', 'spine2', 0.16, 'torso' ], [ 'spine2', 'chestTop', 0.145, 'torso' ], [ 'lUpper', 'rUpper', 0.075, 'torso' ],
 	[ 'lUpper', 'lFore', 0.06, 'arm' ], [ 'lFore', 'lHand', 0.05, 'arm' ], [ 'rUpper', 'rFore', 0.06, 'arm' ], [ 'rFore', 'rHand', 0.05, 'arm' ],
 	[ 'lThigh', 'lCalf', 0.085, 'leg' ], [ 'lCalf', 'lFoot', 0.065, 'leg' ], [ 'rThigh', 'rCalf', 0.085, 'leg' ], [ 'rCalf', 'rFoot', 0.065, 'leg' ],
 ];
-const CAP_KEYS = [ 'neck', 'pelvis', 'lUpper', 'lFore', 'lHand', 'rUpper', 'rFore', 'rHand', 'lThigh', 'lCalf', 'lFoot', 'rThigh', 'rCalf', 'rFoot', 'head' ];
+const CAP_KEYS = [ 'neck', 'pelvis', 'spine2', 'lUpper', 'lFore', 'lHand', 'rUpper', 'rFore', 'rHand', 'lThigh', 'lCalf', 'lFoot', 'rThigh', 'rCalf', 'rFoot', 'head' ];
 
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3(), _v4 = new THREE.Vector3();
 const _q2 = new THREE.Quaternion(), _q3 = new THREE.Quaternion();
@@ -79,7 +82,7 @@ export class HumanBody {
 		this.bank = inst.rig.bank;
 		this.style = Object.assign( { idle: 'idle_drunk', walk: 'walk_drunk', run: 'run_injured', hunch: 0.25, reach: 0, tilt: 0.1, twitch: 0.5, arms: 'hang', gaitScale: 1 }, style );
 		this.clip = { idle: this.bank.get( this.style.idle ), walk: this.bank.get( this.style.walk ), run: this.bank.get( this.style.run ),
-			crouch: this.bank.get( 'crouch_idle' ), knock: this.bank.get( 'knock_door' ), idle0: this.bank.get( 'idle' ) };
+			crouch: this.bank.get( 'crouch_idle' ), knock: this.bank.get( 'knock_door' ), idle0: this.bank.get( 'idle' ), look: this.bank.get( 'look_around' ) };
 		this.t = { idle: rnd() * 20, walk: rnd() * 3, run: rnd() * 2, aux: 0, life: rnd() * 100 };
 		this.seed = rnd() * 100;
 		this.mode = 'stand'; // stand | crawl | ragdoll | rise | lying | static
@@ -87,6 +90,7 @@ export class HumanBody {
 		this.turn = 0; // rad/s
 		this.crouch = 0; // 0..1 blend towards crouching (survivors)
 		this.reachW = 0; // arms reaching forward (chasing)
+		this.searchW = 0; this.searching = false; // standing still, casting about for what made the noise
 		this.aggro = 0; // 0 idle .. 1 hunting: more hunch, open mouth
 		this.jaw = 0; this.jawT = 0;
 		this.look = new THREE.Vector3(); this.lookW = 0; // world point to look at
@@ -107,6 +111,7 @@ export class HumanBody {
 		this.bp = {};
 		for ( const k of CAP_KEYS ) this.bp[ k ] = new THREE.Vector3();
 		this.bp.headTop = new THREE.Vector3();
+		this.bp.chestTop = new THREE.Vector3();
 	}
 
 	// ---- animation ------------------------------------------------------------------------------------------
@@ -152,6 +157,8 @@ export class HumanBody {
 			else rig.add( this.clip.crouch, act.t * 0.6, w );
 		}
 		if ( crouch > 0.01 ) { rig.add( this.clip.crouch, this.t.idle, crouch ); wIdle *= 1 - crouch; }
+		this.searchW += ( ( this.searching ? 1 : 0 ) - this.searchW ) * Math.min( 1, dt * 2 );
+		if ( this.searchW > 0.01 && this.clip.look ) { rig.add( this.clip.look, this.t.idle * 0.8, wIdle * this.searchW ); wIdle *= 1 - this.searchW; }
 		rig.add( this.clip.idle, this.t.idle, wIdle );
 		rig.add( wc, this.t.walk, wWalk );
 		rig.add( rc, this.t.run, wRun );
@@ -374,11 +381,16 @@ export class HumanBody {
 		const rig = this.rig, I = this.info, m = I.mirror;
 		rig.add( this.clip.idle0, 3, w );
 		const f = this.riseFace;
-		// arms flopped away from the body, head turned to one side, legs apart
-		rig.aimAt( 'lUpper', ...this._arr( this._dir( 0.2 * f, - 0.6, - m * 0.7 ) ), 0.8 * w );
-		rig.aimAt( 'rUpper', ...this._arr( this._dir( - 0.1 * f, - 0.2, m * 0.9 ) ), 0.8 * w );
-		rig.aimAt( 'lThigh', ...this._arr( this._dir( 0, - 1, - m * 0.2 ) ), 0.6 * w );
-		rig.aimAt( 'rThigh', ...this._arr( this._dir( 0, - 1, m * 0.25 ) ), 0.6 * w );
+		// arms flopped out on the ground (a touch towards it: the ground is ahead of a body lying face down (f = 1) and
+		// behind one lying on its back), one elbow bent, head turned to one side, legs apart
+		rig.aimAt( 'lUpper', ...this._arr( this._dir( 0.12 * f, - 0.6, - m * 0.75 ) ), 0.9 * w );
+		rig.aimAt( 'lFore', ...this._arr( this._dir( 0.1 * f, - 0.85, - m * 0.4 ) ), 0.9 * w );
+		rig.aimAt( 'rUpper', ...this._arr( this._dir( 0.12 * f, - 0.15, m * 0.95 ) ), 0.9 * w );
+		rig.aimAt( 'rFore', ...this._arr( this._dir( 0.1 * f, 0.55, m * 0.6 ) ), 0.9 * w );
+		rig.aimAt( 'lThigh', ...this._arr( this._dir( 0.05 * f, - 1, - m * 0.2 ) ), 0.7 * w );
+		rig.aimAt( 'rThigh', ...this._arr( this._dir( 0.05 * f, - 1, m * 0.25 ) ), 0.7 * w );
+		rig.aimAt( 'lCalf', ...this._arr( this._dir( 0.05 * f, - 1, - m * 0.22 ) ), 0.7 * w );
+		rig.aimAt( 'rCalf', ...this._arr( this._dir( 0.05 * f, - 1, m * 0.3 ) ), 0.7 * w );
 		rig.bend( 'head', 0, 0.9 * ( this.seed % 2 < 1 ? 1 : - 1 ) * w );
 	}
 
@@ -629,8 +641,10 @@ export class HumanBody {
 	_bones() {
 		const inst = this.inst, bp = this.bp;
 		for ( const k of CAP_KEYS ) inst.bonePos( k, bp[ k ] );
-		// the top of the skull continues the neck -> head line
-		bp.headTop.subVectors( bp.head, bp.neck ).normalize().multiplyScalar( 0.2 * inst.scale ).add( bp.head );
+		// the crown continues the neck -> head line (the capsule's end cap adds its radius); the chest capsule ends
+		// a little over halfway from the chest joint to the neck
+		bp.headTop.subVectors( bp.head, bp.neck ).normalize().multiplyScalar( 0.12 * inst.scale ).add( bp.head );
+		bp.chestTop.lerpVectors( bp.spine2, bp.neck, 0.55 );
 		return bp;
 	}
 

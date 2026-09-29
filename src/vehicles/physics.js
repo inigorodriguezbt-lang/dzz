@@ -20,6 +20,7 @@ const V3 = THREE.Vector3;
 const _a = new V3(), _b = new V3(), _c = new V3(), _d = new V3(), _e = new V3(), _f = new V3(), _g = new V3(), _h = new V3();
 const _q = new THREE.Quaternion(), _m3 = new THREE.Matrix3(), _n = new V3();
 const clamp = ( x, a, b ) => x < a ? a : x > b ? b : x;
+const smoothstep = ( a, b, x ) => { const t = clamp( ( x - a ) / ( b - a ), 0, 1 ); return t * t * ( 3 - 2 * t ); };
 
 // ---- rigid body ------------------------------------------------------------------------------------------
 
@@ -242,7 +243,7 @@ export function makeWheels( model, spec ) {
 		x: w.x, y: w.y, z: w.z, R: w.R, W: w.W, side: w.side, steerK: w.steer || 0, front: w.front,
 		driven: spec.engine?.drive === 'awd' ? true : spec.engine?.drive === 'fwd' ? w.front : spec.engine?.drive === 'rwd' ? ! w.front : false,
 		lp: new V3( w.x, w.y + S.rest, w.z ), L: S.rest, Lprev: S.rest, grounded: false, spin: 0, spinV: 0, slip: 0, lat: 0, fz: 0,
-		surface: SURF.asphalt, contact: new V3(), steer: 0, box: null, skid: !! w.skid,
+		surface: SURF.asphalt, sx: Infinity, sz: Infinity, sBox: null, contact: new V3(), steer: 0, box: null, skid: !! w.skid,
 	} ) );
 }
 
@@ -287,7 +288,8 @@ export function wheelForces( veh, h, input ) {
 		w.fz = fz;
 		w.comp = ( S.rest - L ) / S.travel;
 		w.contact.copy( _mount ).addScaledVector( _down, dist );
-		w.surface = surfaceAt( game, px, pz, gr.box, spec.offroad || 0 );
+		// the surface lookup is costly (beach test): reuse it until the wheel has moved half a metre
+		if ( gr.box !== w.sBox || Math.abs( px - w.sx ) + Math.abs( pz - w.sz ) > 0.5 ) { w.surface = surfaceAt( game, px, pz, gr.box, spec.offroad || 0 ); w.sx = px; w.sz = pz; w.sBox = gr.box; }
 	}
 	// anti-roll bars: move load from the more compressed wheel to its partner on the same axle
 	if ( spec.antiRoll ) for ( let i = 0; i + 1 < n; i += 2 ) {
@@ -359,13 +361,14 @@ export class Engine {
 		this.throttle = 0;
 	}
 	ratio() { const E = this.E; return this.gear < 0 ? - E.reverse : this.gear === 0 ? 0 : E.gears[ this.gear - 1 ]; }
-	// torque curve: a broad hump peaking around 60 % of the redline, cut at the redline
+	// torque curve: a broad hump peaking around 60 % of the redline, faded out by the rev limiter just above it
 	torqueAt( rpm ) {
 		const E = this.E, t = rpm / E.redline;
-		if ( t > 1.02 ) return 0;
+		if ( t >= 1.03 ) return 0;
 		const shape = 0.62 + 0.38 * Math.sin( Math.min( 1, t / 0.62 ) * Math.PI / 2 ) - Math.max( 0, t - 0.75 ) * 0.9;
 		const byPower = E.power * 1000 / Math.max( 50, rpm * Math.PI / 30 );
-		return Math.min( E.torque * shape, byPower );
+		const limiter = t > 1 ? 1 - ( t - 1 ) / 0.03 : 1;
+		return Math.min( E.torque * shape, byPower ) * limiter;
 	}
 	// wheel speed (m/s along the car), wheel radius, throttle 0..1 -> drive force at the wheels (N, total)
 	update( h, speed, R, throttle, vehicle ) {
@@ -388,7 +391,8 @@ export class Engine {
 			}
 		}
 		if ( this.shiftT > 0 || this.gear === 0 ) return 0;
-		const T = this.torqueAt( this.rpm ) * throttle;
+		// once the clutch is in, the engine turns with the wheels: that speed decides the torque (and the limiter)
+		const T = this.torqueAt( Math.max( this.rpm, wheelRpm ) ) * throttle;
 		let F = T * r * E.final * 0.88 / R;
 		// engine braking off the throttle
 		if ( throttle < 0.05 ) F -= Math.sign( speed ) * Math.min( Math.abs( speed ) * 60, 900 ) * Math.abs( r ) / 3;
@@ -416,6 +420,8 @@ export function stepCar( veh, h, inp ) {
 	if ( eng.gear < 0 ) { throttle = inp.back ? 1 : 0; brake = inp.forward ? 1 : 0; }
 	else { throttle = inp.forward ? 1 : 0; brake = inp.back ? 1 : 0; }
 	if ( ! eng.running || veh.fuel <= 0 ) throttle = 0;
+	// hill hold: stopped with nothing pressed, an automatic stays put (in park, or on the brake)
+	if ( veh.driver && throttle === 0 && brake === 0 && Math.abs( speed ) < 1.2 ) brake = 0.6;
 	// parked with nobody at the wheel: the handbrake is on
 	const hand = inp.hand ? 1 : ( veh.driver ? 0 : 1 );
 	const R = veh.wheels[ 0 ]?.R || 0.33;
@@ -433,6 +439,56 @@ export function stepCar( veh, h, inp ) {
 	// a little help staying upright in the air (arcade): damp the spin
 	if ( ! grounded ) b.w.multiplyScalar( 1 - h * 0.3 );
 	return speed;
+}
+
+// motorcycles: a narrow car on two wheels (the tyre forces act at the centre of mass height, so they never tip
+// it) that the rider holds upright; the lean into turns is drawn (veh.lean), not simulated
+export function stepBike( veh, h, inp ) {
+	const speed = stepCar( veh, h, inp );
+	const b = veh.body;
+	b.right( _rt );
+	const roll = Math.asin( clamp( - _rt.y, - 1, 1 ) );
+	const wl = _e.copy( b.w ).applyMatrix3( b.Rt );
+	let grounded = false;
+	for ( const w of veh.wheels ) if ( w.grounded ) grounded = true;
+	if ( veh.driver && Math.abs( roll ) < 1.2 ) {
+		const kp = grounded ? 60 : 10, kd = grounded ? 12 : 4;
+		_F.set( 0, 0, ( roll * kp - wl.z * kd ) * b.Ib.z ).applyMatrix3( b.R );
+		b.torque( _F );
+		// off a jump the rider keeps the nose from tumbling
+		if ( ! grounded ) { _F.set( - wl.x * 2.5 * b.Ib.x, 0, 0 ).applyMatrix3( b.R ); b.torque( _F ); }
+	} else if ( ! veh.driver ) {
+		// riderless and awake (knocked, or let go at speed): it goes down on its left side
+		_F.set( 0, 0, 3 * b.Ib.z * ( 1 - smoothstep( 0.9, 1.3, - roll ) ) ).applyMatrix3( b.R );
+		b.torque( _F );
+	}
+	// the lean that balances the cornering force (left turn = left side down = positive), eased; on the side
+	// stand when parked
+	const target = veh.driver ? ( grounded ? clamp( Math.atan( speed * b.w.y / G ), - 0.8, 0.8 ) : veh.lean ) : ( Math.abs( roll ) < 0.3 ? 0.16 : 0 );
+	veh.lean += ( target - veh.lean ) * Math.min( 1, h * 6 );
+	return speed;
+}
+
+// cars, aircraft and bikes in the sea or a deep pond: drag at every submerged hull point and some lift, so they
+// splash to a stop, wallow and slowly settle on the bottom. Returns the submerged fraction.
+export function wade( veh, h ) {
+	const b = veh.body, game = veh.game, P = game.physics;
+	const n = veh.hull.length;
+	let wet = 0;
+	for ( let i = 0; i < n; i ++ ) {
+		const p = b.toWorld( veh.hull[ i ], _c );
+		const wy = P.waterLevel( p.x, p.z );
+		const d = wy - p.y;
+		// the ocean function runs on over the low coastal plain too: only water that stands over the ground counts
+		if ( d <= 0 || game.hf.heightAt( p.x, p.z ) > wy - 0.05 ) continue;
+		wet ++;
+		const k = Math.min( 1, d / 0.6 );
+		const vp = b.pointVel( p, _vc );
+		_F.copy( vp ).multiplyScalar( - b.m * 0.3 * k / n * ( 1 + vp.length() * 0.12 ) );
+		_F.y += b.m * G * 0.6 * k / n;
+		b.force( _F, p );
+	}
+	return wet / n;
 }
 
 // boats: buoyancy points in the model frame [ x, y (hull bottom), z, area ]
@@ -470,10 +526,17 @@ export function stepBoat( veh, h, inp ) {
 		const fs = - vs * spec.lateral * k * ( 1 + Math.abs( vs ) * 0.3 );
 		_F.copy( _fw ).multiplyScalar( fl );
 		b.force( _F, b.pos );
-		// lateral resistance acts behind the centre of mass: the hull tracks straight and carves turns
+		// lateral resistance acts behind the centre of mass (the hull tracks straight and carves turns), at its
+		// height so a hard turn doesn't trip the boat over its chine
 		_F.copy( _rt ).multiplyScalar( fs );
-		b.toWorld( _pt.set( 0, veh.bounds.min.y + 0.3, veh.bounds.max.z * 0.35 ), _d );
+		b.toWorld( _pt.set( 0, b.com.y, veh.bounds.max.z * 0.35 ), _d );
 		b.force( _F, _d );
+		// planing hulls bank into their turns
+		const roll = Math.asin( clamp( - _rt.y, - 1, 1 ) );
+		const bank = clamp( - b.w.y * Math.abs( vl ) * 0.025, - 0.35, 0.35 ) * spec.planing;
+		const wz = _e.copy( b.w ).applyMatrix3( b.Rt ).z;
+		_F.set( 0, 0, ( ( bank - roll ) * - 2.5 - wz ) * 2 * b.Ib.z * k ).applyMatrix3( b.R );
+		b.torque( _F );
 		// planing lift raises the bow a little, then flattens out
 		if ( plane > 0 ) { _F.set( 0, spec.mass * 0.25 * plane * G, 0 ); b.toWorld( _pt.set( 0, 0, veh.bounds.min.z * 0.2 ), _d ); b.force( _F, _d ); }
 		// water resists turning and rocking
@@ -489,19 +552,20 @@ export function stepBoat( veh, h, inp ) {
 	const prop = b.toWorld( veh.propPoint, _c );
 	veh.propWet = P.waterLevel( prop.x, prop.z ) > prop.y + 0.02;
 	if ( throttle && veh.propWet ) {
+		// the motor swings its thrust towards the side the stern has to go: the bow turns the other way
 		const st = spec.rudder ? 0 : veh.steer;
-		_d.set( - Math.sin( st ), 0, - Math.cos( st ) ).applyQuaternion( b.q );
+		_d.set( Math.sin( st ), 0, - Math.cos( st ) ).applyQuaternion( b.q );
 		_F.copy( _d ).multiplyScalar( throttle * spec.thrust * ( veh.health < spec.health * 0.2 ? 0.5 : 1 ) );
 		b.force( _F, prop );
 	}
 	// rudder (inboard boats): a side force at the stern growing with speed through the water
 	if ( spec.rudder && wet ) {
-		_F.copy( _rt ).multiplyScalar( - veh.steer * ( speed * Math.abs( speed ) * 180 + throttle * spec.thrust * 0.25 ) );
+		_F.copy( _rt ).multiplyScalar( veh.steer * ( speed * Math.abs( speed ) * 180 + throttle * spec.thrust * 0.25 ) );
 		b.force( _F, prop );
 	}
 	// jet skis steer only with thrust: a touch of it even off the throttle so they don't feel dead
 	if ( spec.jet && wet && ! throttle && Math.abs( speed ) > 2 ) {
-		_F.copy( _rt ).multiplyScalar( - veh.steer * speed * 60 );
+		_F.copy( _rt ).multiplyScalar( veh.steer * speed * 60 );
 		b.force( _F, prop );
 	}
 	// air drag
@@ -532,14 +596,17 @@ export function stepHeli( veh, h, inp ) {
 	_F.copy( _up ).multiplyScalar( L );
 	b.force( _F, b.pos );
 	// attitude hold: target pitch / roll from the stick, auto-level when it's released
-	const tp = ( ( inp.forward ? 1 : 0 ) - ( inp.back ? 1 : 0 ) ) * spec.tilt;
-	const tr = ( ( inp.rollR ? 1 : 0 ) - ( inp.rollL ? 1 : 0 ) ) * spec.tilt * 0.9;
+	// sitting on the skids without collective the stick does nothing: tilting the disc there only slides the
+	// helicopter along the ground like a sledge
+	const grounded = veh.onGround && coll <= 0;
+	const tp = grounded ? 0 : ( ( inp.forward ? 1 : 0 ) - ( inp.back ? 1 : 0 ) ) * spec.tilt;
+	const tr = grounded ? 0 : ( ( inp.rollR ? 1 : 0 ) - ( inp.rollL ? 1 : 0 ) ) * spec.tilt * 0.9;
 	// current pitch (nose down positive) and roll (right wing down positive) from the body axes
 	const pitch = Math.asin( clamp( - _fw.y, - 1, 1 ) );
 	const roll = Math.asin( clamp( - _rt.y, - 1, 1 ) );
 	const wl = _e.copy( b.w ).applyMatrix3( b.Rt ); // body-frame angular velocity
 	const yawIn = ( ( inp.left ? 1 : 0 ) - ( inp.right ? 1 : 0 ) ) * spec.yawRate;
-	const air = veh.onGround && coll <= 0 ? 0.25 : 1;
+	const air = grounded ? 0.25 : 1;
 	const kp = 7 * rot * air, kd = 3.5 * rot + 0.8;
 	// torque about body x: positive raises the nose -> nose down needs negative
 	const tx = ( - ( tp - pitch ) * kp - wl.x * kd ) * b.Ib.x;
@@ -599,14 +666,23 @@ export function stepPlane( veh, h, inp ) {
 	// propeller thrust falls off with airspeed
 	_F.copy( _fw ).multiplyScalar( thr * spec.thrust * clamp( 1 - u / 75, 0.2, 1 ) );
 	b.force( _F, b.pos );
-	// control moments (scaled by dynamic pressure) plus weathervane stability and damping
+	// control moments (scaled by dynamic pressure) plus weathervane stability and damping. Arcade assists: the
+	// elevator commands a pitch rate whose nose-up part fades before the stall, hands off the nose settles on the
+	// angle of attack that holds 1 g (level flight at a sensible speed), and the wings level themselves.
 	const qs = clamp( V / 35, 0.08, 1.4 );
 	const wl = _e.copy( b.w ).applyMatrix3( b.Rt );
 	const pIn = ( inp.back ? 1 : 0 ) - ( inp.forward ? 1 : 0 ); // pull back = nose up
 	const rIn = ( inp.right ? 1 : 0 ) - ( inp.left ? 1 : 0 );
 	const yIn = ( inp.rollL ? 1 : 0 ) - ( inp.rollR ? 1 : 0 );
-	const tx = ( ( pIn * spec.pitchRate - wl.x ) * 4 * qs - alpha * 2.2 * qs * ( V > 15 ? 1 : 0 ) ) * b.Ib.x;
-	const tz = ( ( - rIn * spec.rollRate - wl.z ) * 4 * qs ) * b.Ib.z;
+	const air = V > 15 ? 1 : 0;
+	let pCmd = pIn * spec.pitchRate;
+	if ( pCmd > 0 ) pCmd *= 1 - smoothstep( spec.stall * 0.5, spec.stall * 0.9, alpha );
+	const trim = q > 50 ? clamp( ( spec.mass * G / ( q * spec.wing ) - spec.cl0 ) / spec.cla, - 0.05, spec.stall * 0.6 ) : 0;
+	const tx = ( ( pCmd - wl.x ) * 4 * qs - ( alpha - ( pIn ? alpha : trim ) ) * 3 * qs * air ) * b.Ib.x;
+	// roll angle, right wing down positive: positive body z spin raises the right wing
+	const roll = Math.asin( clamp( - _rt.y, - 1, 1 ) );
+	const rCmd = rIn ? - rIn * spec.rollRate : clamp( roll * 1.2, - spec.rollRate * 0.5, spec.rollRate * 0.5 ) * air;
+	const tz = ( ( rCmd - wl.z ) * 4 * qs ) * b.Ib.z;
 	const ty = ( ( yIn * spec.yawRate - wl.y ) * 3 * qs - beta * 2.5 * qs ) * b.Ib.y;
 	_F.set( tx, ty, tz ).applyMatrix3( b.R );
 	b.torque( _F );

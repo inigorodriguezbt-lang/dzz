@@ -18,6 +18,8 @@ const SETS = {
 	small: { list: [ SP.TREEFERN, SP.BANANA, SP.TI, SP.SHRUB, SP.NAUPAKA, SP.TALLGRASS, SP.PINEAPPLE, SP.CANE, SP.ROCK, SP.FERN, SP.GRASS ], gap: 4.5 },
 };
 const set = SETS[ SET ];
+// ?list=2,3: only these species (ids from species.js)
+if ( q.get( 'list' ) ) set.list = q.get( 'list' ).split( ',' ).map( Number );
 
 const info = document.getElementById( 'info' );
 const renderer = new THREE.WebGLRenderer( { antialias: true } );
@@ -38,6 +40,14 @@ const sky = new THREE.DataTexture( new Uint8Array( [ 156, 196, 228, 255 ] ), 1, 
 sky.needsUpdate = true;
 G.uSkyLUT.value = sky;
 G.uCloudShadowK.value = 0;
+// the shared lighting declares the sun's shadow cascades (sampler2DShadow): bind 1x1 depth textures
+for ( const k of [ 'uCsm0', 'uCsm1', 'uCsm2' ] ) if ( G[ k ] && ! G[ k ].value ) {
+	const d = new THREE.DepthTexture( 1, 1 );
+	if ( k !== 'uCsm0' ) d.compareFunction = THREE.LessEqualCompare;
+	const rt = new THREE.WebGLRenderTarget( 1, 1, { depthTexture: d } );
+	renderer.setRenderTarget( rt ); renderer.clear(); renderer.setRenderTarget( null );
+	G[ k ].value = d;
+}
 const hour = + ( q.get( 'hour' ) || 10 );
 const el = Math.max( 0.05, Math.sin( ( hour - 6 ) / 12 * Math.PI ) ) * 1.1;
 const az = + ( q.get( 'sunaz' ) || 200 ) * Math.PI / 180; // compass azimuth of the sun (0 north = -z)
@@ -82,6 +92,7 @@ for ( const s of all ) {
 	lods[ s ] = { near: make( models[ s ], 'near', cfg.shadow !== false ), mid: cfg.mid ? make( cfg.build( 1 ), 'mid', false ) : null };
 }
 const buildMs = performance.now() - t0;
+window.__targets = targets; window.__renderer = renderer; window.__scene = scene; window.__camera = camera;
 // models[] may have holes for species not in the preview: the impostor atlas only measures its own
 for ( let s = 0; s < 18; s ++ ) if ( ! models[ s ] && SPEC[ s ].imp ) models[ s ] = SPEC[ s ].build( 0 );
 const imp = new Impostors( renderer, models, SPEC );
@@ -130,9 +141,10 @@ camera.position.set( ...( cam.length === 3 ? cam : [ 0, set.gap * 0.5, W * 0.62 
 camera.lookAt( ...( look.length === 3 ? look : [ 0, set.gap * 0.35, rowZ[ 1 ] ] ) );
 VG.uWindStr.value = 0.25 + + ( q.get( 'wind' ) ?? 0.45 ) * 0.95;
 
-// atlas debug view: ?atlas=A|B draws the impostor atlas full screen
+// atlas debug view: ?atlas=A|B draws the impostor atlas full screen, ?atlas=leaf the foliage atlas
 if ( q.get( 'atlas' ) ) {
-	const m = new THREE.MeshBasicMaterial( { map: q.get( 'atlas' ) === 'B' ? imp.rtB.texture : imp.rtA.texture, transparent: true } );
+	const which = q.get( 'atlas' );
+	const m = new THREE.MeshBasicMaterial( { map: which === 'leaf' ? atlas.texture : which === 'B' ? imp.rtB.texture : imp.rtA.texture, transparent: true } );
 	const quad = new THREE.Mesh( new THREE.PlaneGeometry( 2, 2 ), m );
 	const s2 = new THREE.Scene(); s2.background = new THREE.Color( 0x303040 ); s2.add( quad );
 	const oc = new THREE.OrthographicCamera( - 1, 1, 1, - 1, 0, 1 );

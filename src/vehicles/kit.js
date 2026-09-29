@@ -2,6 +2,7 @@
 // vehicle model with per-vertex material data, so a whole car draws with one material (one draw call):
 //   color  (vec3)  base albedo (lights: the lamp colour; paint: a tint multiplied by the car's paint)
 //   aMat   (vec4)  x roughness, y metalness, z paint slot (0 none, 1 paint, 2 second paint), w emissive channel
+//                  (bytes: x and y scaled by 255, the shader divides them back)
 //   uv     (vec2)  into the decal atlas (plates, gauges, liveries); plain parts sample its white corner
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
@@ -26,8 +27,8 @@ export const MAT = {
 	seat: { c: 0x1d1d1f, r: 0.95, m: 0 },
 	seatTan: { c: 0x6a5238, r: 0.6, m: 0 },
 	carpet: { c: 0x19191a, r: 1, m: 0 },
-	dash: { c: 0x151516, r: 0.75, m: 0 },
-	headliner: { c: 0xb8b2a6, r: 0.95, m: 0 },
+	dash: { c: 0x232427, r: 0.75, m: 0 },
+	headliner: { c: 0x8c8780, r: 0.95, m: 0 },
 	plastic: { c: 0x2a2b2d, r: 0.7, m: 0 },
 	white: { c: 0xf4f4f2, r: 0.45, m: 0 },
 	gelcoat: { c: 0xf3f3ef, r: 0.22, m: 0 },
@@ -124,8 +125,18 @@ export class Kit {
 	// append an already built kit geometry (keeps its per-vertex material data) under a transform
 	addBuilt( geo, t = null ) {
 		const M = makeMatrix( t );
-		const n = geo.attributes.position.count;
-		const pos = geo.attributes.position.array.slice(), nrm = geo.attributes.normal.array.slice();
+		const A = geo.attributes;
+		const n = A.position.count;
+		const pos = A.position.array.slice();
+		// back to floats (build() stores normals, uvs, colours and material data quantized)
+		const nrm = new Float32Array( n * 3 ), uv = new Float32Array( n * 2 ), col = new Float32Array( n * 3 ), mt = new Float32Array( n * 4 );
+		for ( let i = 0; i < n; i ++ ) {
+			nrm[ i * 3 ] = A.normal.getX( i ); nrm[ i * 3 + 1 ] = A.normal.getY( i ); nrm[ i * 3 + 2 ] = A.normal.getZ( i );
+			uv[ i * 2 ] = A.uv.getX( i ); uv[ i * 2 + 1 ] = A.uv.getY( i );
+			col[ i * 3 ] = A.color.getX( i ); col[ i * 3 + 1 ] = A.color.getY( i ); col[ i * 3 + 2 ] = A.color.getZ( i );
+			const q = A.aMat.normalized ? 1 : 1 / 255;
+			mt[ i * 4 ] = A.aMat.getX( i ) * q; mt[ i * 4 + 1 ] = A.aMat.getY( i ) * q; mt[ i * 4 + 2 ] = A.aMat.getZ( i ); mt[ i * 4 + 3 ] = A.aMat.getW( i );
+		}
 		if ( M ) {
 			_n3.getNormalMatrix( M );
 			for ( let i = 0; i < n; i ++ ) {
@@ -134,7 +145,7 @@ export class Kit {
 			}
 			if ( M.determinant() < 0 ) flipWinding( pos, nrm );
 		}
-		const part = { pos, nrm, uv: geo.attributes.uv.array.slice(), col: geo.attributes.color.array.slice(), mat: geo.attributes.aMat.array.slice(), tag: this.tag };
+		const part = { pos, nrm, uv, col, mat: mt, tag: this.tag };
 		this.parts.push( part );
 		return part;
 	}
@@ -260,12 +271,26 @@ export class Kit {
 			pos.set( p.pos, o * 3 ); nrm.set( p.nrm, o * 3 ); uv.set( p.uv, o * 2 ); col.set( p.col, o * 3 ); mt.set( p.mat, o * 4 );
 			o += c;
 		}
+		// quantized (32 bytes a vertex instead of 60): normals as int16, uvs and colours as uint16, the material
+		// data as bytes (roughness and metalness x 255, then the paint slot and the lamp channel as integers)
+		const q16 = ( a, signed ) => {
+			const o = signed ? new Int16Array( a.length ) : new Uint16Array( a.length );
+			const k = signed ? 32767 : 65535;
+			for ( let i = 0; i < a.length; i ++ ) o[ i ] = Math.round( Math.min( 1, Math.max( signed ? - 1 : 0, a[ i ] ) ) * k );
+			return o;
+		};
+		const mq = new Uint8Array( n * 4 );
+		for ( let i = 0; i < n; i ++ ) {
+			mq[ i * 4 ] = Math.round( Math.min( 1, Math.max( 0, mt[ i * 4 ] ) ) * 255 );
+			mq[ i * 4 + 1 ] = Math.round( Math.min( 1, Math.max( 0, mt[ i * 4 + 1 ] ) ) * 255 );
+			mq[ i * 4 + 2 ] = mt[ i * 4 + 2 ]; mq[ i * 4 + 3 ] = mt[ i * 4 + 3 ];
+		}
 		const g = new THREE.BufferGeometry();
 		g.setAttribute( 'position', new THREE.BufferAttribute( pos, 3 ) );
-		g.setAttribute( 'normal', new THREE.BufferAttribute( nrm, 3 ) );
-		g.setAttribute( 'uv', new THREE.BufferAttribute( uv, 2 ) );
-		g.setAttribute( 'color', new THREE.BufferAttribute( col, 3 ) );
-		g.setAttribute( 'aMat', new THREE.BufferAttribute( mt, 4 ) );
+		g.setAttribute( 'normal', new THREE.BufferAttribute( q16( nrm, true ), 3, true ) );
+		g.setAttribute( 'uv', new THREE.BufferAttribute( q16( uv, false ), 2, true ) );
+		g.setAttribute( 'color', new THREE.BufferAttribute( q16( col, false ), 3, true ) );
+		g.setAttribute( 'aMat', new THREE.BufferAttribute( mq, 4, false ) );
 		g.computeBoundingBox();
 		g.computeBoundingSphere();
 		return g;

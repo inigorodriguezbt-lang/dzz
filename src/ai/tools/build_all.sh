@@ -42,6 +42,8 @@ Professions/Sports_Female_02:f_sport:{}
 Professions/Sports_Male_01:m_swim:{}
 Professions/Sports_Male_04:m_sport:{}
 EOF
+# fill the gaps the face-referenced skin detector leaves in the masks (hands, necks, collars)
+python3 "$HERE/rb_fix_masks.py" "$OUT"
 [ -n "$SKIP_ANIMS" ] && exit 0
 # the clip bank: every clip retargeted onto one reference skeleton, then packed
 CLIPS=$(sed -n "s/^\t'[a-z_0-9]*': ('\([a-z_0-9]*\)'.*/\1/p" "$HERE/rb_pack_anims.py" | sort -u)

@@ -23,7 +23,7 @@ import { allRecipes } from '../../src/game/items/recipes.js';
 import { UI } from '../../src/ui/UI.js';
 import { h } from '../../src/ui/dom.js';
 import { PATHS, icon } from '../../src/ui/icons.js';
-import { seg, toggle, slider, select, popMenu } from '../../src/ui/widgets.js';
+import { seg, toggle, slider, select, popMenu, rail } from '../../src/ui/widgets.js';
 
 const q = new URLSearchParams( location.search );
 const screen = q.get( 'screen' ) || 'hud';
@@ -273,6 +273,17 @@ function kit() {
 			h( 'div.row', {}, h( 'div.lab', { text: 'Grass' } ), h( 'div.ctl', {}, toggle( true ) ), h( 'div.rst' ) ),
 			h( 'div.stats', { style: { marginTop: '12px' } }, ...[ [ 'Health', '41' ], [ 'Blood', '58%' ], [ 'Body', '35.8°' ], [ 'Air', '27°' ] ].map( ( [ a, b ] ) => h( 'div', {}, h( 'span', { text: a } ), h( 'span', { text: b } ) ) ) ),
 			h( 'div.meter', { style: { marginTop: '12px' } }, h( 'i', { style: { width: '64%' } } ) ) ),
+		sec( 'Lists',
+			h( 'div', { style: { display: 'grid', gridTemplateColumns: 'calc(140 * var(--u)) 1fr', gap: '12px' } },
+				rail( [ [ 'graphics', 'Graphics' ], [ 'interface', 'Interface' ], [ 'audio', 'Audio' ], [ 'controls', 'Controls' ], [ 'keys', 'Keys' ] ], 'interface' ),
+				h( 'div', {},
+					...[ [ 'Honolulu run', 'Day 12', true ], [ 'Big Island', 'Day 4', false ] ].map( ( [ n, m, sel ] ) => h( 'div.lrow' + ( sel ? '.sel' : '' ), {},
+						h( 'div', { style: { height: 'calc(54 * var(--u))', borderRadius: 'var(--r-sm)', background: 'var(--bg-2)' } } ),
+						h( 'div', {}, h( 'div.nm', { text: n } ), h( 'div.meta', {}, h( 'span', { text: m } ), h( 'span', { text: '5 h 12 min' } ) ) ),
+						h( 'div.acts', {}, h( 'button.btn.icon.sm', { title: 'Details' }, icon( 'edit' ) ), h( 'button.btn.icon.sm', { title: 'Delete' }, icon( 'trash' ) ) ) ) ),
+					h( 'div.pop.static', { style: { marginTop: '12px', padding: 'var(--s-1)', width: 'calc(280 * var(--u))' } },
+						h( 'div.prow', {}, icon( 'marker' ), h( 'span.lab', { text: '1' } ), h( 'span.v', { text: '1.2 km' } ) ),
+						h( 'div.prow', {}, h( 'span.lab', { text: 'Roads' } ), toggle( true ) ) ) ) ) ),
 		sec( 'Cells',
 			r( cell( 'm4a1', { q: '31', n: '1', held: true, bar: 0.82 } ), cell( 'canned_tuna', { q: '2' } ), cell( 'machete', { bar: 0.4 } ), cell( 'bandage', { q: '3', cls: 'sel' } ), cell( 'lighter', { cls: 'over' } ), cell( 'rags', { cls: 'deny' } ) ),
 			r( ...[ 'head', 'eyes', 'face', 'torso', 'vest', 'back', 'gloves', 'legs', 'feet', 'belt' ].map( emptySlot ) ),

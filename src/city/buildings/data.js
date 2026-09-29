@@ -298,3 +298,44 @@ export function winHash( seed, bi ) {
 	h ^= h >>> 16;
 	return h >>> 0;
 }
+
+// decal atlas cells (textures.js): blood pools / splatters, smears and drag trails, hand prints, papers, dirt and
+// leaves, broken glass, footprints, scorch
+export const DECAL = { blood: [ 0, 1, 2, 3 ], smear: [ 4, 5, 6 ], hands: 7, paper: [ 8, 9, 10, 11 ], dirt: 12, glass: 13, steps: 14, scorch: 15 };
+// uv rect [ u0, v0, u1, v1 ] of decal cell k (flipY: canvas row 0 at the top)
+export function decalUV( k ) {
+	const col = k % 4, row = ( k / 4 ) | 0;
+	return [ col / 4 + 0.002, 1 - ( row + 1 ) / 4 + 0.002, ( col + 1 ) / 4 - 0.002, 1 - row / 4 - 0.002 ];
+}
+
+// what the facade shader shows in window bi of a facade piece with this seed: 0 glass, 1 boarded up, 2 broken.
+// The seed's top 4 bits carry the building's boarded share (x 1/20); the interior builder mirrors this exactly.
+export function winState( seed, bi ) {
+	const h = winHash( seed, bi );
+	const r = ( h & 1023 ) / 1024;
+	if ( r < ( seed >>> 12 ) / 20 ) return 1;
+	if ( r > 0.955 ) return 2;
+	return 0;
+}
+
+// interior colliders (worker -> main): cx cy cz hx hy hz yaw mat kind, building-local
+export const BOX_STRIDE = 9;
+export const PMAT = [ 'concrete', 'wood', 'metal', 'glass', 'rock', 'dirt', 'foliage', 'flesh' ];
+export const PK = [ 'solid', 'glass', 'noclimb' ];
+
+// Seat a building on the ground actually under its built rect. The bake's base is the highest ground under the
+// whole lot, which leaves the floor a metre or more above the street on slopes; the highest ground under the
+// walls is enough (the floor must not sink below the terrain inside). Deterministic: the main thread and the
+// workers run it on the same height field.
+export function fitToGround( r, hf, cities ) {
+	const R = rectOf( shapeOf( r, cities ) );
+	let mx = - Infinity, mn = Infinity;
+	for ( let a = 0; a <= 6; a ++ ) for ( let b = 0; b <= 6; b ++ ) {
+		const lx = R.x0 + ( R.x1 - R.x0 ) * a / 6, lz = R.z0 + ( R.z1 - R.z0 ) * b / 6;
+		const h = hf.heightAt( r.x + lx * r.c - lz * r.s, r.z + lx * r.s + lz * r.c );
+		if ( h > mx ) mx = h;
+		if ( h < mn ) mn = h;
+	}
+	if ( Number.isFinite( mx ) ) { r.base = Math.min( r.base, mx ); r.lo = Math.min( r.lo, mn ); }
+	return r;
+}

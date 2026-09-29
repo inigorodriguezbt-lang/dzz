@@ -442,19 +442,78 @@ export class Shell {
 	}
 }
 
-// ray probe against built geometry: returns { point: [x,y,z], normal: [x,y,z] } or null
+// ray probe against built geometry: returns { point: [x,y,z], normal: [x,y,z] } (the face normal turned towards
+// the ray) or null. The details are placed with thousands of axis-aligned rays, so the triangles are bucketed
+// into a 2-D grid across each axis once and a ray only tests the triangles of its cell (a brute-force raycast
+// over the whole body made the models take seconds to build).
 export function makeProbe( geos ) {
-	const meshes = geos.filter( Boolean ).map( g => new THREE.Mesh( g, new THREE.MeshBasicMaterial( { side: THREE.DoubleSide } ) ) );
-	const rc = new THREE.Raycaster();
-	const o = new THREE.Vector3(), d = new THREE.Vector3();
+	let n = 0;
+	for ( const g of geos ) if ( g ) n += g.attributes.position.count;
+	const T = new Float32Array( n * 3 );
+	let o = 0;
+	for ( const g of geos ) {
+		if ( ! g ) continue;
+		const a = g.index ? g.toNonIndexed().attributes.position.array : g.attributes.position.array;
+		T.set( a, o ); o += a.length;
+	}
+	const nt = n / 3;
+	const CS = 0.08;
+	const grids = [ null, null, null ];
+	const other = [ [ 1, 2 ], [ 0, 2 ], [ 0, 1 ] ];
+	const build = ( axis ) => {
+		const [ A, B ] = other[ axis ];
+		const map = new Map();
+		for ( let t = 0; t < nt; t ++ ) {
+			const k = t * 9;
+			const a0 = Math.min( T[ k + A ], T[ k + 3 + A ], T[ k + 6 + A ] ), a1 = Math.max( T[ k + A ], T[ k + 3 + A ], T[ k + 6 + A ] );
+			const b0 = Math.min( T[ k + B ], T[ k + 3 + B ], T[ k + 6 + B ] ), b1 = Math.max( T[ k + B ], T[ k + 3 + B ], T[ k + 6 + B ] );
+			for ( let i = Math.floor( a0 / CS ); i <= Math.floor( a1 / CS ); i ++ ) for ( let j = Math.floor( b0 / CS ); j <= Math.floor( b1 / CS ); j ++ ) {
+				const key = i * 4096 + j;
+				let l = map.get( key );
+				if ( ! l ) { l = []; map.set( key, l ); }
+				l.push( t );
+			}
+		}
+		return map;
+	};
+	// Moller-Trumbore, both faces
+	const hitTri = ( k, ox, oy, oz, dx, dy, dz ) => {
+		const e1x = T[ k + 3 ] - T[ k ], e1y = T[ k + 4 ] - T[ k + 1 ], e1z = T[ k + 5 ] - T[ k + 2 ];
+		const e2x = T[ k + 6 ] - T[ k ], e2y = T[ k + 7 ] - T[ k + 1 ], e2z = T[ k + 8 ] - T[ k + 2 ];
+		const px = dy * e2z - dz * e2y, py = dz * e2x - dx * e2z, pz = dx * e2y - dy * e2x;
+		const det = e1x * px + e1y * py + e1z * pz;
+		if ( Math.abs( det ) < 1e-12 ) return - 1;
+		const inv = 1 / det;
+		const tx = ox - T[ k ], ty = oy - T[ k + 1 ], tz = oz - T[ k + 2 ];
+		const u = ( tx * px + ty * py + tz * pz ) * inv;
+		if ( u < 0 || u > 1 ) return - 1;
+		const qx = ty * e1z - tz * e1y, qy = tz * e1x - tx * e1z, qz = tx * e1y - ty * e1x;
+		const v = ( dx * qx + dy * qy + dz * qz ) * inv;
+		if ( v < 0 || u + v > 1 ) return - 1;
+		return ( e2x * qx + e2y * qy + e2z * qz ) * inv;
+	};
 	return ( origin, dir ) => {
-		o.set( ...origin ); d.set( ...dir ).normalize();
-		rc.set( o, d ); rc.far = 20;
-		const hits = rc.intersectObjects( meshes, false );
-		if ( ! hits.length ) return null;
-		const h = hits[ 0 ];
-		const n = h.face.normal.clone();
-		if ( n.dot( d ) > 0 ) n.negate();
-		return { point: h.point.toArray(), normal: n.toArray() };
+		const L = Math.hypot( dir[ 0 ], dir[ 1 ], dir[ 2 ] );
+		const dx = dir[ 0 ] / L, dy = dir[ 1 ] / L, dz = dir[ 2 ] / L;
+		const [ ox, oy, oz ] = origin;
+		const axis = Math.abs( dx ) > 0.999 ? 0 : Math.abs( dy ) > 0.999 ? 1 : Math.abs( dz ) > 0.999 ? 2 : - 1;
+		let best = 20, bk = - 1;
+		const test = ( t ) => { const k = t * 9; const h = hitTri( k, ox, oy, oz, dx, dy, dz ); if ( h > 1e-6 && h < best ) { best = h; bk = k; } };
+		if ( axis < 0 ) { for ( let t = 0; t < nt; t ++ ) test( t ); }
+		else {
+			const map = grids[ axis ] ||= build( axis );
+			const [ A, B ] = other[ axis ];
+			const l = map.get( Math.floor( origin[ A ] / CS ) * 4096 + Math.floor( origin[ B ] / CS ) );
+			if ( l ) for ( const t of l ) test( t );
+		}
+		if ( bk < 0 ) return null;
+		// the face normal, turned against the ray
+		const e1x = T[ bk + 3 ] - T[ bk ], e1y = T[ bk + 4 ] - T[ bk + 1 ], e1z = T[ bk + 5 ] - T[ bk + 2 ];
+		const e2x = T[ bk + 6 ] - T[ bk ], e2y = T[ bk + 7 ] - T[ bk + 1 ], e2z = T[ bk + 8 ] - T[ bk + 2 ];
+		let nx = e1y * e2z - e1z * e2y, ny = e1z * e2x - e1x * e2z, nz = e1x * e2y - e1y * e2x;
+		const nl = Math.hypot( nx, ny, nz ) || 1;
+		nx /= nl; ny /= nl; nz /= nl;
+		if ( nx * dx + ny * dy + nz * dz > 0 ) { nx = - nx; ny = - ny; nz = - nz; }
+		return { point: [ ox + dx * best, oy + dy * best, oz + dz * best ], normal: [ nx, ny, nz ] };
 	};
 }

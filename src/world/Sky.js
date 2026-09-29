@@ -1,40 +1,66 @@
-// Sky: a sky-view LUT from the atmosphere model, a raymarched cumulus layer at quarter resolution,
-// the sun, moon and stars, the image-based lighting (PMREM of the sky) and the sun / moon lights.
+// Sky: the Hillaire atmosphere LUTs (render/Atmosphere.js), the dome (sky, sun disc, moon, stars, clouds),
+// the environment capture for image-based lighting and the key light (sun / moon) colours.
+// Ported from Tidewater src/sky/Sky.js, src/sky/Environment.js and src/App.js updateSun /
+// applyAtmosphereReadback (MIT, see LICENSE-Tidewater.txt). The sun and moon paths are ours (real latitude,
+// day of year and lunar phase).
 import * as THREE from 'three';
 import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
-import { ATMOS_GLSL, transmittanceCPU, sunDirection } from '../render/Atmosphere.js';
-import { G, COMMON_GLSL } from '../render/Materials.js';
+import { AtmosphereLUT, atmosphereTransmittance, sunDirection, SUN_ILLUMINANCE, SUN_ANGULAR_RADIUS, ATMO_RG } from '../render/Atmosphere.js';
+import { G, COMMON_GLSL, SHARED_PARS } from '../render/Materials.js';
 import { FS_VERT } from '../render/Renderer.js';
+import { Clouds, CLOUD_VIEW_GLSL } from '../render/sky/Clouds.js';
 
-const CLOUD_BASE = 900, CLOUD_TOP = 1900;
+const ENV_SIZE = 128;
+const ss = THREE.MathUtils.smoothstep;
 
-const SHARED_PARS = /* glsl */`
-	uniform float uTime; uniform vec3 uCamPos; uniform vec3 uSunDir; uniform vec3 uSunColor;
-	uniform sampler2D uSkyLUT; uniform float uFogDensity; uniform float uFogFalloff; uniform float uFogBoost;
-	uniform float uWet; uniform float uCloudCover; uniform vec2 uCloudOffset; uniform float uCloudShadowK;
-	uniform vec2 uWind; uniform float uNight; uniform float uUnderwater; uniform float uWaterLevel;
+const f = ( x ) => {
+	const s = String( x );
+	return s.includes( '.' ) || s.includes( 'e' ) ? s : s + '.0';
+};
+
+// the sun disc and the moon (Tidewater Sky.js skySunDisk / skyMoon; the moon keeps our phase terminator)
+const DISC_GLSL = /* glsl */`
+	uniform float uMoonPhase;
+	vec3 skySunDisk( vec3 dir ) {
+		float cosA = dot( dir, uSkySunDir );
+		float ang = acos( clamp( cosA, -1.0, 1.0 ) );
+		float r = ang / ${f( SUN_ANGULAR_RADIUS )};
+		float mask = smoothstep( 1.0, 0.9, r );
+		float mu = sqrt( max( 1.0 - r * r, 0.0 ) );
+		float limb = 1.0 - 0.6 * ( 1.0 - mu );
+		vec3 T = atmosphereTransmittanceToSpace( dir );
+		// physically the disc radiance is E / solid angle (~1.6e5); clamped for half float targets
+		return T * mask * limb * 2500.0 * smoothstep( -0.02, 0.0, dir.y );
+	}
+	vec3 skyMoon( vec3 dir ) {
+		vec3 m = uMoonDir;
+		float ang = acos( clamp( dot( dir, m ), -1.0, 1.0 ) );
+		float r = ang / 0.0048;
+		if ( r >= 1.0 || uStarI <= 0.0 ) return vec3( 0.0 );
+		float mask = smoothstep( 1.0, 0.92, r );
+		// phase: a lit hemisphere seen from the side
+		vec3 tx = normalize( cross( m, vec3( 0.0, 1.0, 0.0 ) ) ), ty = cross( tx, m );
+		vec2 q = vec2( dot( dir - m, tx ), dot( dir - m, ty ) ) / 0.0048;
+		float z = sqrt( max( 1.0 - dot( q, q ), 0.0 ) );
+		float lit = clamp( dot( normalize( vec3( q, z ) ), normalize( vec3( sin( uMoonPhase * 6.2831 ), 0.0, -cos( uMoonPhase * 6.2831 ) ) ) ) * 4.0, 0.0, 1.0 );
+		float maria = 0.75 + 0.25 * vnoise2( q * 3.0 + 4.0 );
+		return vec3( 0.9, 0.92, 1.0 ) * mask * 3.0 * uStarI * lit * maria * smoothstep( -0.02, 0.02, dir.y );
+	}
 `;
 
-const CLOUD_GLSL = /* glsl */`
-	const float CB = ${CLOUD_BASE.toFixed( 1 )}, CT = ${CLOUD_TOP.toFixed( 1 )};
-	float cloudDensity( vec3 p, bool detail ) {
-		float h = ( p.y - CB ) / ( CT - CB );
-		if ( h < 0.0 || h > 1.0 ) return 0.0;
-		vec2 q = ( p.xz + uCloudOffset ) / 2600.0;
-		float base = fbm2( q ) * 0.7 + fbm2( q * 3.1 + 5.2 ) * 0.3;
-		float cov = 1.0 - uCloudCover;
-		float d = base - cov;
-		if ( d < -0.08 ) return 0.0;
-		// rounded cumulus: wide bases, tops that climb where the cloud is dense
-		float top = 0.35 + clamp( d * 3.0, 0.0, 0.65 );
-		float prof = smoothstep( 0.0, 0.08, h ) * ( 1.0 - smoothstep( top * 0.6, top, h ) );
-		d = d * 3.0 * prof;
-		if ( detail ) {
-			vec3 w = p + vec3( uCloudOffset.x, 0.0, uCloudOffset.y ) * 1.3;
-			float n = vnoise2( w.xz / 210.0 + w.y / 173.0 ) * 0.55 + vnoise2( w.zx / 83.0 - w.y / 97.0 ) * 0.3 + vnoise2( w.xz / 31.0 + w.y / 41.0 ) * 0.15;
-			d -= ( n - 0.25 ) * 0.28 * ( 1.0 - h * 0.3 );
-		}
-		return clamp( d, 0.0, 1.0 ) * 0.045;
+// cube face texel -> direction (GL cube conventions; Tidewater Environment.js envCubeDir)
+const CUBE_DIR_GLSL = /* glsl */`
+	vec3 envCubeDir( int face, vec2 st ) {
+		float u = st.x * 2.0 - 1.0;
+		float v = st.y * 2.0 - 1.0;
+		vec3 d;
+		if ( face == 0 ) d = vec3( 1.0, -v, -u );
+		else if ( face == 1 ) d = vec3( -1.0, -v, u );
+		else if ( face == 2 ) d = vec3( u, 1.0, v );
+		else if ( face == 3 ) d = vec3( u, -1.0, -v );
+		else if ( face == 4 ) d = vec3( u, -v, 1.0 );
+		else d = vec3( -u, -v, -1.0 );
+		return normalize( d );
 	}
 `;
 
@@ -44,114 +70,48 @@ export class Sky {
 		this.settings = settings;
 		this.hour = 9;
 		this.day = 120;
-		this.sunDir = new THREE.Vector3();
+		this.sunDir = new THREE.Vector3(); // the real sun
 		this.moonDir = new THREE.Vector3();
-		this.sunColor = new THREE.Color();
+		this.moonPhase = 0.5;
+		this.sunColor = new THREE.Color(); // sea-level sun light (0 below the horizon)
+		this.moonColor = new THREE.Color();
+		this.keyDir = new THREE.Vector3( 0, 1, 0 ); // the key light: the sun, the moon once the sun is well down
+		this.keyColor = new THREE.Color();
+		this.useMoon = false;
 		this.ambient = new THREE.Color();
+		this.skyIrradiance = new THREE.Vector3( 0.09, 0.18, 0.38 ); // E / PI, before the night ambient
+		this.horizonColor = new THREE.Vector3( 0.6, 0.7, 0.8 );
+		this.night = 0;
 		this.haze = 1;
-		this.cloudCover = 0.34;
+		this.cloudCover = 0.49;
 		this.cloudOffset = new THREE.Vector2( 0, 0 );
+		this._T = new THREE.Vector3();
 
-		// ---- sky-view LUT ----
-		this.lut = new THREE.WebGLRenderTarget( 256, 128, { type: THREE.HalfFloatType, depthBuffer: false } );
-		this.lut.texture.wrapS = THREE.RepeatWrapping;
-		this.lut.texture.minFilter = this.lut.texture.magFilter = THREE.LinearFilter;
-		this.lut.texture.generateMipmaps = false;
-		G.uSkyLUT.value = this.lut.texture;
-		this.lutPass = new FullScreenQuad( new THREE.ShaderMaterial( {
-			name: 'SkyLUT',
-			uniforms: { uSun: { value: new THREE.Vector3() }, uMoon: { value: new THREE.Vector3() }, uAlt: { value: 0 }, uHaze: { value: 1 }, uMoonI: { value: 0 } },
-			vertexShader: FS_VERT,
-			fragmentShader: /* glsl */`
-				uniform vec3 uSun; uniform vec3 uMoon; uniform float uAlt; uniform float uHaze; uniform float uMoonI; varying vec2 vUv;
-				${ATMOS_GLSL}
-				void main() {
-					float az = ( vUv.x - 0.5 ) * 6.2831853;
-					float s = vUv.y * 2.0 - 1.0;
-					float el = sign( s ) * s * s * 1.5707963;
-					vec3 d = vec3( sin( az ) * cos( el ), sin( el ), -cos( az ) * cos( el ) );
-					vec3 c = atmSky( d, uSun, uAlt, uHaze, 22.0 );
-					c += atmSky( d, uMoon, uAlt, uHaze, 22.0 ) * uMoonI;
-					// night sky floor (airglow / starlight)
-					c += vec3( 0.0009, 0.0013, 0.0024 ) * ( 0.6 + 0.4 * max( d.y, 0.0 ) );
-					gl_FragColor = vec4( c, 1.0 );
-				}`,
-			depthTest: false, depthWrite: false,
-		} ) );
+		// ---- atmosphere LUTs
+		this.atmo = new AtmosphereLUT( renderer.gl );
+		G.uSkyLUT.value = this.atmo.skyViewTexture;
+		G.uTransLUT.value = this.atmo.transmittanceTexture;
+		this.atmo.onIrradiance = ( a ) => {
+			this.skyIrradiance.fromArray( a.skyIrradiance );
+			this.horizonColor.fromArray( a.horizon );
+		};
 
-		// ---- clouds (quarter resolution) ----
-		this.cloudRT = new THREE.WebGLRenderTarget( 4, 4, { type: THREE.HalfFloatType, depthBuffer: false } );
-		this.cloudRT.texture.minFilter = this.cloudRT.texture.magFilter = THREE.LinearFilter;
-		this.cloudRT.texture.generateMipmaps = false;
-		this.cloudPass = new FullScreenQuad( new THREE.ShaderMaterial( {
-			name: 'Clouds',
-			uniforms: Object.assign( {
-				uInvProj: { value: new THREE.Matrix4() }, uCamWorld: { value: new THREE.Matrix4() }, uFrame: { value: 0 }, uSteps: { value: 36 },
-				uAmbTop: { value: new THREE.Color() }, uAmbBottom: { value: new THREE.Color() }, uMoonDir: { value: new THREE.Vector3() }, uMoonColor: { value: new THREE.Color() },
-			}, G ),
-			vertexShader: FS_VERT,
-			fragmentShader: /* glsl */`
-				${SHARED_PARS}
-				uniform mat4 uInvProj; uniform mat4 uCamWorld; uniform float uFrame; uniform float uSteps;
-				uniform vec3 uAmbTop; uniform vec3 uAmbBottom; uniform vec3 uMoonDir; uniform vec3 uMoonColor;
-				varying vec2 vUv;
-				${COMMON_GLSL}
-				${CLOUD_GLSL}
-				float hg( float mu, float g ) { float g2 = g * g; return ( 1.0 - g2 ) / ( 12.566 * pow( 1.0 + g2 - 2.0 * g * mu, 1.5 ) ); }
-				void main() {
-					vec4 vp = uInvProj * vec4( vUv * 2.0 - 1.0, 0.5, 1.0 );
-					vec3 rd = normalize( ( uCamWorld * vec4( normalize( vp.xyz / vp.w ), 0.0 ) ).xyz );
-					vec3 ro = uCamPos;
-					float t0, t1;
-					if ( rd.y > 0.0 ) { t0 = max( 0.0, ( CB - ro.y ) / rd.y ); t1 = ( CT - ro.y ) / rd.y; }
-					else if ( rd.y < 0.0 && ro.y > CB ) { t0 = max( 0.0, ( CT - ro.y ) / rd.y ); t1 = ( CB - ro.y ) / rd.y; }
-					else { gl_FragColor = vec4( 0.0, 0.0, 0.0, 1.0 ); return; }
-					t1 = min( t1, 60000.0 );
-					if ( t1 <= t0 ) { gl_FragColor = vec4( 0.0, 0.0, 0.0, 1.0 ); return; }
-					const int STEPS = 36;
-					float seg = ( t1 - t0 ) / uSteps;
-					float jit = hash12( gl_FragCoord.xy + uFrame * 7.13 );
-					vec3 sun = normalize( uSunDir );
-					bool moonLit = sun.y < -0.05;
-					vec3 L = moonLit ? normalize( uMoonDir ) : sun;
-					vec3 Lc = moonLit ? uMoonColor : uSunColor;
-					float mu = dot( rd, L );
-					float phase = mix( hg( mu, 0.6 ), hg( mu, -0.25 ), 0.3 ) * 2.2 + 0.08;
-					float T = 1.0; vec3 S = vec3( 0.0 );
-					for ( int i = 0; i < STEPS; i ++ ) {
-						if ( float( i ) >= uSteps ) break;
-						vec3 p = ro + rd * ( t0 + ( float( i ) + jit ) * seg );
-						float d = cloudDensity( p, true );
-						if ( d > 0.0 ) {
-							// light march towards the sun
-							float od = 0.0;
-							for ( int k = 1; k <= 4; k ++ ) od += cloudDensity( p + L * float( k * k ) * 32.0, false ) * float( 2 * k - 1 ) * 32.0;
-							float beer = exp( -od * 1.1 ) ;
-							float powder = 1.0 - exp( -d * seg * 2.0 );
-							float hf = clamp( ( p.y - CB ) / ( CT - CB ), 0.0, 1.0 );
-							vec3 amb = mix( uAmbBottom, uAmbTop, hf );
-							vec3 lum = Lc * beer * phase * mix( 1.0, powder * 2.0, 0.35 ) + amb;
-							float a = exp( -d * seg );
-							S += T * lum * ( 1.0 - a );
-							T *= a;
-							if ( T < 0.02 ) break;
-						}
-					}
-					// fade into the haze with distance
-					float fade = exp( -t0 / 42000.0 );
-					gl_FragColor = vec4( S * fade, mix( 1.0, T, fade ) );
-				}`,
-			depthTest: false, depthWrite: false,
-		} ) );
+		// ---- volumetric clouds (render/sky/Clouds.js): view history, panorama, ground shadow
+		this.clouds = new Clouds( renderer.gl );
+		this.cloudDensityK = 1;
+		this.cloudAmbientK = 1;
+		this.viewSize = new THREE.Vector2( 1, 1 );
 
-		// ---- sky dome: a full-screen triangle drawn where nothing else wrote depth ----
+		// ---- sky dome: a full-screen triangle drawn where nothing else wrote depth (Tidewater skyViewRadiance)
 		const geo = new THREE.BufferGeometry();
 		geo.setAttribute( 'position', new THREE.Float32BufferAttribute( [ - 1, - 1, 0, 3, - 1, 0, - 1, 3, 0 ], 3 ) );
 		this.domeMat = new THREE.ShaderMaterial( {
 			name: 'SkyDome',
 			uniforms: Object.assign( {
-				uInvProj: { value: new THREE.Matrix4() }, uCamWorld: { value: new THREE.Matrix4() }, uClouds: { value: this.cloudRT.texture },
-				uMoonDir: { value: new THREE.Vector3() }, uMoonPhase: { value: 0.5 }, uStars: { value: 1 }, uCloudsOn: { value: 1 },
+				uInvProj: { value: new THREE.Matrix4() }, uCamWorld: { value: new THREE.Matrix4() },
+				uMoonPhase: { value: 0.5 }, uCloudsOn: { value: 1 },
+				uCloudView: { value: null }, uCvRight: { value: this.clouds.viewRight }, uCvUp: { value: this.clouds.viewUp },
+				uCvFwd: { value: this.clouds.viewFwd }, uCvTan: { value: this.clouds.viewTan }, uCvValid: { value: 0 },
 			}, G ),
 			defines: { REVERSED: this.r.reversed ? 1 : 0 },
 			vertexShader: /* glsl */`
@@ -159,63 +119,19 @@ export class Sky {
 				void main() { vNdc = position.xy; gl_Position = vec4( position.xy, REVERSED == 1 ? 0.0 : 1.0, 1.0 ); }`,
 			fragmentShader: /* glsl */`
 				${SHARED_PARS}
-				uniform mat4 uInvProj; uniform mat4 uCamWorld; uniform sampler2D uClouds;
-				uniform vec3 uMoonDir; uniform float uMoonPhase; uniform float uStars; uniform float uCloudsOn;
+				uniform mat4 uInvProj; uniform mat4 uCamWorld; uniform float uCloudsOn;
 				varying vec2 vNdc;
 				${COMMON_GLSL}
-				vec3 starField( vec3 d ) {
-					vec3 c = vec3( 0.0 );
-					for ( int l = 0; l < 2; l ++ ) {
-						float sc = l == 0 ? 180.0 : 420.0;
-						vec3 p = d * sc;
-						vec3 cell = floor( p );
-						float h = hash12( cell.xy + cell.z * 17.31 );
-						if ( h > 0.985 ) {
-							vec3 cp = cell + 0.5 + ( vec3( hash12( cell.yz ), hash12( cell.zx ), hash12( cell.xy + 3.0 ) ) - 0.5 ) * 0.6;
-							float r = length( p - cp );
-							float tw = 0.7 + 0.3 * sin( uTime * ( 2.0 + h * 5.0 ) + h * 40.0 );
-							c += mix( vec3( 0.7, 0.8, 1.0 ), vec3( 1.0, 0.85, 0.7 ), fract( h * 97.0 ) ) * smoothstep( 0.18, 0.0, r ) * ( h - 0.985 ) * 400.0 * tw * ( l == 0 ? 1.0 : 0.45 );
-						}
-					}
-					return c * 0.004;
-				}
+				${DISC_GLSL}
+				${CLOUD_VIEW_GLSL}
 				void main() {
 					vec4 vp = uInvProj * vec4( vNdc, 0.5, 1.0 );
 					vec3 d = normalize( ( uCamWorld * vec4( normalize( vp.xyz / vp.w ), 0.0 ) ).xyz );
-					vec3 c = texture2D( uSkyLUT, skyLutUv( d ) ).rgb;
-					vec3 s = normalize( uSunDir );
-					// below the horizon the sea haze takes over
-					float mu = dot( d, s );
-					float disk = smoothstep( 0.99995, 0.999985, mu );
-					c += uSunColor * disk * 60.0;
-					c += uSunColor * pow( max( mu, 0.0 ), 900.0 ) * 1.6;
-					// moon and stars
-					float night = uNight;
-					vec3 m = normalize( uMoonDir );
-					float mm = dot( d, m );
-					if ( mm > 0.9995 && m.y > -0.05 ) {
-						vec3 tx = normalize( cross( m, vec3( 0, 1, 0 ) ) ), ty = cross( tx, m );
-						vec2 q = vec2( dot( d - m, tx ), dot( d - m, ty ) ) / 0.0316;
-						float rr = length( q );
-						if ( rr < 1.0 ) {
-							float z = sqrt( 1.0 - rr * rr );
-							float lit = clamp( dot( normalize( vec3( q, z ) ), normalize( vec3( sin( uMoonPhase * 6.2831 ), 0.0, -cos( uMoonPhase * 6.2831 ) ) ) ) * 4.0, 0.0, 1.0 );
-							float maria = 0.75 + 0.25 * vnoise2( q * 3.0 + 4.0 );
-							c += vec3( 0.95, 0.93, 0.88 ) * lit * maria * 1.4 * smoothstep( 1.0, 0.96, rr );
-						}
-					}
-					c += vec3( 0.55, 0.62, 0.8 ) * pow( max( mm, 0.0 ), 400.0 ) * 0.06 * night;
-					c += starField( d ) * night * uStars * smoothstep( -0.02, 0.15, d.y );
-					// clouds
-					if ( uCloudsOn > 0.5 ) {
-						vec4 cl = texture2D( uClouds, gl_FragCoord.xy / vec2( textureSize( uClouds, 0 ) ) * 0.25 );
-						c = c * cl.a + cl.rgb;
-					}
-					// the horizon band fades into the fog colour so distant islands and sky meet
-					float hz = 1.0 - smoothstep( -0.02, 0.06, d.y );
-					vec3 hv = normalize( vec3( d.x, 0.035, d.z ) );
-					c = mix( c, texture2D( uSkyLUT, skyLutUv( hv ) ).rgb * 0.95, hz * 0.8 );
-					gl_FragColor = vec4( c, 1.0 );
+					vec3 base = skyBackground( d, 1.0 ) + skyMoon( d );
+					vec3 sun = skySunDisk( d );
+					vec4 cl = vec4( 0.0, 0.0, 0.0, 1.0 );
+					if ( uCloudsOn > 0.5 ) cl = cloudsSampleView( d );
+					gl_FragColor = vec4( base * cl.a + sun * cloudsSunTransmittance( cl.a ) + cl.rgb, 1.0 );
 				}`,
 			depthTest: true, depthWrite: false,
 		} );
@@ -223,123 +139,139 @@ export class Sky {
 		this.dome.frustumCulled = false;
 		this.dome.renderOrder = 1000;
 
-		// ---- environment lighting ----
+		// ---- environment lighting: the sky (no sun or moon disc: the key light is lit directly) captured
+		// into a cube one face per frame, then prefiltered by three's PMREM into the same target each time
 		this.pmrem = new THREE.PMREMGenerator( this.r.gl );
-		this.envScene = new THREE.Scene();
-		const envMat = new THREE.ShaderMaterial( {
-			uniforms: Object.assign( {}, G ),
-			vertexShader: /* glsl */`varying vec3 vDir; void main() { vDir = position; gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 ); }`,
+		this.envCube = new THREE.WebGLCubeRenderTarget( ENV_SIZE, { type: THREE.HalfFloatType, generateMipmaps: false, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false } );
+		this.envFace = new FullScreenQuad( new THREE.ShaderMaterial( {
+			name: 'EnvFace',
+			uniforms: Object.assign( { uFace: { value: 0 } }, G ),
+			vertexShader: FS_VERT,
 			fragmentShader: /* glsl */`
 				${SHARED_PARS}
-				varying vec3 vDir;
+				uniform int uFace;
 				${COMMON_GLSL}
+				${CUBE_DIR_GLSL}
 				void main() {
-					vec3 d = normalize( vDir );
-					vec3 c = texture2D( uSkyLUT, skyLutUv( vec3( d.x, max( d.y, 0.02 ), d.z ) ) ).rgb;
-					// ground: a warm bounce from sunlit land / sea
-					float g = smoothstep( 0.05, -0.15, d.y );
-					vec3 ground = uSunColor * max( normalize( uSunDir ).y, 0.0 ) * vec3( 0.16, 0.15, 0.12 ) + c * 0.25;
-					c = mix( c, ground, g );
-					// overcast greys the sky dome
-					c = mix( c, vec3( dot( c, vec3( 0.3, 0.5, 0.2 ) ) ) * 1.1, uCloudCover * 0.45 );
-					gl_FragColor = vec4( c, 1.0 );
+					vec3 dir = envCubeDir( uFace, gl_FragCoord.xy / ${f( ENV_SIZE )} );
+					gl_FragColor = vec4( skyReflectionRadiance( dir ), 1.0 );
 				}`,
-			side: THREE.BackSide, depthWrite: false,
-		} );
-		this.envScene.add( new THREE.Mesh( new THREE.SphereGeometry( 10, 32, 16 ), envMat ) );
-		this.envTarget = null;
-		this.envAge = 1e9;
+			depthTest: false, depthWrite: false,
+		} ) );
+		this.envRT = null;
+		this.envStep = - 1;
+		this.envTimer = 0;
 		this.lastEnvSun = new THREE.Vector3( 0, - 2, 0 );
 
-		// ---- lights ----
+		// ---- lights (kept for the scene graph; the sky light is the environment)
 		this.ambientLight = new THREE.HemisphereLight( 0xbfd8ff, 0x3a3020, 0.0 );
 		this.frame = 0;
-		this.lutAge = 1e9;
 	}
 
 	resize( w, h ) {
-		this.cloudRT.setSize( Math.max( 1, w >> 2 ), Math.max( 1, h >> 2 ) );
+		this.viewSize.set( Math.max( 1, w ), Math.max( 1, h ) );
 	}
 
-	// hour 0..24; updates directions and colours
+	// hour 0..24; updates the sun and moon directions
 	setTime( hour, day ) {
 		this.hour = hour; this.day = day;
 		sunDirection( hour, day, 20.5, this.sunDir );
-		// the moon: roughly opposite, shifted by the phase through a 29.5-day cycle
-		const phase = ( day % 29.53 ) / 29.53;
+		// the moon lags the sun by the phase through a 29.5-day cycle (0 new, 0.5 full); the game starts
+		// a couple of days after the full moon
+		const phase = ( ( day + 15 ) % 29.53 ) / 29.53;
 		this.moonPhase = phase;
-		sunDirection( ( hour + 12 + phase * 24 ) % 24, day + 7, 20.5, this.moonDir );
+		sunDirection( ( ( hour - phase * 24 ) % 24 + 24 ) % 24, day + 7, 20.5, this.moonDir );
 	}
 
 	update( dt, camera, scene, settings ) {
 		this.frame ++;
 		const s = this.sunDir;
-		// light colours from the CPU atmosphere
-		const alt = Math.max( 0, camera.position.y ) * 6; // real metres
-		const tr = transmittanceCPU( alt, s, this.haze );
-		const dayF = THREE.MathUtils.smoothstep( s.y, - 0.12, 0.08 );
-		this.sunColor.setRGB( tr.x, tr.y, tr.z ).multiplyScalar( 3.4 * dayF );
-		const night = 1 - THREE.MathUtils.smoothstep( s.y, - 0.2, 0.02 );
+		const gl = this.r.gl;
+		// ---- atmosphere: LUTs and the readback (altitude in real metres: the world is 1:6 vertically)
+		this.atmo.update( dt, s, Math.max( 0, camera.position.y ) * 6 );
+		G.uAtmoR.value = this.atmo.viewHeight;
+		G.uSkySunDir.value.copy( s );
+
+		// ---- light colours (Tidewater App.js updateSun / applyAtmosphereReadback)
+		atmosphereTransmittance( ATMO_RG + 0.001, s.y, this._T );
+		const horizonFade = ss( s.y, - 0.03, 0.02 );
+		this.sunColor.setRGB( this._T.x, this._T.y, this._T.z ).multiplyScalar( SUN_ILLUMINANCE * horizonFade );
+		const night = ss( - s.y, 0.02, 0.18 );
 		this.night = night;
-		const moonUp = THREE.MathUtils.smoothstep( this.moonDir.y, - 0.05, 0.15 );
+		const nb = this.settings.get( 'nightBrightness' ) ?? 1;
+		const moonUp = ss( this.moonDir.y, - 0.05, 0.15 );
 		const moonBright = 0.5 - 0.5 * Math.cos( this.moonPhase * Math.PI * 2 );
-		this.moonColor = new THREE.Color( 0.55, 0.65, 0.9 ).multiplyScalar( 0.12 * moonUp * ( 0.3 + 0.7 * moonBright ) * night * this.settings.get( 'nightBrightness' ) );
-		G.uSunDir.value.copy( s );
-		G.uSunColor.value.copy( this.sunColor );
+		const moonK = ( 0.3 + 0.7 * moonBright ) * moonUp;
+		this.moonColor.setRGB( 0.6, 0.7, 1.0 ).multiplyScalar( 0.12 * night * moonK * nb );
+		// key light: the sun until it is well below the horizon (no direct light in twilight anyway), then the moon
+		this.useMoon = s.y <= - 0.07;
+		this.keyDir.copy( this.useMoon ? this.moonDir : s );
+		this.keyColor.copy( this.useMoon ? this.moonColor : this.sunColor );
+		G.uSunDir.value.copy( this.keyDir );
+		G.uSunColor.value.copy( this.keyColor );
 		G.uNight.value = night;
+		G.uStarI.value = night;
+		G.uMoonDir.value.copy( this.moonDir );
+		G.uMoonBright.value = moonK * nb;
+		const nightAmb = 0.012 * night * nb;
+		G.uSkyIrr.value.set( this.skyIrradiance.x + nightAmb * 0.6, this.skyIrradiance.y + nightAmb * 0.7, this.skyIrradiance.z + nightAmb );
+		G.uHorizon.value.copy( this.horizonColor );
 		G.uCloudCover.value = this.cloudCover;
 		this.cloudOffset.x += G.uWind.value.x * dt * 6;
 		this.cloudOffset.y += G.uWind.value.y * dt * 6;
 		G.uCloudOffset.value.copy( this.cloudOffset );
 
-		// LUT every few frames
-		this.lutAge += dt;
-		if ( this.lutAge > 0.25 ) {
-			this.lutAge = 0;
-			const u = this.lutPass.material.uniforms;
-			u.uSun.value.copy( s ); u.uMoon.value.copy( this.moonDir ); u.uAlt.value = alt; u.uHaze.value = this.haze;
-			u.uMoonI.value = 0.000025 * moonBright * night;
-			const gl = this.r.gl;
-			const prev = gl.getRenderTarget();
-			gl.setRenderTarget( this.lut );
-			this.lutPass.render( gl );
-			gl.setRenderTarget( prev );
-		}
-		// environment (IBL) when the sun moved or the weather changed
-		this.envAge += dt;
-		if ( this.envAge > 4 || s.distanceTo( this.lastEnvSun ) > 0.02 ) {
-			this.envAge = 0; this.lastEnvSun.copy( s );
-			const rt = this.pmrem.fromScene( this.envScene, 0, 0.1, 100 );
-			if ( this.envTarget ) this.envTarget.dispose();
-			this.envTarget = rt;
-			scene.environment = rt.texture;
-		}
-		scene.environmentIntensity = 0.85 * ( 1 - this.cloudCover * 0.2 );
-
-		// clouds
-		const cloudsOn = this.settings.get( 'clouds' ) !== 'off';
+		// ---- clouds
+		const cq = this.settings.get( 'clouds' );
+		const cloudsOn = cq !== 'off';
 		this.domeMat.uniforms.uCloudsOn.value = cloudsOn ? 1 : 0;
-		const cu = this.cloudPass.material.uniforms;
-		cu.uInvProj.value.copy( camera.projectionMatrixInverse );
-		cu.uCamWorld.value.copy( camera.matrixWorld );
-		cu.uFrame.value = this.frame % 64;
-		cu.uSteps.value = this.settings.get( 'clouds' ) === 'low' ? 18 : 36;
-		const top = new THREE.Color().setRGB( 0.35, 0.45, 0.6 ).multiplyScalar( dayF * 0.9 + 0.01 );
-		cu.uAmbTop.value.copy( top ).lerp( new THREE.Color( 0.7, 0.72, 0.75 ), 0.3 ).multiplyScalar( 1.0 + this.sunColor.r * 0.15 );
-		cu.uAmbBottom.value.copy( top ).multiplyScalar( 0.55 ).add( new THREE.Color( 0.05, 0.05, 0.045 ).multiplyScalar( dayF ) );
-		cu.uMoonDir.value.copy( this.moonDir );
-		cu.uMoonColor.value.copy( this.moonColor ).multiplyScalar( 6 );
 		if ( cloudsOn ) {
-			const gl = this.r.gl;
-			const prev = gl.getRenderTarget();
-			gl.setRenderTarget( this.cloudRT );
-			this.cloudPass.render( gl );
-			gl.setRenderTarget( prev );
-		}
+			this.clouds.update( dt, camera, this.viewSize.x, this.viewSize.y, { coverage: this.cloudCover, densityK: this.cloudDensityK, ambientK: this.cloudAmbientK, quality: cq === 'low' ? 'low' : 'high' } );
+			this.domeMat.uniforms.uCloudView.value = this.clouds.viewTex;
+			this.domeMat.uniforms.uCvValid.value = this.clouds.viewValid;
+		} else this.clouds.disable();
 		const du = this.domeMat.uniforms;
 		du.uInvProj.value.copy( camera.projectionMatrixInverse );
 		du.uCamWorld.value.copy( camera.matrixWorld );
-		du.uMoonDir.value.copy( this.moonDir );
 		du.uMoonPhase.value = this.moonPhase;
+
+		// ---- environment: one cube face per frame, then the prefilter; refreshed when the sun moved or
+		// every 3 s so drifting clouds stay in sync (Tidewater Environment.js update)
+		this._updateEnv( dt, scene );
+	}
+
+	_updateEnv( dt, scene ) {
+		const gl = this.r.gl;
+		const sun = this.sunDir;
+		this.envTimer -= dt;
+		const prev = gl.getRenderTarget();
+		const face = ( i ) => {
+			this.envFace.material.uniforms.uFace.value = i;
+			gl.setRenderTarget( this.envCube, i );
+			this.envFace.render( gl );
+		};
+		const filter = () => {
+			this.envRT = this.pmrem.fromCubemap( this.envCube.texture, this.envRT );
+			scene.environment = this.envRT.texture;
+		};
+		if ( ! this.envRT ) {
+			for ( let i = 0; i < 6; i ++ ) face( i );
+			filter();
+			this.envTimer = 3;
+			this.lastEnvSun.copy( sun );
+		} else {
+			if ( this.envStep < 0 && ( sun.angleTo( this.lastEnvSun ) > 0.004 || this.envTimer <= 0 ) ) {
+				this.envTimer = 3;
+				this.lastEnvSun.copy( sun );
+				this.envStep = 0;
+			}
+			if ( this.envStep >= 0 ) {
+				if ( this.envStep < 6 ) face( this.envStep );
+				else filter();
+				this.envStep = this.envStep >= 6 ? - 1 : this.envStep + 1;
+			}
+		}
+		gl.setRenderTarget( prev );
+		scene.environmentIntensity = 1;
 	}
 }

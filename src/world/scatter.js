@@ -151,6 +151,36 @@ function nearRoad( seg, x, z, clear ) {
 	return false;
 }
 
+// the road / street segments near each 8 m square of a cell (many dense lattices test every point)
+class SegGrid {
+	constructor( seg, x0, z0, size, clear ) {
+		this.seg = seg; this.x0 = x0; this.z0 = z0; this.n = Math.ceil( size / 8 );
+		this.cells = Array.from( { length: this.n * this.n }, () => [] );
+		if ( ! seg ) return;
+		for ( let k = 0; k < seg.length; k += 6 ) {
+			const r = seg[ k + 4 ] + clear + 1;
+			const i0 = Math.max( 0, Math.floor( ( Math.min( seg[ k ], seg[ k + 2 ] ) - r - x0 ) / 8 ) ), i1 = Math.min( this.n - 1, Math.floor( ( Math.max( seg[ k ], seg[ k + 2 ] ) + r - x0 ) / 8 ) );
+			const j0 = Math.max( 0, Math.floor( ( Math.min( seg[ k + 1 ], seg[ k + 3 ] ) - r - z0 ) / 8 ) ), j1 = Math.min( this.n - 1, Math.floor( ( Math.max( seg[ k + 1 ], seg[ k + 3 ] ) + r - z0 ) / 8 ) );
+			for ( let j = j0; j <= j1; j ++ ) for ( let i = i0; i <= i1; i ++ ) this.cells[ j * this.n + i ].push( k );
+		}
+	}
+	near( x, z, clear ) {
+		const i = Math.floor( ( x - this.x0 ) / 8 ), j = Math.floor( ( z - this.z0 ) / 8 );
+		if ( i < 0 || j < 0 || i >= this.n || j >= this.n ) return nearRoad( this.seg, x, z, clear );
+		const seg = this.seg;
+		for ( const k of this.cells[ j * this.n + i ] ) {
+			const ax = seg[ k ], az = seg[ k + 1 ], ex = seg[ k + 2 ] - ax, ez = seg[ k + 3 ] - az;
+			const L2 = ex * ex + ez * ez;
+			let t = L2 > 0 ? ( ( x - ax ) * ex + ( z - az ) * ez ) / L2 : 0;
+			t = t < 0 ? 0 : t > 1 ? 1 : t;
+			const dx = x - ( ax + ex * t ), dz = z - ( az + ez * t );
+			const r = seg[ k + 4 ] + clear;
+			if ( dx * dx + dz * dz < r * r ) return true;
+		}
+		return false;
+	}
+}
+
 // ---- output accumulation ---------------------------------------------------------------------------------
 
 class Out {
@@ -258,7 +288,7 @@ function canopy( ctx ) {
 		const slopeK = 1 - sstep( 0.55, 1.05, e.sl );
 		// clearings and groves so forests aren't a uniform carpet
 		// (the wettest forests close up: fewer, smaller clearings)
-		const clear = 0.3 + 0.7 * Math.max( sstep( 0.28, 0.5, vnoise( x / 230, z / 230, 11 ) ), sstep( 0.75, 0.95, e.m ) * 0.6 );
+		const clear = 0.42 + 0.58 * Math.max( sstep( 0.28, 0.5, vnoise( x / 230, z / 230, 11 ) ), sstep( 0.75, 0.95, e.m ) * 0.6 );
 		const grove = sstep( 0.4, 0.66, vnoise( x / 150, z / 150, 7 ) );
 		const pasture = e.use === 3 ? 1 : 0;
 		const fresh = sstep( 0.45, 0.75, lava ); // young flows: nearly bare
@@ -267,13 +297,13 @@ function canopy( ctx ) {
 		W[ 0 ] = ( coast * ( 0.08 + 0.55 * grove ) + ( h < 55 && m > 0.2 ? 0.012 : 0 ) ) * ( 1 - fresh * 0.8 );
 		W[ 1 ] = 0.03 * band( h, 1, 4, 140, 200 ) * band( m, 0.15, 0.25, 0.7, 0.85 ) * ( 1 + pasture * 0.6 );
 		W[ 2 ] = 0.1 * sstep( 0.45, 0.72, m ) * band( h, 3, 10, 230, 300 ) * ( 0.5 + Math.min( 1, e.sl * 1.5 ) ) * clear;
-		W[ 3 ] = ( 0.58 * sstep( 0.4, 0.78, m ) * band( h, 25, 60, 480, 540 ) * clear + 0.07 * band( lava, 0.2, 0.3, 0.6, 0.8 ) * sstep( 0.22, 0.4, m ) * ( h > 20 ? 1 : 0 ) );
+		W[ 3 ] = ( 0.72 * sstep( 0.4, 0.78, m ) * band( h, 25, 60, 480, 540 ) * clear + 0.07 * band( lava, 0.2, 0.3, 0.6, 0.8 ) * sstep( 0.22, 0.4, m ) * ( h > 20 ? 1 : 0 ) );
 		W[ 4 ] = ( ctx.isl === 5 && h > 50 ? 0.09 * ( 0.3 + grove ) : 0 ) + 0.012 * band( h, 130, 170, 420, 480 ) * band( m, 0.25, 0.3, 0.6, 0.7 ) + pasture * 0.008;
 		W[ 5 ] = 0.05 * sstep( 200, 60, sd ) * ( h < 45 ? 1 : 0 ) * band( m, 0.05, 0.12, 0.42, 0.55 ) + 0.022 * band( h, 50, 80, 330, 380 ) * band( m, 0.22, 0.3, 0.48, 0.58 );
 		W[ 6 ] = 0.15 * sstep( 0.33, 0.12, m ) * band( h, 0.8, 2, 130, 180 ) * ( 1 - fresh * 0.6 );
 		let sum = 0;
 		for ( let k = 0; k < 7; k ++ ) sum += W[ k ];
-		const p = Math.min( 0.82, sum * alt * slopeK * ( pasture ? 0.25 : 1 ) * ( 1 - fresh * 0.75 ) ) * wild * wild;
+		const p = Math.min( 0.88, sum * alt * slopeK * ( pasture ? 0.25 : 1 ) * ( 1 - fresh * 0.75 ) ) * wild * wild;
 		if ( p <= 0 || hash2( gi, gj, 111 ) >= p ) return;
 		// species by weight
 		let r = hash2( gi, gj, 112 ) * sum, k = 0;
@@ -313,7 +343,7 @@ function placeTree( ctx, sp, x, z, gi, gj, e, salt = 0 ) {
 	switch ( sp ) {
 		case SP.MONKEYPOD: s = 0.75 + 0.55 * r1; break;
 		case SP.KUKUI: s = 0.7 + 0.5 * r1; break;
-		case SP.OHIA: s = ( 0.55 + 0.65 * r1 ) * ( e.lava > 0.3 ? 0.6 : 1 ) * ( e.h > 380 ? 0.7 : 1 ); break;
+		case SP.OHIA: s = ( 0.62 + 0.62 * r1 ) * ( e.lava > 0.3 ? 0.6 : 1 ) * ( e.h > 380 ? 0.7 : 1 ); break;
 		case SP.PINE: s = 0.7 + 0.5 * r1; a = r2 * 0.045; b = 3.3 + ( r3 - 0.5 ) * 0.8; break; // Cook pines lean towards the equator (south)
 		case SP.IRONWOOD: s = 0.7 + 0.5 * r1; break;
 		case SP.KIAWE: s = 0.65 + 0.55 * r1; a = 0.8 + 0.35 * r2; break;
@@ -490,10 +520,12 @@ function crops( ctx ) {
 
 // ---- grass clumps (32 m cells around the player) --------------------------------------------------------
 
-const GRASS_SP = 0.95;
+// ~3.7 clumps / m² (x 9 blades near the camera, see buildGrassClump)
+const GRASS_SP = 0.52;
 function grass( ctx ) {
 	const { env, e, x0, z0, size } = ctx;
 	const ground = new MeshGround( ctx.hf, x0, z0, size );
+	const roads = new SegGrid( ctx.seg, x0, z0, size, 0.4 );
 	lattice( ctx, GRASS_SP, 401, ( x, z, gi, gj ) => {
 		env.at( x, z, e );
 		const h = e.h;
@@ -506,7 +538,9 @@ function grass( ctx ) {
 		const city = ( e.flags & FLAG.CITY ) ? 1 : 0;
 		if ( ! city && ( hash2( gi, gj, 416 ) < e.u || nearBuilding( ctx.bld, x, z, 6 ) ) ) return;
 		let d = 0.3 + 0.7 * sstep( 0.06, 0.38, m );
-		d *= 1 - sstep( 0.72, 0.95, m ) * 0.45; // shady forest floor
+		// where the terrain paints the rain forest's floor (Terrain.js jungleW) only a little grass grows
+		const wetM = Math.min( 1, m * 1.15 + 0.14 );
+		d *= 1 - sstep( 0.52, 0.8, wetM ) * ( e.use === 3 ? 0.15 : 0.8 );
 		d *= 1 - sstep( 0.35, 0.6, e.lava ) * 0.85;
 		d *= 1 - sstep( 0.6, 0.95, e.sl );
 		d *= 1 - sstep( 480, 600, h ) * 0.8;
@@ -514,12 +548,19 @@ function grass( ctx ) {
 		if ( city ) d = 0.5;
 		if ( e.use === 3 ) d = Math.max( d, 0.9 );
 		if ( hash2( gi, gj, 411 ) >= d ) return;
-		if ( city && ( nearBuilding( ctx.bld, x, z, 0.8 ) || nearRoad( ctx.seg, x, z, 0.4 ) ) ) return;
-		const r1 = hash2( gi, gj, 412 ), r2 = hash2( gi, gj, 413 );
-		const dry = city ? 0.1 * r2 : Math.min( 1, Math.max( 0, 1 - sstep( 0.1, 0.48, m ) + ( vnoise( x / 17, z / 17, 43 ) - 0.5 ) * 0.4 + e.lava * 0.4 ) );
+		// clear of the pavement (the flag grid is 8 m coarse): streets, their sidewalks and road shoulders
+		if ( roads.near( x, z, city ? 0.4 : 0.25 ) || ( city && nearBuilding( ctx.bld, x, z, 0.8 ) ) ) return;
+		const r1 = hash2( gi, gj, 412 );
 		const s = city ? 0.2 + 0.08 * r1 : e.use === 3 ? 0.5 + 0.3 * r1 : ( 0.6 + 0.55 * r1 ) * ( 0.8 + 0.4 * sstep( 0.2, 0.6, m ) );
 		const gy = ground.at( x, z );
 		if ( gy < 0.4 ) return;
-		ctx.out.add( SP.GRASS, x, gy - 0.03, z, s, hash2( gi, gj, 414 ) * TAU, hash2( gi, gj, 415 ), dry, city );
+		// the ground's slope and south exposure (the terrain's meadow tone depends on them)
+		const hx = ground.at( x + 1, z ) - ground.at( x - 1, z ), hz = ground.at( x, z + 1 ) - ground.at( x, z - 1 );
+		const nl = Math.hypot( hx, 2, hz );
+		const slope = 1 - 2 / nl, south = - hz / nl;
+		// a: moisture, slope and south exposure packed in 8 bits each (the blades take the terrain's tone
+		// there, see VegMaterial vegGroundTone), b: lawn
+		const pk = Math.round( m * 255 ) + Math.round( Math.min( 1, slope ) * 255 ) * 256 + Math.round( ( south * 0.5 + 0.5 ) * 255 ) * 65536;
+		ctx.out.add( SP.GRASS, x, gy - 0.03, z, s, hash2( gi, gj, 414 ) * TAU, hash2( gi, gj, 415 ), pk, city );
 	} );
 }

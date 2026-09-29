@@ -126,6 +126,23 @@
 .rail > button { height: calc(32 * var(--u)); padding: 0 var(--s-3); border-radius: var(--r-sm); text-align: left; color: var(--ink-2); flex: none; }
 .rail > button:hover { color: var(--ink-1); } .rail > button.on { background: var(--fill-3); color: var(--ink-1); }
 
+/* ---- list rows ------------------------------------------------------------------------------------------------ */
+/* selectable list row (4.9, worlds): [thumb 96u] [.nm over .meta] [.acts shown on hover or selection] */
+.lrow { display: grid; grid-template-columns: calc(96 * var(--u)) 1fr auto; align-items: center; gap: var(--s-3); height: calc(72 * var(--u)); padding: var(--s-2); border-bottom: 1px solid var(--line-1); border-radius: var(--r-sm); cursor: pointer; transition: background var(--d-1) var(--ease-out); }
+.lrow:hover { background: var(--fill-2); }
+.lrow.sel { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent-line); }
+.lrow > div { min-width: 0; }
+.lrow .thumb { display: block; width: calc(96 * var(--u)); height: calc(54 * var(--u)); border-radius: var(--r-sm); object-fit: cover; background: var(--bg-2); }
+.lrow .nm { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lrow .meta { display: flex; align-items: baseline; gap: var(--s-3); margin-top: 2px; overflow: hidden; white-space: nowrap; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.lrow .acts { display: flex; gap: 2px; visibility: hidden; }
+.lrow:hover .acts, .lrow.sel .acts, .lrow:focus-within .acts { visibility: visible; }
+/* one-line row for popover lists (map layers, markers): [icon] [.lab] [value or control] */
+.prow { display: flex; align-items: center; gap: var(--s-2); height: calc(32 * var(--u)); padding: 0 var(--s-2); border-radius: var(--r-sm); }
+.prow:hover { background: var(--fill-3); }
+.prow > .lab { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prow > .v { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+
 /* ---- item cell and slot (56u grid, 60u pitch) ------------------------------------------------------------------ */
 .cell { position: relative; width: var(--cell); height: var(--cell); border-radius: var(--r-sm); background: var(--fill-1); box-shadow: inset 0 0 0 1px var(--line-1); transition: background var(--d-1); }
 .cell:hover { background: var(--fill-3); box-shadow: inset 0 0 0 1px var(--line-3); }
@@ -137,7 +154,8 @@
 .cell > .dot.spoiled { background: var(--alarm); }
 .cell > .dot + .dot.spoiled { left: calc(13 * var(--u)); }
 .cell > .meter { position: absolute; left: calc(6 * var(--u)); right: calc(6 * var(--u)); bottom: calc(4 * var(--u)); }
-.cell.empty { background: transparent; box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink-3); display: flex; align-items: center; justify-content: center; }
+/* padding 0: the legacy world-list .empty rule (menus.css) must not squeeze the slot glyph */
+.cell.empty { padding: 0; background: transparent; box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink-3); display: flex; align-items: center; justify-content: center; }
 .cell.empty .i { width: calc(24 * var(--u)); height: calc(24 * var(--u)); }
 .cell.w2 { width: calc(116 * var(--u)); } .cell.w3 { width: calc(176 * var(--u)); }
 .cell.w2 > img, .cell.w3 > img { width: calc(100% - 16 * var(--u)); height: calc(44 * var(--u)); }

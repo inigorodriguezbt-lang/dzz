@@ -219,14 +219,18 @@ function drawBanana( ctx, w, h, rnd ) {
 function drawCluster( ctx, w, h, rnd, { grid, leaves, L, W, cols, opts = {}, flowers = null, twig = '#4a3e2c', holes = 0.18 } ) {
 	const cell = w / grid;
 	const pts = [];
+	// the corners stay emptier: a card reads as a rounded clump, not a square
+	const corner = ( x, y ) => Math.hypot( x / w - 0.5, y / h - 0.5 ) > 0.42 && rnd() < 0.55;
 	for ( let j = 0; j < grid; j ++ ) for ( let i = 0; i < grid; i ++ ) {
-		if ( rnd() < holes ) continue;
-		pts.push( [ ( i + 0.2 + 0.6 * rnd() ) * cell, ( j + 0.2 + 0.6 * rnd() ) * cell, 0.7 + 0.5 * rnd() ] );
+		const x = ( i + 0.2 + 0.6 * rnd() ) * cell, y = ( j + 0.2 + 0.6 * rnd() ) * cell;
+		if ( rnd() < holes || corner( x, y ) ) continue;
+		pts.push( [ x, y, 0.75 + 0.5 * rnd() ] );
 	}
 	// second, offset layer fills the cards more irregularly
 	for ( let j = 0; j < grid; j ++ ) for ( let i = 0; i < grid; i ++ ) {
-		if ( rnd() < 0.45 ) continue;
-		pts.push( [ ( i + 0.7 + 0.6 * rnd() ) * cell % w, ( j + 0.7 + 0.6 * rnd() ) * cell % h, 0.55 + 0.4 * rnd() ] );
+		const x = ( i + 0.7 + 0.6 * rnd() ) * cell % w, y = ( j + 0.7 + 0.6 * rnd() ) * cell % h;
+		if ( rnd() < 0.3 || corner( x, y ) ) continue;
+		pts.push( [ x, y, 0.6 + 0.45 * rnd() ] );
 	}
 	// keep leaves inside the card: pull the whorl centres in from the border
 	for ( const [ x0, y0, sc ] of pts ) {
@@ -321,54 +325,70 @@ function drawFine( ctx, w, h, rnd ) {
 	}
 }
 
-// ironwood: bundles of long jointed needles hanging from twigs along the top of the card
+// ironwood: wisps of long jointed needles drooping from twig tips scattered over the card (no straight
+// top edge: the cards turn every way in the crown)
 function drawNeedles( ctx, w, h, rnd ) {
-	const cols = [ '#56664a', '#4c5c40', '#627256', '#475a3c' ];
-	for ( let k = 0; k < 42; k ++ ) {
-		const x0 = w * ( 0.08 + 0.84 * rnd() ), y0 = h * ( 0.05 + 0.4 * rnd() );
-		const n = 10 + Math.floor( rnd() * 12 );
+	const cols = [ '#6a7a5a', '#5e6e50', '#768864', '#566848', '#7e8e6a' ];
+	ctx.lineCap = 'round';
+	for ( let k = 0; k < 46; k ++ ) {
+		const a = rnd() * Math.PI * 2, r = Math.sqrt( rnd() ) * 0.36;
+		const x0 = w * ( 0.5 + Math.cos( a ) * r ), y0 = h * ( 0.42 + Math.sin( a ) * r * 0.9 );
+		const n = 9 + Math.floor( rnd() * 9 );
+		const out = rnd() * Math.PI * 2;
 		for ( let q = 0; q < n; q ++ ) {
-			const len = h * ( 0.25 + 0.4 * rnd() );
-			const dx = ( rnd() - 0.5 ) * 60;
+			// each needle leaves the twig tip outwards and arcs down under its own weight
+			const len = h * ( 0.14 + 0.2 * rnd() );
+			const dir = out + ( rnd() - 0.5 ) * 2.2;
+			const dx = Math.cos( dir ) * len * 0.6, dy = Math.sin( dir ) * len * 0.3;
 			ctx.strokeStyle = cols[ Math.floor( rnd() * cols.length ) ];
-			ctx.lineWidth = 1.6 + rnd() * 1.2;
+			ctx.lineWidth = 1.8 + rnd() * 1.4;
 			ctx.beginPath();
 			ctx.moveTo( x0, y0 );
-			ctx.bezierCurveTo( x0 + dx * 0.6, y0 + len * 0.3, x0 + dx, y0 + len * 0.6, x0 + dx * 0.9 + ( rnd() - 0.5 ) * 10, Math.min( h - 4, y0 + len ) );
+			ctx.quadraticCurveTo( x0 + dx, y0 + dy, x0 + dx * 1.3, Math.min( h - 3, y0 + dy + len * 0.75 ) );
 			ctx.stroke();
 		}
 		ctx.strokeStyle = '#5a4a36';
 		ctx.lineWidth = 2;
-		ctx.beginPath(); ctx.moveTo( x0 - 20, y0 - 6 ); ctx.lineTo( x0 + 20, y0 + 4 ); ctx.stroke();
+		ctx.beginPath(); ctx.moveTo( x0 - Math.cos( out ) * 18, y0 - Math.sin( out ) * 8 ); ctx.lineTo( x0, y0 ); ctx.stroke();
 	}
+	ctx.lineCap = 'butt';
 }
 
-// Cook pine branch: brown branch along the middle (u along), foxtail branchlets curving down / up
+// Cook pine branch: brown branch along the middle (u along), dense foxtail branchlets arching out and
+// down from it (shorter towards the tip): thick tapering tufts with a lighter upper edge and scale marks
 function drawPineBranch( ctx, w, h, rnd ) {
-	const cols = [ '#44643a', '#4e703e', '#3e5c34', '#587a44' ];
-	const cy = h * 0.42;
-	for ( let k = 0; k < 34; k ++ ) {
-		const x0 = w * ( 0.04 + 0.92 * ( k / 34 ) ) + rnd() * 8;
-		for ( const sd of [ - 1, 1 ] ) {
-			if ( rnd() < 0.15 ) continue;
-			const len = h * ( 0.18 + 0.3 * rnd() ) * ( 1 - 0.45 * ( k / 34 ) );
-			ctx.strokeStyle = cols[ Math.floor( rnd() * cols.length ) ];
-			ctx.lineWidth = 9 + rnd() * 5;
-			ctx.lineCap = 'round';
-			ctx.beginPath();
-			ctx.moveTo( x0, cy );
-			// the foxtails droop: the lower ones hang, the upper ones arc over
-			ctx.quadraticCurveTo( x0 + 26 + rnd() * 20, cy + sd * len * 0.5, x0 + 34 + rnd() * 20, cy + sd * len * ( sd > 0 ? 1 : 0.6 ) + ( sd < 0 ? len * 0.3 : 0 ) );
-			ctx.stroke();
-			// scale texture: short dark strokes
-			ctx.strokeStyle = 'rgba(20,34,16,0.5)';
-			ctx.lineWidth = 1;
-			ctx.lineCap = 'butt';
+	const cols = [ hex( 0x3c5c2e ), hex( 0x466838 ), hex( 0x345226 ), hex( 0x527440 ), hex( 0x5c8046 ) ];
+	const cy = h * 0.45;
+	ctx.lineCap = 'round';
+	const tufts = [];
+	for ( let k = 0; k < 64; k ++ ) {
+		const t = ( k + rnd() ) / 64;
+		const sd = rnd() < 0.6 ? 1 : - 1; // most hang down
+		tufts.push( { t, sd, len: h * ( 0.2 + 0.24 * rnd() ) * ( 1 - 0.5 * t ) * ( sd > 0 ? 1 : 0.7 ), wid: ( 11 + rnd() * 6 ) * ( 1 - 0.35 * t ), col: cols[ Math.floor( rnd() * cols.length ) ], bend: 0.3 + 0.4 * rnd() } );
+	}
+	// back to front: the upward tufts first, then the hanging ones over them
+	tufts.sort( ( a, b ) => a.sd - b.sd );
+	for ( const f of tufts ) {
+		const x0 = w * ( 0.03 + 0.9 * f.t ), y0 = cy;
+		const x1 = x0 + f.len * f.bend * 1.4, y1 = y0 + f.sd * f.len;
+		const mx = x0 + f.len * f.bend * 1.1, my = y0 + f.sd * f.len * 0.25;
+		for ( const [ lw, k, dy ] of [ [ 1, 0.85, 0 ], [ 0.55, 1.2, - f.wid * 0.18 ] ] ) {
+			ctx.strokeStyle = css( f.col, k );
+			ctx.lineWidth = f.wid * lw;
+			ctx.beginPath(); ctx.moveTo( x0, y0 + dy ); ctx.quadraticCurveTo( mx, my + dy, x1, y1 + dy ); ctx.stroke();
+		}
+		// scale marks along the tuft
+		ctx.strokeStyle = 'rgba(18,30,12,0.45)';
+		ctx.lineWidth = 1;
+		for ( let q = 1; q < 6; q ++ ) {
+			const u = q / 6, a = 1 - u;
+			const px = a * a * x0 + 2 * a * u * mx + u * u * x1, py = a * a * y0 + 2 * a * u * my + u * u * y1;
+			ctx.beginPath(); ctx.moveTo( px - 3, py - 2 ); ctx.lineTo( px + 3, py + 2 ); ctx.stroke();
 		}
 	}
 	ctx.strokeStyle = '#5b4632';
 	ctx.lineWidth = 7;
-	ctx.beginPath(); ctx.moveTo( 0, cy ); ctx.lineTo( w * 0.97, cy + 6 ); ctx.stroke();
+	ctx.beginPath(); ctx.moveTo( 0, cy ); ctx.lineTo( w * 0.95, cy + 5 ); ctx.stroke();
 	ctx.lineCap = 'butt';
 }
 
@@ -410,7 +430,7 @@ function drawPlume( ctx, w, h, rnd ) {
 			const t = rnd();
 			const y = top + t * h * 0.3;
 			const sp = 16 * ( 1 - t * 0.5 );
-			ctx.strokeStyle = rnd() < 0.5 ? '#d8c89a' : '#c0a878';
+			ctx.strokeStyle = rnd() < 0.5 ? '#b09a74' : '#98805e';
 			ctx.lineWidth = 1.2;
 			ctx.beginPath(); ctx.moveTo( x, y ); ctx.lineTo( x + ( rnd() - 0.5 ) * sp, y + 6 + rnd() * 8 ); ctx.stroke();
 		}
@@ -498,17 +518,17 @@ export function buildLeafAtlas() {
 	tile( 'FERN', drawFern );
 	tile( 'BANANA', drawBanana );
 	tile( 'BROAD', ( x, w, h, r ) => drawCluster( x, w, h, r, {
-		grid: 3, leaves: 5, L: 62, W: 26, holes: 0.12, opts: { tip: 0.35, base: 0.3, light: 1.25, dark: 0.85 },
+		grid: 4, leaves: 6, L: 54, W: 23, holes: 0.12, opts: { tip: 0.35, base: 0.3, light: 1.25, dark: 0.85 },
 		cols: [ hex( 0x6a8850 ), hex( 0x76925a ), hex( 0x5e7c48 ), hex( 0x829c66 ) ], twig: '#6a6048',
 	} ) );
 	tile( 'SMALL', ( x, w, h, r ) => drawCluster( x, w, h, r, {
-		grid: 5, leaves: 7, L: 24, W: 11, holes: 0.2, opts: { tip: 0.2, base: 0.4 },
+		grid: 6, leaves: 7, L: 23, W: 10.5, holes: 0.16, opts: { tip: 0.2, base: 0.4 },
 		cols: [ hex( 0x3e5a28 ), hex( 0x4a6a2e ), hex( 0x56703a ), hex( 0x6a7a44 ) ],
 		flowers: { p: 0.22, draw: lehua },
 	} ) );
 	tile( 'FINE', drawFine );
 	tile( 'SHRUB', ( x, w, h, r ) => drawCluster( x, w, h, r, {
-		grid: 4, leaves: 7, L: 36, W: 15, holes: 0.12, opts: { tip: 0.45, base: 0.35, light: 1.3 },
+		grid: 5, leaves: 7, L: 33, W: 14, holes: 0.12, opts: { tip: 0.45, base: 0.35, light: 1.3 },
 		cols: [ hex( 0x3c6a26 ), hex( 0x467a2c ), hex( 0x2f5a20 ), hex( 0x558434 ) ],
 		flowers: { p: 0.16, draw: hibiscus },
 	} ) );

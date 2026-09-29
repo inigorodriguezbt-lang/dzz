@@ -8,6 +8,7 @@
 import * as THREE from 'three';
 import { getModel } from './models/index.js';
 import { Kit } from './kit.js';
+import { riderKit } from './models/parts.js';
 import { makeBodyMaterial, makeGlassMaterial, makeRotorDiscMaterial, EMIT_CHANNELS } from './materials.js';
 import { LAYER_POST } from '../render/Renderer.js';
 
@@ -39,6 +40,28 @@ function parkedGeometry( m ) {
 	return g;
 }
 
+const riderCache = new Map();
+
+// where the rider's hands and feet go for a seat of a model (model frame)
+export function riderPose( model, kind, seat ) {
+	const P = model.P, S = P.steer;
+	const pose = { hip: seat.pos, eye: seat.eye, hands: null, feet: null };
+	// a point in the steering column's frame (rotation.x = -tilt about the column's base)
+	const col = ( lx, ly, lz ) => { const a = - S.tilt; return [ S.x + lx, S.y + ly * Math.cos( a ) - lz * Math.sin( a ), - S.f + ly * Math.sin( a ) + lz * Math.cos( a ) ]; };
+	if ( seat.driver && S ) {
+		if ( S.axis === 'y' ) { const w = kind === 'bike' ? 0.33 : 0.3; pose.hands = [ col( - w, kind === 'bike' ? 0.135 : 0.04, kind === 'bike' ? 0.07 : 0.04 ), col( w, kind === 'bike' ? 0.135 : 0.04, kind === 'bike' ? 0.07 : 0.04 ) ]; }
+		else { const r = ( S.r ?? 0.19 ) * 0.95; pose.hands = [ col( - r * 0.87, r * 0.5, 0.02 ), col( r * 0.87, r * 0.5, 0.02 ) ]; }
+	} else if ( seat.driver && kind === 'heli' ) pose.hands = [ [ 0.16, 0.86, - 0.86 ], [ 0.42, 1.12, - 0.84 ] ];
+	if ( kind === 'bike' ) pose.feet = seat.driver ? [ [ - 0.21, 0.4, 0.14 ], [ 0.21, 0.4, 0.14 ] ] : [ [ - 0.2, 0.46, 0.55 ], [ 0.2, 0.46, 0.55 ] ];
+	else if ( kind === 'boat' && model.name === 'jetski' ) pose.feet = [ [ - 0.36, 0.5, seat.pos[ 2 ] + 0.05 ], [ 0.36, 0.5, seat.pos[ 2 ] + 0.05 ] ];
+	else {
+		const floor = P.wells?.[ 0 ]?.floor ?? seat.pos[ 1 ] - 0.45;
+		const y = Math.max( floor + 0.06, seat.pos[ 1 ] - 0.42 );
+		pose.feet = [ - 1, 1 ].map( s => [ seat.pos[ 0 ] + s * 0.13, y, seat.pos[ 2 ] - 0.52 ] );
+	}
+	return pose;
+}
+
 export class VehicleVisual {
 	// look: { paint, paint2, metallic, dirt, rust, fade, burnt, crack, gdirt }
 	constructor( model, look = {} ) {
@@ -49,7 +72,7 @@ export class VehicleVisual {
 		this.group.name = 'vehicle-' + m.name;
 		this.mat = makeBodyMaterial( {
 			paint: look.paint ?? 0xb0b4b8, paint2: look.paint2 ?? 0xf2f2f0, metallic: look.metallic ?? 0.4,
-			dirt: look.dirt ?? 0, rust: look.rust ?? 0, fade: look.fade ?? 0, height: m.bounds.max.y,
+			dirt: look.dirt ?? 0, rust: look.rust ?? 0, fade: look.fade ?? 0, dent: look.dent ?? 0, height: m.bounds.max.y,
 		} );
 		if ( look.burnt ) this.mat.userData.u.uBurnt.value = 1;
 		this.emit = this.mat.userData.u.uEmit.value; // live array of EMIT_CHANNELS lamp levels
@@ -152,6 +175,23 @@ export class VehicleVisual {
 		this.parts = o.parts || {};
 	}
 
+	// the player's figure in a seat (-1: nobody); `head` false for the first-person view from inside it
+	setRider( seats, kind, i, head = true ) {
+		const key = i < 0 ? null : `${this.model.name}:${i}:${head ? 1 : 0}`;
+		if ( key === this.riderKey ) return;
+		this.riderKey = key;
+		if ( this.rider ) { this.group.remove( this.rider ); this.rider = null; }
+		if ( ! key ) return;
+		let g = riderCache.get( key );
+		if ( ! g ) { g = riderKit( riderPose( this.model, kind, seats[ i ] ), head ); riderCache.set( key, g ); }
+		const m = new THREE.Mesh( g, this.mat );
+		m.castShadow = true; m.receiveShadow = true;
+		m.matrixAutoUpdate = false; m.updateMatrix();
+		m.name = 'rider';
+		this.rider = m;
+		this.group.add( m );
+	}
+
 	setShadow( on ) {
 		if ( on === this.shadow ) return;
 		this.shadow = on;
@@ -178,6 +218,7 @@ export class VehicleVisual {
 		if ( look.paint2 != null ) u.uPaint2.value.set( look.paint2 );
 		if ( look.dirt != null ) u.uDirt.value = look.dirt;
 		if ( look.rust != null ) u.uRust.value = look.rust;
+		if ( look.dent != null ) u.uDent.value = look.dent;
 		if ( look.burnt != null ) u.uBurnt.value = look.burnt;
 		if ( look.crack != null && this.glassMat ) this.glassMat.userData.u.uCrack.value = look.crack;
 	}

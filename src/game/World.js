@@ -6,6 +6,7 @@ import { Terrain } from '../world/Terrain.js';
 import { Sky } from '../world/Sky.js';
 import { Ocean } from '../world/Ocean.js';
 import { G, preloadTextures, setMaxAnisotropy } from '../render/Materials.js';
+import { SunShadows } from '../render/Shadows.js';
 
 export const TEXTURES = [
 	'sand', 'grass', 'drygrass', 'forest', 'reddirt', 'dirt', 'rock', 'cliff', 'lava', 'snow', 'farm', 'asphalt', 'sidewalk',
@@ -48,31 +49,19 @@ export class World {
 		this.ocean = new Ocean( this.renderer, this.hf, this.settings.get( 'water' ) );
 		this.scene.add( this.ocean.mesh );
 
+		// the key light (sun or moon); its shadows are the cascades (render/Shadows.js), not three's own map
 		this.sun = new THREE.DirectionalLight( 0xffffff, 1 );
+		this.sun.name = 'keyLight';
+		this.sun.castShadow = false;
 		this.scene.add( this.sun, this.sun.target );
-		this._setupShadows();
-		this.settings.on( 'shadows', () => this._setupShadows() );
+		this.csm = new SunShadows( this.renderer );
+		this.csm.setQuality( this.settings.get( 'shadows' ) );
+		this.settings.on( 'shadows', ( q ) => this.csm.setQuality( q ) );
+		// the post chain's sun shafts read the cascades and the view clouds
+		this.renderer.shadows = this.csm;
+		this.renderer.haze.cloudSource = this.sky.clouds;
+		this.renderer.flare.cloudSource = this.sky.clouds;
 		this.settings.on( 'water', v => this.ocean.setQuality( v ) );
-	}
-
-	// one stabilised shadow frustum that follows the camera (snapped to whole texels so it doesn't shimmer)
-	_setupShadows() {
-		const q = this.settings.get( 'shadows' );
-		const cfg = { off: null, medium: [ 1024, 55 ], high: [ 2048, 85 ], ultra: [ 4096, 120 ] }[ q ];
-		const L = this.sun;
-		L.castShadow = !! cfg;
-		if ( ! cfg ) return;
-		const [ size, half ] = cfg;
-		if ( L.shadow.map ) { L.shadow.map.dispose(); L.shadow.map = null; }
-		L.shadow.mapSize.set( size, size );
-		const c = L.shadow.camera;
-		c.left = - half; c.right = half; c.top = half; c.bottom = - half; c.near = 1; c.far = 1400;
-		c.updateProjectionMatrix();
-		L.shadow.bias = - 0.0004;
-		L.shadow.normalBias = 0.04;
-		L.shadow.radius = 2;
-		this.shadowHalf = half;
-		this.shadowSize = size;
 	}
 
 	isIndoors( p ) { return this.indoorTest ? this.indoorTest( p ) : false; }
@@ -103,29 +92,17 @@ export class World {
 		G.uCamPos.value.copy( this.camera.position );
 		this.terrain.update( this.camera.position );
 		this.sky.update( dt, this.camera, this.scene, this.settings );
-		// sun light follows the sky model
-		const s = this.sky.sunDir;
-		const useMoon = s.y < - 0.05;
-		const L = useMoon ? this.sky.moonDir : s;
-		// centre the shadow frustum ahead of the camera and snap it to the shadow texel grid
-		const fwd = new THREE.Vector3( 0, 0, - 1 ).applyQuaternion( this.camera.quaternion );
-		fwd.y = 0; fwd.normalize();
-		const half = this.shadowHalf || 80;
-		const c = this.camera.position.clone().addScaledVector( fwd, half * 0.45 );
-		const texel = ( half * 2 ) / ( this.shadowSize || 2048 );
-		const lz = L.clone().normalize();
-		const lx = new THREE.Vector3( 0, 1, 0 ).cross( lz ).normalize();
-		if ( lx.lengthSq() < 1e-6 ) lx.set( 1, 0, 0 );
-		const ly = lz.clone().cross( lx );
-		const u = Math.round( c.dot( lx ) / texel ) * texel, v = Math.round( c.dot( ly ) / texel ) * texel, w = c.dot( lz );
-		c.copy( lx ).multiplyScalar( u ).addScaledVector( ly, v ).addScaledVector( lz, w );
-		this.sun.position.copy( c ).addScaledVector( lz, 700 );
-		this.sun.target.position.copy( c );
+		// the key light follows the sky model: the sun, then the moon once the sun is 4 degrees down
+		const L = this.sky.keyDir;
+		this.sun.position.copy( this.camera.position ).addScaledVector( L, 700 );
+		this.sun.target.position.copy( this.camera.position );
 		this.sun.target.updateMatrixWorld();
-		this.sun.color.copy( useMoon ? this.sky.moonColor : this.sky.sunColor );
+		this.sun.color.copy( this.sky.keyColor );
 		this.sun.intensity = 1;
 		for ( const sys of this.systems ) sys.update && sys.update( dt );
 		const r = this.renderer;
 		this.ocean.update( dt, this.camera, r.sceneColor, r.sceneDepth, new THREE.Vector2( r.width, r.height ) );
+		// cascaded shadows of the key light, fitted to this frame's camera
+		this.csm.update( this.camera, L, this.scene );
 	}
 }

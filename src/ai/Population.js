@@ -91,12 +91,13 @@ export class Population {
 			const dist = Math.hypot( cx - c.x, cz - c.z );
 			const R = c.radius || 300;
 			if ( dist > R * 1.6 ) continue;
-			const k = ( CITY_K[ c.kind ] ?? 0.5 ) * ( 1 - THREE.MathUtils.smoothstep( dist, R * 0.35, R * 1.6 ) );
+			const k = ( CITY_K[ c.kind ] ?? 0.5 ) * ( 1 - THREE.MathUtils.smoothstep( dist, R * 0.45, R * 1.6 ) );
 			if ( k > dc ) { dc = k; mil = c.kind === 'military'; }
 		}
 		const hf = this.game.hf;
 		const road = hf.flagsNear( cx, cz ) & ( 1 | 4 ) ? 0.05 : 0;
-		d = Math.max( 0.012 + road, db * 0.6 + dc * 0.45 );
+		// the settlement itself counts most (the baked blocks hold a sample of its buildings, not all of them)
+		d = Math.max( 0.012 + road, db * 0.55 + dc * 0.62 );
 		if ( mil ) d = Math.min( 1, d * 1.3 );
 		if ( hf.baseHeight( cx, cz ) < 0 ) d *= 0.2;
 		d = Math.min( 1, d );

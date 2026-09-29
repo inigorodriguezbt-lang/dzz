@@ -1,17 +1,45 @@
-/* Rules moved unchanged from the old ui.css so nothing breaks while this screen is rebuilt to
-   docs/UI_SPEC.md. They use the legacy --tw-* aliases from tokens.css; replace them with the spec
-   rules (section 8 and 22) and delete what is no longer used. */
+/* ---- map (docs/UI_SPEC.md 8.1, 22) --------------------------------------------------------------------------- */
+/* state classes carry a map- prefix: a bare .hot is the hotbar cell */
+.map-screen { position: absolute; inset: 0; z-index: 10; background: #152E4D; pointer-events: auto; }
+.map-screen canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: grab; touch-action: none; }
+.map-screen.map-hot canvas { cursor: pointer; }
+.map-screen.map-drag canvas { cursor: grabbing; }
+.map-screen.map-tele canvas { cursor: crosshair; }
 
-/* ── map ───────────────────────────────────────────────────────────────── */
+.map-title { position: absolute; left: var(--edge); top: var(--edge); max-width: calc(360 * var(--u)); padding: var(--s-2) var(--s-3); }
+.map-title .t-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.map-title .t-label { margin-top: 2px; color: var(--hud-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.map-title .t-label:empty { display: none; }
 
-.map-screen { position: absolute; inset: 0; z-index: 10; background: #06151d; pointer-events: auto; cursor: grab; } /* z-index: above HUD children that set their own */
-.map-screen.drag { cursor: grabbing; }
-.map-screen canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
-.map-ui { position: absolute; top: var(--tw-4); left: var(--tw-4); display: flex; flex-direction: column; gap: var(--tw-2); pointer-events: auto; }
-.map-legend { position: absolute; bottom: var(--tw-4); left: var(--tw-4); padding: var(--tw-3); border-radius: var(--tw-r-md); font-size: var(--tw-fs-sm); display: flex; flex-direction: column; gap: 4px; }
-.map-legend .sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: middle; }
-.map-coords { position: absolute; bottom: var(--tw-4); right: var(--tw-4); padding: 6px 10px; border-radius: var(--tw-r-sm); font-family: var(--tw-mono); font-size: var(--tw-fs-sm); }
-.map-tools { display: flex; gap: 6px; align-self: flex-start; padding: 6px; border-radius: var(--tw-r-md); }
-.map-title { padding: var(--tw-3) var(--tw-4); border-radius: var(--tw-r-md); }
-.map-title h2 { margin: 0; font-size: var(--tw-fs-xl); }
-.map-title .sub { font-size: var(--tw-fs-sm); color: var(--tw-ink-3); }
+/* close: the Map key cap and the close button share one plate, so the cap reads over bright land too */
+.map-close { position: absolute; right: var(--edge); top: var(--edge); display: flex; align-items: center; gap: calc(2 * var(--u)); padding: 0 0 0 var(--s-2); }
+.map-close .btn.icon, .map-tools .btn.icon { color: var(--hud-1); }
+
+.map-tools { position: absolute; right: var(--edge); top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; padding: 2px; }
+.map-tools .btn.icon { position: relative; }
+.map-tools .btn.icon.on { background: var(--fill-3); }
+.map-tools hr { width: 100%; margin: 2px 0; border: 0; border-top: 1px solid var(--line-1); }
+.map-tools .badge { position: absolute; right: 2px; top: 2px; color: var(--hud-2); font: 600 calc(10 * var(--u)) / 1 var(--mono); }
+
+.map-scale { position: absolute; left: var(--edge); bottom: var(--edge); color: #fff; text-align: center; text-shadow: var(--halo); font-variant-numeric: tabular-nums; pointer-events: none; }
+.map-scale .bar { height: calc(5 * var(--u)); margin-top: var(--s-1); border: 1px solid #fff; border-top: 0; filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.9)); }
+.map-readout { position: absolute; right: var(--edge); bottom: var(--edge); display: flex; align-items: center; height: calc(28 * var(--u)); padding: 0 calc(10 * var(--u)); color: var(--hud-1); white-space: pre; pointer-events: none; }
+.teleport-chip { position: fixed; z-index: 40; display: inline-flex; align-items: center; height: calc(20 * var(--u)); padding: 0 var(--s-2); border-radius: var(--r-sm); background: var(--accent); color: var(--on-accent); pointer-events: none; }
+
+/* layers and marker popovers, left of the tool stack */
+.map-pop { padding: var(--s-1); }
+.map-pop.layers { width: calc(200 * var(--u)); }
+.map-pop.layers .prow { cursor: pointer; }
+.map-pop.marks { width: calc(280 * var(--u)); }
+.map-pop .list { max-height: calc(8 * 32 * var(--u)); overflow-y: auto; }
+.map-pop.marks .prow { gap: var(--s-2); padding-right: 2px; cursor: pointer; outline-offset: -2px; }
+.map-pop .prow > .input { flex: 1; min-width: 0; }
+.map-pop .prow .rm { visibility: hidden; }
+.map-pop .prow:hover .rm, .map-pop .prow:focus-within .rm { visibility: visible; }
+.map-pop .foot { display: flex; justify-content: flex-end; margin-top: var(--s-1); padding-top: var(--s-1); border-top: 1px solid var(--line-1); }
+.mk-user { color: var(--accent); fill: var(--accent); }
+.mk-loc { color: var(--accent); }
+.mk-death { color: var(--alarm); }
+.map-pop .input, .map-rename .input { height: calc(24 * var(--u)); padding: 0 var(--s-2); border-radius: var(--r-sm); }
+.map-rename { padding: var(--s-1); }
+.map-rename .input { width: calc(160 * var(--u)); }

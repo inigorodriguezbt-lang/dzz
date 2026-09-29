@@ -170,7 +170,8 @@ function quadruped( s, B ) {
 		p: neckBase.clone().lerp( headBase, f ).add( V( 0, - s.ry * 0.1 * ( 1 - f ), 0 ) ), rx: nr * ( 1.25 - f * 0.35 ) * ( f === 0 ? 1.2 : 1 ), ry: nr * ( 1.5 - f * 0.45 ),
 		cfn: shade( coat ), c: coat, a: 'neck', b: 'head', w: f > 0.7 ? ( f - 0.7 ) / 0.3 : 0,
 	} ) );
-	B.loft( NR, { seg: 12 } );
+	// (the tops of the neck and legs sit inside the body: no end caps there, whose fan normals would crease the shading)
+	B.loft( NR, { seg: 12, cap0: false } );
 	// head: skull -> snout, tilted down
 	const H = s.head, hr = H.r, snout = H.rs;
 	const dirH = V( 0, - Math.sin( H.drop ), - Math.cos( H.drop ) );
@@ -198,7 +199,8 @@ function quadruped( s, B ) {
 	}
 	// legs: front (shoulder, elbow, fetlock) and hind (hip, hock, fetlock)
 	const lr = s.legR;
-	const legX = s.rx * 0.62;
+	// legs set in under the body, their upper parts flat against its flanks (wider fore-aft than across)
+	const legX = s.rx * 0.56;
 	for ( const [ side, sx ] of [ [ 'L', - 1 ], [ 'R', 1 ] ] ) {
 		// front
 		const sh = V( sx * legX, by - s.ry * 0.15 + hump * 0.6, chestZ + L * 0.04 );
@@ -207,14 +209,14 @@ function quadruped( s, B ) {
 		const gr = V( sx * legX, 0, chestZ + L * 0.03 );
 		const u = B.bone( 'F' + side + '1', 'chest', sh ), l = B.bone( 'F' + side + '2', u, el ), f = B.bone( 'F' + side + '3', l, fe );
 		B.loft( [
-			{ p: sh.clone().add( V( 0, s.ry * 0.45, 0 ) ), rx: lr * 2.2, ry: lr * 2.4, c: coat, a: u },
-			{ p: sh.clone().lerp( el, 0.45 ), rx: lr * 1.55, ry: lr * 1.75, c: coat, a: u },
+			{ p: sh.clone().add( V( 0, s.ry * 0.45, 0 ) ), rx: lr * 1.45, ry: lr * 2.7, c: coat, a: u },
+			{ p: sh.clone().lerp( el, 0.45 ), rx: lr * 1.2, ry: lr * 1.9, c: coat, a: u },
 			{ p: el, rx: lr * 1.0, ry: lr * 1.05, c: leg, a: u, b: l, w: 0.5 },
 			{ p: el.clone().lerp( fe, 0.5 ), rx: lr * 0.74, ry: lr * 0.78, c: leg, a: l },
 			{ p: fe, rx: lr * 0.76, ry: lr * 0.8, c: leg, a: l, b: f, w: 0.5 },
 			{ p: gr.clone().add( V( 0, 0.035, - 0.01 ) ), rx: lr * 0.85, ry: lr * 0.95, c: hoof, a: f },
 			{ p: gr.clone().add( V( 0, 0.004, - 0.02 ) ), rx: lr * 0.9, ry: lr * 1.05, c: hoof, a: f },
-		], { seg: 8 } );
+		], { seg: 10, cap0: false } );
 		// hind: the thigh runs forward-down, the shank back to the hock, the cannon straight down
 		const hp0 = V( sx * legX, by - s.ry * 0.05, hipZ - L * 0.02 );
 		const kn = V( sx * legX, s.legH * 0.78, hipZ - L * 0.1 );
@@ -223,15 +225,15 @@ function quadruped( s, B ) {
 		const hg = V( sx * legX, 0, hipZ );
 		const hu = B.bone( 'H' + side + '1', 'body', hp0 ), hl = B.bone( 'H' + side + '2', hu, hk ), hft = B.bone( 'H' + side + '3', hl, hf );
 		B.loft( [
-			{ p: hp0.clone().add( V( 0, s.ry * 0.45, 0.02 ) ), rx: lr * 2.4, ry: lr * 2.9, c: coat, a: hu },
-			{ p: kn, rx: lr * 1.6, ry: lr * 2.0, c: coat, a: hu },
+			{ p: hp0.clone().add( V( 0, s.ry * 0.45, 0.02 ) ), rx: lr * 1.6, ry: lr * 3.1, c: coat, a: hu },
+			{ p: kn, rx: lr * 1.3, ry: lr * 2.2, c: coat, a: hu },
 			{ p: kn.clone().lerp( hk, 0.6 ), rx: lr * 1.05, ry: lr * 1.2, c: leg, a: hu, b: hl, w: 0.6 },
 			{ p: hk, rx: lr * 0.8, ry: lr * 0.95, c: leg, a: hl },
 			{ p: hk.clone().lerp( hf, 0.5 ), rx: lr * 0.7, ry: lr * 0.76, c: leg, a: hl },
 			{ p: hf, rx: lr * 0.72, ry: lr * 0.76, c: leg, a: hl, b: hft, w: 0.5 },
 			{ p: hg.clone().add( V( 0, 0.035, - 0.01 ) ), rx: lr * 0.85, ry: lr * 0.95, c: hoof, a: hft },
 			{ p: hg.clone().add( V( 0, 0.004, - 0.02 ) ), rx: lr * 0.9, ry: lr * 1.05, c: hoof, a: hft },
-		], { seg: 8 } );
+		], { seg: 10, cap0: false } );
 	}
 	// tail
 	if ( s.tail ) {
@@ -336,7 +338,8 @@ const SPECIES = {
 		const prof = [ [ - 0.5, 0.02, 0.02 ], [ - 0.47, 0.07, 0.06 ], [ - 0.4, 0.11, 0.1 ], [ - 0.25, 0.15, 0.15 ], [ - 0.05, 0.16, 0.16 ], [ 0.15, 0.12, 0.12 ], [ 0.3, 0.07, 0.07 ], [ 0.42, 0.035, 0.04 ], [ 0.46, 0.03, 0.035 ] ];
 		B.loft( prof.map( ( [ f, rx, ry ] ) => { const [ a, b, w ] = boneAt( f * len ); return { p: V( 0, 0, f * len ), rx: rx * len * 0.55, ry: ry * len * 0.5, ryb: ry * len * 0.42, cfn: shade, c: back, a, b, w }; } ), { seg: 14 } );
 		// fins: dorsal, second dorsal, pectorals, caudal (big upper lobe)
-		const fin = ( base, dir, l, w, bone ) => B.blade( base, dir.normalize(), V( 0, 0, 1 ), l, w, 0.012 * len, back, bone, 0.15 );
+		// (the blade's width runs along the body, its thickness across: a sail, not a post)
+		const fin = ( base, dir, l, w, bone ) => B.blade( base, dir.normalize(), V( 1, 0, 0 ), l, w, 0.012 * len, back, bone, 0.15 );
 		fin( V( 0, 0.075 * len, - 0.05 * len ), V( 0, 1, 0.55 ), 0.16 * len, 0.08 * len, 'b2' );
 		fin( V( 0, 0.035 * len, 0.3 * len ), V( 0, 1, 0.5 ), 0.05 * len, 0.025 * len, 'b3' );
 		for ( const sx of [ - 1, 1 ] ) {

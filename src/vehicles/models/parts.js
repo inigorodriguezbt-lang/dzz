@@ -118,3 +118,66 @@ export function bench( k, w, hipY, f, m, x = 0, opts = {} ) {
 	k.box( w, opts.back ?? 0.62, 0.14, m, { p: [ x, hipY + 0.28, - ( f - 0.2 ) ], r: [ - 0.25, 0, 0 ] }, 0.06 );
 	if ( opts.heads ) for ( const hx of opts.heads ) k.box( 0.25, 0.16, 0.1, m, { p: [ x + hx, hipY + 0.68, - ( f - 0.33 ) ], r: [ - 0.2, 0, 0 ] }, 0.045 );
 }
+
+// ---- the rider -------------------------------------------------------------------------------------------------------
+
+const RIDER = {
+	skin: mat( 'skin', { c: 0xc99a7c } ), hair: MAT.hair,
+	shirt: { c: 0x2f5d6b, r: 0.85, m: 0 }, jeans: { c: 0x2b3a55, r: 0.9, m: 0 }, shoes: { c: 0x1d1d1f, r: 0.7, m: 0 },
+};
+
+// the middle joint of a two-bone limb (shoulder -> elbow -> hand, hip -> knee -> foot) bent towards `bend`
+function joint( a, b, len, bend ) {
+	const A = new THREE.Vector3( ...a ), B = new THREE.Vector3( ...b );
+	const d = A.distanceTo( B );
+	const mid = A.clone().add( B ).multiplyScalar( 0.5 );
+	const half = Math.min( len, d / 2 + 1e-3 );
+	const off = Math.sqrt( Math.max( 0, len * len - half * half ) );
+	const dir = B.clone().sub( A ).normalize();
+	const n = new THREE.Vector3( ...bend );
+	n.addScaledVector( dir, - n.dot( dir ) ).normalize();
+	return mid.addScaledVector( n, off ).toArray();
+}
+
+// a seated figure for the third-person view: hips at the seat, hands on the wheel / bars / yoke, feet down.
+// pose: { hip, eye, hands: [ L, R ] | null, feet: [ L, R ] | null, lean } in the model frame
+export function riderKit( pose, head = true ) {
+	const k = new Kit();
+	const [ hx, hy, hz ] = pose.hip;
+	const eye = pose.eye;
+	const headC = [ eye[ 0 ], eye[ 1 ] + 0.03, eye[ 2 ] + 0.07 ];
+	const neck = [ headC[ 0 ], headC[ 1 ] - 0.16, headC[ 2 ] + 0.02 ];
+	const pelvis = [ hx, hy + 0.06, hz + 0.02 ];
+	// torso, pelvis, neck, head (seen from inside the head only the arms and legs are drawn: the chest would sit
+	// right under the camera)
+	if ( head ) {
+		k.beam( pelvis, [ neck[ 0 ], neck[ 1 ] - 0.03, neck[ 2 ] ], 0.36, 0.21, RIDER.shirt, [ 0, 0, 1 ], 0.07 );
+		k.box( 0.34, 0.16, 0.24, RIDER.jeans, { p: [ hx, hy, hz + 0.02 ] }, 0.06 );
+		k.rod( [ neck[ 0 ], neck[ 1 ] - 0.04, neck[ 2 ] ], [ headC[ 0 ], headC[ 1 ] - 0.06, headC[ 2 ] ], 0.048, RIDER.skin, 8 );
+		k.sphere( 0.1, RIDER.skin, { p: headC, s: [ 0.92, 1.08, 1 ] }, 14, 10 );
+		k.sphere( 0.104, RIDER.hair, { p: [ headC[ 0 ], headC[ 1 ] + 0.025, headC[ 2 ] + 0.02 ], s: [ 0.95, 0.9, 1 ] }, 14, 8 );
+	}
+	// arms
+	const sh = [ - 1, 1 ].map( s => [ neck[ 0 ] + s * 0.19, neck[ 1 ] - 0.05, neck[ 2 ] ] );
+	for ( let i = 0; i < 2; i ++ ) {
+		const s = i ? 1 : - 1;
+		const hand = pose.hands ? pose.hands[ i ] : [ hx + s * 0.16, hy + 0.1, hz - 0.3 ];
+		const el = joint( sh[ i ], hand, 0.29, [ s * 0.5, - 0.8, 0.2 ] );
+		// a long-sleeved shirt: from inside the car you see sleeves and hands on the wheel
+		k.rod( sh[ i ], el, 0.05, RIDER.shirt, 8, 0.046 );
+		k.rod( el, hand, 0.042, RIDER.shirt, 8, 0.034 );
+		k.cyl( 0.03, 0.034, 0.05, RIDER.skin, { q: new THREE.Quaternion().setFromUnitVectors( new THREE.Vector3( 0, 1, 0 ), new THREE.Vector3( ...hand ).sub( new THREE.Vector3( ...el ) ).normalize() ), p: new THREE.Vector3( ...hand ).lerp( new THREE.Vector3( ...el ), 0.08 ).toArray() }, 8 );
+		k.sphere( 0.042, RIDER.skin, { p: hand, s: [ 1, 0.8, 1.2 ] }, 8, 6 );
+	}
+	// legs
+	for ( let i = 0; i < 2; i ++ ) {
+		const s = i ? 1 : - 1;
+		const hip = [ hx + s * 0.1, hy, hz ];
+		const foot = pose.feet ? pose.feet[ i ] : [ hx + s * 0.13, hy - 0.42, hz - 0.5 ];
+		const kn = joint( hip, foot, 0.44, [ s * 0.15, 0.8, - 0.6 ] );
+		k.rod( hip, kn, 0.075, RIDER.jeans, 8, 0.062 );
+		k.rod( kn, foot, 0.058, RIDER.jeans, 8, 0.046 );
+		k.box( 0.1, 0.08, 0.26, RIDER.shoes, { p: [ foot[ 0 ], foot[ 1 ] - 0.02, foot[ 2 ] - 0.08 ] }, 0.03 );
+	}
+	return k.build();
+}

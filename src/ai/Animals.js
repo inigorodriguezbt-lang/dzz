@@ -134,11 +134,11 @@ export class Animal extends Entity {
 		if ( threat ) {
 			if ( this.species === 'boar' && ( this.aggressive || this.hitT > mgr.time - 20 ) && d < 16 && this.charges < 3 && pi.alive && ! pi.vehicle ) { this._set( 'charge' ); return; }
 			if ( this.species === 'turtle' ) { this.goal.copy( this._toWater() ); this._set( 'wander' ); this.wantV = S.walk; return; }
-			this.fleeFrom = pi.pos.clone();
+			this._scare( pi.pos );
 			this._set( 'flee' );
 			if ( S.sound && rnd() < 0.6 ) this._voice( 1 );
 			// the herd bolts together
-			for ( const o of g.entities.near( this.pos, 25, 'animal', _nb ) ) if ( o !== this && o.alive && o.species === this.species && o.state !== 'flee' ) { o.fleeFrom = this.fleeFrom; o._set( 'flee' ); }
+			for ( const o of g.entities.near( this.pos, 25, 'animal', _nb ) ) if ( o !== this && o.alive && o.species === this.species && o.state !== 'flee' ) { o._scare( this.fleeFrom ); o._set( 'flee' ); }
 			return;
 		}
 		this.alert = d < notice * 1.6 ? 1 : 0;
@@ -159,6 +159,9 @@ export class Animal extends Entity {
 
 	_set( s ) { if ( s !== this.state ) { this.state = s; this.stateT = 0; } }
 
+	// remember what to run from (no allocation per scare)
+	_scare( p ) { ( this.fleeFrom || ( this.fleeFrom = new THREE.Vector3() ) ).copy( p ); }
+
 	_fleeFrom( from ) {
 		const S = this.S;
 		const dx = this.pos.x - from.x, dz = this.pos.z - from.z;
@@ -171,7 +174,7 @@ export class Animal extends Entity {
 	// a boar runs at you, gores, runs on past, turns and comes again
 	_charge( d ) {
 		const g = this.game, pi = this.mgr.pi;
-		if ( ! pi.alive || pi.vehicle || this.health < this.maxHealth * 0.3 ) { this.fleeFrom = pi.pos.clone(); this._set( 'flee' ); return; }
+		if ( ! pi.alive || pi.vehicle || this.health < this.maxHealth * 0.3 ) { this._scare( pi.pos ); this._set( 'flee' ); return; }
 		if ( ! this.pass ) {
 			steer( g, this, this.mover, pi.pos.x, pi.pos.z, this.thinkT, null );
 			this.wantV = this.S.run;
@@ -189,7 +192,7 @@ export class Animal extends Entity {
 			this.wantV = this.S.run * 0.8;
 			if ( Math.hypot( this.pass.x - this.pos.x, this.pass.z - this.pos.z ) < 1.5 || this.stateT > 3 ) { this.pass = null; this.stateT = 0; }
 		}
-		if ( this.charges >= 3 ) { this.fleeFrom = pi.pos.clone(); this._set( 'flee' ); }
+		if ( this.charges >= 3 ) { this._scare( pi.pos ); this._set( 'flee' ); }
 	}
 
 	// a honu heads for the sea when bothered
@@ -277,13 +280,13 @@ export class Animal extends Entity {
 		const src = info.source?.pos || this.mgr.pi.pos;
 		if ( this.species === 'boar' && rnd() < 0.7 && info.source === this.game.player ) { this._set( 'charge' ); this.pass = null; }
 		else if ( this.species === 'shark' ) { if ( this.health < this.maxHealth * 0.5 ) this._set( 'flee' ); else this._set( 'attack' ); }
-		else { this.fleeFrom = src.clone(); this._set( 'flee' ); }
+		else { this._scare( src ); this._set( 'flee' ); }
 		this._voice( 1 );
 		this.flinch = 1;
 	}
 
-	knockback( dir ) { if ( this.alive && ! this.water ) { this.fleeFrom = this.pos.clone().sub( dir ); this._set( 'flee' ); } }
-	stagger( dir ) { this.flinch = 1; if ( this.species !== 'boar' && this.alive ) { this.fleeFrom = this.pos.clone().sub( dir ); this._set( 'flee' ); } }
+	knockback( dir ) { if ( this.alive && ! this.water ) { this._scare( _v.copy( this.pos ).sub( dir ) ); this._set( 'flee' ); } }
+	stagger( dir ) { this.flinch = 1; if ( this.species !== 'boar' && this.alive ) { this._scare( _v.copy( this.pos ).sub( dir ) ); this._set( 'flee' ); } }
 
 	die( info = {} ) {
 		this.state = 'dead';
@@ -644,7 +647,7 @@ export class Animals {
 			if ( d > r ) continue;
 			if ( a.species === 'boar' && a.aggressive && d < 20 ) { a._set( 'charge' ); continue; }
 			if ( a.species === 'turtle' || a.species === 'cow' && e.kind === 'step' ) continue;
-			a.fleeFrom = e.pos.clone(); a._set( 'flee' );
+			a._scare( e.pos ); a._set( 'flee' );
 		}
 	}
 
