@@ -245,7 +245,15 @@ export class Vegetation {
 		const rd = Math.min( 2600, this.settings.get( 'renderDistance' ) || 1400 );
 		const grassOn = this.settings.get( 'grass' ) !== false && q.grass > 0;
 		VG.uDensity.value = q.density;
-		this._taa = this.settings.get( 'antialias' ) === 'taa';
+		// LOD cross-fades by anti-aliasing mode: a moving dither under TAA (it resolves into a blend),
+		// alpha to coverage with MSAA (which also softens the cut-out leaf edges), else a clean swap
+		const aa = this.settings.get( 'antialias' );
+		this._taa = aa === 'taa';
+		VG.uVegFadeMode.value = this._taa ? 1 : 0;
+		const a2c = aa === 'msaa' && ( this.game.renderer?.maxSamples ?? 4 ) > 1;
+		for ( const t of [ ...this.targets.near, ...this.targets.mid, this.impFar, this.impMid ] ) {
+			if ( t.material.alphaToCoverage !== a2c ) { t.material.alphaToCoverage = a2c; t.material.needsUpdate = true; }
+		}
 		// LOD window of a mesh: dithered cross-fade in around `start` and out around `end` when another
 		// level takes over there; the last level of a plant shrinks away over the end of its range
 		// instead (an empty window hides the mesh)

@@ -18,7 +18,7 @@ const INK = {
 const FONT = 'Inter, system-ui, sans-serif';
 const ALL = { roads: true, buildings: true };
 
-// label classes: priority (lower wins a collision), zoom it appears at (px per m), font weight/size (u), colour
+// label classes: priority (lower wins a collision), zoom range it shows in (u per m), font weight/size (u), colour
 const LABEL = {
 	metro: { pri: 0, min: 0.016, font: '600 14', color: '#FFFFFF' },
 	island: { pri: 1, min: 0, max: 0.12, font: '600 12', color: 'rgba(255,255,255,0.9)', caps: true },
@@ -233,16 +233,19 @@ export class MapView {
 	}
 
 	// runways, footprints, streets, dirt tracks, highways, freeways (in world units inside draw's transform).
-	// Lines keep a minimum width in UI units and grow to their real width close up.
+	// Lines keep a minimum width in UI units and grow to their real width close up. z is the zoom in UI units
+	// per metre, so the minimap (device px) and the full map (CSS px) switch layers at the same scale.
 	_vectors( ctx, ppm, u, layers, x0, z0, x1, z1 ) {
 		const px = v => v / ppm; // canvas px -> world units
-		const far = Math.max( 0.6, Math.min( 1, ppm / 0.05 ) ); // thinner minimums when the whole chain is on screen
+		const z = ppm / u;
+		const far = Math.max( 0.6, Math.min( 1, z / 0.05 ) ); // thinner minimums when the whole chain is on screen
 		const width = ( minU, metres ) => px( Math.max( minU * u * far, metres * ppm ) );
 		const each = ( b, fn ) => b.each( x0, z0, x1, z1, fn );
 		ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-		if ( layers.roads && ppm > 0.03 ) { ctx.fillStyle = INK.runway; ctx.fill( this.runwayPath ); }
-		// footprints fade in between 0.3 and 0.5 px/m, streets between 0.12 and 0.2, so zooming never pops
-		const bA = layers.buildings ? smooth( ( ppm - 0.3 ) / 0.2 ) : 0;
+		if ( layers.roads && z > 0.03 ) { ctx.fillStyle = INK.runway; ctx.fill( this.runwayPath ); }
+		// footprints fade in between 0.3 and 0.5 u/m, streets between 0.14 and 0.4 (a 100 m block is then 14-40u,
+		// below that the street grid reads as graph paper over the town), so zooming never pops
+		const bA = layers.buildings ? smooth( ( z - 0.3 ) / 0.2 ) : 0;
 		if ( bA > 0 ) {
 			ctx.globalAlpha = bA;
 			ctx.fillStyle = INK.building;
@@ -250,7 +253,7 @@ export class MapView {
 			ctx.globalAlpha = 1;
 		}
 		if ( ! layers.roads ) return;
-		const sA = smooth( ( ppm - 0.12 ) / 0.08 );
+		const sA = smooth( ( z - 0.14 ) / 0.26 );
 		if ( sA > 0 ) {
 			ctx.globalAlpha = sA;
 			ctx.strokeStyle = INK.street;
@@ -282,7 +285,7 @@ export class MapView {
 
 	// place names in priority order, skipping any that would overlap one already placed (or an avoid rect)
 	_labels( ctx, view, toScreen, u, avoid ) {
-		const { ppm, w, h } = view;
+		const { w, h } = view, ppm = view.ppm / u; // zoom in u per metre (see _vectors)
 		const placed = avoid ? avoid.slice() : [];
 		const pad = 3 * u;
 		ctx.save();
@@ -307,7 +310,7 @@ export class MapView {
 			const tri = l.peak ? 7 * u : 0; // summit mark to the left of the name
 			const x0 = sx - ( tri ? tri / 2 : tw / 2 ), x1 = x0 + ( tri ? tri + 3 * u : 0 ) + tw;
 			const r = [ x0 - pad, sy - th / 2 - pad, x1 + pad, sy + th / 2 + pad ];
-			if ( r[ 2 ] < 0 || r[ 3 ] < 0 || r[ 0 ] > w || r[ 1 ] > h ) continue;
+			if ( r[ 0 ] < 0 || r[ 1 ] < 0 || r[ 2 ] > w || r[ 3 ] > h ) continue; // a name cut by the edge reads as a fragment
 			let hit = false;
 			for ( const p of placed ) if ( r[ 0 ] < p[ 2 ] && r[ 2 ] > p[ 0 ] && r[ 1 ] < p[ 3 ] && r[ 3 ] > p[ 1 ] ) { hit = true; break; }
 			if ( hit ) continue;
@@ -316,15 +319,16 @@ export class MapView {
 			ctx.font = font;
 			ctx.letterSpacing = spacing + 'px';
 			ctx.textAlign = 'left';
-			const tx = tri ? x0 + tri + 3 * u : x0;
+			// whole pixels keep the glyphs crisp
+			const tx = Math.round( tri ? x0 + tri + 3 * u : x0 ), ty = Math.round( sy );
 			if ( tri ) {
 				ctx.beginPath(); ctx.moveTo( x0 + tri / 2, sy - tri * 0.45 ); ctx.lineTo( x0 + tri, sy + tri * 0.45 ); ctx.lineTo( x0, sy + tri * 0.45 ); ctx.closePath();
 				ctx.lineWidth = 2 * u; ctx.stroke(); ctx.fillStyle = c.color; ctx.fill();
 				ctx.lineWidth = 3 * u;
 			}
-			ctx.strokeText( l.text, tx, sy );
+			ctx.strokeText( l.text, tx, ty );
 			ctx.fillStyle = c.color;
-			ctx.fillText( l.text, tx, sy );
+			ctx.fillText( l.text, tx, ty );
 		}
 		ctx.letterSpacing = '0px';
 		ctx.restore();

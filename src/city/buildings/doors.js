@@ -178,11 +178,12 @@ export class Doors {
 		return d;
 	}
 
-	remove( d ) {
+	// defer: an array to hand the leaves' colliders to (removed later, time-sliced) instead of removing them now
+	remove( d, defer = null ) {
 		for ( const l of d.leaves ) {
 			l.batch.give( l.slot );
 			if ( l.paneBatch ) l.paneBatch.give( l.pane );
-			this.game.physics.remove( l.box );
+			if ( defer ) defer.push( l.box ); else this.game.physics.remove( l.box );
 		}
 		this.list.delete( d );
 		this.moving.delete( d );

@@ -118,6 +118,9 @@ export class Menus {
 
 	_show( el, keys = null, opts = {} ) {
 		this._token ++;
+		// one menu screen replacing another (pause ⇄ options, title ⇄ a panel): the backdrop swaps in place and
+		// only the content fades, so the world doesn't flash through between the two
+		if ( this._el && this.ui.screen === this._el && ! el.classList.contains( 'death' ) ) el.classList.add( 'swap' );
 		this._keys = keys;
 		this._el = el;
 		this.ui.show( el, opts );
@@ -186,8 +189,6 @@ export class Menus {
 
 	async title() {
 		const tok = ++ this._token;
-		// the gradient doesn't fade in again when coming back from a panel on the title
-		const still = this.ui.screen?.classList.contains( 'bare' );
 		let live = null;
 		try { live = ( await this.app.saves.list() ).find( w => ! w.dead ) || null; } catch ( e ) { console.warn( e ); }
 		if ( tok !== this._token || this.ui.game ) return;
@@ -197,7 +198,7 @@ export class Menus {
 			{ id: 'options', label: 'Options', run: () => this.options( () => { this._titleFocus = 'options'; this.title(); } ) },
 			{ id: 'about', label: 'About', run: () => this.about() },
 		].filter( Boolean ) );
-		const el = h( 'div.screen.title-screen' + ( still ? '.still' : '' ), {},
+		const el = h( 'div.screen.title-screen', {},
 			h( 'div.menu-col', {}, h( 'h1.wordmark', { text: 'DEADTIDE' } ), ...m.els ),
 			h( 'div.version', { text: 'v' + VERSION } ) );
 		this._show( el, m.keys );
@@ -674,15 +675,17 @@ export class Menus {
 			return false;
 		} );
 
-		// search: labels, or the name of a bound key ('f', 'shift', 'rmb')
+		// search: the start of a word in a label ('r' finds Right and Reload, not Forward), or the name of a bound
+		// key ('f', 'shift', 'rmb')
 		const q = h( 'input.input', { placeholder: 'Search', spellcheck: false, 'aria-label': 'Search keys', oninput: () => filter() } );
 		const groups = []; // { head, rows: [ { el, a: [actions], label } ] }
+		const words = s => ' ' + s.toLowerCase().replace( /-/g, ' ' );
 		const filter = () => {
 			const t = q.value.trim().toLowerCase(), binds = S.get( 'bindings' );
 			for ( const g of groups ) {
 				let any = false;
 				for ( const r of g.rows ) {
-					const ok = ! t || r.label.toLowerCase().includes( t ) || r.acts.some( a => ( binds[ a ] || [] ).some( c => prettyCode( c ).toLowerCase() === t ) );
+					const ok = ! t || words( r.label ).includes( words( t ) ) || r.acts.some( a => ( binds[ a ] || [] ).some( c => prettyCode( c ).toLowerCase() === t ) );
 					r.el.hidden = ! ok;
 					any ||= ok;
 				}
@@ -748,15 +751,26 @@ export class Menus {
 		m.focus( focusId );
 	}
 
+	async _endWorld( id ) {
+		try {
+			const S = this.app.saves, w = await S.load( id );
+			if ( w && ! w.dead ) { w.dead = true; await S.save( w ); }
+		} catch ( e ) { console.warn( 'could not end the world', e ); }
+	}
+
 	death( info = {} ) {
 		const g = this.ui.game;
 		const hard = !! g?.save?.hardcore;
 		const kills = info.kills ?? g?.stats?.lifeKills ?? 0;
+		// hardcore: the world ends now. Game.saveNow() skips saves once a hardcore survivor is dead, so its dead
+		// flag never reaches storage on its own; without this, Continue and Play would reopen the world.
+		const ended = hard && g.save?.id ? this._endWorld( g.save.id ) : null;
 		let busy = false;
 		const quit = async () => {
 			if ( busy ) return;
 			busy = true;
 			this.app.audio.ui();
+			await ended;
 			await this.app.quit( ! hard );
 			this.ui.exitGame();
 		};

@@ -8,8 +8,9 @@
 /* ---- title, pause --------------------------------------------------------------------------------- */
 .title-screen { align-items: flex-end; justify-content: flex-start; background: linear-gradient(90deg, rgba(6, 7, 8, 0.78) 0%, rgba(6, 7, 8, 0.35) 40%, transparent 65%); }
 .title-screen.pause { background: linear-gradient(90deg, rgba(6, 7, 8, 0.85) 0%, rgba(6, 7, 8, 0.45) 45%, rgba(6, 7, 8, 0.15) 80%); }
-.title-screen.still { animation: none; }
-.title-screen.still .menu-col { animation: fade-in var(--d-3) var(--ease-out); }
+/* a menu screen that replaces another keeps the backdrop still; panels already animate in, menu columns fade */
+.screen.swap { animation: none; }
+.title-screen.swap .menu-col { animation: fade-in var(--d-3) var(--ease-out); }
 .menu-col { display: flex; flex-direction: column; align-items: flex-start; margin: 0 0 calc(96 * var(--u)) calc(96 * var(--u)); }
 .menu-col .wordmark { margin-bottom: calc(48 * var(--u)); text-shadow: 0 1px 3px rgba(0, 0, 0, 0.35); }
 .menu-col .kick { color: var(--ink-3); }
@@ -66,6 +67,8 @@
 /* ---- options ------------------------------------------------------------------------------------------- */
 .opt-panel { width: min(calc(800 * var(--u)), calc(100vw - 32px)); height: min(calc(640 * var(--u)), calc(100vh - 48 * var(--u))); }
 .opt-body { flex: 1; min-height: 0; display: grid; grid-template-columns: calc(176 * var(--u)) 1fr; }
+/* the rail starts focused (arrow keys switch tabs): an inset ring stays inside the tab instead of crossing the rail edge */
+.opt-panel .rail > button:focus-visible { outline-offset: -2px; }
 .opt-content { min-height: 0; overflow: auto; padding: var(--s-2) var(--s-5) var(--s-4); }
 .opt-content > .sec-head:not(:first-child) { margin-top: var(--s-3); }
 .keys-list > .sec-head:not(:first-child) { margin-top: var(--s-3); }

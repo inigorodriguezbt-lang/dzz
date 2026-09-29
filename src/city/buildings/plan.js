@@ -966,9 +966,10 @@ function derive( P, st ) {
 			continue;
 		}
 		if ( aOpen !== bOpen ) {
-			// the enclosed room's wall faces the open room like a facade
+			// the enclosed room's wall faces the open room like a facade (and keeps the exterior doors asked
+			// for on that side: a house's front door opens onto its lānai)
 			const inside = aOpen ? e.B : e.A, out = aOpen ? e.A : e.B;
-			addFacade( P, st, inside, out, e, ops );
+			addFacade( P, st, inside, out, e, ops.concat( extDoorsOn( st, inside, e ) ) );
 			continue;
 		}
 		st.walls.push( { ...lineOf( e ), t: wallT( e ), A: e.A, B: e.B, ops } );
@@ -996,20 +997,7 @@ function derive( P, st ) {
 				const e = axis === 'x' ? { axis, x0: f0, z0: line, x1: f1, z1: line } : { axis, x0: line, z0: f0, x1: line, z1: f1 };
 				if ( rm.open ) { st.rails.push( { ...e, side, room: rm } ); continue; }
 				// exterior doors requested on this side that fall into this stretch
-				const ops = [];
-				const len = f1 - f0;
-				for ( const xd of st.ext ) {
-					if ( xd.room !== rm || xd.side !== side ) continue;
-					const w = Math.min( xd.w, len - 0.4 );
-					if ( w < 0.7 ) continue;
-					// `at` runs along u (to the right seen from outside); sides 0 and 1 run against x / z
-					const uFrac = side === 0 || side === 1 ? 1 - xd.at : xd.at;
-					const pos = lo + ( hi - lo ) * uFrac;
-					if ( pos < f0 || pos > f1 ) continue;
-					const c = Math.max( w / 2 + 0.15, Math.min( len - w / 2 - 0.15, pos - f0 ) );
-					ops.push( { c, w, h: Math.min( xd.h, st.h - 0.35 ), kind: xd.kind, ext: true, lock: xd.lock ?? null, name: xd.name } );
-				}
-				addFacade( P, st, rm, null, e, ops );
+				addFacade( P, st, rm, null, e, extOps( st, rm, side, f0, f1 ) );
 			}
 		}
 	}
@@ -1020,6 +1008,34 @@ function derive( P, st ) {
 	// the floor opening above the flights below
 	if ( P.stair && st.i > 0 ) st.holes.push( stairHole( P.stair ) );
 	if ( P.stairs2 && st.i > 0 ) for ( const s of P.stairs2 ) st.holes.push( stairHole( s ) );
+}
+
+// the exterior doors asked for on side `side` of room rm that fall into the stretch [f0, f1] of that side
+// (positions from f0, the start of the stretch along x or z)
+function extOps( st, rm, side, f0, f1 ) {
+	const ops = [];
+	const len = f1 - f0;
+	const lo = side === 0 || side === 2 ? rm.x0 : rm.z0, hi = side === 0 || side === 2 ? rm.x1 : rm.z1;
+	for ( const xd of st.ext ) {
+		if ( xd.room !== rm || xd.side !== side ) continue;
+		const w = Math.min( xd.w, len - 0.4 );
+		if ( w < 0.7 ) continue;
+		// `at` runs along u (to the right seen from outside); sides 0 and 1 run against x / z
+		const uFrac = side === 0 || side === 1 ? 1 - xd.at : xd.at;
+		const pos = lo + ( hi - lo ) * uFrac;
+		if ( pos < f0 || pos > f1 ) continue;
+		const c = Math.max( w / 2 + 0.15, Math.min( len - w / 2 - 0.15, pos - f0 ) );
+		ops.push( { c, w, h: Math.min( xd.h, st.h - 0.35 ), kind: xd.kind, ext: true, lock: xd.lock ?? null, name: xd.name } );
+	}
+	return ops;
+}
+
+// exterior doors of an enclosed room on an edge it shares with an open room (porch, gallery)
+function extDoorsOn( st, rm, e ) {
+	let side;
+	if ( e.axis === 'x' ) side = Math.abs( rm.z0 - e.z0 ) < EPS ? 0 : 2;
+	else side = Math.abs( rm.x0 - e.x0 ) < EPS ? 3 : 1;
+	return e.axis === 'x' ? extOps( st, rm, side, e.x0, e.x1 ) : extOps( st, rm, side, e.z0, e.z1 );
 }
 
 function stairHole( s ) {

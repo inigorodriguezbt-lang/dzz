@@ -26,6 +26,7 @@ export const VG = {
 	uPlayer: { value: new THREE.Vector3( 0, - 1e5, 0 ) },
 	uShadowFar: { value: 160 }, // m: plants further than this skip the shadow pass (beyond the sun's shadow map)
 	uVegFrame: { value: 0 }, // frame % 64 under temporal anti-aliasing (the LOD dither moves), else 0
+	uVegFadeMode: { value: 0 }, // LOD cross-fades: 1 dithered (temporal anti-aliasing), 0 a clean swap at the band's middle
 	// the terrain's detail texture (A: fbm) and its travelling gust field offsets (xy: 140 m, zw: 61 m
 	// scale), see Vegetation.js: the grass takes the ground's meadow tone and moves with its wind sheen
 	tDetail: { value: null },
@@ -240,30 +241,57 @@ const VERT_PARS = /* glsl */`
 
 const FRAG_PARS = /* glsl */`
 	uniform sampler2D tLeaf; uniform sampler2D tPalmBark; uniform sampler2D tBark; uniform sampler2D tRock; uniform float uVegFrame;
+	uniform float uVegFadeMode;
 	uniform float uKind; uniform vec3 uTintA; uniform vec3 uTintB; uniform vec3 uBarkTint; uniform vec4 uMode;
 	varying vec2 vVegUv; varying vec4 vVegMat; varying vec3 vVegCol; varying vec2 vVegFade; varying vec4 vVegInst; varying vec4 vVegGround;
-	// per-pixel threshold of the LOD cross-fades: interleaved gradient noise (Jimenez 2014) reads as a
-	// fine grain where an ordered (Bayer) matrix shows a regular screen-door grid; both levels of a
-	// plant use the same threshold per pixel, so their pixels stay complementary
-	// (with temporal anti-aliasing the pattern moves every frame and resolves into a smooth blend)
-	float vegDither( vec2 p ) { return fract( 52.9829189 * fract( dot( p + uVegFrame * 5.588238, vec2( 0.06711056, 0.00583715 ) ) ) ); }
-	// sample the part's texture, alpha test the foliage (cut: extra threshold), dither the LOD fades
+	// Per-pixel threshold of the LOD cross-fades. A dither only under temporal anti-aliasing, where the
+	// pattern moves every frame and resolves into a smooth blend (interleaved gradient noise, Jimenez
+	// 2014; both levels of a plant use the same threshold, so their pixels stay complementary). Otherwise
+	// a fixed threshold: the levels swap in the middle of the band, every plant at its own jittered
+	// distance, and no screen-door pattern ever shows (MSAA blends through alpha to coverage instead).
+	float vegDither( vec2 p ) {
+		#ifdef VEG_DEPTH
+		return 0.5;
+		#else
+		return uVegFadeMode > 0.5 ? fract( 52.9829189 * fract( dot( p + uVegFrame * 5.588238, vec2( 0.06711056, 0.00583715 ) ) ) ) : 0.5;
+		#endif
+	}
+	// Sample the part's texture; alpha: coverage after the foliage alpha test (cut: extra threshold) and
+	// the LOD fades. Alpha to coverage (MSAA): leaf edges get a one-pixel ramp instead of a hard cut, and
+	// in a cross-fade the incoming level turns opaque over the first half of the band before the outgoing
+	// one fades over the second half (their sample masks nest, so the plant never turns see-through).
+	// Otherwise the pixels are discarded.
 	vec4 vegTexel( float cut ) {
 		vec2 uv = vVegUv;
 		vec2 dx = dFdx( uv ), dy = dFdy( uv );
 		float part = vVegMat.x;
 		vec4 c;
+		float cov = 1.0;
+		#ifdef ALPHA_TO_COVERAGE
+		// (the alpha ramp's screen-space width, in uniform control flow: read for every part)
+		float aw = max( fwidth( textureGrad( tLeaf, uv, dx, dy ).a ), 1e-3 );
+		#endif
 		if ( part < 0.5 ) c = textureGrad( tPalmBark, uv, dx, dy );
 		else if ( part < 1.5 ) c = textureGrad( tBark, uv, dx, dy );
 		else if ( part < 3.5 ) {
 			c = textureGrad( tLeaf, uv, dx, dy );
 			// minified foliage keeps its coverage: lower the threshold with the mip level
 			float lod = log2( max( max( length( dx ), length( dy ) ) * 2048.0, 1e-4 ) );
-			if ( c.a < mix( 0.5, 0.2, clamp( lod / 4.0, 0.0, 1.0 ) ) + cut ) discard;
+			float th = mix( 0.5, 0.2, clamp( lod / 4.0, 0.0, 1.0 ) ) + cut;
+			#ifdef ALPHA_TO_COVERAGE
+			cov = clamp( ( c.a - th ) / aw + 0.5, 0.0, 1.0 );
+			#else
+			if ( c.a < th ) discard;
+			#endif
 		} else c = textureGrad( tRock, uv, dx, dy );
+		#ifdef ALPHA_TO_COVERAGE
+		cov *= min( 1.0, 2.0 * vVegFade.x ) * min( 1.0, 2.0 - 2.0 * vVegFade.y );
+		if ( cov < 0.01 ) discard;
+		#else
 		float bt = vegDither( gl_FragCoord.xy );
 		if ( bt >= vVegFade.x || bt < vVegFade.y ) discard;
-		return c;
+		#endif
+		return vec4( c.rgb, cov );
 	}
 `;
 
@@ -346,6 +374,7 @@ const FRAG_COLOR = /* glsl */`
 		vegSpec = 0.6;
 	}
 	diffuseColor.rgb = vegC;
+	diffuseColor.a = vegTx.a;
 `;
 
 const FRAG_NORMAL = /* glsl */`
@@ -468,7 +497,7 @@ export function makeVegDepthMaterial( U ) {
 			.replace( '#include <common>', '#include <common>\n#define VEG_DEPTH\n' + VERT_PARS )
 			.replace( '#include <begin_vertex>', 'vegDeform( position, normal );\nvec3 transformed = vegP;' );
 		shader.fragmentShader = shader.fragmentShader
-			.replace( '#include <common>', '#include <common>\n' + FRAG_PARS )
+			.replace( '#include <common>', '#include <common>\n#define VEG_DEPTH\n' + FRAG_PARS )
 			.replace( '#include <alphatest_fragment>', 'vegTexel( 0.0 );' );
 	};
 	m.customProgramCacheKey = () => 'vegetation-depth';

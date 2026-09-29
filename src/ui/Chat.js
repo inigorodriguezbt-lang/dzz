@@ -1,7 +1,7 @@
 // Chat and command line (docs/UI_SPEC.md 9). T opens it, / opens it with a slash. Suggestions sit above the
 // input with the best match ghosted after the caret: Tab takes the selected one, ↑/↓ walk the list (or the
-// history when there is nothing to complete), Enter runs, Esc closes. Closed, the last six lines show on
-// plates and fade after 8 s; open, the whole log scrolls on a panel.
+// history when there is nothing to complete), Page Up/Down scroll the log, Enter runs, Esc closes. Closed,
+// the last six lines show on plates and fade after 8 s; open, the whole log scrolls on a panel.
 import { h } from './dom.js';
 
 const FADE = 8000; // ms a line stays on screen while the chat is closed
@@ -84,6 +84,12 @@ export class Chat {
 			const v = this.input.value;
 			this.hide();
 			if ( v.trim() ) C?.run( v );
+			return;
+		}
+		if ( k === 'PageUp' || k === 'PageDown' ) {
+			// read back through the log without leaving the field
+			e.preventDefault();
+			this.log.scrollTop += ( k === 'PageUp' ? - 1 : 1 ) * this.log.clientHeight * 0.8;
 			return;
 		}
 		if ( k === 'Tab' ) {

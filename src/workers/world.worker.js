@@ -5,7 +5,7 @@ import { scatterCell } from '../world/scatter.js';
 import { buildStreetCell } from '../world/streetgen.js';
 import { renderMapTile } from '../ui/maptile.js';
 import { buildingJob } from '../city/buildings/worker.js';
-import { vertexAO, heightGrid, bounceGrid } from '../world/terrain/terrainJobs.js';
+import { vertexAO, heightGrid, bounceGrid, isSea } from '../world/terrain/terrainJobs.js';
 import { buildDetailData } from '../world/terrain/detailData.js';
 
 let hf = null;
@@ -61,7 +61,7 @@ const handlers = {
 				mask[ k * 4 + 2 ] = s4[ 3 ] === 3 ? 255 : 0;
 				// far away the city shows as a grey tint from the coarse map
 				mask[ k * 4 ] = hf.flagAt( x, z, FLAG.CITY ) * 255;
-				mask[ k * 4 + 3 ] = y < 1.6 ? 220 : y < 3 ? 90 : 0;
+				mask[ k * 4 + 3 ] = ! isSea( hf, x, z ) ? 0 : y < 1.6 ? 220 : y < 3 ? 90 : 0;
 			}
 		}
 		const Y = ( i, j ) => pos[ ( j * V + i ) * 3 + 1 ];
@@ -123,13 +123,14 @@ const handlers = {
 	},
 };
 
-// 1 at the water's edge, fading to 0 about 45 m inland (beaches only form near the sea)
+// 1 at the water's edge, fading to 0 about 45 m inland (beaches only form next to the open sea, not around
+// inland ponds and marshes: isSea)
 const DIRS = Array.from( { length: 10 }, ( _, i ) => [ Math.cos( i / 10 * Math.PI * 2 ), Math.sin( i / 10 * Math.PI * 2 ) ] );
 function shoreness( x, z, y ) {
+	if ( y > 9 || ! isSea( hf, x, z ) ) return 0;
 	if ( y < 0.2 ) return 1;
-	if ( y > 9 ) return 0;
 	for ( const r of [ 6, 14, 24, 34, 46 ] ) {
-		for ( const [ dx, dz ] of DIRS ) if ( hf.baseHeight( x + dx * r, z + dz * r ) < 0 ) return 1 - r / 52;
+		for ( const [ dx, dz ] of DIRS ) if ( hf.baseHeight( x + dx * r, z + dz * r ) < 0 && isSea( hf, x + dx * r, z + dz * r ) ) return 1 - r / 52;
 	}
 	return 0;
 }

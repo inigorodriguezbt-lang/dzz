@@ -188,10 +188,17 @@ const VERT_PARS = /* glsl */`
 `;
 
 const FRAG_PARS = /* glsl */`
-	uniform sampler2D tImpA; uniform sampler2D tImpB; uniform sampler2D tImpC; uniform vec2 uImpGrid; uniform float uVegFrame;
+	uniform sampler2D tImpA; uniform sampler2D tImpB; uniform sampler2D tImpC; uniform vec2 uImpGrid; uniform float uVegFrame; uniform float uVegFadeMode;
 	varying vec3 vImpC; varying vec4 vImpX; varying vec4 vImpY; varying vec4 vImpZ; varying vec3 vImpTint; varying vec3 vImpBarkC; varying vec2 vImpQ; varying vec3 vImpWP;
-	// the same per-pixel cross-fade threshold as the plant models (interleaved gradient noise)
-	float impDither( vec2 p ) { return fract( 52.9829189 * fract( dot( p + uVegFrame * 5.588238, vec2( 0.06711056, 0.00583715 ) ) ) ); }
+	// the same per-pixel cross-fade threshold as the plant models (VegMaterial vegDither): a moving
+	// dither under temporal anti-aliasing only, else a clean swap in the middle of the band
+	float impDither( vec2 p ) {
+		#ifdef IMP_DEPTH
+		return 0.5;
+		#else
+		return uVegFadeMode > 0.5 ? fract( 52.9829189 * fract( dot( p + uVegFrame * 5.588238, vec2( 0.06711056, 0.00583715 ) ) ) ) : 0.5;
+		#endif
+	}
 	// world direction -> plant-local (un-shear, inverse yaw, inverse scale)
 	vec3 impLocal( vec3 v ) {
 		v.xz -= vImpY.xy * v.y;
@@ -250,11 +257,18 @@ const DEPTH_TEST = /* glsl */`
 const FRAG_COLOR = /* glsl */`
 	impSample();
 	float impCov = impA.a;
-	float impBt = impDither( gl_FragCoord.xy );
 	// small on screen the atlas is read from its coarse mips, where coverage averages out: lower the
 	// cut-off with the footprint (as the near foliage does) so distant crowns keep their size
 	float impLod = log2( max( max( length( dFdx( vImpQ ) ), length( dFdy( vImpQ ) ) ) * ${( FRAME / 2 ).toFixed( 1 )}, 1e-4 ) );
-	if ( impCov < mix( 0.42, 0.2, clamp( ( impLod - 0.5 ) / 3.0, 0.0, 1.0 ) ) || impBt >= vImpZ.x ) discard;
+	float impCut = mix( 0.42, 0.2, clamp( ( impLod - 0.5 ) / 3.0, 0.0, 1.0 ) );
+	#ifdef ALPHA_TO_COVERAGE
+	// MSAA: soft crown edges (a one-pixel ramp over the coverage) and the fade-in as sample coverage;
+	// the incoming impostor is opaque by the band's middle, where the model starts to fade (VegMaterial)
+	diffuseColor.a = clamp( ( impCov - impCut ) / max( fwidth( impCov ), 0.02 ) + 0.5, 0.0, 1.0 ) * min( 1.0, 2.0 * vImpZ.x );
+	if ( diffuseColor.a < 0.01 ) discard;
+	#else
+	if ( impCov < impCut || impDither( gl_FragCoord.xy ) >= vImpZ.x ) discard;
+	#endif
 	vec3 impCol = impA.rgb / impCov;
 	impCol *= impCol;
 	float impLeaf = clamp( impB.a / impCov, 0.0, 1.0 );

@@ -71,6 +71,8 @@ class City {
 		this.shellBoxes = new Map(); // building -> coarse boxes while only its shell is near
 		this.interiors = new Map();
 		this.queue = [];
+		this.cur = null; // the integration in progress (a generator, see _integrate)
+		this.dropQ = []; // colliders and loot of dropped storeys still to remove
 		this.doors = new Doors( this );
 		this.containers = new Map(); // key -> live container (opened this session)
 		this.saved = { containers: {}, looted: {} };
@@ -174,7 +176,6 @@ class City {
 			c.mesh = m;
 		}
 		c.ready = true;
-		if ( c.lod === 0 ) for ( const bi of c.ids ) { this.nearReady[ bi ] = 1; if ( ! this.interiors.get( bi )?.groundReady ) this._shellBoxes( bi, true ); this.stateTouched.add( bi ); }
 	}
 
 	// the coarse colliders of a building seen only as a shell: the block, and a gas station's pump islands
@@ -231,11 +232,7 @@ class City {
 			I.d = this.rectDist( I.bi, p.x, p.z );
 			if ( I.d > IN_DROP ) { this._dropInterior( I ); continue; }
 			this._storeys( I, p );
-			// decals and glass panes only matter up close (each is a draw call per storey)
-			for ( const st of I.storeys.values() ) for ( const m of st.meshes ) {
-				if ( m.material === this.mats.decal ) m.visible = I.d < 35;
-				else if ( m.material === this.mats.glass ) m.visible = I.d < 60;
-			}
+			for ( const st of I.storeys.values() ) if ( st.ready ) for ( const m of st.meshes ) m.visible = this._meshVisible( I, m );
 			// only the interiors around you cast sun shadows (the shell casts for the rest)
 			const sh = I.d < SHADOW_D;
 			if ( sh !== !! I.shadows ) {
@@ -271,24 +268,33 @@ class City {
 		st.job.promise.then( res => { st.job = null; if ( st.dead || ! res ) return; this.queue.push( { kind: 'storey', I, st, res } ); } ).catch( e => console.error( 'buildings storey', e ) );
 	}
 
-	_dropStorey( I, si, st ) {
+	// a storey goes (also one still being integrated): its meshes and doors at once, its colliders and loose
+	// loot over the next frames (removing hundreds of boxes in one frame is a visible hitch)
+	_dropStorey( I, si, st, recoarse = true ) {
 		st.dead = true;
 		if ( st.job ) st.job.cancelled = true;
 		I.storeys.delete( si );
-		if ( ! st.ready ) return;
 		for ( const m of st.meshes ) { this.group.remove( m ); m.geometry.dispose(); }
-		for ( const b of st.boxes ) this.physics.remove( b );
-		for ( const d of st.doors ) this.doors.remove( d );
-		for ( const it of st.items ) if ( ! it.removed ) this.game.items3d?.remove?.( it );
+		for ( const d of st.doors ) this.doors.remove( d, st.boxes );
 		for ( const l of st.lights ) this.game.itemLights?.remove?.( l.src );
-		if ( si === 0 ) { I.groundReady = false; if ( this.nearReady[ I.bi ] ) this._shellBoxes( I.bi, true ); }
-		this._coarse( I );
+		if ( st.boxes.length || st.items.length ) this.dropQ.push( this._clearGen( st.boxes, st.items ) );
+		st.meshes = []; st.doors = []; st.lights = []; st.boxes = []; st.items = []; st.containers = []; st.beds = []; st.taps = [];
+		const was = st.ready;
+		st.ready = false;
+		if ( si === 0 && was ) { I.groundReady = false; if ( this.nearReady[ I.bi ] ) this._shellBoxes( I.bi, true ); }
+		if ( recoarse ) this._coarse( I );
 		this.stateTouched.add( I.bi );
 	}
 
+	* _clearGen( boxes, items ) {
+		const P = this.physics, W = this.game.items3d;
+		for ( let k = 0; k < boxes.length; k ++ ) { P.remove( boxes[ k ] ); if ( k % 48 === 47 ) yield; }
+		for ( let k = 0; k < items.length; k ++ ) { W?.remove?.( items[ k ] ); if ( k % 8 === 7 ) yield; }
+	}
+
 	_dropInterior( I ) {
-		for ( const [ si, st ] of [ ...I.storeys ] ) this._dropStorey( I, si, st );
-		for ( const b of I.coarse ) this.physics.remove( b );
+		for ( const [ si, st ] of [ ...I.storeys ] ) this._dropStorey( I, si, st, false );
+		if ( I.coarse.length ) this.dropQ.push( this._clearGen( I.coarse, [] ) );
 		I.coarse = [];
 		this.interiors.delete( I.bi );
 		this.stateTouched.add( I.bi );
@@ -328,56 +334,104 @@ class City {
 
 	// ---- integration (time-sliced) --------------------------------------------------------------------------------
 
+	// Worker results join the scene within a per-frame budget. Each one is integrated by a generator that yields
+	// between chunks (colliders, doors, loot), so a big storey spreads over a few frames instead of stalling one.
 	_integrate() {
 		const t0 = performance.now();
-		while ( this.queue.length ) {
-			// interiors first, nearest first; an upper storey waits until its ground storey is in
-			let k = - 1;
-			for ( let i = 0; i < this.queue.length; i ++ ) {
-				const q = this.queue[ i ];
-				const dead = q.kind === 'cell' ? q.c.dead : q.st.dead;
-				// an interior joins its near shell (which hides the storeys it replaces); upper storeys wait for the ground one
-				if ( ! dead && q.kind === 'storey' && ( ! this.nearReady[ q.I.bi ] || ( q.st.si > 0 && ! q.I.groundReady ) ) ) continue;
-				if ( k < 0 || rank( q ) < rank( this.queue[ k ] ) ) k = i;
+		const over = () => performance.now() - t0 > BUDGET_MS;
+		// clearing what was dropped first: it is cheap per step and nothing waits on new work more than on that
+		while ( this.dropQ.length ) {
+			if ( this.dropQ[ 0 ].next().done ) this.dropQ.shift();
+			if ( over() ) return;
+		}
+		for ( ;; ) {
+			if ( ! this.cur ) {
+				const q = this._next();
+				if ( ! q ) break;
+				if ( q.kind === 'cell' ) { if ( q.c.dead ) continue; this.cur = this._cellGen( q.c, q.res ); }
+				else { if ( q.st.dead || this.interiors.get( q.I.bi ) !== q.I ) continue; this.cur = this._storeyGen( q.I, q.st, q.res ); }
 			}
-			if ( k < 0 ) break;
-			const q = this.queue.splice( k, 1 )[ 0 ];
-			if ( q.kind === 'cell' ) { if ( ! q.c.dead ) this._cellReady( q.c, q.res ); }
-			else if ( ! q.st.dead && this.interiors.get( q.I.bi ) === q.I ) this._storeyReady( q.I, q.st, q.res );
-			if ( performance.now() - t0 > BUDGET_MS ) break;
+			if ( this.cur.next().done ) this.cur = null;
+			if ( over() ) break;
 		}
 	}
 
-	_storeyReady( I, st, res ) {
+	// the next result to integrate: interiors first, nearest first. An interior joins its near shell (which hides
+	// the storeys it replaces) and an upper storey waits for its ground storey.
+	_next() {
+		let k = - 1;
+		for ( let i = 0; i < this.queue.length; i ++ ) {
+			const q = this.queue[ i ];
+			const dead = q.kind === 'cell' ? q.c.dead : q.st.dead;
+			if ( ! dead && q.kind === 'storey' && ( ! this.nearReady[ q.I.bi ] || ( q.st.si > 0 && ! q.I.groundReady ) ) ) continue;
+			if ( dead ) { this.queue.splice( i, 1 ); i --; continue; }
+			if ( k < 0 || rank( q ) < rank( this.queue[ k ] ) ) k = i;
+		}
+		return k < 0 ? null : this.queue.splice( k, 1 )[ 0 ];
+	}
+
+	* _cellGen( c, res ) {
+		this._cellReady( c, res );
+		// near cells: the coarse colliders of their buildings, a few buildings per step
+		if ( c.lod !== 0 ) return;
+		let n = 0;
+		for ( const bi of c.ids ) {
+			if ( c.dead ) return;
+			this.nearReady[ bi ] = 1;
+			if ( ! this.interiors.get( bi )?.groundReady ) this._shellBoxes( bi, true );
+			this.stateTouched.add( bi );
+			if ( ++ n % 12 === 0 ) yield;
+		}
+	}
+
+	// A storey's meshes go in hidden and show (with the shell hiding the storey it replaces) only once its
+	// colliders, doors and loot are all in, so the swap happens in one frame.
+	* _storeyGen( I, st, res ) {
 		const r = I.r, g = this.game;
 		const yaw = - r.angle;
-		const place = ( m ) => { m.position.set( r.x, 0, r.z ); m.rotation.y = yaw; m.matrixAutoUpdate = false; m.updateMatrix(); this.group.add( m ); st.meshes.push( m ); return m; };
+		const place = ( m ) => { m.position.set( r.x, 0, r.z ); m.rotation.y = yaw; m.matrixAutoUpdate = false; m.updateMatrix(); m.visible = false; this.group.add( m ); st.meshes.push( m ); return m; };
 		if ( res.geo ) { const m = place( new THREE.Mesh( geoToBuffer( res.geo ), this.mats.interior ) ); m.castShadow = !! I.shadows; m.receiveShadow = true; }
 		if ( res.dec ) { const m = place( new THREE.Mesh( decalToBuffer( res.dec ), this.mats.decal ) ); m.receiveShadow = true; m.renderOrder = 1; }
 		if ( res.glass ) { const m = place( new THREE.Mesh( glassToBuffer( res.glass ), this.mats.glass ) ); m.layers.set( 1 ); }
+		yield;
 		// colliders
 		const B = res.boxes, P = this.physics;
-		for ( let k = 0; k < B.length; k += BOX_STRIDE ) {
+		for ( let k = 0, n = 0; k < B.length; k += BOX_STRIDE ) {
+			if ( st.dead ) return;
 			const [ x, z ] = this.toWorld( r, B[ k ], B[ k + 2 ] );
 			st.boxes.push( P.add( { x, y: B[ k + 1 ], z, hx: B[ k + 3 ], hy: B[ k + 4 ], hz: B[ k + 5 ], yaw: yaw + B[ k + 6 ], mat: PMAT[ B[ k + 7 ] ] || 'concrete', kind: PK[ B[ k + 8 ] ] || 'solid', owner: st } ) );
+			if ( ++ n % 64 === 0 ) yield;
 		}
+		yield;
+		if ( st.dead ) return;
 		for ( const rec of res.doors ) st.doors.push( this.doors.add( I, st.si, rec ) );
 		// containers, beds and taps as world-space oriented boxes / points
 		const obb = ( o ) => { const [ x, z ] = this.toWorld( r, o.cx, o.cz ); return { ...o, x, y: o.cy, z, yaw: yaw + ( o.yaw || 0 ) }; };
 		st.containers = res.containers.map( obb );
 		st.beds = res.beds.map( obb );
 		st.taps = res.taps.map( t => { const [ x, z ] = this.toWorld( r, t.x, t.z ); return { ...t, x, z, water: this._hasWater( I.bi, st.si ) }; } );
+		const night = this._night();
 		for ( const l of res.lights ) {
 			const [ x, z ] = this.toWorld( r, l.x, l.z );
-			l.src = { pos: new THREE.Vector3( x, l.y, z ), color: 0xff9a48, intensity: l.kind === 'lantern' ? 3.2 : 1.8, range: l.kind === 'lantern' ? 9 : 6, flicker: true, on: false, priority: 0.8 };
+			l.src = { pos: new THREE.Vector3( x, l.y, z ), color: 0xff9a48, intensity: l.kind === 'lantern' ? 3.2 : 1.8, range: l.kind === 'lantern' ? 9 : 6, flicker: true, on: night, priority: 0.8 };
 			st.lights.push( l );
 			g.itemLights?.add?.( l.src );
 		}
-		this._spawnLoot( I, st, res.spots );
+		yield;
+		yield * this._spawnLoot( I, st, res.spots );
+		if ( st.dead ) return;
+		for ( const m of st.meshes ) m.visible = this._meshVisible( I, m );
 		st.ready = true;
 		if ( st.si === 0 ) { I.groundReady = true; this._shellBoxes( I.bi, false ); }
 		this._coarse( I );
 		this.stateTouched.add( I.bi );
+	}
+
+	// decals and glass panes only matter up close (each is a draw call per storey)
+	_meshVisible( I, m ) {
+		if ( m.material === this.mats.decal ) return I.d < 35;
+		if ( m.material === this.mats.glass ) return I.d < 60;
+		return true;
 	}
 
 	_hasWater( bi, si ) {
@@ -387,9 +441,10 @@ class City {
 
 	// ---- loose loot --------------------------------------------------------------------------------------------------
 
-	_spawnLoot( I, st, spots ) {
+	* _spawnLoot( I, st, spots ) {
 		const items = this.game.items3d;
 		if ( ! items?.spawn ) return;
+		let n = 0;
 		const r = I.r, hours = this.game.time.hours;
 		const looted = this.saved.looted;
 		for ( const s of spots ) {
@@ -406,6 +461,7 @@ class City {
 			const [ x, z ] = this.toWorld( r, s.x, s.z );
 			const it = items.spawn( stack, new THREE.Vector3( x, s.y + 0.005, z ), { yaw: s.yaw, key: s.key, persistent: false, settle: false } );
 			if ( it ) st.items.push( it );
+			if ( ++ n % 6 === 0 ) { yield; if ( st.dead ) return; }
 		}
 	}
 
@@ -416,8 +472,10 @@ class City {
 
 	// ---- candles at night --------------------------------------------------------------------------------------------
 
+	_night() { return ( this.world.sky?.night || 0 ) > 0.35; }
+
 	_lights() {
-		const night = ( this.world.sky?.night || 0 ) > 0.35;
+		const night = this._night();
 		for ( const I of this.interiors.values() ) for ( const st of I.storeys.values() ) for ( const l of st.lights ) l.src.on = night;
 	}
 
@@ -593,6 +651,9 @@ class City {
 		for ( const c of [ ...this.far.values() ] ) this._drop( this.far, c );
 		for ( const c of [ ...this.near.values() ] ) this._drop( this.near, c );
 		for ( const bi of [ ...this.shellBoxes.keys() ] ) this._shellBoxes( bi, false );
+		this.cur = null;
+		for ( const it of this.dropQ ) while ( ! it.next().done );
+		this.dropQ = [];
 		this.doors.dispose();
 		this.offProvider?.();
 		this.offTaken?.();

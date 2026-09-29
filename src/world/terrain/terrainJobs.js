@@ -119,6 +119,47 @@ export function vertexAO( hf, x0, z0, size, step, V, nor ) {
 	}
 }
 
+// ---- open sea: coarse cells (32 m) below +0.5 m flood-filled from the map border, dilated by two cells.
+// Beaches, the seabed zonation and the bounce's sea only form next to the sea, not around inland ponds,
+// marshes and stream beds (Kawainui, the fishponds), where the DEM also dips to sea level.
+let _seaHf = null, _sea = null;
+function seaMask( hf ) {
+	if ( _seaHf === hf ) return _sea;
+	const W = hf.cnx, H = hf.cnz, n = W * H, lim = 0.5 / hf.iq;
+	const m = new Uint8Array( n ), q = new Int32Array( n );
+	let qh = 0, qt = 0;
+	const push = ( k ) => { if ( ! m[ k ] && hf.coarse[ k ] < lim ) { m[ k ] = 1; q[ qt ++ ] = k; } };
+	for ( let i = 0; i < W; i ++ ) { push( i ); push( ( H - 1 ) * W + i ); }
+	for ( let j = 0; j < H; j ++ ) { push( j * W ); push( j * W + W - 1 ); }
+	while ( qh < qt ) {
+		const k = q[ qh ++ ], i = k % W;
+		if ( i > 0 ) push( k - 1 );
+		if ( i < W - 1 ) push( k + 1 );
+		if ( k >= W ) push( k - W );
+		if ( k < n - W ) push( k + W );
+	}
+	// dilate twice (the shore cells average land and sea)
+	for ( let r = 0; r < 2; r ++ ) {
+		const src = m.slice();
+		for ( let j = 0; j < H; j ++ ) for ( let i = 0; i < W; i ++ ) {
+			const k = j * W + i;
+			if ( src[ k ] ) continue;
+			if ( ( i > 0 && src[ k - 1 ] ) || ( i < W - 1 && src[ k + 1 ] ) || ( j > 0 && src[ k - W ] ) || ( j < H - 1 && src[ k + W ] ) ) m[ k ] = 1;
+		}
+	}
+	_seaHf = hf; _sea = m;
+	return m;
+}
+
+// 1 where ( x, z ) is open sea or its shore (see seaMask)
+export function isSea( hf, x, z ) {
+	const m = seaMask( hf );
+	let i = Math.round( ( x - hf.x0 ) / hf.CS ), j = Math.round( ( z - hf.z0 ) / hf.CS );
+	i = i < 0 ? 0 : i >= hf.cnx ? hf.cnx - 1 : i;
+	j = j < 0 ? 0 : j >= hf.cnz ? hf.cnz - 1 : j;
+	return m[ j * hf.cnx + i ];
+}
+
 // ---- half floats (DataUtils.toHalfFloat without three) ------------------------------------------------
 const _f = new Float32Array( 1 ), _u = new Uint32Array( _f.buffer );
 function toHalf( v ) {
@@ -186,7 +227,10 @@ export function bounceGrid( hf, { x0, z0, n, step } ) {
 	const H = heightGrid( hf, { x0, z0, n, step } ).result.h;
 	// distance to the sea within the grid (two-pass chamfer), for the beaches
 	const D = new Float32Array( n * n );
-	for ( let k = 0; k < n * n; k ++ ) D[ k ] = H[ k ] < 0 ? 0 : 1e9;
+	for ( let j = 0; j < n; j ++ ) for ( let i = 0; i < n; i ++ ) {
+		const k = j * n + i;
+		D[ k ] = H[ k ] < 0 && isSea( hf, x0 + ( i + 0.5 ) * step, z0 + ( j + 0.5 ) * step ) ? 0 : 1e9;
+	}
 	const d1 = step, d2 = step * Math.SQRT2;
 	for ( let j = 0; j < n; j ++ ) for ( let i = 0; i < n; i ++ ) {
 		const k = j * n + i;
@@ -214,7 +258,7 @@ export function bounceGrid( hf, { x0, z0, n, step } ) {
 		const slope = 1 - 1 / Math.sqrt( 1 + hx * hx + hz * hz );
 		hf.surfaceAt( x, z, s4 );
 		const wetM = Math.min( 1, s4[ 0 ] * 1.15 + 0.14 );
-		const shore = h < 0.2 ? 1 : h > 9 ? 0 : D[ k ] < 52 ? 1 - D[ k ] / 52 : 0;
+		const shore = h > 9 ? 0 : D[ k ] < 52 ? 1 - D[ k ] / 52 : 0;
 		const city = hf.flagAt( x, z, FLAG.CITY | FLAG.BUILDING | FLAG.STREET );
 		const lava = sstep( 0.35, 0.6, s4[ 1 ] );
 		const field = ( hf.flagsNear( x, z ) & FLAG.FIELD ) ? 1 : 0;

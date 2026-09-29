@@ -699,7 +699,9 @@ const TERRAIN_ALBEDO = /* glsl */`
 		#endif
 		// bare trodden soil in places, sandy soil toward the beach
 		lawn = mix( lawn, ${ S( 0.4, 0.33, 0.23 ) }, smoothstep( 0.72, 0.84, dN.y + ( dM.y - 0.5 ) * 0.5 ) * 0.25 );
-		lawn = mix( lawn, ${ S( 0.60, 0.52, 0.38 ) }, clamp( spSand * 1.6, 0.0, 1.0 ) * smoothstep( 0.45, 0.62, dN.z + dM.y * 0.3 ) * 0.7 );
+		// (ours: the stone-free fbm dM.w for dM.y. Tidewater's grass field hides the 0.3 m stones of dM.y; on our
+		// sparser sward they showed as pale sandy discs all along the back of the beaches)
+		lawn = mix( lawn, ${ S( 0.60, 0.52, 0.38 ) }, clamp( spSand * 1.6, 0.0, 1.0 ) * smoothstep( 0.45, 0.62, dN.z + dM.w * 0.3 ) * 0.7 );
 		// inside the geometric grass field the ground is only seen between the blades: the shaded base of
 		// the sward, dark and brownish with dead leaves (uTerGrass.z: the vegetation turns it on)
 		float grassHere = smoothstep( 2.5, 4.5, hb ) * ( 1.0 - smoothstep( 0.45, 0.85, jungleW ) ) * ( 1.0 - clamp( spSand * 1.6, 0.0, 1.0 ) );

@@ -24,10 +24,12 @@ for ( let i = 0; i < Math.min( N, lim ); i ++ ) {
 			if ( lod === 0 ) { stats.v0 += n; if ( n > stats.max0[ 0 ] ) stats.max0 = [ n, i, P.S.arch, P.S.n ]; } else { stats.v1 += n; if ( n > stats.max1[ 0 ] ) stats.max1 = [ n, i, P.S.arch, P.S.n ]; }
 			for ( let k = 0; k < n * 3; k ++ ) if ( ! Number.isFinite( g.pos[ k ] ) ) throw new Error( 'NaN vertex lod ' + lod );
 		}
-		const a = byArch[ P.S.arch ] = byArch[ P.S.arch ] || { n: 0, noext: 0, unreached: 0 };
+		const a = byArch[ P.S.arch ] = byArch[ P.S.arch ] || { n: 0, noext: 0, nofront: 0 };
 		a.n ++;
 		for ( const st of P.storeys ) { stats.rooms += st.rooms.length; stats.doors += st.doors.length; }
 		if ( ! P.storeys[ 0 ].doors.some( d => d.ext ) ) a.noext ++;
+		// a door on the street side (the front faces local -z)
+		if ( ! P.storeys[ 0 ].doors.some( d => d.ext && d.nz < - 0.5 ) ) a.nofront ++;
 	} catch ( e ) {
 		fails ++;
 		if ( fails < 8 ) console.log( 'building', i, r.type, e.stack.split( '\n' ).slice( 0, 3 ).join( ' | ' ) );

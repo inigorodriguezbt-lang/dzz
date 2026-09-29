@@ -1,14 +1,16 @@
 // Frame pipeline:
-//   1. opaque world (layer 0) + sky into sceneRT (HDR colour + depth texture), one stabilised sun shadow map
+//   0. (World.update, before) the cascaded sun shadow maps (render/Shadows.js)
+//   1. opaque world (layer 0) + sky into sceneRT (HDR colour + depth texture)
 //   2. GTAO on the opaque depth (half resolution), the beauty pass: scene x AO into beautyRT
 //   3. composite into mainRT (beauty colour + scene depth copied), then water and transparents (layer 1)
 //      that read beautyRT and the scene depth for refraction and depth-based absorption
 //   4. sun shafts and god rays on mainRT (colour + depth) into beautyRT (post/Haze.js)
+//   4b. with antialias 'taa': the temporal resolve (post/TAA.js) back into mainRT, then the overlay layer
 //   5. first-person view model (its own scene and camera) over a cleared depth
 //   6. bloom chain (13-tap downsamples, Karis average on the first, tent upsamples) and the auto exposure
-//      metered from the 1/16 level, then the grade in scene-linear HDR (exposure, white balance,
-//      saturation, contrast, vignette, grain), ACES, the display-space effects (underwater, damage, flash),
-//      sRGB with a +-1 LSB dither; optional FXAA
+//      metered from the 1/16 level, then the grade in scene-linear HDR (RCAS, motion blur, bloom, lens
+//      flare, exposure, white balance, saturation, contrast, vignette, grain), ACES, the display-space
+//      effects (underwater, damage, flash), sRGB with a +-1 LSB dither; optional FXAA
 // The post chain (bloom, meter, grade) is ported from Tidewater src/post/PostFX.js (MIT, see
 // LICENSE-Tidewater.txt).
 import * as THREE from 'three';
@@ -18,6 +20,7 @@ import { GTAO } from './post/GTAO.js';
 import { Haze } from './post/Haze.js';
 import { TAA } from './post/TAA.js';
 import { LensFlare, FLARE_GLSL } from './post/LensFlare.js';
+import { MotionBlur, MB_GLSL } from './post/MotionBlur.js';
 
 export const LAYER_WORLD = 0;
 export const LAYER_POST = 1;
@@ -176,6 +179,7 @@ export class Renderer {
 		this.haze = new Haze();
 		this.taa = new TAA();
 		this.flare = new LensFlare();
+		this.mb = new MotionBlur();
 		this.shadows = null; // the cascaded sun shadows (World): the shafts' shadow
 		this.meterRT = new THREE.WebGLRenderTarget( METER_TILES, METER_TILES, { type: THREE.FloatType, depthBuffer: false } );
 		this.meterRT.texture.minFilter = this.meterRT.texture.magFilter = THREE.NearestFilter;
@@ -192,6 +196,7 @@ export class Renderer {
 				sharpen: { value: 0 }, tSkyDepth: { value: null },
 				tFlareVis: { value: null }, uFlareSunUV: { value: this.flare.sunUV }, uFlareAspect: { value: 1 }, uFlareStrength: { value: 0 },
 				uFlareColor: { value: G.uSunColor.value }, uFlareResY: { value: 1 },
+				...this.mb.uniforms,
 			},
 			vertexShader: FS_VERT,
 			fragmentShader: GRADE_FRAG,
@@ -242,6 +247,8 @@ export class Renderer {
 		this.haze.setSize( W, H );
 		this.taa.setSize( W, H );
 		this.taa.reset();
+		this.mb.setSize( W, H );
+		this.mb.reset();
 		// 5 levels: 1/2 .. 1/32
 		const bloom = [], bloomUp = [];
 		for ( let i = 0; i < 5; i ++ ) {
@@ -265,7 +272,7 @@ export class Renderer {
 	get hazeOn() { return ! this.logDepth && ( this.settings.get( 'shafts' ) ?? this.settings.get( 'shadows' ) !== 'off' ); }
 
 	// snap the eye adaptation and drop the temporal history (after a teleport or a time jump)
-	resetExposure() { this._resetExposure = true; this.taa.reset(); }
+	resetExposure() { this._resetExposure = true; this.taa.reset(); this.mb.reset(); }
 
 	_pass( mat, rt ) {
 		this.quad.material = mat;
@@ -288,6 +295,12 @@ export class Renderer {
 		// clean projection is kept)
 		if ( this.reversed && cam.reversedDepth !== true ) { cam._reversedDepth = true; cam.updateProjectionMatrix(); }
 		if ( taaOn ) this.taa.begin( cam, this.width, this.height );
+		// motion blur (camera-only, from the depth the TAA resolve copies): off by default
+		const mbOn = taaOn && ( this.settings.get( 'motionBlur' ) ?? false );
+		if ( mbOn ) {
+			if ( this.taa.needsRestart ) this.mb.reset();
+			this.mb.updateCamera( cam, cam.userData.projNoJitter );
+		} else this.mb.reset();
 		this.gtao.temporal = taaOn;
 		// 1: opaque + sky
 		gl.shadowMap.needsUpdate = f.shadows !== false;
@@ -345,6 +358,10 @@ export class Renderer {
 			gl.clear( false, true, false );
 			gl.render( f.viewScene, f.viewCamera );
 		}
+		// (mainRT's depth now holds only the view model: its mask for the motion blur)
+		this.mb.uniforms.tMbVM.value = T.main.depthTexture;
+		this.mb.uniforms.uMbVMOn.value = f.viewScene && out === T.main ? 1 : 0;
+		this.mb.render( gl, this.taa.prevDepth.texture, mbOn );
 		const post = out.texture;
 		// 6: bloom down chain (also feeds the exposure meter), then the up chain
 		let src = post;
@@ -421,6 +438,7 @@ const GRADE_FRAG = /* glsl */`
 	uniform vec2 resolution;
 	varying vec2 vUv;
 	${FLARE_GLSL}
+	${MB_GLSL}
 
 	// three's ACES fitted curve (sRGB => XYZ => D65_2_D60 => AP1 => RRT_SAT, RRT + ODT fit, ODT_SAT =>
 	// XYZ => D60_2_D65 => sRGB), clamped
@@ -477,6 +495,7 @@ const GRADE_FRAG = /* glsl */`
 		uv += wob * vec2( sin( time * 1.3 + uv.y * 6.0 ), cos( time * 1.1 + uv.x * 5.0 ) );
 		if ( underwater > 0.0 ) uv += underwater * 0.003 * vec2( sin( time * 2.0 + uv.y * 30.0 ), cos( time * 1.7 + uv.x * 25.0 ) );
 		vec3 c = sharpen > 0.0 ? rcas( uv ) : texture2D( tColor, uv ).rgb;
+		c = mbApply( c, uv );
 		if ( drunk > 0.0 ) c = mix( c, texture2D( tColor, uv + vec2( 0.006, 0.002 ) * drunk * sin( time ) ).rgb, 0.5 * drunk );
 		c += texture2D( tBloom, uv ).rgb * bloomStrength;
 		c += flareLight( vUv );

@@ -41,8 +41,8 @@ export class MapUI {
 		const canvas = this.canvas = h( 'canvas' );
 		this.titleName = h( 'div.t-title' );
 		this.titleSub = h( 'div.t-label' );
-		const title = h( 'div.map-title.plate', {}, this.titleName, this.titleSub );
-		const close = h( 'div.map-close.plate', {}, kc( input.label( 'map' ), 'out' ),
+		const title = this.titleEl = h( 'div.map-title.plate', {}, this.titleName, this.titleSub );
+		const close = this.closeEl = h( 'div.map-close.plate', {}, kc( input.label( 'map' ), 'out' ),
 			h( 'button.btn.icon', { type: 'button', title: 'Close', 'aria-label': 'Close', onclick: () => this.ui.closeScreen() }, icon( 'close' ) ) );
 		const tool = ( name, label, fn ) => h( 'button.btn.icon', { type: 'button', title: label, 'aria-label': label, onclick: fn }, icon( name ) );
 		this.btnLayers = tool( 'layers', 'Layers', () => this._layersPop() );
@@ -54,7 +54,7 @@ export class MapUI {
 			this.btnLayers, this.btnMarkers );
 		this.scaleLab = h( 'div.lab' );
 		this.scaleBar = h( 'div.bar' );
-		const scale = h( 'div.map-scale', {}, this.scaleLab, this.scaleBar );
+		const scale = this.scaleEl = h( 'div.map-scale', {}, this.scaleLab, this.scaleBar );
 		this.readout = h( 'div.map-readout.plate.t-mono', { hidden: true } );
 		this.chip = h( 'div.teleport-chip.t-label', { hidden: true, text: 'Teleport' } );
 		const el = this.el = h( 'div.map-screen', {}, canvas, title, close, this.tools, scale, this.readout, this.chip );
@@ -112,6 +112,11 @@ export class MapUI {
 	}
 
 	_closed() {
+		// UI closes the map on the Map key in its capture listener; Input then queues the same key in the bubble
+		// phase and the next frame's hotkey check would open the map again. Drop it after Input has seen it.
+		const input = this.app.input, eat = e => { if ( input.codes( 'map' ).includes( e.code ) ) input.pressedQ.delete( e.code ); };
+		addEventListener( 'keydown', eat, { once: true } );
+		setTimeout( () => removeEventListener( 'keydown', eat ), 0 );
 		removeEventListener( 'keydown', this.onKey );
 		removeEventListener( 'keyup', this.onKeyUp );
 		removeEventListener( 'blur', this.onBlur );
@@ -185,7 +190,7 @@ export class MapUI {
 		// elevation in real metres (the terrain is baked at 1/6 height); distance in game metres like the scale bar
 		const text = `${signed( x )}, ${signed( z )} · ${signed( hgt * 6 )} m · ${fmtDist( Math.hypot( x - me.x, z - me.z ) )}`;
 		if ( this.readout.textContent !== text ) this.readout.textContent = text;
-		this.readout.hidden = false;
+		if ( this.readout.hidden ) { this.readout.hidden = false; this._sig = ''; } // labels now keep clear of it
 	}
 
 	_context( sx, sy, cx, cy ) {
@@ -424,8 +429,9 @@ export class MapUI {
 		// the time follows the watch rule of the minimap
 		const clock = ! set.get( 'realisticMap' ) || g.mode === 'creative' || g.player.inventory.count( 'watch' ) > 0;
 		const sub = [ island, clock ? hhmm( g.hour ) : '', 'Day ' + g.day ].filter( Boolean ).join( ' · ' );
-		if ( this.titleName.textContent !== name ) this.titleName.textContent = name;
-		if ( this.titleSub.textContent !== sub ) this.titleSub.textContent = sub;
+		// a wider plate moves the labels around it: redraw
+		if ( this.titleName.textContent !== name ) { this.titleName.textContent = name; this._sig = ''; }
+		if ( this.titleSub.textContent !== sub ) { this.titleSub.textContent = sub; this._sig = ''; }
 		const n = g.markers.list().length;
 		if ( this._count !== n ) {
 			this._count = n;
@@ -447,8 +453,8 @@ export class MapUI {
 		const ctx = this.canvas.getContext( '2d' );
 		ctx.setTransform( this.dpr, 0, 0, this.dpr, 0, 0 );
 		const [ px, py ] = this._toScreen( me.x, me.z );
-		// place names keep clear of the player and the markers
-		const avoid = [ [ px - 14 * u, py - 14 * u, px + 14 * u, py + 14 * u ] ];
+		// place names keep clear of the player, the markers and the plates over the map
+		const avoid = [ [ px - 14 * u, py - 14 * u, px + 14 * u, py + 14 * u ], ...this._chrome( u ) ];
 		if ( this.layers.markers ) for ( const m of markers ) avoid.push( this._markerRect( m ) );
 		const res = mv.draw( ctx, { cx: v.cx, cz: v.cz, ppm: v.ppm, rot: 0, w: W, h: H },
 			{ priority: 0.1, u, pxRatio: this.dpr, layers: this.layers, avoid, under: ( c, toScreen ) => this._grid( c, toScreen ) } );
@@ -468,9 +474,21 @@ export class MapUI {
 		// scale bar: a round distance close to 120u
 		const d = nice( 120 * u / v.ppm ), len = Math.round( d * v.ppm );
 		if ( this._scaleLen !== len ) { this._scaleLen = len; this.scaleBar.style.width = len + 'px'; }
-		const lab = fmtDist( d );
+		const lab = d >= 1000 ? d / 1000 + ' km' : d + ' m'; // round steps: 2 km, not 2.0 km
 		if ( this.scaleLab.textContent !== lab ) this.scaleLab.textContent = lab;
 		if ( this.ptr ) this._pointer(); // the ground under a still pointer changes as the map moves
+	}
+
+	// screen rects of the title, close, tools, scale bar and readout (the canvas fills the window, so client
+	// coordinates are canvas coordinates), grown by 4u
+	_chrome( u ) {
+		const out = [];
+		for ( const el of [ this.titleEl, this.closeEl, this.tools, this.scaleEl, this.readout ] ) {
+			if ( ! el || el.hidden ) continue;
+			const r = el.getBoundingClientRect();
+			if ( r.width ) out.push( [ r.left - 4 * u, r.top - 4 * u, r.right + 4 * u, r.bottom + 4 * u ] );
+		}
+		return out;
 	}
 
 	// 1 km lines (250 m close up), faded in as they get far enough apart to read as a grid
