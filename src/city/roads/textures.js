@@ -93,13 +93,13 @@ export function crackTexture() {
 			stroke( pts, width, color );
 		};
 		// long transverse / longitudinal cracks, alligator patches, sealed snakes
-		for ( let k = 0; k < 7; k ++ ) crack( rnd() * W, rnd() * H, rnd() < 0.5 ? rnd() * 0.4 : Math.PI / 2 + ( rnd() - 0.5 ) * 0.4, 40 + rnd() * 50, 1.6 + rnd() * 1.2, 0, '#f00' );
+		for ( let k = 0; k < 7; k ++ ) crack( rnd() * W, rnd() * H, rnd() < 0.5 ? rnd() * 0.4 : Math.PI / 2 + ( rnd() - 0.5 ) * 0.4, 40 + rnd() * 50, 0.9 + rnd() * 0.7, 0, '#f00' );
 		for ( let k = 0; k < 3; k ++ ) {
 			const cx = rnd() * W, cy = rnd() * H;
-			for ( let m = 0; m < 14; m ++ ) crack( cx + ( rnd() - 0.5 ) * 60, cy + ( rnd() - 0.5 ) * 60, rnd() * 6.28, 5 + rnd() * 6, 1.1, 2, '#f00' );
+			for ( let m = 0; m < 14; m ++ ) crack( cx + ( rnd() - 0.5 ) * 60, cy + ( rnd() - 0.5 ) * 60, rnd() * 6.28, 5 + rnd() * 6, 0.8, 2, '#f00' );
 		}
 		ctx.globalCompositeOperation = 'lighter';
-		for ( let k = 0; k < 5; k ++ ) crack( rnd() * W, rnd() * H, rnd() * 6.28, 30 + rnd() * 40, 4 + rnd() * 3, 1, '#0f0' );
+		for ( let k = 0; k < 4; k ++ ) crack( rnd() * W, rnd() * H, rnd() * 6.28, 30 + rnd() * 40, 2.5 + rnd() * 2, 1, '#0f0' );
 		ctx.globalCompositeOperation = 'source-over';
 	}, { srgb: false } );
 	return _cracks;
@@ -158,9 +158,8 @@ let _atlas = null;
 export function signAtlas() {
 	if ( _atlas ) return _atlas;
 	_atlas = canvasTexture( ATLAS_SIZE, ATLAS_H, ( ctx ) => {
+		// transparent where a cell doesn't paint: shaped signs (octagon, triangle, diamonds, shields) are cut out
 		ctx.clearRect( 0, 0, ATLAS_SIZE, ATLAS_H );
-		ctx.fillStyle = '#808080';
-		ctx.fillRect( 0, 0, ATLAS_SIZE, ATLAS_H );
 		ctx.textAlign = 'center';
 		ctx.textBaseline = 'middle';
 		// street name blades: green with a white border, the name in white caps-and-lower
@@ -212,7 +211,6 @@ function diamond( ctx, x, y, w, h, fill ) {
 
 function drawMisc( ctx, k, x, y, w, h ) {
 	const cx = x + w / 2, cy = y + h / 2;
-	ctx.fillStyle = '#6d6f70'; ctx.fillRect( x, y, w, h ); // uncovered corners read as the bare metal back
 	switch ( k ) {
 		case MISC.STOP: {
 			const oct = ( r ) => { ctx.beginPath(); for ( let i = 0; i < 8; i ++ ) { const a = ( i + 0.5 ) / 8 * Math.PI * 2; ctx.lineTo( cx + Math.cos( a ) * r, cy + Math.sin( a ) * r ); } ctx.closePath(); };

@@ -95,7 +95,7 @@ export function buildStreetCell( _hf, world, msg ) {
 	OX = ci * CELL; OZ = cj * CELL;
 	const out = {
 		road: new Geo( [ 4, 4 ] ), walk: new Geo( [ 4 ] ), kit: new Geo( [ 3, 3 ] ), fence: new Geo( [ 2 ] ),
-		wires: [], props: [], signs: [], cars: [], decals: [], boxes: [], lamps: [],
+		wires: [], props: [], signs: [], cars: [], decals: [], boxes: [],
 	};
 	const C = { ci, cj, lod, out };
 	emitHighways( C );
@@ -116,7 +116,6 @@ export function buildStreetCell( _hf, world, msg ) {
 		cars: new Float32Array( out.cars ),
 		decals: new Float32Array( out.decals ),
 		boxes: new Float32Array( out.boxes ),
-		dyn: out.dyn || [],
 	};
 	for ( const k of [ 'wires', 'props', 'signs', 'cars', 'decals', 'boxes' ] ) transfer.push( res[ k ].buffer );
 	res.transfer = transfer;
@@ -226,7 +225,7 @@ function roadBox( r ) {
 }
 
 function emitHighways( C ) {
-	const { ci, cj, lod, out } = C;
+	const { ci, cj, lod } = C;
 	const x0 = ci * CELL, z0 = cj * CELL, x1 = x0 + CELL, z1 = z0 + CELL;
 	for ( const r of net.roads ) {
 		if ( ! r.runs.length ) continue;
@@ -252,7 +251,6 @@ function emitHighways( C ) {
 			if ( ! lod && chunks.length ) highwayProps( C, r, rh, q, chunks );
 		}
 	}
-	void out;
 }
 
 function highwayStrip( C, r, rh, rows ) {
@@ -701,6 +699,7 @@ function streetProps( C, st ) {
 	const taken = []; // along positions per side used by furniture (keeps parked cars off hydrants)
 	const free = ( a, side, r ) => ! taken.some( t => t[ 1 ] === side && Math.abs( t[ 0 ] - a ) < r );
 	const curbU = ( side ) => side * ( hw + ( wk > 0 ? 0.55 : 1.2 ) );
+	const onWalk = ( x, z, u ) => H( x, z ) + ( wk > 0 && Math.abs( u ) > hw && Math.abs( u ) < hw + wk ? LIFT.walk + CURB : 0 );
 	// streetlights (towns and resorts), utility poles with lines (villages and one side of town streets)
 	if ( st.kind !== SK.VILLAGE ) {
 		const SP = st.kind === SK.METRO ? 32 : 38;
@@ -713,7 +712,7 @@ function streetProps( C, st ) {
 			const flick = hh( st.id, k, 41 ) < 0.06 ? 1 : 0;
 			// the arm points over the street: local +x towards the centre line
 			const tilt = hh( st.id, k, 43 ) < 0.04 ? ( 0.25 + hh( st.id, k, 44 ) * 0.3 ) : 0;
-			prop( C, PROP.STREETLIGHT, x, z, yawX( - nx * side, - nz * side ), tilt ? 0 : flick, 1, tilt );
+			prop( C, PROP.STREETLIGHT, x, z, yawX( - nx * side, - nz * side ), tilt ? 0 : flick, 1, tilt, onWalk( x, z, u ) );
 			taken.push( [ a, side ] );
 		}
 	}
@@ -741,8 +740,9 @@ function streetProps( C, st ) {
 		for ( let k = 0; k < n; k ++ ) {
 			const a = a0 + 6 + rnd() * ( a1 - a0 - 12 ), side = rnd() < 0.5 ? 1 : - 1;
 			if ( ! free( a, side, 3 ) || blocked( a, curbU( side ) ) ) continue;
-			const [ x, z ] = at( a, side * ( hw + ( wk > 0 ? 0.45 : 1.0 ) ) );
-			prop( C, PROP.HYDRANT, x, z, rnd() * 6.3, st.kind === SK.VILLAGE ? 1 : 0 );
+			const hu = side * ( hw + ( wk > 0 ? 0.45 : 1.0 ) );
+			const [ x, z ] = at( a, hu );
+			prop( C, PROP.HYDRANT, x, z, rnd() * 6.3, st.kind === SK.VILLAGE ? 1 : 0, 1, 0, onWalk( x, z, hu ) );
 			taken.push( [ a, side ] );
 		}
 	}
@@ -751,14 +751,14 @@ function streetProps( C, st ) {
 		const side = rnd() < 0.5 ? 1 : - 1, a = a0 + ( a1 - a0 ) * ( 0.3 + rnd() * 0.4 );
 		if ( free( a, side, 8 ) && ! blocked( a, curbU( side ) ) ) {
 			// shelter back against the outer edge of the sidewalk, open to the street
-			const [ x, z ] = at( a, side * ( hw + wk - 0.95 ) );
-			const yaw = yawZ( - nx * side, - nz * side ) + Math.PI;
-			if ( st.kind === SK.METRO && wk >= 3 ) prop( C, PROP.BUS_SHELTER, x, z, yawZ( nx * side, nz * side ) );
-			else prop( C, PROP.BENCH, x, z, yawZ( - nx * side, - nz * side ) );
-			void yaw;
+			const bu = side * ( hw + wk - 0.95 );
+			const [ x, z ] = at( a, bu );
+			if ( st.kind === SK.METRO && wk >= 3 ) prop( C, PROP.BUS_SHELTER, x, z, yawZ( nx * side, nz * side ), 0, 1, 0, onWalk( x, z, bu ) );
+			else prop( C, PROP.BENCH, x, z, yawZ( - nx * side, - nz * side ), 0, 1, 0, onWalk( x, z, bu ) );
 			const [ sx, sz ] = at( a - 3, side * ( hw + 0.5 ) );
-			prop( C, PROP.SIGN_POST, sx, sz, 0 );
-			sign( C, SIGN_CELL.misc( MISC.BUS ), sx, H( sx, sz ) + 2.2, sz, yawZ( st.dx * side, st.dz * side ), 0.45, 0.45, 1 );
+			const sy = onWalk( sx, sz, side * ( hw + 0.5 ) );
+			prop( C, PROP.SIGN_POST, sx, sz, 0, 0, 1, 0, sy );
+			sign( C, SIGN_CELL.misc( MISC.BUS ), sx, sy + 2.2, sz, yawZ( st.dx * side, st.dz * side ), 0.45, 0.45, 1 );
 			taken.push( [ a, side ], [ a - 3, side ] );
 		}
 	}
@@ -767,7 +767,7 @@ function streetProps( C, st ) {
 		for ( const side of [ - 1, 1 ] ) for ( let a = a0 + 3; a < a1 - 2; a += 6.4 ) {
 			if ( ! free( a, side, 1.5 ) || rnd() < 0.2 || blocked( a, curbU( side ) ) ) continue;
 			const [ x, z ] = at( a, side * ( hw + 0.4 ) );
-			prop( C, PROP.METER, x, z, yawZ( - nx * side, - nz * side ), 0, 1, rnd() < 0.05 ? 0.6 : 0 );
+			prop( C, PROP.METER, x, z, yawZ( - nx * side, - nz * side ), 0, 1, rnd() < 0.05 ? 0.6 : 0, onWalk( x, z, side * ( hw + 0.4 ) ) );
 		}
 	}
 	// parked (abandoned) cars along the curbs
@@ -982,7 +982,9 @@ function nodeProps( C, n, toW, has ) {
 	const dir = ( d ) => armDir( n, ( d + 4 ) % 4 );
 	const corner = ( q, off ) => { const [ sa, sb ] = [ [ 1, 1 ], [ - 1, 1 ], [ - 1, - 1 ], [ 1, - 1 ] ][ q ]; return toW( sa * ( hw + off ), sb * ( hw + off ) ); };
 	const cornerOk = ( q, off ) => { const [ x, z ] = corner( q, off ); return ! onHighway( x, z, 1 ); };
-	const inset = wk > 0 ? Math.min( 0.75, wk * 0.35 ) : 1.4;
+	// deep enough into the corner to stay inside the rounded curb
+	const inset = wk > 0 ? wk * 0.45 : 1.4;
+	const walkY = ( x, z ) => H( x, z ) + ( wk > 0 ? LIFT.walk + CURB : 0 );
 	const big = ( n.kind === SK.METRO && n.deg >= 3 ) || ( n.kind === SK.TOWN && n.deg >= 4 && n.distC < 0.55 );
 	if ( n.kind !== SK.BASE && n.deg >= 3 ) {
 		if ( big ) {
@@ -993,14 +995,14 @@ function nodeProps( C, n, toW, has ) {
 				const [ x, z ] = corner( q, inset );
 				const da = dir( a );
 				// arm along -dirA, heads facing dirB
-				prop( C, PROP.SIGNAL, x, z, yawX( - da[ 0 ], - da[ 1 ] ), 0, 1, 0 );
+				prop( C, PROP.SIGNAL, x, z, yawX( - da[ 0 ], - da[ 1 ] ), 0, 1, 0, walkY( x, z ) );
 			}
 			for ( const q of [ 1, 3 ] ) {
 				const a = q, b = q + 1;
 				if ( ! has( b ) || ! cornerOk( q, inset ) ) continue;
 				const [ x, z ] = corner( q, inset );
 				const da = dir( a );
-				prop( C, PROP.SIGNAL, x, z, yawX( - da[ 0 ], - da[ 1 ] ), 1, 1, 0 );
+				prop( C, PROP.SIGNAL, x, z, yawX( - da[ 0 ], - da[ 1 ] ), 1, 1, 0, walkY( x, z ) );
 			}
 		} else {
 			// all-way stop
@@ -1010,8 +1012,11 @@ function nodeProps( C, n, toW, has ) {
 				const x = n.x + dd[ 0 ] * ( hw + STUB[ n.kind ] + 1.2 ) + right[ 0 ] * ( hw + inset ), z = n.z + dd[ 1 ] * ( hw + STUB[ n.kind ] + 1.2 ) + right[ 1 ] * ( hw + inset );
 				if ( onHighway( x, z, 1 ) ) continue;
 				const yaw = yawZ( dd[ 0 ], dd[ 1 ] );
-				prop( C, PROP.SIGN_POST, x, z, yaw, 0, 1, hh( n.key % 1e9, d, 3 ) < 0.08 ? 0.35 : 0 );
-				sign( C, SIGN_CELL.misc( MISC.STOP ), x, H( x, z ) + 2.15, z, yaw, 0.76, 0.76, 0 );
+				const ly = hh( n.key % 1e9, d, 3 ) < 0.08 ? 0.35 : 0;
+				const py = walkY( x, z );
+				prop( C, PROP.SIGN_POST, x, z, yaw, 0, 1, ly, py );
+				// a leaning post takes its sign with it
+				if ( ! ly ) sign( C, SIGN_CELL.misc( MISC.STOP ), x, py + 2.15, z, yaw, 0.76, 0.76, 0 );
 			}
 		}
 	}
@@ -1254,7 +1259,7 @@ function roadblock( C, e, r, rnd ) {
 	prop( C, PROP.SPIKES, s2.x + s2.nx * dir * 1.8, s2.z + s2.nz * dir * 1.8, yawX( s2.nx, s2.nz ) );
 	const sgx = w.x + w.nx * ( hw + 1.5 ) * dir - tx * 18, sgz = w.z + w.nz * ( hw + 1.5 ) * dir - tz * 18;
 	prop( C, PROP.SAWHORSE, sgx, sgz, yawX( w.nx, w.nz ) );
-	sign( C, SIGN_CELL.wide( rnd() < 0.5 ? WIDE.ROAD_CLOSED : WIDE.QUARANTINE ), sgx, H( sgx, sgz ) + 1.35, sgz, yawZ( - tx, - tz ), 1.9, 0.48, 1 );
+	sign( C, SIGN_CELL.wide( rnd() < 0.5 ? WIDE.ROAD_CLOSED : WIDE.QUARANTINE ), sgx, H( sgx, sgz ) + 1.27, sgz, yawZ( - tx, - tz ), 1.9, 0.48, 1 );
 	// the last stand: casings of blood, bags, a body bag or two
 	for ( let k = 0; k < 8; k ++ ) {
 		const a = rnd() * 6.283, d = 2 + rnd() * 9;
@@ -1320,7 +1325,7 @@ function checkpoint( C, e, r, rnd ) {
 		const w4 = rowAt( r, e.s + dir * s );
 		const sx = w4.x + nx * dir * ( hw + 1.6 ), sz = w4.z + nz * dir * ( hw + 1.6 );
 		prop( C, PROP.SAWHORSE, sx, sz, yawX( nx, nz ) );
-		sign( C, SIGN_CELL.wide( k ), sx, H( sx, sz ) + 1.35, sz, yawZ( - tx, - tz ), 1.9, 0.48, 1 );
+		sign( C, SIGN_CELL.wide( k ), sx, H( sx, sz ) + 1.27, sz, yawZ( - tx, - tz ), 1.9, 0.48, 1 );
 	}
 	// vehicles: humvees at the gate, a truck on the shoulder
 	car( C, CAR.HUMVEE, w.x + nx * side * ( hw - 1.5 ) + tx * 16, w.z + nz * side * ( hw - 1.5 ) + tz * 16, yawFwd( - tx, - tz ) + 0.3, rnd, { color: 16, flags: CF.LOOT | ( rnd() < 0.5 ? CF.DOOR_FL : 0 ) } );

@@ -234,8 +234,11 @@ export class ViewModel {
 			it.nockRest = info.bow ? - 0.16 : 0.385;
 			it.cams = info.bow ? [ V( - 0.07, 0.475, 0 ), V( - 0.07, - 0.475, 0 ) ] : [ V( 0.385, 0.012, 0.33 ), V( 0.385, 0.012, - 0.33 ) ];
 		}
-		// grips in the gun frame
-		it.grips = { R: info.grips.R, L: info.grips.L };
+		// grips in the gun frame. A support hand under a handguard: palm up under it, fingers round the right side, the
+		// wrist hanging left and low (the models' generic normal puts the forearm above the gun)
+		let L = info.grips.L;
+		if ( L && ! L.support && ! L.vert && ! L.under && ! L.bow ) L = { ...L, n: V( 0, - 1, 0.3 ).normalize() };
+		it.grips = { R: info.grips.R, L };
 		it.eye = this._eyePoint( it );
 		it.cls = f.cls;
 		it.heavy = !! info.heavy || def.weight > 6;
@@ -261,8 +264,10 @@ export class ViewModel {
 			const relief = ( oi.eyeRelief ?? 0.15 ) + ( it.optic.overlay ? 0.02 : 0.03 );
 			return V( info.optic[ 0 ] + ( oi.rearX ?? - 0.03 ) - relief, info.optic[ 1 ] + oi.axisH, 0 );
 		}
-		if ( info.integratedOptic ) return V( info.integratedOptic.x0 - 0.075, info.integratedOptic.y, 0 );
-		return V( info.rearX - info.eyeBack, info.sightH, 0 );
+		if ( info.integratedOptic ) return V( info.integratedOptic.x0 - 0.1, info.integratedOptic.y, 0 );
+		// a little further back than a real cheek weld: the view FOV is narrow and the irons would fill it
+		const extra = { pistol: 0.02, smg: 0.07, rifle: 0.08, sniper: 0.06, shotgun: 0.07, lmg: 0.08, bow: 0 }[ it.f.cls ] ?? 0.06;
+		return V( info.rearX - info.eyeBack - extra, info.sightH, 0 );
 	}
 
 	_buildMelee( def ) {
@@ -460,13 +465,13 @@ export class ViewModel {
 		// hip
 		const hipP = V(), hipQ = new THREE.Quaternion();
 		if ( gun ) {
-			if ( cls === 'pistol' ) { hipP.set( 0.085, - 0.125, - 0.36 ); hipQ.copy( E( 0.02, 0.05, 0 ) ).multiply( GUN_Q ); }
-			else if ( cls === 'bow' && it.info.bow ) { hipP.set( 0.01, - 0.07, - 0.5 ); hipQ.copy( E( 0.02, 0.02, - 0.25 ) ).multiply( GUN_Q ); }
-			else { hipP.set( 0.115, - 0.135, - 0.22 - ( it.heavy ? 0.02 : 0 ) ); hipQ.copy( E( 0.025, 0.045, - 0.03 ) ).multiply( GUN_Q ); }
+			if ( cls === 'pistol' ) { hipP.set( 0.1, - 0.115, - 0.42 ); hipQ.copy( E( 0.03, 0.06, 0 ) ).multiply( GUN_Q ); }
+			else if ( cls === 'bow' && it.info.bow ) { hipP.set( 0.01, - 0.07, - 0.55 ); hipQ.copy( E( 0.02, 0.02, - 0.25 ) ).multiply( GUN_Q ); }
+			else { hipP.set( 0.13, - 0.15, - 0.3 - ( it.heavy ? 0.03 : 0 ) ); hipQ.copy( E( 0.03, 0.035, - 0.02 ) ).multiply( GUN_Q ); }
 		} else if ( it.kind === 'melee' ) {
 			if ( it.two ) { hipP.set( 0.1, - 0.3, - 0.34 ); basisQ( V( - 0.3, 0.8, - 0.35 ), V( - 0.3, - 0.1, - 1 ), hipQ ); }
 			else { hipP.set( 0.2, - 0.25, - 0.32 ); basisQ( V( - 0.18, 0.85, - 0.45 ), V( - 0.4, 0.2, - 1 ), hipQ ); }
-		} else if ( it.kind === 'throw' ) { hipP.set( 0.14, - 0.16, - 0.3 ); hipQ.copy( E( 0.1, - 0.3, 0.1 ) ); }
+		} else if ( it.kind === 'throw' ) { hipP.set( 0.11, - 0.12, - 0.3 ); hipQ.copy( E( 0.25, - 0.4, 0.15 ) ); }
 		else if ( it.kind === 'fists' ) { hipP.set( 0.14, - 0.2, - 0.32 ); hipQ.identity(); }
 		else { hipP.set( 0.15, - 0.18, - 0.34 ); hipQ.copy( E( 0.05, 0.35, 0.15 ) ).multiply( it.long ? GUN_Q : E( 0, 0.6, 0 ) ); }
 		P.copy( hipP ); Q.copy( hipQ );
@@ -508,22 +513,33 @@ export class ViewModel {
 	// body motion of the item during actions (the hands follow separately)
 	_actionPose( it, act, P, Q ) {
 		const t = act.t, s = this.s;
+		// offsets: translate (view), pitch / yaw in view space about the grip, roll about the item's own long axis
+		// (positive turns the bottom of a gun towards the player so the magwell comes into view, negative the top)
 		const off = ( x, y, z, rx, ry, rz, k ) => {
 			if ( k <= 0 ) return;
 			P.x += x * k; P.y += y * k; P.z += z * k;
-			_q.setFromEuler( new THREE.Euler( rx * k, ry * k, rz * k, 'YXZ' ) );
-			// rotate about the gun's own grip point
+			_q.setFromEuler( new THREE.Euler( rx * k, ry * k, 0, 'YXZ' ) );
 			const g = _v.copy( it.grips?.R?.p || _v.set( 0, 0, 0 ) ).applyQuaternion( Q ).add( P );
 			P.sub( g ).applyQuaternion( _q ).add( g );
 			Q.premultiply( _q );
+			if ( rz ) {
+				// roll about the gun's bore line through the grip
+				const axis = _v2.set( 1, 0, 0 ).applyQuaternion( Q );
+				_q.setFromAxisAngle( axis, rz * k );
+				const g2 = _v.copy( it.grips?.R?.p || _v.set( 0, 0, 0 ) ).applyQuaternion( Q ).add( P );
+				P.sub( g2 ).applyQuaternion( _q ).add( g2 );
+				Q.premultiply( _q );
+			}
 		};
 		const bell = ( a, b, c, d ) => seg( t, a, b ) * ( 1 - seg( t, c, d ) );
 		const pistol = it.cls === 'pistol';
 		switch ( act.type ) {
 			case 'reload_mag': case 'reload_belt': {
 				const k = bell( 0, 0.14, 0.86, 1 );
-				if ( pistol ) off( - 0.03, 0.02, 0.06, 0.25, 0.25, - 0.2, k );
-				else off( - 0.05, 0.02, 0.02, 0.12, 0.1, - 0.5, k );
+				const o = this.dbg?.reloadOff;
+				if ( o ) off( ...o, k );
+				else if ( pistol ) off( - 0.04, 0.05, 0.04, 0.3, 0.4, 0.5, k );
+				else off( - 0.06, 0.085, 0.0, 0.1, 0.5, 0.6, k );
 				// the seat: a push up when the magazine clicks in
 				const bump = bell( act.p.magIn - 0.04, act.p.magIn, act.p.magIn, act.p.magIn + 0.06 );
 				off( 0, 0.012, 0, 0.04, 0, 0, bump );
@@ -531,28 +547,28 @@ export class ViewModel {
 			}
 			case 'shells_open': case 'shells_insert': case 'shells_close': case 'clip': {
 				const k = act.type === 'shells_open' ? seg( t, 0, 1 ) : act.type === 'shells_close' ? 1 - seg( t, 0.3, 1 ) : 1;
-				if ( it.info.pump || act.p.port === 'bottom' ) off( - 0.04, 0.03, 0.03, 0.15, 0.2, 0.75, k );
-				else off( - 0.05, 0.02, 0.03, 0.1, 0.25, - 0.3, k );
+				if ( it.info.pump || act.p.port === 'bottom' ) off( - 0.04, 0.06, 0.0, 0.15, 0.45, 0.9, k );
+				else off( - 0.04, 0.05, 0.0, 0.1, 0.4, - 0.45, k );
 				if ( act.type === 'shells_insert' ) off( 0, 0.006, 0, 0.02, 0, 0, bell( 0.35, 0.5, 0.5, 0.65 ) );
 				break;
 			}
 			case 'revolver_open': case 'revolver_insert': case 'revolver_close': {
 				const k = act.type === 'revolver_open' ? seg( t, 0, 0.6 ) : act.type === 'revolver_close' ? 1 - seg( t, 0.35, 1 ) : 1;
-				off( - 0.06, 0.03, 0.08, 0.35, 0.45, 0.2, k );
+				off( - 0.05, 0.05, 0.05, 0.3, 0.45, 0.3, k );
 				// dump the empties: muzzle up
 				if ( act.type === 'revolver_open' ) off( 0, 0.02, 0, 0.9, 0, 0, bell( 0.5, 0.7, 0.8, 1 ) );
 				break;
 			}
 			case 'break_open': case 'break_insert': case 'break_close': {
 				const k = act.type === 'break_open' ? seg( t, 0, 0.6 ) : act.type === 'break_close' ? 1 - seg( t, 0.4, 1 ) : 1;
-				off( - 0.04, 0.02, 0.05, 0.25, 0.3, - 0.2, k );
+				off( - 0.05, 0.04, 0.06, 0.25, 0.3, - 0.3, k );
 				if ( act.type === 'break_close' ) off( 0, 0.02, 0, 0.12, 0, 0, bell( 0.2, 0.35, 0.35, 0.55 ) );
 				break;
 			}
 			case 'charge': case 'jam': {
 				const k = bell( 0, 0.2, 0.8, 1 );
-				if ( pistol ) off( - 0.03, 0.03, 0.05, 0.1, 0.35, - 0.1, k );
-				else off( - 0.04, 0.02, 0.02, 0.05, 0.2, - 0.35, k );
+				if ( pistol ) off( - 0.04, 0.04, 0.05, 0.1, 0.35, - 0.3, k );
+				else off( - 0.04, 0.04, 0.02, 0.05, 0.35, - 0.35, k );
 				break;
 			}
 			case 'cycle': {
@@ -763,9 +779,14 @@ export class ViewModel {
 		}
 		// defaults: both hands on their grips
 		if ( gR ) toView( gR, 1, this.handR ); else showR = false;
-		if ( gL ) toView( gL, - 1, this.handL ); else showL = false;
+		// the support palm presses a little into the handguard (flesh gives)
+		if ( gL ) toView( gL, - 1, this.handL, gL.support ? 0 : - 0.15 ); else showL = false;
 		let curlR = gR ? curlFor( gR.r ) : curlFor( 0.02, 1.3 ), curlL = gL ? curlFor( gL.r ) : curlFor( 0.03, 0.5 );
-		let thumbR = [ 0.3, 0.25, 0.45, 0.35 ], thumbL = [ 0.6, 0.1, 0.25, 0.2 ];
+		// thumbs: [ spread towards the index side, flex into the palm, joint 1, joint 2 ]. On a pistol grip the right
+		// thumb lies forward along the left of the frame; under a handguard the left one runs along its side
+		let thumbR = [ - 0.2, 0.2, 0.2, 0.15 ], thumbL = [ 0.95, - 0.5, 0.1, 0.1 ];
+		if ( gL && ! gL.support ) curlL = curlFor( gL.r, 0.8 );
+		if ( this.dbg ) { if ( this.dbg.thumbL ) thumbL = this.dbg.thumbL; if ( this.dbg.thumbR ) thumbR = this.dbg.thumbR; }
 		if ( it.kind === 'gun' ) {
 			// trigger finger: straight along the frame until the trigger is pulled
 			const trig = gR?.trig;
@@ -804,7 +825,7 @@ export class ViewModel {
 		if ( act?.type === 'bash' && it.kind === 'gun' && it.cls !== 'pistol' ) showL = !! gL;
 		// melee two-handers and the throw arm
 		if ( it.kind === 'melee' && it.two && gL ) { toView( gL, - 1, this.handL ); showL = true; curlL = curlFor( gL.r ); }
-		if ( it.kind === 'throw' ) { curlR = curlFor( it.grips.R.r, 1 ); thumbR = [ 0.2, 0.4, 0.4, 0.3 ]; }
+		if ( it.kind === 'throw' ) { curlR = curlFor( it.grips.R.r, 1.35 ); thumbR = [ 0.3, 0.7, 0.5, 0.4 ]; }
 		if ( it.kind === 'tool' || it.kind === 'item' ) { curlR = curlFor( it.grips.R.r, 1 ); }
 		// hide the arms when the scope fills the screen
 		if ( s.overlay ) showL = showR = false;
@@ -834,6 +855,11 @@ export class ViewModel {
 			return wristMatrix( g, - 1, out ).premultiply( O );
 		};
 		const chargeHand = ( pull, out ) => {
+			// AR pattern with the bolt locked back: slap the bolt catch on the left of the receiver
+			if ( it.def.model?.arch === 'ar' && act.type === 'reload_mag' ) {
+				const g = grip( [ 0.03 + pull * 0.01, - 0.03, - 0.02 ], [ 1, 0.2, 0 ], [ 0, 0.2, - 1 ], 0.012 );
+				return wristMatrix( g, - 1, out ).premultiply( O );
+			}
 			// grab the charging handle / slide / bolt handle: from the left side, over the top
 			let x = info.rearX ?? - 0.1, y = ( info.sightH ?? 0.05 ) * 0.7, z = 0;
 			if ( it.parts.charge ) { const c = it.parts.charge.userData.rest; x = c.x; y = c.y + 0.005; z = c.z; }

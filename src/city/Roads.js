@@ -12,10 +12,9 @@
 // spawnPoints(center, radius, n) -> [ { pos, yaw } ], plus the "Search trunk / glovebox" interaction on
 // lootable wrecks (state in save.world.wrecks).
 import * as THREE from 'three';
-import { buildNetwork, CELL, SK, segDist, hashStr, mulberry32 } from './roads/network.js';
-import * as NET from './roads/network.js';
-import { PROP, PROP_BOXES, MATS, CAR, CAR_DIMS, CF, CAR_STRIDE, PROP_STRIDE, SIGN_STRIDE, DECAL_STRIDE, BOX_STRIDE, ATLAS_SIZE, atlasRect } from './roads/kinds.js';
-import { roadMaterials, makeCarMaterial, makeDynSignMaterial, signBoardGeometry, decalGeometry } from './roads/materials.js';
+import { buildNetwork, CELL, hashStr, mulberry32, nearestOnNetwork, roadsideSpots } from './roads/network.js';
+import { PROP, PROP_BOXES, MATS, MISC, CAR, CAR_DIMS, CF, CAR_STRIDE, PROP_STRIDE, SIGN_STRIDE, DECAL_STRIDE, BOX_STRIDE, ATLAS_SIZE, atlasRect } from './roads/kinds.js';
+import { roadMaterials, makeCarMaterial, makeDynSignMaterial, signBoardGeometry, decalGeometry, ROAD_LIFT } from './roads/materials.js';
 import { MODELS, expandProp } from './roads/models.js';
 import { carGeometries, carSpec, carPanels } from './roads/cars.js';
 import { guideSign, ATLAS_H, GLOW_CELL } from './roads/textures.js';
@@ -26,11 +25,16 @@ const R_NEAR_OUT = 590; // ... and back to lod 1 beyond this (hysteresis)
 const R_FAR_MAX = 1600; // far surfaces out to min(renderDistance, this)
 const REFILL_MOVE = 5; // refill the instance bands after the camera moved this far (m)
 const NEAR_BAND = 75; // props / cars closer than this cast sun shadows
+const QUALITY = { low: 0.65, medium: 0.85, high: 1, ultra: 1.2 }; // scales the near radius and the draw distances
 
 const CAR_NAMES = [ 'Sedan', 'Hatchback', 'SUV', 'Pickup truck', 'Van', 'Police cruiser', 'Humvee', 'Army truck', 'Bus' ];
 const TRUNK_CAP = [ 24, 18, 32, 36, 48, 22, 30, 60, 30 ];
-const CAR_BAND = [ [ 0, 70, 'near', true ], [ 70, 150, 'near', false ], [ 150, 620, 'far', false ] ];
-const DECAL_ROUGH = [ 0.35, 0.4, 0.5, 0.9, 0.12, 0.95, 0.2, 0.9, 0.85, 0.5, 0.9, 0.8 ];
+const CAR_BAND = [ [ 0, 60, 'near', true ], [ 60, 150, 'far', false ], [ 150, 500, 'low', false ] ];
+// a week old: the blood has dried dull, oil stays glossy
+const DECAL_ROUGH = [ 0.7, 0.75, 0.8, 0.9, 0.2, 0.95, 0.3, 0.9, 0.85, 0.8, 0.9, 0.8 ];
+
+// atlas cells whose sign isn't a full rectangle (see textures.js)
+const SHAPED = new Set( [ 200 + MISC.STOP, 200 + MISC.YIELD, 200 + MISC.PED, 200 + MISC.CURVE, 200 + MISC.BIOHAZARD, 200 + MISC.H1 ] );
 
 const cellKey = ( ci, cj ) => ( ci + 1000 ) * 10000 + ( cj + 1000 );
 
@@ -173,7 +177,7 @@ export class Roads {
 			} );
 			this.carMats.push( mat );
 			const bands = CAR_BAND.map( ( [ d0, d1, lod, shadow ] ) => {
-				const b = new Batch( G, 'car' + t + '-' + d0, lod === 'near' ? cg.near[ t ] : cg.far[ t ], mat, CAR_ATTRS, { shadow } );
+				const b = new Batch( G, 'car' + t + '-' + d0, cg[ lod ][ t ], mat, CAR_ATTRS, { shadow } );
 				this.batches.push( b );
 				return [ b, d0, d1 ];
 			} );
@@ -195,6 +199,8 @@ export class Roads {
 	update( dt ) {
 		this.frame ++;
 		const cam = this.world.camera.position;
+		// finer terrain LODs (higher detail setting) need less lift far away
+		ROAD_LIFT.value = 2.5 / ( { low: 1.6, medium: 2.0, high: 2.5, ultra: 3.2 }[ this.settings.get( 'terrainDetail' ) ] || 2.5 );
 		this.evalT -= dt;
 		if ( this.evalT <= 0 ) { this.evalT = 0.3; this._stream( cam ); }
 		if ( this.dirty || this.lastRefill.distanceToSquared( cam ) > REFILL_MOVE * REFILL_MOVE ) this._refill( cam );
@@ -208,6 +214,7 @@ export class Roads {
 
 	_stream( p ) {
 		const rFar = Math.min( R_FAR_MAX, Math.max( 600, this.settings.get( 'renderDistance' ) || 1400 ) );
+		const qk = this._quality();
 		const c0 = Math.floor( p.x / CELL ), c1 = Math.floor( p.z / CELL ), n = Math.ceil( rFar / CELL ) + 1;
 		for ( let dj = - n; dj <= n; dj ++ ) for ( let di = - n; di <= n; di ++ ) {
 			const ci = c0 + di, cj = c1 + dj;
@@ -217,8 +224,8 @@ export class Roads {
 			let c = this.cells.get( key );
 			if ( ! c ) { c = { key, ci, cj, lod: - 1, want: - 1, job: null, meshes: [], boxes: [], inst: null, dyn: [], wrecks: [] }; this.cells.set( key, c ); }
 			// lod 0 near, lod 1 far, with hysteresis
-			let want = d < R_NEAR ? 0 : 1;
-			if ( c.lod === 0 && d < R_NEAR_OUT ) want = 0;
+			let want = d < R_NEAR * qk ? 0 : 1;
+			if ( c.lod === 0 && d < R_NEAR_OUT * qk ) want = 0;
 			c.want = want;
 			c.dist = d;
 			if ( c.lod !== want && ! c.job ) this._request( c, want, d );
@@ -240,6 +247,8 @@ export class Roads {
 			return c ? this._priority( c.dist, msg.lod ) : pri;
 		} );
 	}
+
+	_quality() { return QUALITY[ this.settings.get( 'quality' ) ] || 1; }
 
 	_priority( d, lod ) { return 0.35 + d / 900 + ( lod ? 0.6 : 0 ); }
 
@@ -383,11 +392,13 @@ export class Roads {
 		for ( let i = 0; i < Sg.length; i += SIGN_STRIDE ) {
 			const dyn = Sg[ i ], cell = Sg[ i + 1 ], x = Sg[ i + 2 ] + ox, y = Sg[ i + 3 ], z = Sg[ i + 4 ] + oz, yaw = Sg[ i + 5 ], w = Sg[ i + 6 ], h = Sg[ i + 7 ], dbl = Sg[ i + 8 ];
 			E.set( 0, yaw, 0, 'YXZ' ); Q.setFromEuler( E );
-			M.compose( V.set( x, y, z ), Q, S.set( w, h, 1 ) );
+			// single-sided boards hang in front of their post
+			const off = dyn || dbl ? 0 : 0.045;
+			M.compose( V.set( x + Math.sin( yaw ) * off, y, z + Math.cos( yaw ) * off ), Q, S.set( w, h, 1 ) );
 			if ( dyn ) { this._dynSign( c, cell, M ); continue; }
 			const [ px, py, pw, ph ] = atlasRect( cell );
 			const rect = [ ( px + 1 ) / ATLAS_SIZE, 1 - ( py + ph - 1 ) / ATLAS_H, ( px + pw - 1 ) / ATLAS_SIZE, 1 - ( py + 1 ) / ATLAS_H ];
-			set( 'signs', SIGN_ATTRS ).add( M, x, z, [ ...rect, dbl, 0, 0, 0 ] );
+			set( 'signs', SIGN_ATTRS ).add( M, x, z, [ ...rect, dbl, SHAPED.has( cell ) ? 1 : 0, 0, 0 ] );
 		}
 		// ---- decals ----
 		const Dc = r.decals;
@@ -460,8 +471,9 @@ export class Roads {
 		const cells = [];
 		for ( const c of this.cells.values() ) if ( c.inst ) cells.push( c );
 		const px = cam.x, pz = cam.z;
+		const qk = this._quality();
 		const fill = ( batch, key, d0, d1 ) => {
-			const a2 = d0 * d0, b2 = d1 * d1;
+			const a2 = d0 * d0 * qk * qk, b2 = d1 * d1 * qk * qk;
 			let n = 0;
 			const hits = this._hits || ( this._hits = [] );
 			hits.length = 0;
@@ -572,56 +584,19 @@ export class Roads {
 
 	// ---- queries ------------------------------------------------------------------------------------------------
 
-	// nearest drivable centreline point: highways first (drawn runs), then city streets
+	// nearest drivable centreline point (drawn highways and city streets)
 	nearestRoad( pos, maxDist = 40 ) {
-		const x = pos.x, z = pos.z, net = this.net;
-		let best = null, bd = maxDist;
-		net.rhash.query( x, z, maxDist, ( s ) => {
-			const d = segDist( s, x, z );
-			if ( d < bd ) { bd = d; best = { s, t: NET.segT, hw: true }; }
-		} );
-		net.shash.query( x, z, maxDist, ( s ) => {
-			const d = segDist( s, x, z );
-			if ( d < bd ) { bd = d; best = { s, t: NET.segT, hw: false }; }
-		} );
-		if ( ! best ) return null;
-		const s = best.s;
-		const px = s.ax + ( s.bx - s.ax ) * best.t, pz = s.az + ( s.bz - s.az ) * best.t;
-		const L = Math.hypot( s.bx - s.ax, s.bz - s.az ) || 1;
-		const dir = new THREE.Vector3( ( s.bx - s.ax ) / L, 0, ( s.bz - s.az ) / L );
-		if ( best.hw ) {
-			const r = s.road;
-			return { point: new THREE.Vector3( px, this.hf.heightAt( px, pz ), pz ), dir, lanes: r.lanes, width: r.w, kind: r.lanes === 1 ? 'dirt' : r.lanes === 4 ? 'freeway' : 'highway', name: r.route || r.name, dist: bd };
-		}
-		const names = s.base ? NET.BASE_NAMES : NET.STREET_NAMES;
-		return { point: new THREE.Vector3( px, this.hf.heightAt( px, pz ), pz ), dir, lanes: s.kind === SK.METRO ? 4 : 2, width: s.w, kind: 'street', name: names[ s.name ] || '', dist: bd };
+		const r = nearestOnNetwork( this.net, pos.x, pos.z, maxDist );
+		if ( ! r ) return null;
+		return {
+			point: new THREE.Vector3( r.x, this.hf.heightAt( r.x, r.z ), r.z ), dir: new THREE.Vector3( r.dx, 0, r.dz ),
+			lanes: r.lanes, width: r.width, kind: r.kind, name: r.name, dist: r.dist,
+		};
 	}
 
 	// free spots on the roads around a point (parking lanes, shoulders) for spawning vehicles: [ { pos, yaw } ]
 	spawnPoints( center, radius = 150, n = 4 ) {
-		const net = this.net, cand = [];
-		const cx = center.x, cz = center.z, r2 = radius * radius;
-		net.shash.query( cx, cz, radius, ( st ) => {
-			const hw = st.w / 2, S = st.kind === SK.METRO ? 3.6 : st.kind === SK.TOWN ? 3.2 : 0;
-			const u = hw - ( st.kind === SK.VILLAGE ? 1.0 : 1.15 );
-			const nx = - st.dz, nz = st.dx;
-			for ( let a = hw + S + 4; a < st.len - hw - S - 4; a += 6.5 ) for ( const side of [ - 1, 1 ] ) {
-				const x = st.ax + st.dx * a + nx * u * side, z = st.az + st.dz * a + nz * u * side;
-				const dx = x - cx, dz = z - cz;
-				if ( dx * dx + dz * dz > r2 ) continue;
-				cand.push( [ x, z, Math.atan2( - st.dx * side, - st.dz * side ) ] );
-			}
-		} );
-		net.rhash.query( cx, cz, radius, ( s ) => {
-			const L = Math.hypot( s.bx - s.ax, s.bz - s.az );
-			if ( L < 3 ) return;
-			const dx0 = ( s.bx - s.ax ) / L, dz0 = ( s.bz - s.az ) / L;
-			const mx = ( s.ax + s.bx ) / 2, mz = ( s.az + s.bz ) / 2;
-			if ( ( mx - cx ) ** 2 + ( mz - cz ) ** 2 > r2 ) return;
-			const side = ( Math.round( mx + mz ) & 1 ) ? 1 : - 1;
-			const u = s.road.hw - 1.1;
-			cand.push( [ mx - dz0 * u * side, mz + dx0 * u * side, Math.atan2( - dx0 * side, - dz0 * side ) ] );
-		} );
+		const cand = roadsideSpots( this.net, center.x, center.z, radius );
 		// shuffle, then keep spots clear of wrecks, props, buildings and each other
 		for ( let i = cand.length - 1; i > 0; i -- ) { const j = Math.floor( Math.random() * ( i + 1 ) ); [ cand[ i ], cand[ j ] ] = [ cand[ j ], cand[ i ] ]; }
 		const out = [], near = [];

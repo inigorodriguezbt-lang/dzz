@@ -11,7 +11,13 @@ import { G, COMMON_GLSL, patchMaterial, tex } from '../../render/Materials.js';
 import { noiseTexture, crackTexture, signAtlas, decalAtlas, ATLAS_H } from './textures.js';
 import { ATLAS_SIZE } from './kinds.js';
 
-export const PULL_GLSL = /* glsl */`
+// Coarse terrain LODs rise above the road beds by up to ~0.1 m at 250 m, ~0.4 m at 500 m and ~1.4 m at 1 km (99th
+// percentile over every highway, measured against the terrain's triangle grids), so far vertices are also lifted by
+// that much (0 within 120 m, where shadows and gameplay happen). uRoadLift scales it with the terrain detail
+// setting; `sign` lets the buried shoulder columns of a ribbon sink instead of rise.
+export const ROAD_LIFT = { value: 1 };
+export function pullGLSL( sign = '1.0' ) {
+	return /* glsl */`
 	vec4 mvPosition = vec4( transformed, 1.0 );
 	#ifdef USE_BATCHING
 		mvPosition = batchingMatrix * mvPosition;
@@ -22,14 +28,21 @@ export const PULL_GLSL = /* glsl */`
 	mvPosition = modelViewMatrix * mvPosition;
 	{
 		float pd = length( mvPosition.xyz );
+		float lift = ( max( pd - 120.0, 0.0 ) * 0.0008 + max( pd - 400.0, 0.0 ) * 0.0012 ) * uRoadLift * ( ${sign} );
+		mvPosition.xyz += ( viewMatrix * vec4( 0.0, lift, 0.0, 0.0 ) ).xyz;
 		mvPosition.xyz *= 1.0 - max( pd - 40.0, 0.0 ) * 0.003 / max( pd, 1.0 );
 	}
 	gl_Position = projectionMatrix * mvPosition;
 `;
+}
+export const PULL_GLSL = pullGLSL();
 
 // swap the projection for the pulled one (patchMaterial keeps its world-position block after the include)
-function pull( shader ) {
-	shader.vertexShader = shader.vertexShader.replace( '#include <project_vertex>', PULL_GLSL );
+function pull( shader, sign ) {
+	shader.uniforms.uRoadLift = ROAD_LIFT;
+	shader.vertexShader = shader.vertexShader
+		.replace( '#include <common>', '#include <common>\nuniform float uRoadLift;' )
+		.replace( '#include <project_vertex>', pullGLSL( sign ) );
 }
 
 // declarations go right before main(), after three's and patchMaterial's common code
@@ -37,18 +50,21 @@ function beforeMain( src, code ) { return src.replace( 'void main() {', code + '
 
 // AA helpers shared by the surface shaders
 const LINES_GLSL = /* glsl */`
-	// coverage of the band |x| < hw, fading to its average when thinner than a pixel
-	float lineAA( float x, float hw ) {
-		float fw = max( fwidth( x ), 1e-4 );
+	// coverage of the band |x| < hw given the pixel footprint fw of x, fading to its average when sub-pixel
+	float bandAA( float x, float hw, float fw ) {
+		fw = max( fw, 1e-4 );
 		return ( 1.0 - smoothstep( hw - fw, hw + fw, abs( x ) ) ) * min( 1.0, 2.0 * hw / fw );
 	}
+	float lineAA( float x, float hw ) { return bandAA( x, hw, fwidth( x ) ); }
 	float boxAA( float x, float a, float b ) { return lineAA( x - ( a + b ) * 0.5, ( b - a ) * 0.5 ); }
-	float dashAA( float s, float period, float on ) {
-		float fs = max( fwidth( s ), 1e-4 );
-		float d = mod( s, period );
-		float m = smoothstep( 0.0, fs, d ) * ( 1.0 - smoothstep( on - fs, on, d ) );
-		return mix( m, on / period, smoothstep( period * 0.25, period, fs * 2.0 ) );
+	// periodic bands (stripes, ticks, keys): the footprint comes from the continuous coordinate, so the wrap of
+	// the period never shows as a seam of half-covered pixels
+	float stripeAA( float s, float period, float center, float hw ) {
+		float fw = fwidth( s );
+		float x = mod( s - center + period * 0.5, period ) - period * 0.5;
+		return mix( bandAA( x, hw, fw ), 2.0 * hw / period, smoothstep( period * 0.25, period, fw * 2.0 ) );
 	}
+	float dashAA( float s, float period, float on ) { return stripeAA( s, period, on * 0.5, on * 0.5 ); }
 `;
 
 let _cache = null;
@@ -72,7 +88,7 @@ function makeRoadMaterial() {
 	};
 	patchMaterial( mat, 'roads-road', ( sh ) => {
 		Object.assign( sh.uniforms, U );
-		pull( sh );
+		pull( sh, 'abs( rd.x ) > rd.w * 0.5 + 0.05 && rd.z < 2.5 ? - 1.0 : 1.0' );
 		sh.vertexShader = sh.vertexShader
 			.replace( '#include <common>', '#include <common>\nattribute vec4 rd; attribute vec4 rd2; varying vec4 vRd; varying vec4 vRd2; varying vec3 vWN;' )
 			.replace( '#include <begin_vertex>', '#include <begin_vertex>\nvRd = rd; vRd2 = rd2; vWN = normal;' );
@@ -106,15 +122,15 @@ function makeRoadMaterial() {
 					// sun-bleached old asphalt vs darker fresh overlays
 					col = mix( col * vec3( 0.86, 0.87, 0.9 ), col * vec3( 1.1, 1.07, 1.0 ), smoothstep( 0.3, 0.7, nz.g ) );
 					rNT = texture2D( tAsphN, wp * 0.21 ).xyz * 2.0 - 1.0;
-					vec2 cr = texture2D( tCrack, wp / 23.0 ).rg;
-					float crackAmt = smoothstep( 0.35, 0.8, nz.b + nz.r * 0.45 );
+					vec2 cr = texture2D( tCrack, wp / 14.0 ).rg;
+					float crackAmt = smoothstep( 0.6, 1.05, nz.b + nz.r * 0.45 ) * 0.9 + 0.1;
 					float paint = 0.0, yel = 0.0, gravel = 0.0, edgeWet = 0.0;
 					vec3 paintCol = vec3( 0.74, 0.74, 0.7 );
 					// repaired patches: rectangles of darker, fresher asphalt (no paint on them)
 					vec2 pc = vec2( floor( s / 9.0 ), floor( ( u + 40.0 ) / 3.3 ) );
 					vec2 pf = vec2( fract( s / 9.0 ), fract( ( u + 40.0 ) / 3.3 ) );
 					float ph = hash12( pc + vec2( floor( vRd2.x * 0.37 ), cls * 7.0 ) );
-					float patchM = step( ph, 0.075 ) * boxAA( pf.x, 0.08, 0.35 + 0.55 * hash12( pc + 3.1 ) ) * boxAA( pf.y, 0.1, 0.9 );
+					float patchM = step( ph, 0.04 ) * boxAA( pf.x, 0.08, 0.35 + 0.55 * hash12( pc + 3.1 ) ) * boxAA( pf.y, 0.1, 0.9 );
 					if ( cls < 0.5 ) {
 						// freeway: yellow inner edge by the median, dashed white lane divider, white outer edge
 						yel += lineAA( au - 0.95, 0.075 );
@@ -167,7 +183,7 @@ function makeRoadMaterial() {
 						if ( pl > 0.0 ) {
 							paint += lineAA( au - pl, 0.05 ) * 0.9;
 							// parking stall ticks
-							paint += lineAA( mod( s - a0 + 1.0, 6.5 ) - 3.25, 0.05 ) * boxAA( au, pl, pl + 0.7 ) * 0.9;
+							paint += stripeAA( s - a0 + 1.0, 6.5, 3.25, 0.05 ) * boxAA( au, pl, pl + 0.7 ) * 0.9;
 						}
 						float fl = vRd2.w;
 						float bA = mod( fl, 2.0 ), bB = floor( mod( fl * 0.5, 2.0 ) );
@@ -201,8 +217,8 @@ function makeRoadMaterial() {
 							float onB = boxAA( bb, hw, hw + S ) * boxAA( aa, - 1.0, hw - 0.25 );
 							if ( kind < 0.5 ) {
 								float inA = boxAA( aa, hw + 0.35, hw + S - 0.35 ), inB = boxAA( bb, hw + 0.35, hw + S - 0.35 );
-								paint += onA * inA * lineAA( mod( vRd.y + hw, 1.2 ) - 0.6, 0.3 );
-								paint += onB * inB * lineAA( mod( vRd.x + hw, 1.2 ) - 0.6, 0.3 );
+								paint += onA * inA * stripeAA( vRd.y + hw, 1.2, 0.6, 0.3 );
+								paint += onB * inB * stripeAA( vRd.x + hw, 1.2, 0.6, 0.3 );
 							} else {
 								paint += onA * ( lineAA( aa - ( hw + 0.35 ), 0.15 ) + lineAA( aa - ( hw + S - 0.35 ), 0.15 ) );
 								paint += onB * ( lineAA( bb - ( hw + 0.35 ), 0.15 ) + lineAA( bb - ( hw + S - 0.35 ), 0.15 ) );
@@ -220,7 +236,7 @@ function makeRoadMaterial() {
 						col = mix( col, cc * vec3( 0.95, 0.97, 1.0 ), 0.55 );
 						paint += lineAA( au - ( hw - 1.2 ), 0.45 ) * step( 3.0, sE );
 						paint += lineAA( u, 0.45 ) * dashAA( s - 70.0, 50.0, 30.0 ) * step( 70.0, sE );
-						paint += boxAA( sE, 6.0, 36.0 ) * lineAA( mod( au - 3.0, 3.6 ) - 1.8, 0.9 ) * boxAA( au, 3.0, hw - 3.0 );
+						paint += boxAA( sE, 6.0, 36.0 ) * stripeAA( au - 3.0, 3.6, 1.8, 0.9 ) * boxAA( au, 3.0, hw - 3.0 );
 						paint += boxAA( sE, 110.0, 140.0 ) * boxAA( au, 3.5, 8.5 );
 						paint += ( boxAA( sE, 72.0, 90.0 ) + boxAA( sE, 160.0, 175.0 ) ) * ( boxAA( au, 4.0, 5.2 ) + boxAA( au, 6.4, 7.6 ) );
 						paint += lineAA( sE - 3.0, 0.5 ) * step( au, hw - 1.2 );
@@ -254,8 +270,8 @@ function makeRoadMaterial() {
 						crackAmt = 0.0;
 					}
 					// cracks and sealed tar snakes
-					col *= 1.0 - cr.r * 0.6 * crackAmt;
-					col = mix( col, vec3( 0.03, 0.028, 0.026 ), cr.g * 0.75 * crackAmt );
+					col *= 1.0 - cr.r * 0.5 * crackAmt;
+					col = mix( col, vec3( 0.035, 0.032, 0.03 ), cr.g * 0.6 * crackAmt );
 					rRough = mix( rRough, 0.5, cr.g * crackAmt );
 					// patches
 					col = mix( col, col * 0.62, patchM );
@@ -278,15 +294,17 @@ function makeRoadMaterial() {
 						float pn = texture2D( tNoise, wp * 0.031 ).r * 0.62 + nf.g * 0.38 + edgeWet * 0.22;
 						float pud = smoothstep( 0.66 - uWet * 0.16, 0.69 - uWet * 0.16, pn ) * smoothstep( 0.05, 0.5, uWet );
 						col *= 1.0 - 0.5 * pud;
-						rRough = mix( rRough, 0.02, pud );
+						// not below ~0.07: a sharper sun highlight overflows the half-float scene target into black specks
+						rRough = mix( rRough, 0.07, pud );
 						rNS *= 1.0 - pud;
 						// raindrop rings
 						vec2 rp = wp * 2.0;
 						vec2 ci = floor( rp );
 						float rt = fract( uTime * 0.9 + hash12( ci ) );
 						float rr = length( fract( rp ) - 0.5 - ( vec2( hash12( ci + 1.3 ), hash12( ci + 2.7 ) ) - 0.5 ) * 0.4 );
-						float ring = ( 1.0 - smoothstep( 0.0, 0.03, abs( rr - rt * 0.45 ) ) ) * ( 1.0 - rt ) * pud * uWet;
-						rNT.xy += vec2( ring ) * 0.8;
+						// (only while it is really wet, i.e. still raining; subtle so the tilted normals don't pick up the dark ground in the IBL)
+						float ring = ( 1.0 - smoothstep( 0.0, 0.03, abs( rr - rt * 0.45 ) ) ) * ( 1.0 - rt ) * pud * smoothstep( 0.6, 0.9, uWet );
+						rNT.xy += vec2( ring ) * 0.25;
 						rNS = max( rNS, ring );
 					}
 					diffuseColor.rgb = col;
@@ -444,9 +462,16 @@ function makeFenceMaterial() {
 	return mat;
 }
 
+// power lines and barbed wire: 1 px lines, faded by distance to the coverage a ~2 cm cable really has (a full
+// pixel at 200 m would read as a thick dark band)
 function makeWireMaterial() {
-	const mat = new THREE.LineBasicMaterial( { color: 0x121212 } );
-	patchMaterial( mat, 'roads-wire', ( sh ) => pull( sh ), { noWet: true, noCloudShadow: true } );
+	const mat = new THREE.LineBasicMaterial( { color: 0x121212, transparent: true, depthWrite: false } );
+	patchMaterial( mat, 'roads-wire', ( sh ) => {
+		pull( sh );
+		sh.fragmentShader = sh.fragmentShader.replace( '#include <premultiplied_alpha_fragment>', /* glsl */`
+			gl_FragColor.a *= clamp( 14.0 / length( vWorldPos - cameraPosition ), 0.03, 0.95 );
+			#include <premultiplied_alpha_fragment>` );
+	}, { noWet: true, noCloudShadow: true } );
 	return mat;
 }
 
@@ -531,8 +556,9 @@ function makeDecalMaterial() {
 // additive light pools under the few lamps that still flicker at night
 function makeGlowMaterial() {
 	const mat = new THREE.ShaderMaterial( {
-		uniforms: Object.assign( { tDecal: { value: decalAtlas() } }, G ),
+		uniforms: Object.assign( { tDecal: { value: decalAtlas() }, uRoadLift: ROAD_LIFT }, G ),
 		vertexShader: /* glsl */`
+			uniform float uRoadLift;
 			attribute vec2 duv; attribute vec4 iDec;
 			varying vec2 vDuv; varying vec4 vDec; varying vec3 vWorldPos;
 			void main() {
@@ -585,6 +611,11 @@ function makeSignMaterial() {
 			.replace( '#include <map_fragment>', /* glsl */`
 				float sMetal = 0.1;
 				{
+					// shaped signs are cut out of the board by the atlas alpha (the back face sees it mirrored); their
+					// thin edge faces would outline the empty square, so shaped boards drop them
+					vec2 fuv = vFace < 0.5 || vSide.x > 0.5 ? vSuv : vec2( 1.0 - vSuv.x, vSuv.y );
+					if ( vFace < 1.5 && texture2D( tAtlas, mix( vRect.xy, vRect.zw, fuv ) ).a < 0.5 ) discard;
+					if ( vFace > 1.5 && vSide.y > 0.5 ) discard;
 					vec3 back = vec3( 0.32, 0.33, 0.33 ) * ( 0.8 + 0.4 * texture2D( tNoise, vSuv * 2.0 + vRect.xy * 7.0 ).r );
 					vec3 col = back;
 					bool front = vFace < 0.5 || ( vFace < 1.5 && vSide.x > 0.5 );
@@ -613,8 +644,13 @@ export function makeDynSignMaterial( texture ) {
 			.replace( '#include <begin_vertex>', '#include <begin_vertex>\nvFace = face; vSuv = suv;' );
 		sh.fragmentShader = beforeMain( sh.fragmentShader, 'varying float vFace; varying vec2 vSuv;' );
 		sh.fragmentShader = sh.fragmentShader.replace( '#include <map_fragment>', /* glsl */`
-			if ( vFace < 0.5 ) diffuseColor *= texture2D( map, vSuv );
-			else diffuseColor.rgb = vec3( 0.3, 0.31, 0.31 );
+			{
+				// rounded corners are cut out (the back face sees the canvas mirrored)
+				vec4 t = texture2D( map, vFace < 0.5 ? vSuv : vec2( 1.0 - vSuv.x, vSuv.y ) );
+				if ( vFace < 1.5 && t.a < 0.5 ) discard;
+				if ( vFace < 0.5 ) diffuseColor.rgb *= t.rgb;
+				else diffuseColor.rgb = vec3( 0.3, 0.31, 0.31 );
+			}
 		` );
 	} );
 	return mat;
@@ -715,10 +751,13 @@ export function makeCarMaterial( u ) {
 						float dA = min( length( vec2( lp.z - uArch.y, lp.y - uArch.w ) ), length( vec2( lp.z - uArch.z, lp.y - uArch.w ) ) );
 						if ( dA < uArch.w + 0.08 ) { col = vec3( 0.012 ); cRough = 1.0; cMetal = 0.0; }
 					}
-					// rust patches growing from the sills, the wheel arches and panel edges
-					float rm = smoothstep( 1.0 - rust, 1.0 - rust + 0.08, n1.b * 0.65 + n2.r * 0.35 + ( 1.0 - smoothstep( 0.15, 0.8, lp.y ) ) * rust * 0.45 );
+					// rust: only old beaters have it (a week of apocalypse doesn't rust a car), in spots growing from the
+					// sills, the wheel arches and panel edges
+					float ra = rust * rust;
+					float low = 1.0 - smoothstep( 0.2, 0.75, lp.y - uArch.w * 0.5 );
+					float rm = smoothstep( 0.92 - ra * 0.5, 0.97 - ra * 0.5, n1.b * 0.55 + n2.r * 0.45 + low * ra * 0.6 );
 					if ( part <= 2 || part == 4 ) {
-						vec3 rc = texture2D( tRust, lp.zy * 0.8 + lp.x ).rgb * vec3( 0.8, 0.6, 0.45 );
+						vec3 rc = texture2D( tRust, lp.zy * 0.8 + lp.x ).rgb * vec3( 0.52, 0.34, 0.22 );
 						col = mix( col, rc, rm );
 						cRough = mix( cRough, 0.92, rm ); cMetal = mix( cMetal, 0.05, rm );
 					}
@@ -733,20 +772,26 @@ export function makeCarMaterial( u ) {
 						if ( burn > 0.5 && ( part == 3 || glassPart || part == 7 || part == 8 || part == 13 ) ) discard;
 					}
 					if ( part == 3 && ( fl & 4096 ) != 0 ) discard;
-					// broken glass: side windows gone (a few shards left in the frame), the laminated screen crazed
+					// broken glass: tempered side / rear windows shatter and fall out (a few shards stay in the frame),
+					// the laminated windscreen crazes around the impact
 					if ( glassPart ) {
 						bool all = ( fl & 128 ) != 0, some = ( fl & 64 ) != 0;
-						if ( part == 5 ) {
-							float win = floor( ( lp.z + 20.0 ) / 0.95 ) + ( lp.x > 0.0 ? 50.0 : 0.0 );
+						bool screen = part == 6 && lp.z < 0.0;
+						if ( ! screen ) {
+							float win = floor( ( lp.z + 20.0 ) / 0.95 ) + ( lp.x > 0.0 ? 50.0 : 0.0 ) + ( part == 6 ? 100.0 : 0.0 );
 							float h = fract( sin( win * 12.9898 + vCar2.x * 78.233 ) * 43758.5453 );
 							if ( ( all || ( some && h < 0.45 ) ) && n2.a > 0.16 ) discard;
 						} else if ( all || ( some && fract( vCar2.x * 3.3 ) < 0.5 ) ) {
-							vec2 c = vec2( lp.x - ( fract( vCar2.x * 7.1 ) - 0.5 ) * uArch.x, lp.y - uDoorY.w + 0.28 );
-							float r = length( c ), a = atan( c.y, c.x );
-							float rad = 1.0 - smoothstep( 0.0, 0.02, abs( fract( a * 2.2 + n2.r * 0.25 ) - 0.5 ) * r * 4.0 );
-							float ring = 1.0 - smoothstep( 0.0, 0.08, abs( fract( r * 7.0 + n2.g * 0.4 ) - 0.5 ) );
-							float web = max( rad, ring * 0.7 ) * ( 1.0 - smoothstep( 0.15, 0.8, r ) );
-							col = mix( col, vec3( 0.5, 0.52, 0.52 ), web * 0.75 );
+							vec2 c = vec2( lp.x - ( fract( vCar2.x * 7.1 ) - 0.5 ) * uArch.x * 0.8, lp.y - ( uDoorY.z + uDoorY.w ) * 0.5 );
+							float r = length( c );
+							float a = atan( c.y, c.x ) / 6.2832 + 0.5;
+							// distance (m) to the nearest of 9 jagged radial cracks, and to the concentric rings
+							float rad = abs( fract( a * 9.0 + n2.r * 0.12 ) - 0.5 ) / 9.0 * 6.2832 * r;
+							float ring = abs( fract( r * 4.0 + n2.g * 0.5 ) - 0.5 ) / 4.0;
+							float web = max( 1.0 - smoothstep( 0.003, 0.011, rad ), ( 1.0 - smoothstep( 0.002, 0.008, ring ) ) * step( r, 0.42 ) );
+							web *= 1.0 - smoothstep( 0.3, 0.8, r );
+							web = max( web, 1.0 - smoothstep( 0.02, 0.07, r ) );
+							col = mix( col, vec3( 0.5, 0.52, 0.52 ), web * 0.7 );
 							cRough = mix( cRough, 0.7, web );
 						}
 					}

@@ -12,14 +12,21 @@ page.on( 'console', m => logs.push( `[${m.type()}] ${m.text()}` ) );
 page.on( 'pageerror', e => logs.push( `[pageerror] ${e.message}` ) );
 await page.goto( url );
 try { await page.waitForFunction( () => window.__ready === true, null, { timeout: 240000 } ); } catch ( e ) { logs.push( 'TIMEOUT waiting for ready' ); }
+const gal = process.env.GALLERY ? process.env.GALLERY.split( ',' ).map( Number ) : null;
+await page.evaluate( () => { window.__budget = 0; } );
 for ( let i = 0; i < list.length; i ++ ) {
-	await page.evaluate( ( v ) => window.__view( ...v ), list[ i ] );
-	await page.waitForTimeout( 1500 );
-	try { await page.waitForFunction( () => window.__idle(), null, { timeout: 120000, polling: 500 } ); } catch ( e ) { logs.push( 'TIMEOUT idle ' + i ); }
-	const f0 = await page.evaluate( () => window.__frames );
-	await page.waitForFunction( ( f ) => window.__frames >= f + 2, f0, { timeout: 60000 } );
-	await page.screenshot( { path: `${prefix}${i}.png`, timeout: 120000 } );
-	console.log( 'shot', i, await page.evaluate( () => document.getElementById( 'info' ).textContent ) );
+	try {
+		await page.evaluate( ( v ) => { window.__budget = 0; window.__view( ...v ); }, list[ i ] );
+		// the gallery is a fake near cell: (re)inject it once the camera is next to it
+		if ( gal && Math.hypot( list[ i ][ 0 ] - gal[ 0 ], list[ i ][ 1 ] - gal[ 1 ] ) < 300 ) await page.evaluate( ( g ) => window.__gallery( ...g ), gal );
+		await page.waitForTimeout( 1500 );
+		await page.waitForFunction( () => window.__idle(), null, { timeout: 180000, polling: 500 } );
+		const s0 = await page.evaluate( () => window.__synced );
+		await page.evaluate( () => { window.__budget = 2; } );
+		await page.waitForFunction( ( s ) => window.__synced > s, s0, { timeout: 300000, polling: 500 } );
+		await page.screenshot( { path: `${prefix}${i}.png`, timeout: 300000 } );
+		console.log( 'shot', i, await page.evaluate( () => document.getElementById( 'info' ).textContent ) );
+	} catch ( e ) { console.log( 'shot', i, 'FAILED', e.message.split( '\n' )[ 0 ] ); }
 }
 console.log( logs.filter( l => ! l.includes( '[vite]' ) ).slice( 0, 40 ).join( '\n' ) );
 await browser.close();

@@ -1747,8 +1747,9 @@ export function attachmentParts( def ) {
 	} else if ( k === 'holo' ) {
 		railClamp( P, - 0.045, 0.04, 0.014, 0.016 );
 		P.box( 'blk', - 0.045, 0.04, 0.012, 0.022, - 0.017, 0.017, 0.004 );
-		// the window: an open hood (sides and top) over the base, the laser housing at the back
-		P.box( 'blk', - 0.045, - 0.03, 0.02, 0.05, - 0.017, 0.017, 0.004 );
+		// the window: an open hood (sides and top) over the base; the battery housing and buttons sit low at the back
+		P.box( 'blk', - 0.047, - 0.028, 0.019, 0.026, - 0.017, 0.017, 0.003 );
+		for ( const z of [ - 0.007, 0.007 ] ) P.cylZ( 'rubber', - 0.04, 0.0225, z - 0.003, z + 0.003, 0.0035, 8 );
 		P.box( 'blk', - 0.03, 0.03, 0.022, 0.055, 0.0145, 0.019, 0.002 );
 		P.box( 'blk', - 0.03, 0.03, 0.022, 0.055, - 0.019, - 0.0145, 0.002 );
 		P.box( 'blk', - 0.03, 0.03, 0.051, 0.056, - 0.019, 0.019, 0.002 );

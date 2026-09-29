@@ -94,6 +94,7 @@ function sheet( b, rows, hex, tag, hint ) {
 const mirror = ( rows ) => rows.map( r => r.map( p => [ - p[ 0 ], p[ 1 ], p[ 2 ] ] ) );
 
 function wheel( b, x, z, r, lod, side ) {
+	if ( lod > 1 ) { b.box( 0.23, r * 1.7, r * 1.7, 0x141414, TAG.tyre, { x, y: r * 0.9, z } ); return; }
 	const seg = lod ? 8 : 16;
 	const w = 0.23;
 	b.cyl( r, r, w, seg, 0x141414, TAG.tyre, { x, y: r, z, axis: 'x' } );
@@ -111,7 +112,9 @@ function buildCar( type, lod ) {
 	const S = SPECS[ type ], D = CAR_DIMS[ type ];
 	const b = new MB();
 	const hw = D.W / 2;
-	const body = lod ? S.body.filter( ( s, i ) => i === 0 || i === S.body.length - 1 || i % 2 === 1 || S.body.length <= 6 ) : S.body;
+	// lod 0 full, 1 fewer stations and no interior, 2 a coarse shell for the distance
+	const body = lod > 1 ? S.body.filter( ( s, i ) => i === 0 || i === S.body.length - 1 || i === Math.floor( S.body.length / 2 ) )
+		: lod ? S.body.filter( ( s, i ) => i === 0 || i === S.body.length - 1 || i % 2 === 1 || S.body.length <= 6 ) : S.body;
 	// ---- lower body: strips per section edge (smooth along the car, creased across) ----
 	const sec = ( s ) => {
 		const [ z, yb, ybelt, yt, wf ] = s, w = hw * wf;
@@ -149,14 +152,17 @@ function buildCar( type, lod ) {
 	// stations with a curved windscreen and rear window
 	const st = [];
 	const push = ( z, f ) => { const [ yb, wb ] = topAt( z ); st.push( { z, yb, wb, yr: yb + ( cab.roof - yb ) * f, wr: wb + ( roofW - wb ) * f } ); };
-	push( zA, 0 ); push( zA + ( zB - zA ) * 0.45, 0.62 ); push( zB, 1 );
+	push( zA, 0 ); if ( lod < 2 ) push( zA + ( zB - zA ) * 0.45, 0.62 ); push( zB, 1 );
 	const mids = [ zB ];
-	if ( cab.pillarB < zC && cab.pillarB > zB ) mids.push( cab.pillarB - 0.06, cab.pillarB + 0.06 );
-	if ( cab.pillars ) for ( let z = zB + cab.pillars; z < zC - 0.3; z += cab.pillars ) mids.push( z - 0.07, z + 0.07 );
+	if ( lod < 2 ) {
+		if ( cab.pillarB < zC && cab.pillarB > zB ) mids.push( cab.pillarB - 0.06, cab.pillarB + 0.06 );
+		if ( cab.pillars ) for ( let z = zB + cab.pillars; z < zC - 0.3; z += cab.pillars ) mids.push( z - 0.07, z + 0.07 );
+	}
 	if ( cab.glassTo !== undefined ) mids.push( cab.glassTo );
 	mids.push( zC );
 	for ( const z of mids.slice( 1 ) ) push( z, 1 );
-	push( zC + ( zD - zC ) * 0.55, 0.6 ); push( zD, 0 );
+	if ( lod < 2 ) push( zC + ( zD - zC ) * 0.55, 0.6 );
+	push( zD, 0 );
 	st.sort( ( a, c ) => a.z - c.z );
 	const crown = 0.03;
 	// side strips between consecutive stations: glass in the door windows, paint on the pillars
@@ -171,7 +177,10 @@ function buildCar( type, lod ) {
 		if ( zm < zB && zm > zA && ( type === CAR.BUS ) ) glass = true;
 		// glass is inset slightly from the body line and framed by a thin band of paint below the roof
 		const rows = [ [ [ a.wb, a.yb, a.z ], [ a.wr, a.yr, a.z ] ], [ [ c.wb, c.yb, c.z ], [ c.wr, c.yr, c.z ] ] ];
-		if ( glass ) {
+		if ( glass && lod > 1 ) {
+			sheet( b, rows, 0x0b0e10, TAG.glass, () => [ 1, 0, 0 ] );
+			sheet( b, mirror( rows ), 0x0b0e10, TAG.glass, () => [ - 1, 0, 0 ] );
+		} else if ( glass ) {
 			const lerp = ( p, q, t ) => [ p[ 0 ] + ( q[ 0 ] - p[ 0 ] ) * t, p[ 1 ] + ( q[ 1 ] - p[ 1 ] ) * t, p[ 2 ] ];
 			const lo = cab.slit ? 0.38 : 0.06, hi = cab.slit ? 0.86 : 0.93;
 			const r0 = rows.map( r => [ r[ 0 ], lerp( r[ 0 ], r[ 1 ], lo ) ] );
@@ -202,7 +211,7 @@ function buildCar( type, lod ) {
 		b.box( D.W * 0.9, 0.3, 0.03, 0x111111, TAG.trim, { y: 2.8, z: zF - 0.01 } );
 		b.box( D.W * 0.7, 0.18, 0.02, 0xd08a20, TAG.head, { y: 2.8, z: zF - 0.03 } );
 	}
-	for ( const s of [ - 1, 1 ] ) {
+	for ( const s of lod > 1 ? [] : [ - 1, 1 ] ) {
 		b.box( 0.3, 0.12, 0.05, 0xdcdcd4, TAG.head, { x: s * ( hwF - 0.22 ), y: yL, z: zF - 0.005 } );
 		b.box( 0.26, 0.12, 0.05, 0x8a1010, TAG.tail, { x: s * ( hw * r[ 4 ] - 0.2 ), y: ( r[ 2 ] + r[ 3 ] ) / 2, z: zR + 0.005 } );
 		if ( ! lod && type !== CAR.BUS && type !== CAR.MTRUCK ) {
@@ -216,7 +225,7 @@ function buildCar( type, lod ) {
 		b.box( D.W * 0.96, 0.14, 0.12, S.military ? 0x2a2d20 : 0x1b1b1b, TAG.trim, { y: f[ 1 ] + 0.08, z: zF + 0.03 } );
 		b.box( D.W * 0.96, 0.14, 0.12, S.military ? 0x2a2d20 : 0x1b1b1b, TAG.trim, { y: r[ 1 ] + 0.06, z: zR - 0.03 } );
 	}
-	if ( ! S.military ) {
+	if ( ! S.military && lod < 2 ) {
 		b.box( 0.32, 0.16, 0.01, 0xe2dfd0, TAG.plate, { y: f[ 1 ] + 0.2, z: zF - 0.035 } );
 		b.box( 0.32, 0.16, 0.01, 0xe2dfd0, TAG.plate, { y: r[ 1 ] + 0.25, z: zR + 0.035 } );
 	}
@@ -245,7 +254,7 @@ function buildCar( type, lod ) {
 		}
 		b.box( D.W, 0.12, z1 - z0, 0x3a3f28, TAG.paint, { y: y0 + 0.06, z: ( z0 + z1 ) / 2 } );
 	}
-	if ( S.police ) {
+	if ( S.police && lod < 2 ) {
 		const y = cab.roof + 0.02;
 		b.box( 1.2, 0.05, 0.28, 0x111111, TAG.trim, { y: y + 0.025, z: ( zB + zC ) / 2 - 0.15 } );
 		for ( const s of [ - 1, 1 ] ) b.box( 0.55, 0.1, 0.24, s < 0 ? 0x7a0a0a : 0x0a1a7a, s < 0 ? TAG.red : TAG.blue, { x: s * 0.3, y: y + 0.1, z: ( zB + zC ) / 2 - 0.15 } );
@@ -254,7 +263,7 @@ function buildCar( type, lod ) {
 		b.box( 1.0, 0.06, 0.06, 0x111111, TAG.trim, { y: f[ 1 ] + 0.55, z: zF - 0.12 } );
 		b.box( 1.0, 0.06, 0.06, 0x111111, TAG.trim, { y: f[ 1 ] + 0.2, z: zF - 0.12 } );
 	}
-	if ( S.military && type === CAR.HUMVEE ) {
+	if ( S.military && type === CAR.HUMVEE && lod < 2 ) {
 		b.box( D.W * 0.5, 0.06, 0.8, 0x2a2d20, TAG.trim, { y: cab.roof + 0.03, z: 0.2 } ); // hatch ring
 		b.box( 0.3, 0.5, 0.15, 0x2a2d20, TAG.trim, { x: hw - 0.3, y: 1.35, z: zR + 0.05 } ); // jerrycan rack
 	}
@@ -299,8 +308,8 @@ export const CAR_KEYS = [ 'sedan', 'hatch', 'suv', 'pickup', 'van', 'police', 'h
 let _geo = null;
 export function carGeometries() {
 	if ( _geo ) return _geo;
-	_geo = { near: [], far: [], door: buildDoor(), lid: buildLid() };
-	for ( let t = 0; t < CAR_KEYS.length; t ++ ) { _geo.near.push( buildCar( t, 0 ) ); _geo.far.push( buildCar( t, 1 ) ); }
+	_geo = { near: [], far: [], low: [], door: buildDoor(), lid: buildLid() };
+	for ( let t = 0; t < CAR_KEYS.length; t ++ ) { _geo.near.push( buildCar( t, 0 ) ); _geo.far.push( buildCar( t, 1 ) ); _geo.low.push( buildCar( t, 2 ) ); }
 	return _geo;
 }
 

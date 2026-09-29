@@ -8,7 +8,7 @@ const warn0 = console.warn;
 console.warn = ( ...a ) => { warnings.push( a.join( ' ' ) ); };
 await import( '../src/game/items/defs/index.js' );
 console.warn = warn0;
-const { ITEMS, makeStack, stackWeight, stackVolume, freshness } = await import( '../src/game/items/ItemDB.js' );
+const { ITEMS, getItem, makeStack, stackWeight, stackVolume, freshness } = await import( '../src/game/items/ItemDB.js' );
 const { LOOT_TABLES, rollLoot, tableIds } = await import( '../src/game/items/Loot.js' );
 const { allRecipes } = await import( '../src/game/items/recipes.js' );
 
@@ -177,6 +177,155 @@ ok( rollLoot( 'no_such_table' ).length === 0, 'unknown table → nothing' );
 const lootable = [ ...ITEMS.values() ].filter( d => ! d.tags.includes( 'crafted' ) && ! [ 'cooked' ].some( t => d.tags.includes( t ) ) );
 const never = lootable.filter( d => ! seen.has( d.id ) ).map( d => d.id );
 console.log( `   ${seen.size} of ${ITEMS.size} ids appear in loot; never looted (not crafted/cooked): ${never.length ? never.join( ' ' ) : 'none'}` );
+
+// ---- item use / crafting / fires with a stub game (no DOM, no renderer) ---------------------------------------
+console.log( 'item use' );
+{
+	const THREE = await import( 'three' );
+	const { PlayerInventory } = await import( '../src/game/Inventory.js' );
+	const { Survival } = await import( '../src/game/Survival.js' );
+	const { Actions } = await import( '../src/game/Actions.js' );
+	const { ItemUse } = await import( '../src/game/items/ItemUse.js' );
+	const { Crafting } = await import( '../src/game/Crafting.js' );
+	const { LightPool } = await import( '../src/game/items/LightPool.js' );
+	const toasts = [];
+	const game = {
+		mode: 'survival', difficulty: 'normal', time: { hours: 100, dayMinutes: 48 }, get hour() { return this.time.hours % 24; }, get day() { return 5; },
+		scene: new THREE.Scene(), camera: new THREE.PerspectiveCamera(), stats: {},
+		events: { emit() {}, on() { return () => {}; } }, audio: { play() {}, loop() { return null; }, buffers: new Map() },
+		interact: { addProvider() { return () => {}; } }, settings: { get: () => true }, input: { pressed: () => false },
+		world: { isIndoors: () => false, sky: { sunDir: new THREE.Vector3( 0, 1, 0 ), night: 0 } }, weather: { rain: 0, cover: 0.3 },
+		player: { pos: new THREE.Vector3(), yaw: 0, stanceH: 1.6, shake: 0, inventory: new PlayerInventory(), lookDir: ( o ) => o.set( 0, 0, - 1 ) },
+		toast: ( t ) => toasts.push( t ), dropStack: () => {}, inputActive: true,
+	};
+	game.survival = new Survival( game );
+	game.actions = new Actions( game );
+	const lights = new LightPool( game );
+	game.itemUse = new ItemUse( game, lights );
+	game.crafting = new Crafting( game, lights );
+	const U = game.itemUse, S = game.survival, inv = game.player.inventory;
+	inv.equip.back = makeStack( 'backpack_military', 1 ); // room for everything
+	const finish = () => game.actions.update( 999 );
+	const put = ( id, q = 1, o = {} ) => { const st = makeStack( id, q, o ); inv.add( st, { autoEquip: false } ); return inv.find( ( x ) => x.id === id ); };
+	const act = ( st, re ) => U.actions( st ).find( a => re.test( a.label ) );
+
+	// multi-portion food
+	const spam = put( 'spam' );
+	S.hunger = 20;
+	ok( /^Eat \(3\/3\)/.test( U.actions( spam )[ 0 ]?.label ), 'spam: first action eats a portion: ' + U.actions( spam )[ 0 ]?.label );
+	U.use( spam ); finish();
+	ok( Math.abs( S.hunger - ( 20 + 1020 / 20 / 3 ) ) < 0.01 && spam.data.left === 2, `spam: one portion eaten (hunger ${S.hunger.toFixed( 1 )}, left ${spam.data.left})` );
+	U.use( spam ); finish(); U.use( spam ); finish();
+	ok( ! inv.count( 'spam' ), 'spam: gone after three portions' );
+
+	// cans need an opener or a blade; stacks split so one can is opened
+	const beans = put( 'canned_beans' );
+	ok( /needs a can opener/.test( U.actions( beans )[ 0 ].label ), 'beans: needs a tool without one' );
+	put( 'kitchen_knife' );
+	ok( /Open with Kitchen knife/.test( U.actions( beans )[ 0 ].label ), 'beans: a knife opens it' );
+	U.use( beans ); finish();
+	ok( beans.data.open && beans.data.spill > 0, 'beans: opened with a knife spills a little' );
+	ok( /^Eat/.test( U.actions( beans )[ 0 ].label ), 'beans: then it can be eaten' );
+	const tuna = put( 'canned_tuna', 4 );
+	put( 'can_opener' );
+	U.use( tuna ); finish();
+	const opened = inv.findAll( ( x ) => x.id === 'canned_tuna' );
+	ok( opened.length === 2 && opened.some( x => x.qty === 3 && ! x.data.open ) && opened.some( x => x.qty === 1 && x.data.open && ! x.data.spill ), 'tuna: one can split off and opened cleanly with the opener' );
+
+	// coconut: crack with a blade into drink + food
+	put( 'machete' );
+	const coco = put( 'coconut' );
+	U.use( coco ); finish();
+	ok( coco.id === 'coconut_open', 'coconut cracks open with a machete' );
+	const th0 = S.thirst; U.use( coco ); finish();
+	ok( S.thirst > th0, 'cracked coconut gives water' );
+
+	// drinks leave their bottle
+	const beer = put( 'beer_bottle' );
+	U.use( beer ); finish();
+	ok( beer.id === 'empty_bottle' && S.drunk > 0, 'beer: drunk, the empty bottle stays' );
+
+	// water containers, seawater, boiling at a fire
+	const bottle = put( 'water_bottle' );
+	U.fillFrom( 'sea', bottle ); finish();
+	ok( bottle.data.liquid === 'sea' && bottle.data.amount > 0.49, 'fill a bottle with seawater' );
+	S.thirst = 50; U.drinkFrom( bottle ); finish();
+	ok( S.thirst < 50, 'seawater makes thirst worse' );
+	const canteen = put( 'canteen' );
+	U.fillFrom( 'sea', canteen ); finish();
+	const boil = game.crafting.recipes.find( r => r.id === 'boil_water' );
+	ok( ! game.crafting.canCraft( boil ), 'boiling needs a fire' );
+	const fire = game.crafting.placeFire( 'campfire', new THREE.Vector3( 0.5, 0, 0 ), { lit: true, fuel: 2 } );
+	ok( game.nearFire( game.player.pos ), 'a lit campfire is near' );
+	ok( game.crafting.canCraft( boil ), 'boiling possible at the fire with a canteen' );
+	game.crafting.craft( boil ); finish();
+	ok( canteen.data.liquid === 'water' && Math.abs( canteen.data.amount - 0.6 ) < 0.01, `boiled seawater is drinkable, 60% left (${canteen.data.amount})` );
+	S.thirst = 40; U.drinkFrom( canteen ); finish();
+	ok( S.thirst > 40, 'boiled water quenches thirst' );
+
+	// cooking raw meat at the fire
+	const boar = put( 'raw_boar' );
+	ok( /Cook on the fire/.test( U.actions( boar )[ 0 ].label ), 'raw meat: cooking is the default at a fire' );
+	U.use( boar ); finish();
+	ok( boar.id === 'cooked_boar', 'raw boar cooks' );
+	// the fire burns down in game hours
+	game.time.hours += 3; game.crafting.update( 0.1 );
+	ok( ! fire.lit && fire.deadSince !== null, 'the campfire burns out' );
+	ok( ! game.nearFire( game.player.pos ), 'a dead fire gives no warmth' );
+
+	// medicine
+	const band = put( 'bandage', 2 );
+	S.bleeding = 0; toasts.length = 0; U.use( band ); finish();
+	ok( band.qty === 2 && toasts.some( t => /not bleeding/.test( t ) ), 'bandage refused when not bleeding' );
+	S.bleeding = 1; U.use( band ); finish();
+	ok( S.bleeding === 0 && band.qty === 1, 'bandage stops a bleed' );
+	const kit = put( 'first_aid_kit' );
+	const nb = inv.count( 'bandage' );
+	U.use( kit ); finish();
+	ok( ! inv.count( 'first_aid_kit' ) && inv.count( 'bandage' ) === nb + 3 && inv.count( 'painkillers' ) >= 6, 'first aid kit unpacks' );
+	S.infected = true; S.infection = 0.3;
+	const cipro = put( 'antibiotics_strong', 2 );
+	U.use( cipro ); finish();
+	ok( ! S.infected, 'strong antibiotics clear an infection' );
+
+	// rags from a t-shirt, bandage from rags (crafting)
+	const tee = put( 'tshirt' );
+	U.actions( tee ).find( a => /Rip/.test( a.label ) ).run(); finish();
+	ok( ! inv.count( 'tshirt' ) && inv.count( 'rags' ) >= 1, `t-shirt ripped into ${inv.count( 'rags' )} rags` );
+	put( 'rags', 2 );
+	const rb = game.crafting.recipes.find( r => r.id === 'rag_bandage' );
+	const before = inv.count( 'bandage_rag' );
+	game.crafting.craft( rb ); finish();
+	ok( inv.count( 'bandage_rag' ) === before + 1, 'craft a rag bandage' );
+	const spear = game.crafting.recipes.find( r => r.id === 'spear' );
+	ok( ! game.crafting.canCraft( spear ) && /long stick/i.test( game.crafting.check( spear ).reason ), 'spear needs a long stick: ' + game.crafting.check( spear ).reason );
+
+	// lights drain batteries in game hours
+	const fl = put( 'flashlight' );
+	U.toggleLight( fl );
+	ok( fl.data.on, 'flashlight on' );
+	U._updateLights( 0 );
+	ok( lights.spotSource && lights.spotSource.kind === 'flashlight', 'the flashlight feeds the spot light' );
+	U._updateLights( 20 );
+	ok( ! fl.data.on && fl.data.charge === 0, 'batteries run flat' );
+	put( 'batteries', 2 );
+	act( fl, /Replace the batteries/ ).run(); finish();
+	ok( fl.data.charge === getItem( 'flashlight' ).tool.battery, 'fresh batteries' );
+
+	// food spoils with game time
+	const poke = put( 'poke' ); poke.data.age = 0;
+	U._spoil( 10 );
+	ok( freshness( poke ) === 0, 'poke rots within hours' );
+	const nuts = put( 'macadamia_nuts' );
+	U._spoil( 1000 );
+	ok( freshness( nuts ) === 1, 'canned nuts never spoil' );
+
+	// sleeping bag hands over to game.sleep
+	let slept = null; game.sleep = ( h, q ) => { slept = [ h, q ]; return true; };
+	S.energy = 30;
+	U.use( put( 'sleeping_bag' ) );
+	ok( slept && slept[ 0 ] >= 2 && slept[ 1 ] > 0.5, 'sleeping bag sleeps ' + slept?.[ 0 ] + ' h' );
+}
 
 console.log( `\n${passes} passed, ${fails} failed` );
 process.exit( fails ? 1 : 0 );

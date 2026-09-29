@@ -68,44 +68,55 @@ function segment( len, r0, r1 = r0 ) {
 // the rigged hand geometry for one side (1 right, -1 left), in the bind pose
 function handGeometry( side ) {
 	const parts = [];
-	// palm: a rounded slab, wider at the knuckles, and the thenar pad under the thumb
-	const palm = new RoundedBoxGeometry( 0.082, PALM_T, 0.098, 2, 0.011 );
+	// palm: a superellipsoid slab (soft box), narrower and thicker at the heel, knuckle bumps where the fingers start
+	const palm = new THREE.SphereGeometry( 1, 20, 14 );
 	const pp = palm.attributes.position;
+	const sp = ( v, e ) => Math.sign( v ) * Math.pow( Math.abs( v ), e );
 	for ( let i = 0; i < pp.count; i ++ ) {
-		const z = pp.getZ( i ) + 0.049, k = 0.8 + 0.2 * Math.min( 1, z / 0.07 );
-		pp.setX( i, pp.getX( i ) * k );
-		// the palm is thicker at the heel of the hand
-		if ( pp.getY( i ) < 0 ) pp.setY( i, pp.getY( i ) * ( 1.25 - 0.3 * z / 0.098 ) );
+		let x = sp( pp.getX( i ), 0.42 ), y = sp( pp.getY( i ), 0.55 ), z = sp( pp.getZ( i ), 0.42 );
+		const t = ( z + 1 ) / 2; // 0 heel .. 1 knuckles
+		x *= 0.04 * ( 0.8 + 0.2 * t );
+		y *= PALM_T * 0.5 * ( 1.2 - 0.35 * t ) + ( y > 0 ? 0.0025 * ( 1 - x * x / 0.0016 ) : 0 );
+		z = z * 0.049 + 0.047;
+		pp.setXYZ( i, x, y, z );
 	}
 	palm.computeVertexNormals();
-	palm.translate( 0, 0, 0.047 );
 	parts.push( piece( palm, 0 ) );
-	const thenar = new THREE.SphereGeometry( 0.019, 10, 8 );
-	thenar.scale( 0.9, 0.55, 1.25 ); thenar.translate( 0.018, - 0.011, 0.03 );
+	for ( const f of FINGERS ) {
+		const k = new THREE.SphereGeometry( f.r * 1.12, 10, 8 );
+		k.scale( 1, 0.85, 1 ); k.translate( f.x, 0.002, f.z - 0.003 );
+		parts.push( piece( k, 0 ) );
+	}
+	const thenar = new THREE.SphereGeometry( 0.019, 12, 9 );
+	thenar.scale( 0.95, 0.6, 1.3 ); thenar.translate( 0.02, - 0.009, 0.032 );
 	parts.push( piece( thenar, 0 ) );
-	// wrist: an oval stub reaching back into the forearm
-	const wrist = new THREE.CylinderGeometry( 0.024, 0.026, 0.05, 12, 1 );
-	wrist.scale( 1.3, 1, 0.78 ); wrist.rotateX( Math.PI / 2 ); wrist.translate( 0, - 0.002, - 0.012 );
+	// wrist: a rounded oval reaching back into the forearm
+	const wrist = new THREE.CapsuleGeometry( 0.021, 0.035, 4, 12 );
+	wrist.scale( 1.4, 1, 0.82 ); wrist.rotateX( Math.PI / 2 ); wrist.translate( 0, - 0.001, - 0.012 );
 	parts.push( piece( wrist, 0 ) );
-	// fingers: bones 1..12 (3 per finger), thumb 13..15
+	// segments sit where their bones are in the bind pose (fingers straight along +Z)
 	let b = 1;
 	for ( const f of FINGERS ) {
+		let z = f.z;
 		for ( let s = 0; s < 3; s ++ ) {
 			const r0 = f.r * ( 1 - s * 0.08 ), r1 = f.r * ( 0.92 - s * 0.08 );
-			parts.push( piece( segment( f.len[ s ], r0, r1 ), b ) );
+			parts.push( piece( segment( f.len[ s ], r0, r1 ).translate( f.x, 0, z ), b ) );
 			if ( s === 2 ) {
 				// the nail
 				const nail = new RoundedBoxGeometry( r1 * 1.3, 0.0022, f.len[ 2 ] * 0.55, 1, 0.001 );
-				nail.translate( 0, r1 * 0.78, f.len[ 2 ] * 0.58 );
+				nail.translate( f.x, r1 * 0.78, z + f.len[ 2 ] * 0.58 );
 				parts.push( piece( nail, b, [ 1.12, 0.95, 0.92 ] ) );
 			}
+			z += f.len[ s ];
 			b ++;
 		}
 	}
+	let tz = THUMB.z;
 	for ( let s = 0; s < 3; s ++ ) {
 		const r0 = THUMB.r * ( 1 - s * 0.07 ), r1 = THUMB.r * ( 0.9 - s * 0.07 );
-		parts.push( piece( segment( THUMB.len[ s ], r0, r1 ), b ) );
-		if ( s === 2 ) { const nail = new RoundedBoxGeometry( r1 * 1.3, 0.0022, THUMB.len[ 2 ] * 0.5, 1, 0.001 ); nail.translate( 0, r1 * 0.8, THUMB.len[ 2 ] * 0.6 ); parts.push( piece( nail, b, [ 1.12, 0.95, 0.92 ] ) ); }
+		parts.push( piece( segment( THUMB.len[ s ], r0, r1 ).translate( THUMB.x, THUMB.y, tz ), b ) );
+		if ( s === 2 ) { const nail = new RoundedBoxGeometry( r1 * 1.3, 0.0022, THUMB.len[ 2 ] * 0.5, 1, 0.001 ); nail.translate( THUMB.x, THUMB.y + r1 * 0.8, tz + THUMB.len[ 2 ] * 0.6 ); parts.push( piece( nail, b, [ 1.12, 0.95, 0.92 ] ) ); }
+		tz += THUMB.len[ s ];
 		b ++;
 	}
 	let geo = mergeGeometries( parts, false );
@@ -128,9 +139,9 @@ function limbGeometry( prof, flat = 0.82 ) {
 	return g;
 }
 // profiles run from the joint nearer the body (y = 0) to the far one (y = 1)
-const FORE_PROF = [ [ - 0.05, 0.0 ], [ - 0.05, 0.032 ], [ 0.06, 0.036 ], [ 0.28, 0.038 ], [ 0.55, 0.032 ], [ 0.85, 0.026 ], [ 1.0, 0.0235 ], [ 1.02, 0.0 ] ];
-const UPPER_PROF = [ [ - 0.05, 0.0 ], [ - 0.05, 0.05 ], [ 0.15, 0.051 ], [ 0.5, 0.046 ], [ 0.85, 0.039 ], [ 1.0, 0.035 ], [ 1.04, 0.0 ] ];
-const SLEEVE_F_PROF = [ [ - 0.05, 0 ], [ - 0.05, 0.043 ], [ 0.3, 0.045 ], [ 0.6, 0.04 ], [ 0.9, 0.035 ], [ 0.97, 0.037 ], [ 0.985, 0.0 ] ];
+const FORE_PROF = [ [ - 0.06, 0.0 ], [ - 0.05, 0.022 ], [ - 0.02, 0.032 ], [ 0.06, 0.036 ], [ 0.28, 0.038 ], [ 0.55, 0.032 ], [ 0.85, 0.026 ], [ 0.97, 0.0235 ], [ 1.0, 0.02 ], [ 1.025, 0.011 ], [ 1.035, 0.0 ] ];
+const UPPER_PROF = [ [ - 0.07, 0.0 ], [ - 0.06, 0.035 ], [ - 0.02, 0.05 ], [ 0.15, 0.051 ], [ 0.5, 0.046 ], [ 0.85, 0.039 ], [ 1.0, 0.035 ], [ 1.04, 0.025 ], [ 1.07, 0.0 ] ];
+const SLEEVE_F_PROF = [ [ - 0.06, 0 ], [ - 0.05, 0.043 ], [ 0.3, 0.045 ], [ 0.6, 0.04 ], [ 0.9, 0.035 ], [ 0.965, 0.037 ], [ 0.975, 0.03 ], [ 0.972, 0.0 ] ];
 
 let MATS = null;
 function materials() {

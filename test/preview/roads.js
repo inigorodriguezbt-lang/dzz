@@ -49,6 +49,33 @@ window.__view = ( x, z, h = 1.7, yaw = 0, pitch = 0, fov = 0, hr = 10, wet = 0 )
 	q.set( 'wet', wet );
 	game.player.pos.set( cam.position.x, cam.position.y - 1.6, cam.position.z );
 };
+
+// gallery: every prop type and every car body in rows on a flat spot, injected as a fake near cell
+window.__gallery = ( gx, gz ) => {
+	const R = game.roads, hf = world.hf;
+	const props = [], cars = [], signs = [], decals = [];
+	const types = [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 33 ];
+	types.forEach( ( t, i ) => {
+		const x = gx + ( i % 8 ) * 7, z = gz + Math.floor( i / 8 ) * 9;
+		props.push( t, x - gx, hf.heightAt( x, z ), z - gz, 0, t === 25 ? 5 : 1, 0, t === 0 || t === 1 ? 1 : 0 );
+	} );
+	for ( let t = 0; t < 9; t ++ ) {
+		const x = gx + t * 7 - 2, z = gz + 40;
+		const flags = [ 0, 1 | 16, 2 | 64, 128, 1 | 2 | 4 | 8, 16 | 32, 256 | 1024, 0, 0 ][ t ];
+		cars.push( t, x - gx, hf.heightAt( x, z ), z - gz, 0.5, 0, 0, t === 5 ? 20 : t >= 6 ? 16 : t * 2, t * 0.12, 0, flags | 8192, t * 777 );
+		const z2 = gz + 52;
+		cars.push( t, x - gx, hf.heightAt( x, z2 ), z2 - gz, 2.6, 0, 0, t, 0.6, t === 3 || t === 7 ? 0.9 : 0, 128, t * 331 );
+	}
+	signs.push( 0, 200, 0, hf.heightAt( gx, gz - 6 ) + 2, - 6, 0, 0.76, 0.76, 0, 0 );
+	signs.push( 0, 300, 5, hf.heightAt( gx + 5, gz - 6 ) + 1.4, - 6, 0, 1.9, 0.48, 1, 0 );
+	signs.push( 0, 3, 10, hf.heightAt( gx + 10, gz - 6 ) + 2.5, - 6, 0, 0.95, 0.2, 1, 0 );
+	for ( let k = 0; k < 12; k ++ ) decals.push( k, k * 4, hf.heightAt( gx + k * 4, gz - 12 ) + 0.1, - 12, 0, 3, 3, 1 );
+	const r = { lod: 0, ox: gx, oz: gz, props: new Float32Array( props ), cars: new Float32Array( cars ), signs: new Float32Array( signs ), decals: new Float32Array( decals ), boxes: new Float32Array( 0 ), wires: new Float32Array( 0 ) };
+	const c = { key: - 1, ci: Math.floor( gx / 320 ), cj: Math.floor( gz / 320 ), lod: - 1, job: null, meshes: [], boxes: [], inst: null, dyn: [], wrecks: [], dist: 0 };
+	R.cells.set( - 1, c );
+	R._load( c, r );
+};
+
 window.__idle = () => ! [ ...game.roads.cells.values() ].some( c => c.job ) && world.pool.busy === 0 && world.terrain.pending === 0;
 install( game );
 await world.warmup( ( s, p ) => { info.textContent = s + ' ' + Math.round( p * 100 ) + '%'; } );
@@ -64,18 +91,32 @@ for ( let i = 0; i < 400; i ++ ) {
 G.uWet.value = + ( q.get( 'wet' ) || 0 );
 const frames = + ( q.get( 'frames' ) || 0 );
 let n = 0, last = performance.now();
+// __budget: -1 renders continuously; >= 0 keeps updating (streaming) but renders only that many more frames. The
+// shot script renders a couple of frames per view and waits for the GPU (SwiftShader frames are very slow).
+window.__budget = - 1;
+window.__synced = 0;
 window.__ready = true;
+const px = new Uint8Array( 4 );
 function loop() {
+	requestAnimationFrame( loop );
 	const now = performance.now(), dt = Math.min( 0.1, ( now - last ) / 1000 ); last = now;
 	world.update( dt );
 	G.uWet.value = + ( q.get( 'wet' ) || 0 );
 	for ( const s of systems ) s.update( dt );
+	if ( window.__budget === 0 ) return;
+	if ( window.__budget > 0 ) window.__budget --;
 	renderer.render( { scene: world.scene, camera: cam, grade: { exposure: 1.0 + world.sky.night * 1.4, night: world.sky.night, time: world.clock } } );
 	const ri = renderer.gl.info.render;
 	info.textContent = `calls ${ri.calls} tris ${( ri.triangles / 1e3 ).toFixed( 0 )}k cells ${game.roads.cells.size} boxes ${game.physics.boxes.size}`;
 	n ++;
 	window.__frames = n;
-	if ( frames && n >= frames ) { window.__done = true; return; }
-	requestAnimationFrame( loop );
+	if ( window.__budget === 0 ) {
+		// block until the GPU has really finished the frame
+		const gl = renderer.gl.getContext();
+		gl.bindFramebuffer( gl.FRAMEBUFFER, null );
+		gl.readPixels( 0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px );
+		window.__synced ++;
+	}
+	if ( frames && n >= frames ) { window.__done = true; window.__budget = 0; }
 }
 loop();

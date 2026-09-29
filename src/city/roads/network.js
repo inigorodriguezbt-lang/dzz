@@ -409,6 +409,51 @@ export function highwayEdgeDist( net, x, z, r = 20 ) {
 	return [ best, road ];
 }
 
+// nearest drivable centreline point: drawn highway runs and city streets; returns
+// { x, z, dx, dz, dist, lanes, width, kind, name } or null
+export function nearestOnNetwork( net, x, z, maxDist ) {
+	let best = null, bd = maxDist, bt = 0, hw = false;
+	net.rhash.query( x, z, maxDist, ( s ) => { const d = segDist( s, x, z ); if ( d < bd ) { bd = d; best = s; bt = segT; hw = true; } } );
+	net.shash.query( x, z, maxDist, ( s ) => { const d = segDist( s, x, z ); if ( d < bd ) { bd = d; best = s; bt = segT; hw = false; } } );
+	if ( ! best ) return null;
+	const s = best;
+	const L = Math.hypot( s.bx - s.ax, s.bz - s.az ) || 1;
+	const o = { x: s.ax + ( s.bx - s.ax ) * bt, z: s.az + ( s.bz - s.az ) * bt, dx: ( s.bx - s.ax ) / L, dz: ( s.bz - s.az ) / L, dist: bd };
+	if ( hw ) {
+		const r = s.road;
+		return { ...o, lanes: r.lanes, width: r.w, kind: r.lanes === 1 ? 'dirt' : r.lanes === 4 ? 'freeway' : 'highway', name: r.route ? ( r.route.startsWith( 'H' ) ? r.route : 'Route ' + r.route ) : r.fromName + ' – ' + r.toName };
+	}
+	const names = s.base ? BASE_NAMES : STREET_NAMES;
+	return { ...o, lanes: s.kind === SK.METRO ? 4 : 2, width: s.w, kind: 'street', name: names[ s.name ] || '' };
+}
+
+// candidate parking / shoulder spots within a radius: [ [ x, z, yaw ] ] (yaw: facing the travel direction)
+export function roadsideSpots( net, cx, cz, radius ) {
+	const cand = [], r2 = radius * radius;
+	net.shash.query( cx, cz, radius, ( st ) => {
+		const hw = st.w / 2, S = st.kind === SK.METRO ? 3.6 : st.kind === SK.TOWN ? 3.2 : 0;
+		const u = hw - ( st.kind === SK.VILLAGE ? 1.0 : 1.15 );
+		const nx = - st.dz, nz = st.dx;
+		for ( let a = hw + S + 4; a < st.len - hw - S - 4; a += 6.5 ) for ( const side of [ - 1, 1 ] ) {
+			const x = st.ax + st.dx * a + nx * u * side, z = st.az + st.dz * a + nz * u * side;
+			if ( ( x - cx ) ** 2 + ( z - cz ) ** 2 > r2 ) continue;
+			// traffic keeps right: the +u side travels along the street direction
+			cand.push( [ x, z, Math.atan2( - st.dx * side, - st.dz * side ) ] );
+		}
+	} );
+	net.rhash.query( cx, cz, radius, ( s ) => {
+		const L = Math.hypot( s.bx - s.ax, s.bz - s.az );
+		if ( L < 3 ) return;
+		const dx = ( s.bx - s.ax ) / L, dz = ( s.bz - s.az ) / L;
+		const mx = ( s.ax + s.bx ) / 2, mz = ( s.az + s.bz ) / 2;
+		if ( ( mx - cx ) ** 2 + ( mz - cz ) ** 2 > r2 ) return;
+		const side = ( Math.round( mx + mz ) & 1 ) ? 1 : - 1;
+		const u = s.road.hw - 1.1;
+		cand.push( [ mx - dz * u * side, mz + dx * u * side, Math.atan2( - dx * side, - dz * side ) ] );
+	} );
+	return cand;
+}
+
 // chain-link perimeter around military bases and airports, with gates where roads pass
 function buildFences( net, meta ) {
 	const byCity = new Map();

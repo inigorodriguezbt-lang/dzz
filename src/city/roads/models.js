@@ -226,14 +226,16 @@ function jersey() {
 }
 
 function sandbags() {
+	// a 2 m x 0.9 m wall of bags laid like bricks, two bags deep
 	const b = new MB();
 	let s = 7;
 	const rnd = () => { s = ( s * 16807 ) % 2147483647; return s / 2147483647; };
-	for ( let row = 0; row < 3; row ++ ) for ( let k = 0; k < 4; k ++ ) {
-		const x = - 0.75 + k * 0.5 + ( row % 2 ? 0.25 : 0 );
-		if ( x > 0.9 ) continue;
-		const c = [ 0xa99b76, 0x9d8f6b, 0xb3a57e ][ Math.floor( rnd() * 3 ) ];
-		b.sphere( 0.5, 8, 5, c, T.fabric, { x, y: 0.15 + row * 0.28, z: ( rnd() - 0.5 ) * 0.05, sx: 1.02, sy: 0.34, sz: 0.62, ry: ( rnd() - 0.5 ) * 0.2 } );
+	const cols = [ 0xa99b76, 0x9d8f6b, 0xb3a57e, 0x8f8462 ];
+	for ( let row = 0; row < 4; row ++ ) for ( const z of [ - 0.17, 0.17 ] ) {
+		const off = ( row % 2 ) * 0.25;
+		for ( let x = - 1.0 + 0.25 + off; x < 1.0 - 0.2; x += 0.5 ) {
+			b.sphere( 0.5, 8, 5, cols[ Math.floor( rnd() * 4 ) ], T.fabric, { x: x + ( rnd() - 0.5 ) * 0.04, y: 0.12 + row * 0.215, z: z + ( rnd() - 0.5 ) * 0.03, sx: 0.54, sy: 0.3, sz: 0.36, ry: ( rnd() - 0.5 ) * 0.15 } );
+		}
 	}
 	return b.build();
 }
@@ -471,19 +473,19 @@ function tent() {
 // maxD: draw distance (m), cast: casts sun shadows in the near band
 
 export const MODELS = {
-	streetlight: { build: () => streetlight( false ), maxD: 700 },
+	streetlight: { build: () => streetlight( false ), maxD: 620 },
 	streetlight2: { build: () => streetlight( true ), maxD: 800 },
-	pole: { build: () => utilityPole( 0 ), maxD: 700 },
-	poleT: { build: () => utilityPole( 1 ), maxD: 700 },
-	poleL: { build: () => utilityPole( 2 ), maxD: 700 },
-	poleR: { build: () => utilityPole( 3 ), maxD: 700 },
-	signal: { build: signalMast, maxD: 500 },
+	pole: { build: () => utilityPole( 0 ), maxD: 560 },
+	poleT: { build: () => utilityPole( 1 ), maxD: 560 },
+	poleL: { build: () => utilityPole( 2 ), maxD: 560 },
+	poleR: { build: () => utilityPole( 3 ), maxD: 560 },
+	signal: { build: signalMast, maxD: 380 },
 	signPost: { build: () => signPost( false ), maxD: 220 },
 	signPostTall: { build: () => signPost( true ), maxD: 260 },
-	hydrant: { build: hydrant, maxD: 150 },
-	litter: { build: () => trashCan( 0 ), maxD: 170 },
+	hydrant: { build: hydrant, maxD: 130 },
+	litter: { build: () => trashCan( 0 ), maxD: 130 },
 	wheelie: { build: () => trashCan( 1 ), maxD: 170 },
-	newsBox: { build: newsBox, maxD: 150 },
+	newsBox: { build: newsBox, maxD: 120 },
 	shelter: { build: busShelter, maxD: 400 },
 	bench: { build: bench, maxD: 170 },
 	cone: { build: cone, maxD: 180 },
@@ -500,7 +502,7 @@ export const MODELS = {
 	milePost: { build: milePost, maxD: 220 },
 	guidePosts: { build: () => guidePosts( 0 ), maxD: 700 },
 	welcomePosts: { build: () => guidePosts( 1 ), maxD: 500 },
-	meter: { build: meter, maxD: 130 },
+	meter: { build: meter, maxD: 110 },
 	boomBase: { build: boomBase, maxD: 300 },
 	boomArm: { build: boomArm, maxD: 300 },
 	floodlight: { build: floodlight, maxD: 450 },

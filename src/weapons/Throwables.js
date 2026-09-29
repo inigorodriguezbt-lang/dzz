@@ -25,7 +25,7 @@ export class Throwables {
 		this.game.scene.add( mesh );
 		const obj = {
 			def, kind: t.kind, mesh, pos: o.origin.clone(), vel: o.vel.clone(), spin: new THREE.Vector3( rnd() * 12 - 6, rnd() * 12 - 6, rnd() * 12 - 6 ),
-			fuse: Math.max( 0.05, ( t.fuse || 0 ) - ( o.cooked || 0 ) ), armed: t.kind !== 'molotov', rest: false, t: 0, source: o.source ?? null, done: false, bounces: 0,
+			fuse: Math.max( 0.05, ( t.fuse || 0 ) - ( o.cooked || 0 ) ), armed: t.kind !== 'molotov', rest: false, t: 0, source: o.source ?? null, done: false, bounces: 0, unlit: !! o.unlit,
 		};
 		this.list.push( obj );
 		return obj;
@@ -38,7 +38,7 @@ export class Throwables {
 			o.t += dt;
 			if ( ! o.rest ) this._move( o, dt );
 			// molotov rag trails flame and smoke in flight
-			if ( o.kind === 'molotov' && ! o.done && g.fx ) {
+			if ( o.kind === 'molotov' && ! o.done && ! o.unlit && g.fx ) {
 				const top = _v.set( 0, 0.12, 0 ).applyQuaternion( o.mesh.quaternion ).add( o.pos );
 				g.fx.add.emit( { x: top.x, y: top.y, z: top.z, vx: 0, vy: 0.8, vz: 0, life: 0.3, s0: 0.07, s1: 0.02, frame: 6, r: 5, g: 2.2, b: 0.6, a: 0.9 } );
 				g.fx.lightNow( top.clone(), _fireCol, 6, 8 );
@@ -170,6 +170,8 @@ export class Throwables {
 		g.audio?.play( 'glass', { pos: p, vol: 0.9, max: 60 } );
 		g.fx?.impact( p, _v.set( 0, 1, 0 ), 'glass', { size: 1.2, sound: false, decal: false } );
 		if ( water ) { g.fx?.splash( p, 0.5 ); return; }
+		// an unlit bottle only leaves a fuel stain
+		if ( o.unlit ) { g.fx?.decal( p, _v.set( 0, 1, 0 ), 'scorch', 1.2, 60, 0.35 ); return; }
 		g.audio?.play( 'fire_whoosh', { pos: p, vol: 0.9, max: 80 } );
 		// the fuel spreads over the ground where it broke
 		const floor = g.physics.ground( p.x, p.z, p.y + 0.5 ).y;

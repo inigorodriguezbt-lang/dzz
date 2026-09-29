@@ -24,16 +24,17 @@ import { makeStack, getItem } from '../game/items/ItemDB.js';
 // ---- per species rendering setup ---------------------------------------------------------------------------
 //   kind: vertex deformation, build( lod ): model, near / mid: end distance (m, at 'high'), imp: impostor
 //   level ('far' = out to the render distance with thinning, or an end distance), tints (leaf tint range,
-//   bark tint), mode (see vegUniforms), shadow: the near model casts shadows
+//   bark tint), mode (see vegUniforms), shadow: the near (and mid) models cast shadows. The sun's shadow
+//   map reaches ~85-120 m, so the mid models of the big plants cast too: no shadow pops at the switch.
 const W = [ 1, 1, 1 ];
 export const SPEC = {
-	[ SP.PALM ]: { kind: KIND.PALM, build: PG.buildPalm, near: 140, mid: 620, imp: 'far', tint: [ [ 0.95, 1, 0.9 ], [ 1.12, 1.08, 0.8 ] ], shadow: true },
-	[ SP.MONKEYPOD ]: { kind: KIND.TREE, build: ( l ) => PG.buildBroadleaf( 'monkeypod', l ), near: 130, mid: 420, imp: 'far', tint: [ [ 0.85, 0.95, 0.85 ], [ 1.05, 1.08, 0.9 ] ], bark: [ 0.9, 0.85, 0.8 ], shadow: true },
-	[ SP.KUKUI ]: { kind: KIND.TREE, build: ( l ) => PG.buildBroadleaf( 'kukui', l ), near: 130, mid: 420, imp: 'far', tint: [ [ 0.95, 1, 0.95 ], [ 1.1, 1.12, 1.0 ] ], bark: W, shadow: true },
-	[ SP.OHIA ]: { kind: KIND.TREE, build: ( l ) => PG.buildBroadleaf( 'ohia', l ), near: 130, mid: 420, imp: 'far', tint: [ [ 0.8, 0.92, 0.8 ], [ 1.1, 1.05, 0.85 ] ], bark: W, mode: [ 0, 0, 1, 0 ], shadow: true },
-	[ SP.PINE ]: { kind: KIND.PINE, build: PG.buildPine, near: 160, mid: 620, imp: 'far', tint: [ [ 0.9, 0.95, 0.95 ], [ 1.05, 1.08, 1.0 ] ], bark: W, shadow: true },
-	[ SP.IRONWOOD ]: { kind: KIND.TREE, build: ( l ) => PG.buildBroadleaf( 'ironwood', l ), near: 130, mid: 420, imp: 'far', tint: [ [ 0.9, 0.95, 0.9 ], [ 1.08, 1.05, 0.95 ] ], bark: W, shadow: true },
-	[ SP.KIAWE ]: { kind: KIND.TREE, build: ( l ) => PG.buildBroadleaf( 'kiawe', l ), near: 120, mid: 380, imp: 'far', tint: [ [ 0.95, 0.98, 0.85 ], [ 1.1, 1.08, 0.9 ] ], bark: [ 0.8, 0.75, 0.7 ], shadow: true },
+	[ SP.PALM ]: { kind: KIND.PALM, build: PG.buildPalm, near: 95, mid: 600, imp: 'far', tint: [ [ 0.95, 1, 0.9 ], [ 1.12, 1.08, 0.8 ] ], shadow: true },
+	[ SP.MONKEYPOD ]: { kind: KIND.TREE, build: ( l ) => PG.buildBroadleaf( 'monkeypod', l ), near: 95, mid: 420, imp: 'far', tint: [ [ 0.85, 0.95, 0.85 ], [ 1.05, 1.08, 0.9 ] ], bark: [ 0.9, 0.85, 0.8 ], shadow: true },
+	[ SP.KUKUI ]: { kind: KIND.TREE, build: ( l ) => PG.buildBroadleaf( 'kukui', l ), near: 90, mid: 420, imp: 'far', tint: [ [ 0.95, 1, 0.95 ], [ 1.1, 1.12, 1.0 ] ], bark: W, shadow: true },
+	[ SP.OHIA ]: { kind: KIND.TREE, build: ( l ) => PG.buildBroadleaf( 'ohia', l ), near: 90, mid: 420, imp: 'far', tint: [ [ 0.8, 0.92, 0.8 ], [ 1.1, 1.05, 0.85 ] ], bark: W, mode: [ 0, 0, 1, 0 ], shadow: true },
+	[ SP.PINE ]: { kind: KIND.PINE, build: PG.buildPine, near: 110, mid: 600, imp: 'far', tint: [ [ 0.9, 0.95, 0.95 ], [ 1.05, 1.08, 1.0 ] ], bark: W, shadow: true },
+	[ SP.IRONWOOD ]: { kind: KIND.TREE, build: ( l ) => PG.buildBroadleaf( 'ironwood', l ), near: 90, mid: 420, imp: 'far', tint: [ [ 0.9, 0.95, 0.9 ], [ 1.08, 1.05, 0.95 ] ], bark: W, shadow: true },
+	[ SP.KIAWE ]: { kind: KIND.TREE, build: ( l ) => PG.buildBroadleaf( 'kiawe', l ), near: 85, mid: 380, imp: 'far', tint: [ [ 0.95, 0.98, 0.85 ], [ 1.1, 1.08, 0.9 ] ], bark: [ 0.8, 0.75, 0.7 ], shadow: true },
 	[ SP.TREEFERN ]: { kind: KIND.SMALL, build: PG.buildTreeFern, near: 90, imp: 280, tint: [ [ 0.9, 1, 0.9 ], [ 1.1, 1.08, 0.9 ] ], bark: [ 0.8, 0.7, 0.6 ], shadow: true },
 	[ SP.BANANA ]: { kind: KIND.SMALL, build: PG.buildBanana, near: 80, imp: 240, tint: [ [ 0.95, 1, 0.9 ], [ 1.1, 1.1, 0.95 ] ], shadow: true },
 	[ SP.TI ]: { kind: KIND.SMALL, build: PG.buildTi, near: 60, imp: 150, tint: [ [ 0.95, 1, 0.95 ], [ 1.1, 1.05, 0.95 ] ], mode: [ 0, 1, 0, 0 ], shadow: true },
@@ -42,7 +43,7 @@ export const SPEC = {
 	[ SP.TALLGRASS ]: { kind: KIND.SMALL, build: PG.buildTallGrass, near: 60, imp: 170, tint: [ [ 1, 1.05, 0.9 ], [ 1.55, 1.25, 0.72 ] ], mode: [ 1, 0, 0, 0 ], shadow: true },
 	[ SP.PINEAPPLE ]: { kind: KIND.SMALL, build: PG.buildPineappleRow, near: 45, tint: [ [ 0.95, 1, 1 ], [ 1.05, 1.05, 1 ] ], shadow: false },
 	[ SP.CANE ]: { kind: KIND.CANE, build: PG.buildCanePatch, near: 80, mid: 260, tint: [ [ 0.95, 1, 0.95 ], [ 1.08, 1.05, 0.9 ] ], shadow: true },
-	[ SP.ROCK ]: { kind: KIND.ROCK, build: PG.buildRock, near: 140, mid: 420, tint: [ [ 0.58, 0.55, 0.52 ], [ 0.2, 0.19, 0.2 ] ], shadow: true },
+	[ SP.ROCK ]: { kind: KIND.ROCK, build: PG.buildRock, near: 90, mid: 380, tint: [ [ 0.58, 0.55, 0.52 ], [ 0.2, 0.19, 0.2 ] ], shadow: true },
 	[ SP.FERN ]: { kind: KIND.SMALL, build: PG.buildFern, near: 45, tint: [ [ 0.9, 1, 0.9 ], [ 1.1, 1.1, 0.95 ] ], shadow: false },
 	[ SP.GRASS ]: { kind: KIND.GRASS, build: () => PG.buildGrassClump(), near: 45, tint: [ [ 0.3, 0.5, 0.12 ], [ 0.78, 0.62, 0.3 ] ], shadow: false },
 };
@@ -119,7 +120,7 @@ export class Vegetation {
 			if ( s === SP.GRASS ) { lods.near = make( g0, 'grass', false ); this.targets.grass.push( lods.near ); } else {
 				lods.near = make( g0, 'near', cfg.shadow );
 				this.targets.near.push( lods.near );
-				if ( cfg.mid ) { lods.mid = make( cfg.build( 1 ), 'mid', false ); this.targets.mid.push( lods.mid ); }
+				if ( cfg.mid ) { lods.mid = make( cfg.build( 1 ), 'mid', cfg.shadow ); this.targets.mid.push( lods.mid ); }
 			}
 			this.spTargets[ s ] = lods;
 		}
@@ -436,6 +437,8 @@ export class Vegetation {
 		const cam = this.world.camera.position;
 		VG.uWindStr.value = 0.25 + ( this.game.weather?.wind ?? 0.45 ) * 0.95;
 		VG.uPlayer.value.copy( this.game.player.pos );
+		// the shadow map is centred ~0.45 half-sizes ahead of the camera: its far corners
+		VG.uShadowFar.value = ( this.world.shadowHalf || 85 ) * 1.9;
 		this.impostors.update( cam );
 		this._stream( cam, now );
 		this._bands( cam, now );

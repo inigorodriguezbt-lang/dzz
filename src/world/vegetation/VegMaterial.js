@@ -18,6 +18,7 @@ export const VG = {
 	uWindStr: { value: 0.45 },
 	uDensity: { value: 1 },
 	uPlayer: { value: new THREE.Vector3( 0, - 1e5, 0 ) },
+	uShadowFar: { value: 160 }, // m: plants further than this skip the shadow pass (beyond the sun's shadow map)
 	tLeaf: { value: null },
 	tPalmBark: { value: null },
 	tBark: { value: null },
@@ -29,7 +30,7 @@ const VERT_PARS = /* glsl */`
 	attribute vec4 iPos; attribute vec4 iDat;
 	uniform float uTime; uniform vec3 uCamPos; uniform vec2 uWind;
 	uniform vec4 uLod; uniform float uKind; uniform vec3 uThin;
-	uniform float uWindStr; uniform float uDensity; uniform vec3 uPlayer;
+	uniform float uWindStr; uniform float uDensity; uniform vec3 uPlayer; uniform float uShadowFar;
 	varying vec2 vVegUv; varying vec4 vVegMat; varying vec3 vVegCol; varying vec2 vVegFade; varying vec4 vVegInst;
 
 	float vegHash( vec2 p ) { vec3 p3 = fract( vec3( p.xyx ) * 0.1031 ); p3 += dot( p3, p3.yzx + 33.33 ); return fract( ( p3.x + p3.y ) * p3.z ); }
@@ -55,6 +56,10 @@ const VERT_PARS = /* glsl */`
 		float keep = uDensity * mix( 1.0, uThin.z, thinK );
 		float thin = clamp( ( keep - rank ) / 0.05, 0.0, 1.0 );
 		vVegFade = vec2( min( fin, thin ), fout );
+		#ifdef VEG_DEPTH
+		// outside the shadow map: collapse before any of the work below
+		if ( d > uShadowFar ) vVegFade.x = 0.0;
+		#endif
 		vVegInst = vec4( rank, pa, pb, s );
 		vVegMat = aMat;
 		vVegCol = aCol;
@@ -289,7 +294,7 @@ export function makeVegDepthMaterial( U ) {
 	m.onBeforeCompile = ( shader ) => {
 		Object.assign( shader.uniforms, G, VG, U );
 		shader.vertexShader = shader.vertexShader
-			.replace( '#include <common>', '#include <common>\n' + VERT_PARS )
+			.replace( '#include <common>', '#include <common>\n#define VEG_DEPTH\n' + VERT_PARS )
 			.replace( '#include <begin_vertex>', 'vegDeform( position, normal );\nvec3 transformed = vegP;' );
 		shader.fragmentShader = shader.fragmentShader
 			.replace( '#include <common>', '#include <common>\n' + FRAG_PARS )
