@@ -1,73 +1,199 @@
+// Deadtide — boot, the app loop and the switch between the title screen and a running world.
 import * as THREE from 'three';
 import { Settings } from './core/Settings.js';
 import { Input } from './core/Input.js';
 import { Renderer } from './render/Renderer.js';
 import { World } from './game/World.js';
+import { Game } from './game/Game.js';
+import { SaveSystem } from './core/SaveSystem.js';
+import { Audio } from './audio/Audio.js';
+import { UI } from './ui/UI.js';
+import { MODULES } from './game/modules.js';
 
-const loader = document.getElementById( 'loader' );
-const status = ( s, p ) => {
-	loader.querySelector( '.loader-status' ).textContent = s;
-	loader.querySelector( '.loader-pct' ).textContent = Math.round( p * 100 ) + '%';
-	loader.querySelector( '.loader-fill' ).style.transform = `scaleX(${Math.max( 0.02, p )})`;
-};
-
-async function boot() {
-	const settings = new Settings();
-	const canvas = document.getElementById( 'view' );
-	const renderer = new Renderer( canvas, settings );
-	const input = new Input( canvas, settings );
-	const world = new World( renderer, settings );
-	await world.load( status );
-	const q = new URLSearchParams( location.search );
-	const cam = world.camera;
-	const [ x, z ] = ( q.get( 'at' ) || '4600,-2000' ).split( ',' ).map( Number );
-	cam.position.set( x, world.hf.heightAt( x, z ) + + ( q.get( 'h' ) || 2 ), z );
-	let yaw = + ( q.get( 'yaw' ) || 0 ) * Math.PI / 180, pitch = + ( q.get( 'pitch' ) || 0 ) * Math.PI / 180;
-	world.sky.setTime( + ( q.get( 'hour' ) || 9 ), 120 );
-	const resize = () => {
-		renderer.resize( innerWidth, innerHeight );
-		cam.aspect = innerWidth / innerHeight; cam.updateProjectionMatrix();
-		world.sky.resize( renderer.width, renderer.height );
-	};
-	resize();
-	addEventListener( 'resize', resize );
-	cam.rotation.order = 'YXZ';
-	cam.rotation.set( pitch, yaw, 0 );
-	cam.updateMatrixWorld();
-	await world.warmup( status );
-	loader.classList.add( 'tw-hidden' );
-	canvas.addEventListener( 'click', () => input.lock() );
-	let last = performance.now();
-	const maxFrames = + ( q.get( 'frames' ) || 0 );
-	const tick = () => {
-		const now = performance.now();
-		const dt = Math.min( 0.1, ( now - last ) / 1000 ); last = now;
-		const [ mx, my ] = input.consumeMouse();
-		yaw -= mx; pitch = Math.max( - 1.5, Math.min( 1.5, pitch - my ) );
-		cam.rotation.set( pitch, yaw, 0 );
-		const sp = input.is( 'sprint' ) ? 120 : 20;
-		const f = new THREE.Vector3( - Math.sin( yaw ), 0, - Math.cos( yaw ) ), r = new THREE.Vector3( Math.cos( yaw ), 0, - Math.sin( yaw ) );
-		if ( input.is( 'forward' ) ) cam.position.addScaledVector( f, sp * dt );
-		if ( input.is( 'back' ) ) cam.position.addScaledVector( f, - sp * dt );
-		if ( input.is( 'left' ) ) cam.position.addScaledVector( r, - sp * dt );
-		if ( input.is( 'right' ) ) cam.position.addScaledVector( r, sp * dt );
-		if ( input.is( 'jump' ) ) cam.position.y += sp * dt;
-		if ( input.is( 'crouch' ) ) cam.position.y -= sp * dt;
-		cam.updateMatrixWorld();
-		world.update( dt );
-		renderer.render( { scene: world.scene, camera: cam } );
-		input.endFrame();
-		window.__frames = ( window.__frames || 0 ) + 1;
-		if ( maxFrames && window.__frames >= maxFrames ) { window.__done = true; return; }
-		requestAnimationFrame( tick );
-	};
-	window.__world = world;
-	window.__ready = true;
-	requestAnimationFrame( tick );
+const loaderEl = document.getElementById( 'loader' );
+const t0 = performance.now();
+function status( s, p ) {
+	loaderEl.querySelector( '.loader-status' ).textContent = s;
+	loaderEl.querySelector( '.loader-pct' ).textContent = Math.round( p * 100 ) + '%';
+	loaderEl.querySelector( '.loader-fill' ).style.transform = `scaleX(${Math.max( 0.02, p )})`;
+	const sec = Math.floor( ( performance.now() - t0 ) / 1000 );
+	loaderEl.querySelector( '.loader-time' ).textContent = `${Math.floor( sec / 60 )}:${String( sec % 60 ).padStart( 2, '0' )}`;
 }
 
-boot().catch( e => {
+// title-screen camera: slow drifts over famous views
+const VISTAS = [
+	{ at: [ - 3880, - 9660 ], h: 26, yaw: - 118, pitch: - 4, hour: 17.6 }, // Waikīkī towards Diamond Head
+	{ at: [ - 12330, - 16420 ], h: 40, yaw: 160, pitch: - 6, hour: 7.2 }, // North Shore
+	{ at: [ 26350, 3500 ], h: 90, yaw: 60, pitch: - 5, hour: 18.2 }, // Big Island
+];
+
+class App {
+	constructor() {
+		this.settings = new Settings();
+		this.canvas = document.getElementById( 'view' );
+		this.renderer = new Renderer( this.canvas, this.settings );
+		this.input = new Input( this.canvas, this.settings );
+		this.audio = new Audio( this.settings );
+		this.saves = new SaveSystem();
+		this.world = new World( this.renderer, this.settings );
+		this.game = null;
+		this.ui = null;
+		this.q = new URLSearchParams( location.search );
+		this.last = performance.now();
+		this.fps = 60;
+		this.frame = 0;
+		this.titleT = 0;
+		this.vista = VISTAS[ Math.floor( Math.random() * VISTAS.length ) ];
+		const unlockAudio = () => { this.audio.init(); };
+		window.addEventListener( 'pointerdown', unlockAudio );
+		window.addEventListener( 'keydown', unlockAudio );
+	}
+
+	async boot() {
+		await this.saves.open();
+		await this.world.load( status );
+		this.onResize();
+		addEventListener( 'resize', () => this.onResize() );
+		this.settings.on( 'renderScale', () => this.onResize() );
+		this.settings.on( 'antialias', () => this.onResize() );
+		this.settings.on( 'guiScale', v => document.documentElement.style.setProperty( '--gui', v ) );
+		document.documentElement.style.setProperty( '--gui', this.settings.get( 'guiScale' ) );
+		this.ui = new UI( this );
+		const quick = this.q.get( 'quick' );
+		if ( quick ) {
+			this.placeTitleCamera();
+			await this.world.warmup( status, 0.55, 0.7 );
+			const save = SaveSystem.newWorld( { name: 'Test', mode: this.q.get( 'mode' ) || 'creative', seed: 1234, dayMinutes: + ( this.q.get( 'day' ) || 48 ), startHour: + ( this.q.get( 'hour' ) || 10 ) } );
+			await this.startGame( save, { at: this.q.get( 'at' ), yaw: this.q.get( 'yaw' ) } );
+		} else {
+			this.placeTitleCamera();
+			await this.world.warmup( status, 0.55, 0.97 );
+			loaderEl.classList.add( 'tw-hidden' );
+			this.ui.showTitle();
+		}
+		window.__app = this;
+		window.__world = this.world;
+		window.__ready = true;
+		requestAnimationFrame( () => this.loop() );
+	}
+
+	placeTitleCamera() {
+		const v = this.vista, cam = this.world.camera;
+		const y = Math.max( this.world.hf.heightAt( v.at[ 0 ], v.at[ 1 ] ), 0 ) + v.h;
+		cam.position.set( v.at[ 0 ], y, v.at[ 1 ] );
+		cam.rotation.set( v.pitch * Math.PI / 180, v.yaw * Math.PI / 180, 0, 'YXZ' );
+		cam.updateMatrixWorld();
+		this.world.sky.setTime( v.hour, 120 );
+	}
+
+	onResize() {
+		const w = innerWidth, h = innerHeight;
+		this.renderer.resize( w, h );
+		const cam = this.world.camera;
+		cam.aspect = w / h; cam.updateProjectionMatrix();
+		this.world.sky.resize( this.renderer.width, this.renderer.height );
+	}
+
+	async loadModules() {
+		const out = [];
+		for ( const m of MODULES ) {
+			try { const mod = await m(); if ( mod.install ) out.push( mod.install ); } catch ( e ) { console.error( 'module import failed', e ); }
+		}
+		return out;
+	}
+
+	async startGame( save, opts = {} ) {
+		loaderEl.classList.remove( 'tw-hidden' );
+		status( 'Entering the world', 0.72 );
+		this.ui.hideAll();
+		if ( this.game ) await this.quit( false );
+		const game = new Game( this, this.world, save );
+		this.game = game;
+		await game.start();
+		if ( opts.at ) {
+			const [ x, z ] = opts.at.split( ',' ).map( Number );
+			game.player.pos.set( x, game.physics.ground( x, z, 1e4 ).y, z );
+			if ( opts.yaw ) game.player.yaw = + opts.yaw * Math.PI / 180;
+		}
+		// build the surroundings before the curtain lifts
+		game.player.update( 0.016 );
+		this.world.camera.position.set( game.player.pos.x, game.player.eye, game.player.pos.z );
+		await this.world.warmup( status, 0.75, 0.9 );
+		for ( let i = 0; i < 40; i ++ ) {
+			game.update( 0.001 );
+			this.world.update( 0.001 );
+			const busy = this.world.pool.busy;
+			status( 'Populating the area', 0.9 + i / 40 * 0.1 );
+			if ( busy === 0 && i > 6 ) break;
+			await new Promise( r => setTimeout( r, 60 ) );
+		}
+		loaderEl.classList.add( 'tw-hidden' );
+		this.ui.enterGame( game );
+		await game.saveNow( true );
+		return game;
+	}
+
+	async quit( save = true ) {
+		const g = this.game;
+		if ( ! g ) return;
+		if ( save && ! g.dead ) await g.saveNow( true );
+		g.events.emit( 'quit', {} );
+		for ( const sys of g.systems ) { try { sys.dispose && sys.dispose(); } catch ( e ) { console.error( e ); } }
+		for ( const e of g.entities.list ) e.dispose();
+		g.hands?.dispose?.();
+		this.game = null;
+		this.input.unlock();
+	}
+
+	thumbnail() {
+		try {
+			const c = document.createElement( 'canvas' ); c.width = 320; c.height = 180;
+			c.getContext( '2d' ).drawImage( this.canvas, 0, 0, 320, 180 );
+			return c.toDataURL( 'image/jpeg', 0.7 );
+		} catch ( e ) { return null; }
+	}
+
+	loop() {
+		const now = performance.now();
+		const dt = Math.min( 0.1, ( now - this.last ) / 1000 );
+		this.last = now;
+		this.fps += ( 1 / Math.max( dt, 1e-3 ) - this.fps ) * 0.05;
+		this.frame ++;
+		const g = this.game;
+		try {
+			if ( g ) {
+				g.inputActive = this.input.locked && ! this.ui.blocking() && ! g.dead;
+				this.input.enabled = g.inputActive;
+				g.update( dt );
+			} else {
+				// title: a slow drift across the vista
+				this.titleT += dt;
+				const cam = this.world.camera;
+				cam.rotation.y += dt * 0.004;
+				cam.updateMatrixWorld();
+				this.world.sky.setTime( this.vista.hour + this.titleT / 600, 120 );
+			}
+			this.world.update( dt );
+			this.renderer.render( {
+				scene: this.world.scene, camera: this.world.camera,
+				viewScene: g && ! g.dead && ! g.player.vehicle ? g.viewScene : null, viewCamera: g?.viewCamera,
+				grade: g ? g.grade() : { exposure: 1.0 + this.world.sky.night * 1.4, night: this.world.sky.night, time: this.world.clock },
+			} );
+			this.ui.update( dt );
+		} catch ( e ) {
+			console.error( e );
+		}
+		this.input.endFrame();
+		window.__frames = ( window.__frames || 0 ) + 1;
+		const maxFrames = + ( this.q.get( 'frames' ) || 0 );
+		if ( maxFrames && window.__frames >= maxFrames ) { window.__done = true; return; }
+		requestAnimationFrame( () => this.loop() );
+	}
+}
+
+const app = new App();
+app.boot().catch( e => {
 	console.error( e );
-	loader.classList.add( 'tw-error' );
+	loaderEl.classList.add( 'tw-error' );
 	status( 'Failed to start: ' + e.message, 1 );
 } );

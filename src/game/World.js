@@ -49,8 +49,37 @@ export class World {
 		this.scene.add( this.ocean.mesh );
 
 		this.sun = new THREE.DirectionalLight( 0xffffff, 1 );
-		this.sun.castShadow = false;
 		this.scene.add( this.sun, this.sun.target );
+		this._setupShadows();
+		this.settings.on( 'shadows', () => this._setupShadows() );
+	}
+
+	// one stabilised shadow frustum that follows the camera (snapped to whole texels so it doesn't shimmer)
+	_setupShadows() {
+		const q = this.settings.get( 'shadows' );
+		const cfg = { off: null, medium: [ 1024, 55 ], high: [ 2048, 85 ], ultra: [ 4096, 120 ] }[ q ];
+		const L = this.sun;
+		L.castShadow = !! cfg;
+		if ( ! cfg ) return;
+		const [ size, half ] = cfg;
+		if ( L.shadow.map ) { L.shadow.map.dispose(); L.shadow.map = null; }
+		L.shadow.mapSize.set( size, size );
+		const c = L.shadow.camera;
+		c.left = - half; c.right = half; c.top = half; c.bottom = - half; c.near = 1; c.far = 1400;
+		c.updateProjectionMatrix();
+		L.shadow.bias = - 0.0004;
+		L.shadow.normalBias = 0.04;
+		L.shadow.radius = 2;
+		this.shadowHalf = half;
+		this.shadowSize = size;
+	}
+
+	isIndoors( p ) { return this.indoorTest ? this.indoorTest( p ) : false; }
+	isBeach( x, z ) {
+		const h = this.hf.baseHeight( x, z );
+		if ( h > 3.5 || ( this.hf.flagsNear( x, z ) & ( 1 | 4 | 16 | 32 ) ) ) return false;
+		for ( const r of [ 8, 18, 30 ] ) for ( let k = 0; k < 8; k ++ ) { const a = k / 8 * Math.PI * 2; if ( this.hf.baseHeight( x + Math.cos( a ) * r, z + Math.sin( a ) * r ) < 0 ) return true; }
+		return false;
 	}
 
 	// block until the terrain around the camera is in
@@ -77,8 +106,21 @@ export class World {
 		const s = this.sky.sunDir;
 		const useMoon = s.y < - 0.05;
 		const L = useMoon ? this.sky.moonDir : s;
-		this.sun.position.copy( this.camera.position ).addScaledVector( L, 1000 );
-		this.sun.target.position.copy( this.camera.position );
+		// centre the shadow frustum ahead of the camera and snap it to the shadow texel grid
+		const fwd = new THREE.Vector3( 0, 0, - 1 ).applyQuaternion( this.camera.quaternion );
+		fwd.y = 0; fwd.normalize();
+		const half = this.shadowHalf || 80;
+		const c = this.camera.position.clone().addScaledVector( fwd, half * 0.45 );
+		const texel = ( half * 2 ) / ( this.shadowSize || 2048 );
+		const lz = L.clone().normalize();
+		const lx = new THREE.Vector3( 0, 1, 0 ).cross( lz ).normalize();
+		if ( lx.lengthSq() < 1e-6 ) lx.set( 1, 0, 0 );
+		const ly = lz.clone().cross( lx );
+		const u = Math.round( c.dot( lx ) / texel ) * texel, v = Math.round( c.dot( ly ) / texel ) * texel, w = c.dot( lz );
+		c.copy( lx ).multiplyScalar( u ).addScaledVector( ly, v ).addScaledVector( lz, w );
+		this.sun.position.copy( c ).addScaledVector( lz, 700 );
+		this.sun.target.position.copy( c );
+		this.sun.target.updateMatrixWorld();
 		this.sun.color.copy( useMoon ? this.sky.moonColor : this.sky.sunColor );
 		this.sun.intensity = 1;
 		for ( const sys of this.systems ) sys.update && sys.update( dt );
