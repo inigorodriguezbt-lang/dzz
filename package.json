@@ -7,8 +7,11 @@
     "dev": "vite --host 127.0.0.1 --port 5190",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1 --port 5191",
-    "bake": "node tools/bake/bake.mjs",
-    "test": "node test/logic.mjs"
+    "bake": "node --max-old-space-size=8192 tools/bake/bake.mjs .tile-cache public/data",
+    "test": "node test/logic.mjs",
+    "test:all": "node test/logic.mjs && (test -f test/items.mjs && node test/items.mjs || true) && (test -f test/weapons.mjs && node test/weapons.mjs || true)",
+    "fetch:textures": "python3 tools/textures/fetch.py public/textures",
+    "fetch:tiles": "node tools/bake/fetch-tiles.mjs .tile-cache"
   },
   "license": "MIT",
   "dependencies": {

@@ -33,6 +33,13 @@ export class Terrain {
 		this.pendingCount = 0;
 		this.index = buildIndex();
 		this.material = makeTerrainMaterial();
+		// shadow pass: fold the skirts back up to the edge so they never cast slivers of shadow
+		this.depthMaterial = new THREE.MeshDepthMaterial( { depthPacking: THREE.RGBADepthPacking } );
+		this.depthMaterial.onBeforeCompile = ( sh ) => {
+			sh.vertexShader = sh.vertexShader.replace( '#include <common>', '#include <common>\nattribute float skirt;' )
+				.replace( '#include <begin_vertex>', '#include <begin_vertex>\ntransformed.y += skirt;' );
+		};
+		this.depthMaterial.customProgramCacheKey = () => 'terrain-depth';
 		this._v = new THREE.Vector3();
 		this.drawn = [];
 	}
@@ -108,10 +115,12 @@ export class Terrain {
 		g.setAttribute( 'normal', new THREE.InterleavedBufferAttribute( ib, 3, 0, true ) );
 		g.setAttribute( 'surf', new THREE.BufferAttribute( r.surf, 4, true ) );
 		g.setAttribute( 'tmask', new THREE.BufferAttribute( r.mask, 4, true ) );
+		g.setAttribute( 'skirt', new THREE.BufferAttribute( r.skirt, 1 ) );
 		g.setIndex( this.index );
 		g.boundingBox = new THREE.Box3( new THREE.Vector3( 0, r.minY, 0 ), new THREE.Vector3( n.size, r.maxY, n.size ) );
 		g.boundingSphere = g.boundingBox.getBoundingSphere( new THREE.Sphere() );
 		const m = new THREE.Mesh( g, this.material );
+		m.customDepthMaterial = this.depthMaterial;
 		m.position.set( n.x0, 0, n.z0 );
 		m.updateMatrix();
 		m.updateMatrixWorld();

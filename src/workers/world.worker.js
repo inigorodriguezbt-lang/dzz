@@ -24,6 +24,7 @@ const handlers = {
 		const nor = new Int8Array( ( nMain + nSkirt ) * 4 );
 		const surf = new Uint8Array( ( nMain + nSkirt ) * 4 );
 		const mask = new Uint8Array( ( nMain + nSkirt ) * 4 );
+		const skirtA = new Float32Array( nMain + nSkirt );
 		// heights on a 1-vertex border so normals are consistent across nodes
 		const W = V + 2;
 		const hs = new Float32Array( W * W );
@@ -67,9 +68,10 @@ const handlers = {
 		for ( let e = 0; e < nSkirt; e ++ ) {
 			const src = edges[ e ], k = nMain + e;
 			pos[ k * 3 ] = pos[ src * 3 ]; pos[ k * 3 + 1 ] = pos[ src * 3 + 1 ] - skirt; pos[ k * 3 + 2 ] = pos[ src * 3 + 2 ];
+			skirtA[ k ] = skirt;
 			for ( let c = 0; c < 4; c ++ ) { nor[ k * 4 + c ] = nor[ src * 4 + c ]; surf[ k * 4 + c ] = surf[ src * 4 + c ]; mask[ k * 4 + c ] = mask[ src * 4 + c ]; }
 		}
-		return { result: { pos, nor, surf, mask, minY: minY - skirt, maxY }, transfer: [ pos.buffer, nor.buffer, surf.buffer, mask.buffer ] };
+		return { result: { pos, nor, surf, mask, skirt: skirtA, minY: minY - skirt, maxY }, transfer: [ pos.buffer, nor.buffer, surf.buffer, mask.buffer, skirtA.buffer ] };
 	},
 
 	scatter( msg ) {

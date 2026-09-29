@@ -56,7 +56,7 @@ export class Weather {
 		this.fog += ( w.fog - this.fog ) * k;
 		const sky = g.world.sky;
 		sky.cloudCover = this.cover;
-		sky.haze = 0.8 + this.fog * 0.25;
+		sky.haze = 0.5 + this.fog * 0.22;
 		G.uFogBoost.value = this.fog;
 		G.uWet.value += ( ( this.rain > 0.05 ? Math.min( 1, this.rain * 1.4 ) : 0 ) - G.uWet.value ) * Math.min( 1, dt * ( this.rain > 0.05 ? 0.05 : 0.01 ) );
 		g.world.ocean.seaState = this.sea;
