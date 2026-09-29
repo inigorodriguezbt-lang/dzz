@@ -44,21 +44,28 @@ export class MapView {
 		}
 	}
 
-	_tile( L, i, j ) {
+	// priority: lower runs sooner; the terrain streams at ~0..3, so a tile someone is looking at
+	// shouldn't wait for the whole landscape to finish loading
+	_tile( L, i, j, priority = 50 + L * 10 ) {
 		const key = L + ':' + i + ':' + j;
 		let t = this.tiles.get( key );
-		if ( t ) { t.used = this.frame; return t; }
+		if ( t ) {
+			t.used = this.frame;
+			if ( t.job && t.job.priority > priority ) t.job.priority = priority;
+			return t;
+		}
 		const mpp = LEVELS[ L ], size = mpp * TPX;
 		t = { img: null, used: this.frame, L };
 		this.tiles.set( key, t );
 		this.pending ++;
-		const job = this.world.pool.submit( { type: 'maptile', x0: this.hf.x0 + i * size, z0: this.hf.z0 + j * size, size, px: TPX }, 50 + L * 10 );
+		const job = t.job = this.world.pool.submit( { type: 'maptile', x0: this.hf.x0 + i * size, z0: this.hf.z0 + j * size, size, px: TPX }, priority );
 		job.promise.then( r => {
 			this.pending --;
 			if ( ! r ) { this.tiles.delete( key ); return; }
 			const c = document.createElement( 'canvas' ); c.width = c.height = TPX;
 			c.getContext( '2d' ).putImageData( new ImageData( r.rgba, TPX, TPX ), 0, 0 );
 			t.img = c;
+			t.job = null;
 		} ).catch( () => { this.pending --; this.tiles.delete( key ); } );
 		return t;
 	}
@@ -100,7 +107,7 @@ export class MapView {
 					const [ , hi ] = this.hf.rangeOver( this.hf.x0 + i * size, this.hf.z0 + j * size, size );
 					if ( hi < - 60 ) continue;
 				}
-				const t = this._tile( L, i, j );
+				const t = this._tile( L, i, j, opts.priority !== undefined ? opts.priority + L * 0.1 : undefined );
 				if ( t.img ) ctx.drawImage( t.img, this.hf.x0 + i * size, this.hf.z0 + j * size, size + 0.5 / ppm, size + 0.5 / ppm );
 			}
 		}

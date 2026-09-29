@@ -107,7 +107,7 @@ export class MapUI {
 		const ctx = this.canvas.getContext( '2d' );
 		ctx.setTransform( dpr, 0, 0, dpr, 0, 0 );
 		const W = innerWidth, H = innerHeight;
-		const { toScreen } = this.ui.mapView.draw( ctx, { cx: this.view.cx, cz: this.view.cz, ppm: this.view.ppm, rot: 0, w: W, h: H } );
+		const { toScreen } = this.ui.mapView.draw( ctx, { cx: this.view.cx, cz: this.view.cz, ppm: this.view.ppm, rot: 0, w: W, h: H }, { priority: 0.1 } );
 		// grid (1 km) when zoomed in
 		if ( this.view.ppm > 0.08 ) {
 			ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.lineWidth = 1;

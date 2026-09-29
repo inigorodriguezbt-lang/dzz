@@ -307,7 +307,7 @@ export class HUD {
 		const zoom = inVeh && Math.abs( inVeh.speed ) > 12 ? 0.55 : 1.1;
 		const pos = p.vehicle && g.vehicles?.driving ? g.vehicles.driving.pos : p.pos;
 		const yaw = inVeh?.heading ?? p.yaw;
-		const { toScreen } = map.draw( ctx, { cx: pos.x, cz: pos.z, ppm: zoom, rot: - yaw, w: W, h: W }, { labels: false } );
+		const { toScreen } = map.draw( ctx, { cx: pos.x, cz: pos.z, ppm: zoom, rot: - yaw, w: W, h: W }, { labels: false, priority: 0.6 } );
 		// markers
 		for ( const m of g.markers?.list?.() || [] ) {
 			const [ sx, sy ] = toScreen( m.x, m.z );
