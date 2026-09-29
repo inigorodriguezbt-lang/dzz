@@ -45,13 +45,14 @@ export class World {
 		this.scene.add( this.sky.ambientLight );
 		this.terrain = new Terrain( this.hf, this.pool, this.settings );
 		this.scene.add( this.terrain.group );
-		this.ocean = new Ocean( this.renderer, this.hf );
+		this.ocean = new Ocean( this.renderer, this.hf, this.settings.get( 'water' ) );
 		this.scene.add( this.ocean.mesh );
 
 		this.sun = new THREE.DirectionalLight( 0xffffff, 1 );
 		this.scene.add( this.sun, this.sun.target );
 		this._setupShadows();
 		this.settings.on( 'shadows', () => this._setupShadows() );
+		this.settings.on( 'water', v => this.ocean.setQuality( v ) );
 	}
 
 	// one stabilised shadow frustum that follows the camera (snapped to whole texels so it doesn't shimmer)

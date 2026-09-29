@@ -6,15 +6,19 @@ import { G, COMMON_GLSL } from '../render/Materials.js';
 import { LAYER_POST } from '../render/Renderer.js';
 
 const TAU = Math.PI * 2;
+// polar grid: segments around, first ring spacing, growth per ring
+const GRID = { low: { seg: 128, dr: 0.8, grow: 1.06 }, medium: { seg: 176, dr: 0.6, grow: 1.05 }, high: { seg: 224, dr: 0.5, grow: 1.045 } };
+const WQ = { low: 0, medium: 1, high: 2 };
 
 export class Ocean {
-	constructor( renderer, hf ) {
+	constructor( renderer, hf, quality = 'high' ) {
 		this.r = renderer;
 		this.hf = hf;
 		this.seaState = 0.5; // 0 calm .. 1 storm
 		this.time = 0;
 		this.waves = makeWaves();
-		this.mesh = new THREE.Mesh( buildPolarGrid(), this._material() );
+		this.quality = quality;
+		this.mesh = new THREE.Mesh( buildPolarGrid( GRID[ quality ] ), this._material() );
 		this.mesh.frustumCulled = false;
 		this.mesh.layers.set( LAYER_POST );
 		this.mesh.renderOrder = 10;
@@ -182,6 +186,16 @@ export class Ocean {
 		return mat;
 	}
 
+	// 'low' | 'medium' | 'high': grid density, ripple layers and refraction
+	setQuality( q ) {
+		if ( ! GRID[ q ] || q === this.quality ) return;
+		this.quality = q;
+		this.mesh.geometry.dispose();
+		this.mesh.geometry = buildPolarGrid( GRID[ q ] );
+		this.mat.defines.WQ = WQ[ q ];
+		this.mat.needsUpdate = true;
+	}
+
 	update( dt, camera, sceneColor, sceneDepth, viewport ) {
 		this.time += dt;
 		const u = this.mat.uniforms;
@@ -229,11 +243,10 @@ function makeWaves() {
 	} );
 }
 
-function buildPolarGrid() {
-	const seg = 224;
+function buildPolarGrid( { seg, dr: dr0, grow } = GRID.high ) {
 	const radii = [ 0 ];
-	let r = 0.5, dr = 0.5;
-	while ( r < 60000 ) { radii.push( r ); if ( r > 12 ) dr *= 1.045; r += dr; }
+	let r = dr0, dr = dr0;
+	while ( r < 60000 ) { radii.push( r ); if ( r > 12 ) dr *= grow; r += dr; }
 	const pos = [], idx = [];
 	pos.push( 0, 0, 0 );
 	for ( let i = 1; i < radii.length; i ++ ) for ( let s = 0; s < seg; s ++ ) {

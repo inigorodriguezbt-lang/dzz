@@ -259,11 +259,12 @@ const TERRAIN_ALBEDO = /* glsl */`
 	// the scanned textures are temperate and dark: normalise them to their own luminance and repaint
 	// them with a tropical palette (Tidewater's meadow tones), keeping the texture's detail
 	float lg = dot( grassT, vec3( 0.3, 0.55, 0.15 ) ), ld = dot( dryT, vec3( 0.3, 0.55, 0.15 ) ), lf = dot( forestT, vec3( 0.3, 0.55, 0.15 ) );
-	vec3 lush = vec3( 0.05, 0.11, 0.02 ), green = vec3( 0.1, 0.175, 0.032 ), olive = vec3( 0.15, 0.17, 0.05 ), straw = vec3( 0.28, 0.245, 0.12 );
+	vec3 lush = vec3( 0.05, 0.11, 0.02 ), green = vec3( 0.1, 0.175, 0.032 ), olive = vec3( 0.15, 0.17, 0.05 ), straw = vec3( 0.27, 0.235, 0.14 );
 	// the baked rainfall runs dry for the lowlands; Hawaiʻi reads greener than that except on the true leeward coasts
 	float wet = clamp( moist * 1.15 + 0.14 + ( n1 - 0.5 ) * 0.3 + ( macro - 0.5 ) * 0.28, 0.0, 1.0 );
 	vec3 grass = mix( green, lush, smoothstep( 0.55, 0.85, wet ) ) * ( grassT / max( lg, 0.02 ) ) * mix( 0.85, 1.15, n2 );
-	vec3 dry = mix( straw, olive, smoothstep( 0.18, 0.4, wet + ( n3 - 0.5 ) * 0.2 ) ) * ( dryT / max( ld, 0.02 ) );
+	// the dry scan is already yellow: keep only a little of its hue so the palette isn't coloured twice
+	vec3 dry = mix( straw, olive, smoothstep( 0.18, 0.4, wet + ( n3 - 0.5 ) * 0.2 ) ) * mix( vec3( ld ), dryT, 0.35 ) / max( ld, 0.02 );
 	vec3 forest = lush * 0.8 * ( forestT / max( lf, 0.02 ) );
 	vec3 c = mix( dry, grass, smoothstep( 0.22, 0.5, wet ) );
 	c = mix( c, forest, smoothstep( 0.66, 0.9, wet ) * ( 1.0 - pasture ) * 0.7 );
