@@ -273,6 +273,18 @@ export class Survival {
 			this.health = Math.min( 100, this.health + dt * 0.06 );
 		}
 
+		// the body's own sounds: a heartbeat when close to death, heavy breathing when spent
+		this.beatT = ( this.beatT || 0 ) - dt;
+		if ( this.beatT <= 0 && ( this.health < 30 || this.blood < 2900 ) ) {
+			this.beatT = this.health < 15 ? 0.62 : 0.9;
+			g.audio?.play( 'heartbeat', { bus: 'ui', vol: 0.55, detune: 0 } );
+		}
+		this.breathT = ( this.breathT || 0 ) - dt;
+		if ( this.breathT <= 0 && this.stamina < 18 && ! p.underwater ) {
+			this.breathT = 1.7;
+			g.audio?.play( 'breath', { bus: 'ui', vol: 0.35 } );
+		}
+
 		if ( this.health <= 0 ) {
 			this.health = 0;
 			const cause = this.blood < 2200 ? 'blood loss' : this.hunger <= 0 ? 'starvation' : this.thirst <= 0 ? 'dehydration' : this.temp < 35.2 ? 'hypothermia'

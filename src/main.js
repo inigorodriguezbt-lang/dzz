@@ -8,6 +8,7 @@ import { Game } from './game/Game.js';
 import { SaveSystem } from './core/SaveSystem.js';
 import { Audio } from './audio/Audio.js';
 import { UI } from './ui/UI.js';
+import { Music } from './audio/Music.js';
 import { MODULES } from './game/modules.js';
 
 const loaderEl = document.getElementById( 'loader' );
@@ -34,6 +35,7 @@ class App {
 		this.renderer = new Renderer( this.canvas, this.settings );
 		this.input = new Input( this.canvas, this.settings );
 		this.audio = new Audio( this.settings );
+		this.music = new Music( this.audio );
 		this.saves = new SaveSystem();
 		this.world = new World( this.renderer, this.settings );
 		this.game = null;
@@ -180,6 +182,16 @@ class App {
 				grade: g ? g.grade() : { exposure: 1.0 + this.world.sky.night * 1.4, night: this.world.sky.night, time: this.world.clock },
 			} );
 			this.ui.update( dt );
+			// music: the title screen, and quietly around dawn and dusk in the world
+			let level = 0;
+			if ( ! g ) level = 1;
+			else if ( ! g.dead && ! this.world.isIndoors?.( g.player.pos ) ) {
+				const h = g.hour;
+				level = 0.55 * Math.max( Math.exp( - Math.pow( ( h - 6.6 ) / 0.7, 2 ) ), Math.exp( - Math.pow( ( h - 18.4 ) / 0.7, 2 ) ) );
+				if ( g.entities.near( g.player.pos, 40, 'zombie' ).length ) level = 0;
+			}
+			this.music.setLevel( level );
+			this.music.update();
 		} catch ( e ) {
 			console.error( e );
 		}

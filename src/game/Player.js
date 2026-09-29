@@ -159,7 +159,9 @@ export class Player {
 		const wasSwim = this.swimming;
 		this.swimming = depth > 1.35 && this.pos.y < water - 0.9;
 		if ( this.swimming && ! wasSwim ) { this.setStance( 'stand' ); this.stance = 'stand'; g.audio?.play( 'splash', { pos: this.pos, vol: 0.7 } ); }
+		const wasUnder = this.underwater;
 		this.underwater = this.eye < water - 0.05;
+		if ( this.underwater !== wasUnder ) g.audio?.play( this.underwater ? 'submerge' : 'emerge', { vol: 0.6 } );
 
 		if ( this.swimming ) {
 			const swim = ( input.is( 'sprint' ) && S?.stamina > 5 ? 2.6 : 1.6 ) * mods.speed;
