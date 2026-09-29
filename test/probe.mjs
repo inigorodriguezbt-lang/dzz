@@ -1,8 +1,9 @@
 // node test/probe.mjs <url> "<js expression evaluated after ready>" [out.png]
-import { chromium } from 'playwright';
+import { launch, lean } from './lib/browser.mjs';
 const [ url, expr, out ] = process.argv.slice( 2 );
-const browser = await chromium.launch( { args: [ '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist' ] } );
+const browser = await launch();
 const page = await browser.newPage( { viewport: { width: 960, height: 540 } } );
+await lean( page );
 const logs = [];
 page.on( 'console', m => { if ( ! m.text().includes( 'vite' ) && ! m.text().includes( 'ERR_CERT' ) ) logs.push( `[${m.type()}] ${m.text()}` ); } );
 page.on( 'pageerror', e => logs.push( `[pageerror] ${e.message}` ) );

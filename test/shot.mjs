@@ -1,8 +1,9 @@
 // Headless screenshot of the running game: node test/shot.mjs <url> <out.png> [waitMs]
-import { chromium } from 'playwright';
+import { launch, lean } from './lib/browser.mjs';
 const [ url, out, wait = '4000' ] = process.argv.slice( 2 );
-const browser = await chromium.launch( { args: [ '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist' ] } );
+const browser = await launch();
 const page = await browser.newPage( { viewport: { width: 1280, height: 720 } } );
+await lean( page );
 const logs = [];
 page.on( 'console', m => logs.push( `[${m.type()}] ${m.text()}` ) );
 page.on( 'pageerror', e => logs.push( `[pageerror] ${e.message}` ) );

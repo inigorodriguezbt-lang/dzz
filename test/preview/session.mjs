@@ -1,13 +1,14 @@
 // One full-game boot, then a script of steps: node test/preview/session.mjs <url> <outdir> <steps.json>
 // steps: [ { js: "expression (may be async)", wait: ms, shot: "name" } ]. The page gets helpers:
 //   __press( code ), __down( code ), __up( code ) — fake input (the canvas has no pointer lock headless)
-import { chromium } from 'playwright';
+import { launch, lean } from '../lib/browser.mjs';
 import fs from 'node:fs';
 const [ url, outdir, stepsFile ] = process.argv.slice( 2 );
 const steps = JSON.parse( fs.readFileSync( stepsFile, 'utf8' ) );
 fs.mkdirSync( outdir, { recursive: true } );
-const browser = await chromium.launch( { args: [ '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist' ] } );
+const browser = await launch();
 const page = await browser.newPage( { viewport: { width: 960, height: 540 } } );
+await lean( page );
 const logs = [];
 page.on( 'console', m => { const t = m.text(); if ( ! t.includes( 'vite' ) && ! t.includes( 'ERR_CERT' ) ) logs.push( `[${m.type()}] ${t}` ); } );
 page.on( 'pageerror', e => logs.push( `[pageerror] ${e.message}` ) );
