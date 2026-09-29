@@ -476,6 +476,7 @@ html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden;
 .map-legend { position: absolute; bottom: var(--tw-4); left: var(--tw-4); padding: var(--tw-3); border-radius: var(--tw-r-md); font-size: var(--tw-fs-sm); display: flex; flex-direction: column; gap: 4px; }
 .map-legend .sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: middle; }
 .map-coords { position: absolute; bottom: var(--tw-4); right: var(--tw-4); padding: 6px 10px; border-radius: var(--tw-r-sm); font-family: var(--tw-mono); font-size: var(--tw-fs-sm); }
+.map-tools { display: flex; gap: 6px; align-self: flex-start; padding: 6px; border-radius: var(--tw-r-md); }
 .map-title { padding: var(--tw-3) var(--tw-4); border-radius: var(--tw-r-md); }
 .map-title h2 { margin: 0; font-size: var(--tw-fs-xl); }
 .map-title .sub { font-size: var(--tw-fs-sm); color: var(--tw-ink-3); }

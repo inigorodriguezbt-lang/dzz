@@ -22,7 +22,7 @@ export class MapUI {
 			<div><span class="sw" style="background:#ffc861"></span>Freeway</div><div><span class="sw" style="background:#fbf6e8"></span>Highway / street</div>
 			<div><span class="sw" style="background:#96704a"></span>Dirt road</div><div><span class="sw" style="background:#5c544e"></span>Building</div>
 			<div><span class="sw" style="background:#5fe3d4"></span>Marker</div><div><span class="sw" style="background:#ff7a85"></span>Your body</div>` } );
-		const zoomBtns = h( 'div', { style: { display: 'flex', gap: '6px' } },
+		const zoomBtns = h( 'div.map-tools.tw-glass', {},
 			h( 'button.btn.small', { text: '+', onclick: () => this._zoom( 1.5 ) } ), h( 'button.btn.small', { text: '−', onclick: () => this._zoom( 1 / 1.5 ) } ),
 			h( 'button.btn.small', { text: 'Me', onclick: () => { this.view.cx = g.player.pos.x; this.view.cz = g.player.pos.z; } } ),
 			h( 'button.btn.small', { text: 'Islands', onclick: () => { this.view.cx = 0; this.view.cz = 0; this.view.ppm = Math.min( innerWidth / ( this.app.world.meta.halfX * 2.1 ), innerHeight / ( this.app.world.meta.halfZ * 2.1 ) ); } } ),

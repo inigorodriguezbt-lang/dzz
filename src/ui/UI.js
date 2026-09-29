@@ -166,8 +166,10 @@ export class UI {
 		const meta = this.app.world.meta, hf = this.app.world.hf;
 		const isl = meta.islands.find( i => i.id === hf.islandAt( p.x, p.z ) );
 		let near = null, nd = Infinity;
-		for ( const c of meta.cities ) { const d = Math.hypot( c.x - p.x, c.z - p.z ); if ( d < nd ) { nd = d; near = c; } }
-		const inTown = near && nd < near.radius * 1.35;
+		// relative to each town's size, so a big metro wins over a small neighbour whose centre is closer
+		let nr = Infinity;
+		for ( const c of meta.cities ) { const d = Math.hypot( c.x - p.x, c.z - p.z ), r = d / c.radius; if ( r < nr ) { nr = r; nd = d; near = c; } }
+		const inTown = near && nr < 1.35;
 		if ( ! isl ) return hf.baseHeight( p.x, p.z ) < 0 ? 'Pacific Ocean' : ( inTown ? near.name : 'Coast' );
 		if ( inTown ) return long ? `${near.name}, ${isl.name}` : near.name;
 		return long && near ? `${isl.name} — near ${near.name}` : isl.name;
