@@ -33,6 +33,7 @@ export class Terrain {
 		this.pendingCount = 0;
 		this.index = buildIndex();
 		this.material = makeTerrainMaterial();
+		TerrainMorph.material = this.material;
 		// shadow pass: fold the skirts back up to the edge so they never cast slivers of shadow
 		this.depthMaterial = new THREE.MeshDepthMaterial( { depthPacking: THREE.RGBADepthPacking } );
 		this.depthMaterial.onBeforeCompile = ( sh ) => {
@@ -50,6 +51,7 @@ export class Terrain {
 	update( camPos, frustum ) {
 		this.frame ++;
 		const K = { low: 1.6, medium: 2.0, high: 2.5, ultra: 3.2 }[ this.settings.get( 'terrainDetail' ) ] || 2.0;
+		TerrainMorph.K.value = K;
 		for ( const m of this.drawn ) m.visible = false;
 		this.drawn.length = 0;
 		this._select( this.root, camPos, K, frustum );
@@ -116,11 +118,15 @@ export class Terrain {
 		g.setAttribute( 'surf', new THREE.BufferAttribute( r.surf, 4, true ) );
 		g.setAttribute( 'tmask', new THREE.BufferAttribute( r.mask, 4, true ) );
 		g.setAttribute( 'skirt', new THREE.BufferAttribute( r.skirt, 1 ) );
+		g.setAttribute( 'parentY', new THREE.BufferAttribute( r.parentY, 1 ) );
+		
 		g.setIndex( this.index );
 		g.boundingBox = new THREE.Box3( new THREE.Vector3( 0, r.minY, 0 ), new THREE.Vector3( n.size, r.maxY, n.size ) );
 		g.boundingSphere = g.boundingBox.getBoundingSphere( new THREE.Sphere() );
 		const m = new THREE.Mesh( g, this.material );
 		m.customDepthMaterial = this.depthMaterial;
+		m.onBeforeRender = TerrainMorph.before;
+		m.userData.lodSize = n.size;
 		m.position.set( n.x0, 0, n.z0 );
 		m.updateMatrix();
 		m.updateMatrixWorld();
@@ -190,6 +196,19 @@ function buildIndex() {
 	return new THREE.BufferAttribute( new Uint32Array( idx ), 1 );
 }
 
+// CDLOD-style geomorphing: every vertex slides towards the height its parent node would give it as the
+// node approaches the distance where it merges into that parent, so LOD changes never pop.
+export const TerrainMorph = {
+	K: { value: 2.5 },
+	size: { value: 64 },
+	material: null,
+	before( renderer, scene, camera, geometry, material ) {
+		if ( material !== TerrainMorph.material ) return;
+		TerrainMorph.size.value = this.userData.lodSize;
+		material.uniformsNeedUpdate = true;
+	},
+};
+
 export function makeTerrainMaterial() {
 	const m = new THREE.MeshStandardMaterial( { roughness: 0.95, metalness: 0, color: 0xffffff } );
 	const T = {
@@ -202,9 +221,18 @@ export function makeTerrainMaterial() {
 	for ( const k in T ) uniforms[ k ] = { value: T[ k ] };
 	patchMaterial( m, 'terrain', ( shader ) => {
 		Object.assign( shader.uniforms, uniforms );
+		shader.uniforms.uLodK = TerrainMorph.K;
+		shader.uniforms.uLodSize = TerrainMorph.size;
 		shader.vertexShader = shader.vertexShader
-			.replace( '#include <common>', '#include <common>\nattribute vec4 surf; attribute vec4 tmask; varying vec4 vSurf; varying vec4 vMask;' )
-			.replace( '#include <begin_vertex>', '#include <begin_vertex>\nvSurf = surf; vMask = tmask;' );
+			.replace( '#include <common>', '#include <common>\nattribute vec4 surf; attribute vec4 tmask; attribute float parentY; uniform float uLodK; uniform float uLodSize; varying vec4 vSurf; varying vec4 vMask;' )
+			.replace( '#include <begin_vertex>', `#include <begin_vertex>
+				vSurf = surf; vMask = tmask;
+				{
+					vec3 wpm = ( modelMatrix * vec4( position, 1.0 ) ).xyz;
+					float dm = distance( wpm, cameraPosition );
+					float km = smoothstep( uLodSize * uLodK * 1.55, uLodSize * uLodK * 1.95, dm );
+					transformed.y = mix( position.y, parentY, km );
+				}` );
 		shader.fragmentShader = shader.fragmentShader
 			.replace( '#include <common>', '#include <common>\nvarying vec4 vSurf; varying vec4 vMask;\n' + Object.keys( T ).map( k => `uniform sampler2D ${k};` ).join( '\n' ) )
 			.replace( '#include <map_fragment>', TERRAIN_ALBEDO )

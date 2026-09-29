@@ -25,6 +25,8 @@ const handlers = {
 		const surf = new Uint8Array( ( nMain + nSkirt ) * 4 );
 		const mask = new Uint8Array( ( nMain + nSkirt ) * 4 );
 		const skirtA = new Float32Array( nMain + nSkirt );
+		// morph target: the height the parent node's grid (twice as coarse, same diagonals) has here
+		const parentY = new Float32Array( nMain + nSkirt );
 		// heights on a 1-vertex border so normals are consistent across nodes
 		const W = V + 2;
 		const hs = new Float32Array( W * W );
@@ -59,6 +61,21 @@ const handlers = {
 				mask[ k * 4 + 3 ] = y < 1.6 ? 220 : y < 3 ? 90 : 0;
 			}
 		}
+		const Y = ( i, j ) => pos[ ( j * V + i ) * 3 + 1 ];
+		for ( let j = 0; j < V; j ++ ) for ( let i = 0; i < V; i ++ ) {
+			const k = j * V + i;
+			const oi = i & 1, oj = j & 1;
+			let py;
+			if ( ! oi && ! oj ) py = Y( i, j );
+			else if ( oi && ! oj ) py = ( Y( i - 1, j ) + Y( i + 1, j ) ) * 0.5;
+			else if ( ! oi && oj ) py = ( Y( i, j - 1 ) + Y( i, j + 1 ) ) * 0.5;
+			else {
+				// the centre of a parent cell lies on that cell's diagonal (see buildIndex: parity of the cell)
+				const pi = ( i - 1 ) >> 1, pj = ( j - 1 ) >> 1;
+				py = ( ( pi + pj ) & 1 ) ? ( Y( i + 1, j - 1 ) + Y( i - 1, j + 1 ) ) * 0.5 : ( Y( i - 1, j - 1 ) + Y( i + 1, j + 1 ) ) * 0.5;
+			}
+			parentY[ k ] = py;
+		}
 		// skirts: copies of the edge vertices pulled down
 		const edges = [];
 		for ( let i = 0; i < V; i ++ ) edges.push( i ); // north (j = 0)
@@ -69,9 +86,10 @@ const handlers = {
 			const src = edges[ e ], k = nMain + e;
 			pos[ k * 3 ] = pos[ src * 3 ]; pos[ k * 3 + 1 ] = pos[ src * 3 + 1 ] - skirt; pos[ k * 3 + 2 ] = pos[ src * 3 + 2 ];
 			skirtA[ k ] = skirt;
+			parentY[ k ] = parentY[ src ] - skirt;
 			for ( let c = 0; c < 4; c ++ ) { nor[ k * 4 + c ] = nor[ src * 4 + c ]; surf[ k * 4 + c ] = surf[ src * 4 + c ]; mask[ k * 4 + c ] = mask[ src * 4 + c ]; }
 		}
-		return { result: { pos, nor, surf, mask, skirt: skirtA, minY: minY - skirt, maxY }, transfer: [ pos.buffer, nor.buffer, surf.buffer, mask.buffer, skirtA.buffer ] };
+		return { result: { pos, nor, surf, mask, skirt: skirtA, parentY, minY: minY - skirt, maxY }, transfer: [ pos.buffer, nor.buffer, surf.buffer, mask.buffer, skirtA.buffer, parentY.buffer ] };
 	},
 
 	scatter( msg ) {
