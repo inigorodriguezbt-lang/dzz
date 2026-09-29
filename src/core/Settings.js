@@ -39,7 +39,7 @@ export const DEFAULTS = {
 	sensitivity: 1, invertY: false, toggleCrouch: true, toggleAim: false, toggleSprint: false, bindings: DEFAULT_BINDINGS,
 	// gameplay
 	subtitles: true, autoPickupAmmo: true, realisticMap: false, damageIndicators: true, hitMarkers: true,
-	showInteractHints: true, compass: true, units: 'metric', tutorial: true,
+	showInteractHints: true, compass: true, minimap: true, units: 'metric', tutorial: true,
 };
 
 export const QUALITY_PRESETS = {

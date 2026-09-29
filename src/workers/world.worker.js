@@ -3,6 +3,7 @@
 import { HeightField, FLAG, vnoise, hash2 } from '../world/HeightField.js';
 import { scatterCell } from '../world/scatter.js';
 import { buildStreetCell } from '../world/streetgen.js';
+import { renderMapTile } from '../ui/maptile.js';
 
 let hf = null;
 let world = null;
@@ -80,6 +81,8 @@ const handlers = {
 		const r = buildStreetCell( hf, world, msg );
 		return { result: r, transfer: r.transfer };
 	},
+
+	maptile( msg ) { const r = renderMapTile( hf, msg ); return { result: r, transfer: r.transfer }; },
 
 	heights( { pts } ) {
 		const out = new Float32Array( pts.length / 2 );

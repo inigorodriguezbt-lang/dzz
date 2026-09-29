@@ -10,6 +10,7 @@ import { PlayerInventory } from './Inventory.js';
 import { Actions } from './Actions.js';
 import { Interact } from './Interact.js';
 import { Weather } from './Weather.js';
+import { Markers } from './Markers.js';
 import { makeStack, getItem } from './items/ItemDB.js';
 
 export class Game {
@@ -36,6 +37,7 @@ export class Game {
 		this.actions = new Actions( this );
 		this.interact = new Interact( this );
 		this.weather = new Weather( this );
+		this.markers = new Markers( this );
 		this.stats = save.stats;
 		this.time = save.time; // { hours, dayMinutes }
 		this.paused = false;
@@ -43,7 +45,7 @@ export class Game {
 		this.dead = false;
 		this.autosaveT = 0;
 		this.playTime = save.playTime || 0;
-		this.systems = []; // { update(dt) } registered by the content modules
+		this.systems = [ this.markers ]; // { update(dt) } registered by the content modules
 		this.creativeSpeed = 1;
 		this.timeFrozen = false;
 		this.viewScene = new THREE.Scene();
@@ -72,6 +74,12 @@ export class Game {
 			this.spawnFresh();
 		}
 		this.weather.load( s.weather );
+		this.events.on( 'kill', ( e ) => {
+			if ( e.source !== this.player && e.source !== 'player' ) return;
+			if ( e.target?.type === 'zombie' ) { this.stats.zombies = ( this.stats.zombies || 0 ) + 1; this.stats.lifeKills = ( this.stats.lifeKills || 0 ) + 1; }
+			else if ( e.target?.type === 'animal' ) this.stats.animals = ( this.stats.animals || 0 ) + 1;
+			else if ( e.target?.type === 'npc' ) this.stats.kills = ( this.stats.kills || 0 ) + 1;
+		} );
 		for ( const sys of this.systems ) if ( sys.load ) { try { sys.load( s ); } catch ( e ) { console.error( 'load', e ); } }
 		this.events.emit( 'start', {} );
 	}
@@ -167,6 +175,7 @@ export class Game {
 			exposure: this.exposure(),
 			time: this.world.clock,
 			flash: this.flash || 0,
+			fade: this.fade || 0,
 		};
 	}
 
@@ -210,6 +219,7 @@ export class Game {
 		this.audio.play( 'death', { vol: 0.9 } );
 		// the body keeps its gear where it fell
 		this.events.emit( 'playerDeath', { cause, pos: this.player.pos.clone(), inventory: this.player.inventory } );
+		this.markers.add( { x: this.player.pos.x, z: this.player.pos.z, label: 'Your body', kind: 'death' } );
 		if ( this.save.hardcore ) { this.save.dead = true; }
 		this.app.ui?.showDeath( this.deathInfo );
 		this.saveNow();
@@ -223,6 +233,40 @@ export class Game {
 		this.player.alive = true;
 		this.survival.damageFlash = 0;
 		this.saveNow();
+	}
+
+	// sleep in a bed, tent or sleeping bag: the screen fades, hours pass, energy comes back and you
+	// wake hungrier. Interrupted when the infected come close.
+	sleep( hours = 6, quality = 1 ) {
+		if ( this.dead || this.sleeping ) return false;
+		const near = this.entities.near( this.player.pos, 25, 'zombie' ).filter( z => z.alive );
+		if ( near.length ) { this.toast( "You can't sleep with the infected nearby", 'warn' ); return false; }
+		if ( this.survival.energy > 85 ) { this.toast( "You aren't tired", 'info' ); return false; }
+		this.sleeping = true;
+		const S = this.survival;
+		const start = performance.now();
+		const dur = 2600;
+		const tick = () => {
+			const t = Math.min( 1, ( performance.now() - start ) / dur );
+			this.flash = 0;
+			this.fade = t < 0.3 ? t / 0.3 : t > 0.7 ? ( 1 - t ) / 0.3 : 1;
+			if ( t < 1 ) requestAnimationFrame( tick );
+			else {
+				this.fade = 0;
+				this.sleeping = false;
+			}
+		};
+		requestAnimationFrame( tick );
+		setTimeout( () => {
+			this.time.hours += hours;
+			S.energy = Math.min( 100, S.energy + hours * 13 * quality );
+			S.hunger = Math.max( 0, S.hunger - hours * 2.2 );
+			S.thirst = Math.max( 0, S.thirst - hours * 3 );
+			S.health = Math.min( 100, S.health + hours * 2 * quality );
+			this.audio.play( 'sleep', { bus: 'ui', vol: 0.5 } );
+			this.toast( `You slept ${hours} hours`, 'good' );
+		}, dur * 0.5 );
+		return true;
 	}
 
 	// give by id (creative menu, /give)

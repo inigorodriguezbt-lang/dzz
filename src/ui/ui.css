@@ -224,7 +224,7 @@ html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden;
 @keyframes tw-fade-in { from { opacity: 0; } to { opacity: 1; } }
 .title-col { display: flex; flex-direction: column; gap: var(--tw-3); margin: 0 0 clamp(40px, 10vh, 120px) clamp(24px, 7vw, 120px); width: min(420px, 80vw); }
 .title-col .loader-kicker { margin: 0; }
-.title-col h1 { margin: 0 0 var(--tw-5); font-size: clamp(56px, 8vw, 118px); letter-spacing: 0.26em; font-weight: 600; line-height: 0.95; color: transparent; background: linear-gradient(180deg, #ffffff 20%, #fff0dc 70%, #ffd7a8 100%); -webkit-background-clip: text; background-clip: text; filter: drop-shadow(0 2px 18px rgba(0, 0, 0, 0.45)); white-space: nowrap; }
+.title-col h1 { width: max-content; max-width: 92vw; margin: 0 0 var(--tw-5); font-size: clamp(44px, 6.4vw, 104px); letter-spacing: 0.24em; font-weight: 600; line-height: 0.95; color: transparent; background: linear-gradient(180deg, #ffffff 20%, #fff0dc 70%, #ffd7a8 100%); -webkit-background-clip: text; background-clip: text; filter: drop-shadow(0 2px 18px rgba(0, 0, 0, 0.45)); white-space: nowrap; }
 .menu-btn {
 	display: flex; align-items: center; justify-content: space-between; height: calc(46 * var(--tw-u)); padding: 0 var(--tw-4);
 	border-radius: var(--tw-r-md); font-size: var(--tw-fs-lg); font-weight: 500; letter-spacing: 0.02em; color: var(--tw-ink);
