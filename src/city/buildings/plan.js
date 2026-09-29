@@ -171,7 +171,7 @@ function windowsFor( P, room, len, st, side ) {
 		case 'hallbig': case 'bay': return len > 6 ? w( 6, 2.4, 1.0, Math.max( 2.2, ch - 2.0 ), 6 ) : null;
 		case 'garage': return len > 3 ? w( 3.5, 1.0, 0.7, 1.7, 6 ) : null;
 		case 'sales': case 'dining': case 'bar': case 'waiting': case 'lobby': case 'teller':
-			if ( side === 0 && st.i === 0 && ( S.arch === 'shop' || S.arch === 'food' || S.arch === 'bigbox' || S.arch === 'gas' || k === 'lobby' || k === 'waiting' || k === 'teller' ) ) {
+			if ( ( side === 0 || S.arch === 'tower' ) && st.i === 0 && ( S.arch === 'shop' || S.arch === 'food' || S.arch === 'bigbox' || S.arch === 'gas' || S.arch === 'tower' || k === 'lobby' || k === 'waiting' || k === 'teller' ) ) {
 				return w( S.arch === 'bigbox' ? 3.2 : 2.6, 3.0, Math.min( 2.7, ch - 1.0 ), 0.45, 4 );
 			}
 			if ( S.arch === 'bigbox' || k === 'sales' ) return null;
@@ -277,11 +277,12 @@ function corridorFloors( P, o ) {
 				if ( b.k === 'stair' ) {
 					const sr = mk( st, 'stair', b.a0, bb0, b.a1, bb0 + sl );
 					if ( sr ) link( st, corr, sr, st.i === 0 && o.stairDoor === false ? 'open' : 'door', { fire: true } );
-					if ( bb1 - ( bb0 + sl ) > 1.2 ) mk( st, 'utility', b.a0, bb0 + sl, b.a1, bb1 );
+					if ( bb1 - ( bb0 + sl ) > 0.3 ) mk( st, 'utility', b.a0, bb0 + sl, b.a1, bb1 );
 				} else {
-					const er = mk( st, 'elevator', b.a0, bb0, b.a1, bb0 + 2.6 );
+					const ed = bb1 - ( bb0 + 2.6 ) > 1.2 ? 2.6 : bb1 - bb0;
+					const er = mk( st, 'elevator', b.a0, bb0, b.a1, bb0 + ed );
 					if ( er ) link( st, corr, er, 'elevator' );
-					if ( bb1 - ( bb0 + 2.6 ) > 1.2 ) mk( st, 'utility', b.a0, bb0 + 2.6, b.a1, bb1 );
+					if ( ed < bb1 - bb0 ) mk( st, 'utility', b.a0, bb0 + 2.6, b.a1, bb1 );
 				}
 			}
 			for ( const [ f0, f1 ] of free ) {
@@ -342,10 +343,12 @@ const LAYOUT = {
 				const b1 = W >= 8.5 ? 3 : 0;
 				const living = room( st0, 'living', x0, zc0, x1 - b1, zc0 + fdep );
 				const bed1 = b1 ? room( st0, 'bedroom', x1 - b1, zc0, x1, zc0 + fdep ) : null;
-				const bathW = 2.0;
-				const kitchen = room( st0, 'kitchen', x0, zc0 + fdep, Math.max( x0 + 2.4, x1 - bathW - ( b1 ? 0 : 2.6 ) ), z1 );
-				const bath = room( st0, 'bath', kitchen.x1, zc0 + fdep, Math.min( x1, kitchen.x1 + bathW ), z1 );
-				const bed2 = bath && x1 - bath.x1 >= 2.4 ? room( st0, 'bedroom', bath.x1, zc0 + fdep, x1, z1 ) : null;
+				// kitchen | bath | (bedroom): whatever is left over widens the kitchen
+				const hasBed2 = W - 2.4 - 2.0 >= 2.6 && ! b1;
+				const kx1 = hasBed2 ? x0 + Math.max( 2.4, W - 2.0 - 2.8 ) : x1 - 2.0;
+				const kitchen = room( st0, 'kitchen', x0, zc0 + fdep, kx1, z1 );
+				const bath = room( st0, 'bath', kx1, zc0 + fdep, hasBed2 ? kx1 + 2.0 : x1, z1 );
+				const bed2 = hasBed2 ? room( st0, 'bedroom', kx1 + 2.0, zc0 + fdep, x1, z1 ) : null;
 				link( st0, living, kitchen, 'open' );
 				link( st0, living, bed1 );
 				extDoor( st0, living, 0, { at: 0.5, kind: 'front' } );
@@ -464,7 +467,11 @@ const LAYOUT = {
 			cw: office ? 2.4 : 2.0, module: office ? 7.5 : sub === 'hotel' ? 4.3 : 7.4, elevator: true, roof: true,
 			stairs: stairs || [ ( A0 + A1 ) / 2 ], stairDoor: true,
 			kinds: ( st, side, i, n ) => {
-				if ( st.i === 0 ) return i === 0 && ! alongZ ? 'lobby' : office ? pick( R, [ 'office', 'openoffice', 'storage', 'meeting' ] ) : pick( R, sub === 'hotel' ? [ 'dining', 'bar', 'sales', 'office', 'storage', 'restroom' ] : [ 'office', 'storage', 'sales', 'laundry' ] );
+				if ( st.i === 0 ) {
+					// street level: the listed shop fronts the street, the rest is back of house
+					if ( S.shop && side === ( alongZ ? - 1 : - 1 ) ) return 'sales';
+					return office ? pick( R, [ 'office', 'openoffice', 'storage', 'meeting' ] ) : pick( R, sub === 'hotel' ? [ 'dining', 'bar', 'sales', 'office', 'storage', 'restroom' ] : [ 'office', 'storage', 'sales', 'laundry' ] );
+				}
 				if ( office ) return ( i + st.i ) % 5 === 2 ? 'restroom' : ( i + side ) % 3 === 0 ? 'office' : ( i % 4 === 3 ? 'meeting' : 'openoffice' );
 				return sub === 'hotel' ? 'hotelroom' : 'apt';
 			},
@@ -473,7 +480,10 @@ const LAYOUT = {
 				const inner = side < 0 ? bb1 : bb0; // corridor side
 				const outer = side < 0 ? bb0 : bb1;
 				const dir = side < 0 ? - 1 : 1;
-				const ld = loggia && st.i > 0 && ( k === 'hotelroom' || k === 'apt' ) ? 1.6 : 0;
+				let ld = loggia && st.i > 0 && ( k === 'hotelroom' || k === 'apt' ) ? 1.6 : 0;
+				const depth = Math.abs( outer - inner );
+				if ( depth - ld < ( k === 'apt' ? 6.2 : 5.0 ) ) ld = 0;
+				if ( depth < ( k === 'apt' ? 6.2 : 5.0 ) ) k = k === 'apt' ? 'living' : 'bedroom';
 				const lg = ld ? mk( st, 'loggia', a0, Math.min( outer, outer - dir * ld ), a1, Math.max( outer, outer - dir * ld ) ) : null;
 				const o2 = outer - dir * ld;
 				const B = ( p, q ) => [ Math.min( p, q ), Math.max( p, q ) ];
@@ -530,6 +540,13 @@ const LAYOUT = {
 		// fire exit at the far end
 		const corr0 = st0.rooms.find( rm => rm.k === 'corridor' || rm.k === 'lobby' );
 		if ( corr0 && res.alongZ ) extDoor( st0, corr0, 2, { kind: 'metal' } );
+		// street-level shops get their own doors
+		for ( const rm of st0.rooms ) {
+			if ( rm.k !== 'sales' ) continue;
+			rm.shop = S.shop || pick( R, [ 'convenience', 'clothing', 'pharmacy', 'surf', 'sports' ] );
+			const side = rm.z0 <= P.rect.z0 + 0.05 ? 0 : rm.x0 <= P.rect.x0 + 0.05 ? 3 : rm.x1 >= P.rect.x1 - 0.05 ? 1 : rm.z1 >= P.rect.z1 - 0.05 ? 2 : - 1;
+			if ( side >= 0 ) extDoor( st0, rm, side, { kind: 'glass2', w: 1.6 } );
+		}
 	},
 
 	office( P ) {

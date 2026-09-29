@@ -253,7 +253,7 @@ export function makeBodyMaterial( opts = {} ) {
 			.replace( '#include <common>', '#include <common>\n' + BODY_VERT_PARS )
 			.replace( '#include <begin_vertex>', '#include <begin_vertex>\n vMat = aMat; vObj = position; vObjN = normal;' );
 		shader.fragmentShader = shader.fragmentShader
-			.replace( '#include <common>', '#include <common>\n' + BODY_FRAG_PARS )
+			.replace( '#include <map_pars_fragment>', BODY_FRAG_PARS + '\n#include <map_pars_fragment>' )
 			.replace( '#include <color_fragment>', /* glsl */`#include <color_fragment>
 				{
 					vehLamp = diffuseColor.rgb;

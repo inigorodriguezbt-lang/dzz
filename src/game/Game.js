@@ -11,6 +11,7 @@ import { Actions } from './Actions.js';
 import { Interact } from './Interact.js';
 import { Weather } from './Weather.js';
 import { Markers } from './Markers.js';
+import { Water } from './Water.js';
 import { makeStack, getItem } from './items/ItemDB.js';
 
 export class Game {
@@ -38,6 +39,7 @@ export class Game {
 		this.interact = new Interact( this );
 		this.weather = new Weather( this );
 		this.markers = new Markers( this );
+		this.water = new Water( this );
 		this.stats = save.stats;
 		this.time = save.time; // { hours, dayMinutes }
 		this.paused = false;

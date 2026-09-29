@@ -1,0 +1,55 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Vehicle preview</title>
+<style>html,body{margin:0;background:#9ab;overflow:hidden}canvas{display:block}</style></head>
+<body><canvas id="c"></canvas>
+<script type="module">
+import * as THREE from 'three';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+import { getModel } from './models/index.js';
+import { makeBodyMaterial, makeGlassMaterial } from './materials.js';
+import { G } from '../render/Materials.js';
+const q = new URLSearchParams( location.search );
+const canvas = document.getElementById( 'c' );
+const r = new THREE.WebGLRenderer( { canvas, antialias: true } );
+r.setSize( innerWidth, innerHeight );
+r.toneMapping = THREE.ACESFilmicToneMapping;
+r.shadowMap.enabled = true;
+const scene = new THREE.Scene();
+scene.background = new THREE.Color( 0x9fb8cc );
+const pm = new THREE.PMREMGenerator( r );
+scene.environment = pm.fromScene( new RoomEnvironment(), 0.04 ).texture;
+scene.environmentIntensity = 0.7;
+const sun = new THREE.DirectionalLight( 0xfff2e0, 2.6 );
+sun.position.set( 8, 14, 6 ); sun.castShadow = true;
+sun.shadow.mapSize.set( 2048, 2048 );
+Object.assign( sun.shadow.camera, { left: - 15, right: 15, top: 15, bottom: - 15 } );
+scene.add( sun );
+scene.add( new THREE.HemisphereLight( 0xbfd8ff, 0x3a3020, 0.4 ) );
+const ground = new THREE.Mesh( new THREE.PlaneGeometry( 200, 200 ), new THREE.MeshStandardMaterial( { color: 0x55585a, roughness: 0.9 } ) );
+ground.rotation.x = - Math.PI / 2; ground.receiveShadow = true; scene.add( ground );
+G.uSkyLUT.value = new THREE.DataTexture( new Uint8Array( [ 150, 180, 210, 255 ] ), 1, 1 ); G.uSkyLUT.value.needsUpdate = true;
+const cam = new THREE.PerspectiveCamera( + ( q.get( 'fov' ) || 40 ), innerWidth / innerHeight, 0.05, 500 );
+window.show = ( list ) => {
+	const out = [];
+	for ( const it of list ) {
+		const m = getModel( it.name );
+		const g = new THREE.Group();
+		const mat = makeBodyMaterial( { paint: it.paint ?? 0x9a1b1b, paint2: it.paint2 ?? 0xffffff, metallic: it.metal ?? 0.5, dirt: it.dirt ?? 0, rust: it.rust ?? 0, fade: it.fade ?? 0, height: m.bounds.max.y } );
+		mat.userData.u.uEmit.value = it.emit || new Array( 12 ).fill( 0 );
+		if ( it.burnt ) mat.userData.u.uBurnt.value = 1;
+		const body = new THREE.Mesh( it.far ? m.far : m.near, mat ); body.castShadow = body.receiveShadow = true; g.add( body );
+		if ( ! it.far ) {
+			if ( m.glass ) g.add( new THREE.Mesh( m.glass, makeGlassMaterial( { crack: it.crack || 0, dirt: it.gdirt || 0 } ) ) );
+			if ( m.wheelGeo ) for ( const w of m.wheels ) { if ( w.hidden ) continue; const wm = new THREE.Mesh( m.wheelGeo, mat ); wm.position.set( w.x, w.y, w.z ); wm.scale.x = w.side; wm.castShadow = true; g.add( wm ); }
+			if ( m.steering ) { const s = new THREE.Mesh( m.steering, mat ); const S = m.P.steer; s.position.set( S.x, S.y, - S.f ); s.rotation.x = - S.tilt; g.add( s ); }
+			for ( const p of m.parts ) { const pm = new THREE.Mesh( p.geo, mat ); pm.position.fromArray( p.pos ); if ( p.rot ) pm.rotation.fromArray( p.rot ); g.add( pm ); }
+		}
+		g.position.set( it.x || 0, 0, it.z || 0 ); g.rotation.y = it.yaw || 0;
+		scene.add( g );
+		out.push( { name: it.name, tris: m.near.attributes.position.count / 3, far: m.far.attributes.position.count / 3, bounds: m.bounds } );
+	}
+	return out;
+};
+window.view = ( p, t ) => { cam.position.set( ...p ); cam.lookAt( ...t ); r.render( scene, cam ); return true; };
+window.__ready = true;
+</script></body></html>

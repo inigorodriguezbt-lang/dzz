@@ -1,2 +1,626 @@
-// Placeholder module: replaced by the real implementation.
-export function install( /* game */ ) {}
+// Vegetation: palms, trees, understory, crops, rocks and grass over all eight islands.
+//
+// Placement runs in the world workers (scatter.js), deterministic per cell on three layers: canopy
+// (64 m cells out to the render distance), detail (64 m cells near the camera) and grass (32 m cells
+// around the player). The main thread keeps the cell results and, whenever the camera has moved a few
+// metres, refills a small set of instance buffers ("bands"):
+//   near  full models with shadows (~40-160 m by species)
+//   mid   simplified models (palms, trees, cane, rocks) and impostors of the small plants
+//   far   impostors of the trees and palms out to the render distance, thinned with distance
+//   grass geometric grass clumps within ~45 m
+// The exact per-instance LOD windows, distance thinning and dithered cross-fades happen in the vertex /
+// fragment shaders against the live camera, so the CPU refills are infrequent and never pop.
+// Trunks near the player become physics boxes; F on a palm shakes down a coconut, on a banana plant
+// picks a hand of bananas.
+import * as THREE from 'three';
+import { SP, NSP, STRIDE, SPECIES, LAYER, LAYER_CELL, PALM_H } from './vegetation/species.js';
+import { buildLeafAtlas } from './vegetation/LeafTextures.js';
+import * as PG from './vegetation/PlantGeometry.js';
+import { KIND, VG, vegTextures, vegUniforms, makeVegMaterial, makeVegDepthMaterial } from './vegetation/VegMaterial.js';
+import { Impostors, IMP_SPECIES } from './vegetation/Impostors.js';
+import { makeStack } from '../game/items/ItemDB.js';
+
+// ---- per species rendering setup ---------------------------------------------------------------------------
+//   kind: vertex deformation, build( lod ): model, near / mid: end distance (m, at 'high'), imp: impostor
+//   level ('far' = out to the render distance with thinning, or an end distance), tints (leaf tint range,
+//   bark tint), mode (see vegUniforms), shadow: the near model casts shadows
+const W = [ 1, 1, 1 ];
+const SPEC = {
+	[ SP.PALM ]: { kind: KIND.PALM, build: PG.buildPalm, near: 140, mid: 620, imp: 'far', tint: [ [ 0.95, 1, 0.9 ], [ 1.12, 1.08, 0.8 ] ], shadow: true },
+	[ SP.MONKEYPOD ]: { kind: KIND.TREE, build: ( l ) => PG.buildBroadleaf( 'monkeypod', l ), near: 130, mid: 420, imp: 'far', tint: [ [ 0.85, 0.95, 0.85 ], [ 1.05, 1.08, 0.9 ] ], bark: [ 0.9, 0.85, 0.8 ], shadow: true },
+	[ SP.KUKUI ]: { kind: KIND.TREE, build: ( l ) => PG.buildBroadleaf( 'kukui', l ), near: 130, mid: 420, imp: 'far', tint: [ [ 0.95, 1, 0.95 ], [ 1.1, 1.12, 1.0 ] ], bark: W, shadow: true },
+	[ SP.OHIA ]: { kind: KIND.TREE, build: ( l ) => PG.buildBroadleaf( 'ohia', l ), near: 130, mid: 420, imp: 'far', tint: [ [ 0.8, 0.92, 0.8 ], [ 1.1, 1.05, 0.85 ] ], bark: W, mode: [ 0, 0, 1, 0 ], shadow: true },
+	[ SP.PINE ]: { kind: KIND.PINE, build: PG.buildPine, near: 160, mid: 620, imp: 'far', tint: [ [ 0.9, 0.95, 0.95 ], [ 1.05, 1.08, 1.0 ] ], bark: W, shadow: true },
+	[ SP.IRONWOOD ]: { kind: KIND.TREE, build: ( l ) => PG.buildBroadleaf( 'ironwood', l ), near: 130, mid: 420, imp: 'far', tint: [ [ 0.9, 0.95, 0.9 ], [ 1.08, 1.05, 0.95 ] ], bark: W, shadow: true },
+	[ SP.KIAWE ]: { kind: KIND.TREE, build: ( l ) => PG.buildBroadleaf( 'kiawe', l ), near: 120, mid: 380, imp: 'far', tint: [ [ 0.95, 0.98, 0.85 ], [ 1.1, 1.08, 0.9 ] ], bark: [ 0.8, 0.75, 0.7 ], shadow: true },
+	[ SP.TREEFERN ]: { kind: KIND.SMALL, build: PG.buildTreeFern, near: 90, imp: 280, tint: [ [ 0.9, 1, 0.9 ], [ 1.1, 1.08, 0.9 ] ], bark: [ 0.8, 0.7, 0.6 ], shadow: true },
+	[ SP.BANANA ]: { kind: KIND.SMALL, build: PG.buildBanana, near: 80, imp: 240, tint: [ [ 0.95, 1, 0.9 ], [ 1.1, 1.1, 0.95 ] ], shadow: true },
+	[ SP.TI ]: { kind: KIND.SMALL, build: PG.buildTi, near: 60, imp: 150, tint: [ [ 0.95, 1, 0.95 ], [ 1.1, 1.05, 0.95 ] ], mode: [ 0, 1, 0, 0 ], shadow: true },
+	[ SP.SHRUB ]: { kind: KIND.SMALL, build: PG.buildShrub, near: 75, imp: 220, tint: [ [ 0.85, 0.95, 0.85 ], [ 1.1, 1.1, 0.9 ] ], mode: [ 0, 0, 2, 0 ], shadow: true },
+	[ SP.NAUPAKA ]: { kind: KIND.SMALL, build: PG.buildNaupaka, near: 70, imp: 200, tint: [ [ 0.95, 1, 0.95 ], [ 1.1, 1.08, 0.95 ] ], shadow: true },
+	[ SP.TALLGRASS ]: { kind: KIND.SMALL, build: PG.buildTallGrass, near: 60, imp: 170, tint: [ [ 1, 1.05, 0.9 ], [ 1.55, 1.25, 0.72 ] ], mode: [ 1, 0, 0, 0 ], shadow: true },
+	[ SP.PINEAPPLE ]: { kind: KIND.SMALL, build: PG.buildPineappleRow, near: 45, tint: [ [ 0.95, 1, 1 ], [ 1.05, 1.05, 1 ] ], shadow: false },
+	[ SP.CANE ]: { kind: KIND.CANE, build: PG.buildCanePatch, near: 80, mid: 260, tint: [ [ 0.95, 1, 0.95 ], [ 1.08, 1.05, 0.9 ] ], shadow: true },
+	[ SP.ROCK ]: { kind: KIND.ROCK, build: PG.buildRock, near: 140, mid: 420, tint: [ [ 0.75, 0.7, 0.66 ], [ 0.22, 0.21, 0.22 ] ], shadow: true },
+	[ SP.FERN ]: { kind: KIND.SMALL, build: PG.buildFern, near: 45, tint: [ [ 0.9, 1, 0.9 ], [ 1.1, 1.1, 0.95 ] ], shadow: false },
+	[ SP.GRASS ]: { kind: KIND.GRASS, build: () => PG.buildGrassClump(), near: 45, tint: [ [ 0.3, 0.5, 0.12 ], [ 0.78, 0.62, 0.3 ] ], shadow: false },
+};
+
+const QUALITY = {
+	low: { dist: 0.55, density: 0.5, grass: 0, far: 0.6 },
+	medium: { dist: 0.78, density: 0.75, grass: 32, far: 0.85 },
+	high: { dist: 1, density: 1, grass: 45, far: 1 },
+	ultra: { dist: 1.3, density: 1, grass: 60, far: 1 },
+};
+
+const FADE = 0.1; // cross-fade band, share of the switch distance
+const MARGIN = { near: 18, mid: 50, far: 110, grass: 8 };
+const MOVE = { near: 7, mid: 22, far: 55, grass: 3.5 }; // refill after the camera moved this far
+const COLLIDE_R = 48;
+
+const cellKey = ( layer, i, j ) => layer * 1e8 + ( i + 5000 ) * 1e4 + ( j + 5000 );
+
+// ---- instance buffer of one drawn mesh -------------------------------------------------------------------------
+
+class Target {
+	constructor( name, geometry, material, depthMaterial, cap = 512 ) {
+		this.name = name;
+		this.base = geometry;
+		this.material = material;
+		this.depthMaterial = depthMaterial;
+		this.geometry = new THREE.InstancedBufferGeometry();
+		this.geometry.index = geometry.index;
+		for ( const k in geometry.attributes ) this.geometry.setAttribute( k, geometry.attributes[ k ] );
+		this.geometry.boundingSphere = new THREE.Sphere( new THREE.Vector3(), 1e6 );
+		this.mesh = new THREE.Mesh( this.geometry, material );
+		this.mesh.name = 'veg-' + name;
+		this.mesh.frustumCulled = false;
+		this.mesh.matrixAutoUpdate = false;
+		this.mesh.receiveShadow = true;
+		if ( depthMaterial ) this.mesh.customDepthMaterial = depthMaterial;
+		this.mesh.visible = false;
+		this.count = 0;
+		this._alloc( cap );
+	}
+
+	_alloc( cap ) {
+		this.cap = cap;
+		this.data = new Float32Array( cap * STRIDE );
+		this.ib = new THREE.InstancedInterleavedBuffer( this.data, STRIDE, 1 );
+		this.ib.setUsage( THREE.DynamicDrawUsage );
+		this.geometry.setAttribute( 'iPos', new THREE.InterleavedBufferAttribute( this.ib, 4, 0 ) );
+		this.geometry.setAttribute( 'iDat', new THREE.InterleavedBufferAttribute( this.ib, 4, 4 ) );
+	}
+
+	begin() { this.n = 0; }
+
+	push( src, o, ox, oy, oz, rankOverride = - 1 ) {
+		if ( this.n >= this.cap ) {
+			const old = this.data;
+			this._alloc( this.cap * 2 );
+			this.data.set( old.subarray( 0, this.n * STRIDE ) );
+		}
+		const d = this.data, k = this.n * STRIDE;
+		d[ k ] = src[ o ] - ox; d[ k + 1 ] = src[ o + 1 ] - oy; d[ k + 2 ] = src[ o + 2 ] - oz; d[ k + 3 ] = src[ o + 3 ];
+		d[ k + 4 ] = src[ o + 4 ]; d[ k + 5 ] = rankOverride >= 0 ? rankOverride : src[ o + 5 ]; d[ k + 6 ] = src[ o + 6 ]; d[ k + 7 ] = src[ o + 7 ];
+		this.n ++;
+	}
+
+	end( origin ) {
+		this.count = this.n;
+		this.geometry.instanceCount = this.n;
+		this.ib.clearUpdateRanges();
+		this.ib.addUpdateRange( 0, this.n * STRIDE );
+		this.ib.needsUpdate = true;
+		this.mesh.visible = this.n > 0;
+		this.mesh.position.copy( origin );
+		this.mesh.updateMatrix();
+		this.mesh.updateMatrixWorld( true );
+	}
+
+	dispose() {
+		this.geometry.dispose();
+		this.material.dispose();
+		this.depthMaterial?.dispose();
+	}
+}
+
+// ---- the system ------------------------------------------------------------------------------------------------
+
+export class Vegetation {
+	constructor( game ) {
+		this.game = game;
+		this.world = game.world;
+		this.hf = game.hf;
+		this.pool = game.world.pool;
+		this.settings = game.settings;
+		this.group = new THREE.Group();
+		this.group.name = 'vegetation';
+		this.game.scene.add( this.group );
+		this.cells = new Map();
+		this.inFlight = 0;
+		this.colliders = new Map();
+		this.picked = {};
+		this.stats = { cells: 0, instances: 0, drawn: 0, rebuildMs: 0 };
+		this._t0 = performance.now();
+		this._lastStream = 0;
+		this._streamPos = new THREE.Vector3( 1e9, 0, 0 );
+		this._bandPos = { near: new THREE.Vector3( 1e9, 0, 0 ), mid: new THREE.Vector3( 1e9, 0, 0 ), far: new THREE.Vector3( 1e9, 0, 0 ), grass: new THREE.Vector3( 1e9, 0, 0 ) };
+		this._bandDirty = { near: true, mid: true, far: true, grass: true };
+		this._bandTime = { near: 0, mid: 0, far: 0, grass: 0 };
+		this._colPos = new THREE.Vector3( 1e9, 0, 0 );
+		this._origin = new THREE.Vector3();
+		this._buildObstacles();
+		this._buildAssets();
+		this.setQuality();
+		this._unsub = [ 'vegetation', 'grass', 'renderDistance' ].map( k => this.settings.on( k, () => this.setQuality() ) );
+	}
+
+	// ---- setup ------------------------------------------------------------------------------------------------
+
+	_buildAssets() {
+		const t0 = performance.now();
+		const atlas = buildLeafAtlas();
+		this.atlas = atlas;
+		vegTextures( atlas.texture );
+		this.targets = { near: [], mid: [], grass: [] };
+		this.spTargets = []; // species -> { near, mid }
+		this.models = [];
+		for ( let s = 0; s < NSP; s ++ ) {
+			const cfg = SPEC[ s ];
+			const lods = {};
+			const g0 = cfg.build( 0 );
+			this.models[ s ] = g0;
+			const make = ( g, name, shadow ) => {
+				const U = vegUniforms( cfg.kind, cfg.tint[ 0 ], cfg.tint[ 1 ], cfg.bark, cfg.mode );
+				const t = new Target( SPECIES[ s ].name + '-' + name, g, makeVegMaterial( U ), shadow ? makeVegDepthMaterial( U ) : null );
+				t.U = U;
+				t.species = s;
+				t.mesh.castShadow = !! shadow;
+				this.group.add( t.mesh );
+				return t;
+			};
+			if ( s === SP.GRASS ) { lods.near = make( g0, 'grass', false ); this.targets.grass.push( lods.near ); } else {
+				lods.near = make( g0, 'near', cfg.shadow );
+				this.targets.near.push( lods.near );
+				if ( cfg.mid ) { lods.mid = make( cfg.build( 1 ), 'mid', false ); this.targets.mid.push( lods.mid ); }
+			}
+			this.spTargets[ s ] = lods;
+		}
+		// impostors: trees far away (one mesh) and the small plants at mid range (another)
+		this.impostors = new Impostors( this.game.renderer.gl, this.models, SPEC );
+		this.impFar = this.impostors.makeTarget( 'far' );
+		this.impMid = this.impostors.makeTarget( 'mid' );
+		this.group.add( this.impFar.mesh, this.impMid.mesh );
+		this.buildMs = performance.now() - t0;
+	}
+
+	// building footprints, roads and streets bucketed on a 128 m grid (sent along with scatter jobs)
+	_buildObstacles() {
+		const meta = this.world.meta;
+		const B = 128;
+		const grid = new Map();
+		const key = ( i, j ) => ( i + 1000 ) * 4000 + ( j + 1000 );
+		const put = ( list, x0, z0, x1, z1 ) => {
+			for ( let i = Math.floor( x0 / B ); i <= Math.floor( x1 / B ); i ++ ) for ( let j = Math.floor( z0 / B ); j <= Math.floor( z1 / B ); j ++ ) {
+				const k = key( i, j );
+				let e = grid.get( k );
+				if ( ! e ) grid.set( k, e = { b: [], s: [] } );
+				e[ list ].push( this._obs[ list ].length / 6 - 1 );
+			}
+		};
+		this._obs = { b: [], s: [] };
+		const bd = meta.buildings?.data || [];
+		for ( let k = 0; k < bd.length; k += 11 ) {
+			const x = bd[ k ], z = bd[ k + 1 ], w = bd[ k + 2 ], d = bd[ k + 3 ];
+			this._obs.b.push( x, z, w / 2, d / 2, bd[ k + 4 ], ( bd[ k + 8 ] || 1 ) * 3.2 );
+			const r = Math.hypot( w, d ) / 2 + 12;
+			put( 'b', x - r, z - r, x + r, z + r );
+		}
+		for ( const rw of meta.runways || [] ) {
+			this._obs.b.push( rw.x, rw.z, rw.len / 2 + 30, rw.w / 2 + 12, rw.angle, 0 );
+			const r = rw.len / 2 + 50;
+			put( 'b', rw.x - r, rw.z - r, rw.x + r, rw.z + r );
+		}
+		const KINDS = { metro: 1, town: 2, village: 3, resort: 4, military: 5, airport: 5, observatory: 5 };
+		const seg = ( ax, az, bx, bz, hw, kind ) => {
+			this._obs.s.push( ax, az, bx, bz, hw, kind );
+			const m = hw + 12;
+			put( 's', Math.min( ax, bx ) - m, Math.min( az, bz ) - m, Math.max( ax, bx ) + m, Math.max( az, bz ) + m );
+		};
+		for ( const st of meta.streets || [] ) {
+			const city = meta.cities[ st[ 0 ] ];
+			seg( st[ 1 ], st[ 2 ], st[ 4 ], st[ 5 ], st[ 7 ] / 2 + ( st[ 8 ] || 0 ), KINDS[ city?.kind ] || 2 );
+		}
+		for ( const rd of meta.roads || [] ) {
+			const p = rd.pts;
+			for ( let k = 0; k + 5 < p.length; k += 3 ) seg( p[ k ], p[ k + 1 ], p[ k + 3 ], p[ k + 4 ], rd.w / 2 + 1, 0 );
+		}
+		this._obsGrid = grid;
+		this._obsKey = key;
+	}
+
+	_obstaclesFor( x0, z0, size ) {
+		const B = 128, m = 14;
+		const bs = new Set(), ss = new Set();
+		for ( let i = Math.floor( ( x0 - m ) / B ); i <= Math.floor( ( x0 + size + m ) / B ); i ++ ) for ( let j = Math.floor( ( z0 - m ) / B ); j <= Math.floor( ( z0 + size + m ) / B ); j ++ ) {
+			const e = this._obsGrid.get( this._obsKey( i, j ) );
+			if ( ! e ) continue;
+			for ( const k of e.b ) bs.add( k );
+			for ( const k of e.s ) ss.add( k );
+		}
+		const pack = ( set, src ) => {
+			if ( ! set.size ) return null;
+			const a = new Float32Array( set.size * 6 );
+			let o = 0;
+			for ( const k of set ) { for ( let q = 0; q < 6; q ++ ) a[ o + q ] = src[ k * 6 + q ]; o += 6; }
+			return a;
+		};
+		return { bld: pack( bs, this._obs.b ), seg: pack( ss, this._obs.s ) };
+	}
+
+	// ---- quality -------------------------------------------------------------------------------------------------
+
+	setQuality() {
+		const q = QUALITY[ this.settings.get( 'vegetation' ) ] || QUALITY.high;
+		this.q = q;
+		const rd = Math.min( 2600, this.settings.get( 'renderDistance' ) || 1400 );
+		const grassOn = this.settings.get( 'grass' ) !== false && q.grass > 0;
+		VG.uDensity.value = q.density;
+		const win = ( U, start, end, fadeIn = true ) => {
+			const a = start * FADE, b = end * FADE;
+			U.uLod.value.set( start > 0 && fadeIn ? start - a * 0.5 : 0, start > 0 && fadeIn ? start + a * 0.5 : 0, end - b * 0.5, end + b * 0.5 );
+		};
+		this.ranges = []; // species -> { near, mid, imp: [ start, end ] }
+		let nearMax = 0, midMax = 0, detailMax = 0;
+		for ( let s = 0; s < NSP; s ++ ) {
+			const cfg = SPEC[ s ], T = this.spTargets[ s ];
+			const k = s === SP.GRASS ? 1 : q.dist;
+			const near = s === SP.GRASS ? ( grassOn ? q.grass : 0 ) : cfg.near * k;
+			const mid = cfg.mid ? Math.max( near + 20, cfg.mid * k ) : 0;
+			let imp = null;
+			if ( cfg.imp === 'far' ) imp = [ mid || near, Math.max( ( mid || near ) + 50, rd * q.far ) ];
+			else if ( cfg.imp ) imp = [ near, Math.max( near + 20, cfg.imp * k ) ];
+			this.ranges[ s ] = { near, mid, imp };
+			win( T.near.U, 0, near );
+			if ( T.mid ) win( T.mid.U, near, mid );
+			if ( s !== SP.GRASS ) nearMax = Math.max( nearMax, near );
+			midMax = Math.max( midMax, mid, cfg.imp && cfg.imp !== 'far' ? imp[ 1 ] : 0 );
+			if ( SPECIES[ s ].layer === LAYER.DETAIL ) detailMax = Math.max( detailMax, imp ? imp[ 1 ] : mid || near );
+		}
+		// grass thins out towards the end of its range
+		const gT = this.spTargets[ SP.GRASS ].near;
+		gT.U.uThin.value.set( this.ranges[ SP.GRASS ].near * 0.35, this.ranges[ SP.GRASS ].near, 0.3 );
+		this.impostors.setRanges( this.ranges, q );
+		this.radius = {
+			[ LAYER.CANOPY ]: Math.max( rd * q.far, midMax ) + 80,
+			[ LAYER.DETAIL ]: detailMax + 40,
+			[ LAYER.GRASS ]: grassOn ? q.grass + 20 : 0,
+		};
+		this.bandR = { near: nearMax + MARGIN.near, mid: midMax + MARGIN.mid, far: this.radius[ LAYER.CANOPY ], grass: ( grassOn ? q.grass : 0 ) + MARGIN.grass };
+		for ( const b in this._bandDirty ) this._bandDirty[ b ] = true;
+		this._streamPos.set( 1e9, 0, 0 );
+	}
+
+	// ---- streaming -------------------------------------------------------------------------------------------
+
+	_stream( cam, now ) {
+		const moved = this._streamPos.distanceToSquared( cam ) > 100;
+		if ( ! moved && now - this._lastStream < 250 ) return;
+		this._lastStream = now;
+		this._streamPos.copy( cam );
+		const want = [];
+		for ( const layer of [ LAYER.GRASS, LAYER.DETAIL, LAYER.CANOPY ] ) {
+			const R = this.radius[ layer ];
+			const size = LAYER_CELL[ layer ];
+			// evict
+			for ( const [ k, c ] of this.cells ) {
+				if ( c.layer !== layer ) continue;
+				const d = Math.hypot( ( c.i + 0.5 ) * size - cam.x, ( c.j + 0.5 ) * size - cam.z );
+				if ( d > R * 1.2 + size ) {
+					if ( c.job ) { c.job.cancelled = true; }
+					this.cells.delete( k );
+				}
+			}
+			if ( R <= 0 ) continue;
+			const i0 = Math.floor( ( cam.x - R ) / size ), i1 = Math.floor( ( cam.x + R ) / size );
+			const j0 = Math.floor( ( cam.z - R ) / size ), j1 = Math.floor( ( cam.z + R ) / size );
+			for ( let j = j0; j <= j1; j ++ ) for ( let i = i0; i <= i1; i ++ ) {
+				const dx = Math.max( i * size - cam.x, 0, cam.x - ( i + 1 ) * size ), dz = Math.max( j * size - cam.z, 0, cam.z - ( j + 1 ) * size );
+				const d = Math.hypot( dx, dz );
+				if ( d > R ) continue;
+				const k = cellKey( layer, i, j );
+				if ( this.cells.has( k ) ) continue;
+				// open sea: nothing to scatter
+				const [ , hi ] = this.hf.rangeOver( i * size, j * size, size );
+				if ( hi < 0.3 ) { this.cells.set( k, { layer, i, j, state: 3, data: null } ); continue; }
+				want.push( { k, layer, i, j, d: d / ( layer === LAYER.GRASS ? 3 : layer === LAYER.DETAIL ? 1.6 : 1 ) } );
+			}
+		}
+		if ( ! want.length ) return;
+		want.sort( ( a, b ) => a.d - b.d );
+		const maxFlight = this.stats.frames > 30 ? 24 : 96;
+		for ( const w of want ) {
+			if ( this.inFlight >= maxFlight ) break;
+			this._request( w );
+		}
+	}
+
+	_request( w ) {
+		const size = LAYER_CELL[ w.layer ];
+		const obs = this._obstaclesFor( w.i * size, w.j * size, size );
+		const msg = { type: 'scatter', layer: w.layer, i: w.i, j: w.j, bld: obs.bld, seg: obs.seg };
+		const cell = { layer: w.layer, i: w.i, j: w.j, state: 1, data: null, job: null };
+		this.cells.set( w.k, cell );
+		this.inFlight ++;
+		cell.job = this.pool.submit( msg, w.d / 900 + ( w.layer === LAYER.CANOPY ? 0.05 : 0 ) );
+		cell.job.promise.then( ( r ) => {
+			this.inFlight --;
+			cell.job = null;
+			if ( this.cells.get( w.k ) !== cell ) return; // evicted meanwhile
+			if ( ! r ) { this.cells.delete( w.k ); return; }
+			cell.data = r.data; cell.off = r.off; cell.state = 2;
+			this._markDirty( cell );
+		} ).catch( () => { this.inFlight --; this.cells.delete( w.k ); } );
+	}
+
+	_markDirty( cell ) {
+		if ( cell.layer === LAYER.GRASS ) { this._bandDirty.grass = true; return; }
+		const size = LAYER_CELL[ cell.layer ];
+		const cam = this._streamPos;
+		const d = Math.hypot( ( cell.i + 0.5 ) * size - cam.x, ( cell.j + 0.5 ) * size - cam.z ) - size * 0.71;
+		if ( d < this.bandR.near ) this._bandDirty.near = true;
+		if ( d < this.bandR.mid ) this._bandDirty.mid = true;
+		if ( cell.layer === LAYER.CANOPY ) this._bandDirty.far = true;
+	}
+
+	// ---- band refills ----------------------------------------------------------------------------------------------
+
+	_bands( cam, now ) {
+		for ( const band of [ 'grass', 'near', 'mid', 'far' ] ) {
+			const moved = this._bandPos[ band ].distanceTo( cam ) > MOVE[ band ];
+			const dirty = this._bandDirty[ band ] && now - this._bandTime[ band ] > ( band === 'far' ? 700 : band === 'mid' ? 350 : 150 );
+			if ( ! moved && ! dirty ) continue;
+			const t0 = performance.now();
+			this._fill( band, cam );
+			this.stats.rebuildMs = performance.now() - t0;
+			this._bandPos[ band ].copy( cam );
+			this._bandDirty[ band ] = false;
+			this._bandTime[ band ] = now;
+			if ( band === 'near' ) this._colPos.set( 1e9, 0, 0 );
+		}
+	}
+
+	// refill the instance buffers of one band from the cells around the camera
+	_fill( band, cam ) {
+		const o = this._origin.set( Math.round( cam.x ), Math.round( cam.y ), Math.round( cam.z ) );
+		const ox = o.x, oy = o.y, oz = o.z;
+		const density = VG.uDensity.value;
+		const R = this.ranges;
+		let layers, targets;
+		if ( band === 'grass' ) { layers = [ LAYER.GRASS ]; targets = this.targets.grass; } else if ( band === 'near' ) { layers = [ LAYER.CANOPY, LAYER.DETAIL ]; targets = this.targets.near; } else if ( band === 'mid' ) { layers = [ LAYER.CANOPY, LAYER.DETAIL ]; targets = [ ...this.targets.mid, this.impMid ]; } else { layers = [ LAYER.CANOPY ]; targets = [ this.impFar ]; }
+		for ( const t of targets ) t.begin();
+		const bandR = this.bandR[ band ];
+		const m = MARGIN[ band ];
+		const imp = this.impostors;
+		for ( const c of this.cells.values() ) {
+			if ( c.state !== 2 || ! layers.includes( c.layer ) ) continue;
+			const size = LAYER_CELL[ c.layer ];
+			const x0 = c.i * size, z0 = c.j * size;
+			const dx = Math.max( x0 - cam.x, 0, cam.x - x0 - size ), dz = Math.max( z0 - cam.z, 0, cam.z - z0 - size );
+			if ( dx * dx + dz * dz > bandR * bandR ) continue;
+			const data = c.data, off = c.off;
+			for ( let s = 0; s < NSP; s ++ ) {
+				const a = off[ s ], b = off[ s + 1 ];
+				if ( a === b ) continue;
+				const r = R[ s ];
+				let tgt = null, lo = 0, hi = 0, impK = - 1;
+				if ( band === 'near' || band === 'grass' ) { tgt = this.spTargets[ s ].near; hi = r.near + m; } else if ( band === 'mid' ) {
+					if ( this.spTargets[ s ].mid ) { tgt = this.spTargets[ s ].mid; lo = r.near - m; hi = r.mid + m; } else if ( r.imp && SPEC[ s ].imp !== 'far' ) { tgt = this.impMid; lo = r.imp[ 0 ] - m; hi = r.imp[ 1 ] + m; impK = imp.slot[ s ]; }
+				} else if ( SPEC[ s ].imp === 'far' ) { tgt = this.impFar; lo = r.imp[ 0 ] - m; hi = r.imp[ 1 ] + m; impK = imp.slot[ s ]; }
+				if ( ! tgt || hi <= 0 ) continue;
+				const lo2 = lo > 0 ? lo * lo : - 1, hi2 = hi * hi;
+				const far = band === 'far';
+				for ( let n = a; n < b; n ++ ) {
+					const q = n * STRIDE;
+					const rank = data[ q + 5 ];
+					if ( rank >= density ) continue;
+					const ex = data[ q ] - cam.x, ez = data[ q + 2 ] - cam.z;
+					const d2 = ex * ex + ez * ez;
+					if ( d2 > hi2 || d2 < lo2 ) continue;
+					// far forests thin out with distance (the shader fades the same ranks)
+					if ( far && rank > density * imp.keepAt( Math.sqrt( d2 ) ) + 0.06 ) continue;
+					tgt.push( data, q, ox, oy, oz, impK >= 0 ? impK + rank * 0.999 : - 1 );
+				}
+			}
+		}
+		let total = 0;
+		for ( const t of targets ) { t.end( o ); total += t.count; }
+		this.stats[ band ] = total;
+	}
+
+	// ---- physics: trunk boxes around the player -------------------------------------------------------------------
+
+	_colliders() {
+		const p = this.game.player.pos;
+		if ( this._colPos.distanceToSquared( p ) < 36 ) return;
+		this._colPos.copy( p );
+		const phys = this.game.physics;
+		const keep = new Set();
+		this.nearPlants = [];
+		const R2 = COLLIDE_R * COLLIDE_R;
+		const density = VG.uDensity.value;
+		for ( const [ ck, c ] of this.cells ) {
+			if ( c.state !== 2 || c.layer === LAYER.GRASS ) continue;
+			const size = LAYER_CELL[ c.layer ];
+			const dx = Math.max( c.i * size - p.x, 0, p.x - ( c.i + 1 ) * size ), dz = Math.max( c.j * size - p.z, 0, p.z - ( c.j + 1 ) * size );
+			if ( dx * dx + dz * dz > R2 ) continue;
+			const data = c.data, off = c.off;
+			for ( let s = 0; s < NSP; s ++ ) {
+				const col = SPECIES[ s ].collider;
+				if ( ! col && s !== SP.BANANA ) continue;
+				for ( let n = off[ s ]; n < off[ s + 1 ]; n ++ ) {
+					const q = n * STRIDE;
+					if ( data[ q + 5 ] >= density ) continue;
+					const x = data[ q ], z = data[ q + 2 ];
+					if ( ( x - p.x ) ** 2 + ( z - p.z ) ** 2 > R2 ) continue;
+					const key = ck * 8192 + n;
+					if ( s === SP.PALM || s === SP.BANANA ) this.nearPlants.push( { key, s, x, y: data[ q + 1 ], z, S: data[ q + 3 ], a: data[ q + 6 ], b: data[ q + 7 ] } );
+					if ( ! col ) continue;
+					keep.add( key );
+					if ( this.colliders.has( key ) ) continue;
+					const sc = s === SP.PALM ? 1 : data[ q + 3 ];
+					let r = col.r * sc, h = col.h * ( s === SP.PALM ? 1 : sc ), y = data[ q + 1 ];
+					let cx = x, cz = z;
+					if ( s === SP.ROCK ) { r = 0.85 * sc; h = 1.1 * sc * data[ q + 6 ]; y += h * 0.1; }
+					if ( s === SP.PALM ) {
+						// follow a leaning trunk over its lowest metres
+						const H = data[ q + 3 ], lean = data[ q + 6 ], b = data[ q + 7 ], curved = b > 7, az = curved ? b - 8 : b;
+						const u = Math.min( 1, 1.6 / H ), f = curved ? u * ( 2 - u ) : u;
+						cx += Math.cos( az ) * lean * f * H; cz += Math.sin( az ) * lean * f * H;
+					}
+					const box = phys.add( { x: cx, y: y + h / 2, z: cz, hx: r * 0.8, hy: h / 2, hz: r * 0.8, yaw: data[ q + 4 ], mat: col.mat, kind: 'solid', owner: this } );
+					box.veg = { species: s, key };
+					this.colliders.set( key, box );
+				}
+			}
+		}
+		for ( const [ k, box ] of this.colliders ) if ( ! keep.has( k ) ) { phys.remove( box ); this.colliders.delete( k ); }
+	}
+
+	// ---- per frame -------------------------------------------------------------------------------------------------
+
+	update( dt ) {
+		const now = performance.now();
+		this.stats.frames = ( this.stats.frames || 0 ) + 1;
+		const cam = this.world.camera.position;
+		VG.uWindStr.value = 0.25 + ( this.game.weather?.wind ?? 0.45 ) * 0.95;
+		VG.uPlayer.value.copy( this.game.player.pos );
+		this.impostors.update( cam );
+		this._stream( cam, now );
+		this._bands( cam, now );
+		this._colliders();
+		void dt;
+	}
+
+	// ---- queries and interactions ---------------------------------------------------------------------------------
+
+	// nearest tree / palm / big plant with a trunk within r of (x, z)
+	treeAt( x, z, r = 3 ) {
+		let best = null, bd = r * r;
+		for ( const [ ck, c ] of this.cells ) {
+			if ( c.state !== 2 || c.layer === LAYER.GRASS ) continue;
+			const size = LAYER_CELL[ c.layer ];
+			const dx = Math.max( c.i * size - x, 0, x - ( c.i + 1 ) * size ), dz = Math.max( c.j * size - z, 0, z - ( c.j + 1 ) * size );
+			if ( dx * dx + dz * dz > bd ) continue;
+			for ( let s = 0; s < NSP; s ++ ) {
+				if ( ! SPECIES[ s ].collider || s === SP.ROCK ) continue;
+				for ( let n = c.off[ s ]; n < c.off[ s + 1 ]; n ++ ) {
+					const q = n * STRIDE;
+					if ( c.data[ q + 5 ] >= VG.uDensity.value ) continue;
+					const d = ( c.data[ q ] - x ) ** 2 + ( c.data[ q + 2 ] - z ) ** 2;
+					if ( d < bd ) { bd = d; best = { key: ck * 8192 + n, species: s, name: SPECIES[ s ].name, x: c.data[ q ], y: c.data[ q + 1 ], z: c.data[ q + 2 ], scale: c.data[ q + 3 ], dist: Math.sqrt( d ) }; }
+				}
+			}
+		}
+		return best;
+	}
+
+	// F prompts: shake a palm for a coconut, pick bananas
+	interactions( ray ) {
+		const list = this.nearPlants;
+		if ( ! list || ! list.length ) return null;
+		const o = ray.origin, d = ray.dir;
+		let best = null;
+		for ( const p of list ) {
+			const ex = p.x - o.x, ez = p.z - o.z;
+			if ( ex * ex + ez * ez > 36 ) continue;
+			let cx = p.x, cz = p.z, r = 0.35, y0 = p.y, y1 = p.y + 3;
+			if ( p.s === SP.PALM ) {
+				const curved = p.b > 7, az = curved ? p.b - 8 : p.b;
+				const u = Math.min( 1, 1.5 / p.S ), f = curved ? u * ( 2 - u ) : u;
+				cx += Math.cos( az ) * p.a * f * p.S; cz += Math.sin( az ) * p.a * f * p.S;
+				r = 0.45;
+			} else { r = 0.9; y1 = p.y + 2.6 * p.S; }
+			// ray vs vertical cylinder (closest approach in xz)
+			const dx = d.x, dz = d.z;
+			const L2 = dx * dx + dz * dz;
+			if ( L2 < 1e-6 ) continue;
+			const t = ( ( cx - o.x ) * dx + ( cz - o.z ) * dz ) / L2;
+			if ( t < 0 ) continue;
+			const px = o.x + dx * t - cx, pz = o.z + dz * t - cz;
+			if ( px * px + pz * pz > r * r ) continue;
+			const y = o.y + d.y * t;
+			if ( y < y0 - 0.2 || y > y1 ) continue;
+			const dist = t * Math.sqrt( dx * dx + dz * dz + d.y * d.y ) / Math.sqrt( dx * dx + d.y * d.y + dz * dz );
+			if ( ! best || dist < best.t ) best = { p, t: Math.max( 0.1, t - r * 0.5 ) };
+		}
+		if ( ! best ) return null;
+		const p = best.p;
+		const hours = this.game.time?.hours ?? 0;
+		const last = this.picked[ p.key ];
+		const regrown = last === undefined || hours - last > 48;
+		if ( p.s === SP.PALM ) {
+			if ( p.S > 13 ) return [ { t: best.t, id: 'veg:' + p.key, label: 'Coconut palm', sub: 'Too tall to shake', action: () => {} } ];
+			return [ { t: best.t, id: 'veg:' + p.key, label: regrown ? 'Shake the palm' : 'Coconut palm', sub: regrown ? 'Knock down a coconut' : 'No coconuts left', hold: regrown ? 1.2 : 0, action: () => regrown && this._harvest( p, 'coconut' ) } ];
+		}
+		if ( p.b < 0.55 ) return null;
+		return [ { t: best.t, id: 'veg:' + p.key, label: regrown ? 'Pick bananas' : 'Banana plant', sub: regrown ? null : 'Already picked', hold: regrown ? 0.8 : 0, action: () => regrown && this._harvest( p, 'banana' ) } ];
+	}
+
+	_harvest( p, id ) {
+		const g = this.game;
+		this.picked[ p.key ] = g.time?.hours ?? 0;
+		const n = id === 'coconut' ? 1 + ( Math.random() < 0.4 ? 1 : 0 ) : 3 + Math.floor( Math.random() * 3 );
+		g.audio?.play?.( id === 'coconut' ? 'hit_wood' : 'pickup', { pos: new THREE.Vector3( p.x, p.y + 1, p.z ), vol: 0.6 } );
+		let spawned = 0;
+		for ( let k = 0; k < ( id === 'coconut' ? n : 1 ); k ++ ) {
+			const st = makeStack( id, id === 'coconut' ? 1 : n );
+			if ( ! st ) break;
+			const pl = g.player.pos;
+			// coconuts land around the foot of the trunk on the player's side
+			const a = Math.atan2( pl.z - p.z, pl.x - p.x ) + ( Math.random() - 0.5 ) * 1.6;
+			const r = 0.7 + Math.random() * 0.8;
+			const x = p.x + Math.cos( a ) * r, z = p.z + Math.sin( a ) * r;
+			const pos = new THREE.Vector3( x, g.physics.ground( x, z, p.y + 3 ).y + 0.15, z );
+			if ( g.items3d?.spawn ) { g.items3d.spawn( st, pos, { persistent: true } ); spawned ++; } else if ( g.player.inventory.add( st ) === 0 ) { spawned ++; g.player.inventory.changed?.(); }
+		}
+		if ( spawned ) g.toast?.( id === 'coconut' ? ( n > 1 ? 'Two coconuts drop down' : 'A coconut drops down' ) : 'You pick a hand of bananas', 'info' );
+		else g.toast?.( id === 'coconut' ? 'The coconuts are out of reach' : 'The bananas are not ripe yet', 'info' );
+	}
+
+	serialize( save ) {
+		save.world = save.world || {};
+		const h = this.game.time?.hours ?? 0;
+		const picked = {};
+		for ( const k in this.picked ) if ( h - this.picked[ k ] < 48 ) picked[ k ] = this.picked[ k ];
+		save.world.vegetation = { picked };
+	}
+
+	load( save ) {
+		this.picked = save?.world?.vegetation?.picked || {};
+	}
+
+	dispose() {
+		for ( const u of this._unsub || [] ) u();
+		for ( const c of this.cells.values() ) if ( c.job ) c.job.cancelled = true;
+		this.cells.clear();
+		this.game.physics.removeOwner( this );
+		this.colliders.clear();
+		for ( const list of Object.values( this.targets ) ) for ( const t of list ) t.dispose();
+		for ( const g of this.models ) g.dispose();
+		this.impostors.dispose();
+		this.atlas.texture.dispose();
+		this.game.scene.remove( this.group );
+	}
+}
+
+export function install( game ) {
+	const veg = new Vegetation( game );
+	game.vegetation = veg;
+	game.register( veg );
+	game.interact?.addProvider( ( ray ) => veg.interactions( ray ) );
+	return veg;
+}
+
+void PALM_H;

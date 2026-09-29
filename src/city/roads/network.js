@@ -177,6 +177,7 @@ export function buildNetwork( meta, hf ) {
 		streets: [], nodes: new Map(), roads: [], runways: [], fences: [], events: [], signs: [], markers: [],
 		shash: new SegHash( 48 ), // streets
 		rhash: new SegHash( 48 ), // drawn highway runs
+		allhash: new SegHash( 64 ), // every highway knot segment, drawn or not
 		zones: [], // rectangles no street may cross (runways, taxiways): { x, z, cx, sx, hl, hw }
 	};
 	buildRunways( net, meta );
@@ -321,6 +322,7 @@ function buildRoads( net, meta, hf ) {
 			route: ROUTE_OF.get( r.name ) || '', fromName: placeName( from, meta ), toName: placeName( to, meta ) };
 	} );
 	net.roads = roads;
+	for ( const r of roads ) for ( let k = 0; k < r.n - 1; k ++ ) net.allhash.add( { ax: r.x[ k ], az: r.z[ k ], bx: r.x[ k + 1 ], bz: r.z[ k + 1 ], road: r }, r.hw + 2 );
 	const order = [ ...roads ].sort( ( a, b ) => ( b.lanes - a.lanes ) || ( b.len - a.len ) );
 	const ahash = new SegHash( 48 ); // accepted (drawn) runs
 	const P = [ 0, 0, 0, 0, 0 ];
@@ -462,6 +464,7 @@ function buildFences( net, meta ) {
 					const [ d ] = highwayEdgeDist( net, x, z, 30 );
 					if ( d < 3.5 ) blocked = true;
 				}
+				if ( ! blocked ) net.allhash.query( x, z, 20, ( sg ) => { if ( segDist( sg, x, z ) < sg.road.hw + 3.5 ) { blocked = true; return false; } } );
 				if ( ! blocked && open === null ) open = t;
 				if ( ( blocked || k === n ) && open !== null ) {
 					const t1 = blocked ? ( k - 1 ) / n : 1;

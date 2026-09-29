@@ -104,20 +104,20 @@ export const PAL = {
 const TOWER_TYPES = { office: 1, apartment: 1, hotel: 1 };
 
 // every building's effective storey count. The bake is conservative; the big-city cores get a skyline.
-export function storeysOf( r, cities ) {
+export function storeysOf( r, cities, type = r.type ) {
 	const city = cities[ r.city ];
 	let n = Math.max( 1, r.floors | 0 );
-	if ( ! city || ! TOWER_TYPES[ r.type ] ) return n;
+	if ( ! city || ! TOWER_TYPES[ type ] ) return n;
 	const R = rng( hash32( r.i, 0x70e5 ) );
 	const dc = Math.hypot( r.x - city.x, r.z - city.z ) / Math.max( 1, city.radius );
 	if ( city.id === 'honolulu' ) {
 		if ( dc < 0.55 ) {
 			const k = Math.pow( 1 - dc / 0.55, 1.3 );
 			n = Math.max( n, Math.round( 5 + k * 26 * ( 0.55 + 0.45 * R() ) + R() * 3 ) );
-		} else if ( dc < 0.8 && r.type !== 'office' ) n = Math.max( n, 3 + Math.floor( R() * 4 ) );
+		} else if ( dc < 0.8 && type !== 'office' ) n = Math.max( n, 3 + Math.floor( R() * 4 ) );
 	} else if ( city.id === 'waikiki' ) {
-		if ( r.type === 'hotel' ) n = Math.max( n, 10 + Math.floor( R() * 22 ) );
-		else n = Math.max( n, dc < 0.8 ? 7 + Math.floor( R() * 16 ) : n );
+		if ( type === 'hotel' ) n = Math.max( n, 10 + Math.floor( R() * 22 ) );
+		else n = Math.max( n, dc < 0.8 ? 7 + Math.floor( R() * 16 ) : 3 + Math.floor( R() * 6 ) );
 	} else if ( city.kind === 'metro' && dc < 0.3 ) {
 		n = Math.max( n, 4 + Math.floor( R() * 5 ) );
 	}
@@ -126,11 +126,28 @@ export function storeysOf( r, cities ) {
 
 // the massing: arch(etype), built rect inside the lot footprint, storeys and heights. All in building-local
 // metres: x across the front, z from front (-d/2) to back (+d/2).
+const COMMERCIAL = { convenience: 1, restaurant: 1, clothing: 1, fastfood: 1, bar: 1, pawn: 1, sports: 1, pharmacy: 1, surf: 1, bank: 1 };
+
+// what a lot really holds: Waikīkī's residential blocks are condos, and downtown Honolulu stacks offices,
+// flats and hotels over its shops (the listed business keeps the street level)
+export function effectiveType( r, cities ) {
+	const city = cities[ r.city ];
+	if ( ! city ) return { type: r.type, shop: null };
+	if ( city.id === 'waikiki' && r.type === 'house' ) return { type: 'apartment', shop: null };
+	if ( city.id === 'honolulu' && COMMERCIAL[ r.type ] && r.w >= 20 ) {
+		const dc = Math.hypot( r.x - city.x, r.z - city.z ) / Math.max( 1, city.radius );
+		const h = hash32( r.i, 0x3d1 );
+		if ( dc < 0.5 && ( h % 100 ) < 65 ) return { type: [ 'office', 'office', 'apartment', 'hotel' ][ ( h >> 8 ) & 3 ], shop: r.type };
+	}
+	return { type: r.type, shop: null };
+}
+
 export function shapeOf( r, cities ) {
 	const R = rng( hash32( r.i, 0x5a9e ) );
-	const t = r.type, W = r.w, D = r.d;
+	const eff = effectiveType( r, cities );
+	const t = eff.type, W = r.w, D = r.d;
 	const S = {
-		type: t, arch: t, variant: 0, n: storeysOf( r, cities ), Hs: null, raise: 0.25, bw: W, bd: D, ox: 0, oz: 0,
+		type: t, shop: eff.shop, arch: t, variant: 0, n: storeysOf( r, cities, t ), Hs: null, raise: 0.25, bw: W, bd: D, ox: 0, oz: 0,
 		roof: 'flat', pitch: 0.3, overhang: 0.5, pave: false, units: 1,
 	};
 	const front = ( bd ) => { S.bd = Math.min( D, bd ); S.oz = - D / 2 + S.bd / 2; };
@@ -153,19 +170,19 @@ export function shapeOf( r, cities ) {
 			break;
 		}
 		case 'apartment':
-			if ( S.n >= 5 ) { S.arch = 'tower'; break; }
+			if ( S.n >= 5 && W >= 17 ) { S.arch = 'tower'; break; }
 			S.arch = 'walkup'; H = 2.95;
 			S.bw = Math.min( W, 18 + Math.floor( R() * 3 ) * 4 );
 			front( 26 + Math.floor( R() * 4 ) * 5 );
 			S.pave = true;
 			break;
 		case 'office':
-			if ( S.n >= 4 ) { S.arch = 'tower'; break; }
+			if ( S.n >= 4 && W >= 17 ) { S.arch = 'tower'; break; }
 			S.arch = 'office'; H = 3.6; H0 = 4.2; front( 28 );
 			S.pave = true;
 			break;
 		case 'hotel':
-			S.arch = S.n >= 4 ? 'tower' : 'office'; H = 3.2; H0 = 4.2;
+			S.arch = S.n >= 4 && W >= 17 ? 'tower' : 'office'; H = 3.2; H0 = 4.2;
 			if ( S.arch === 'office' ) { front( 26 ); S.pave = true; }
 			break;
 		case 'grocery': case 'hardware': case 'market':
