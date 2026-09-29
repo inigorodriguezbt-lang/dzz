@@ -73,7 +73,7 @@ export class Bodies {
 		}
 	}
 
-	serialize( save ) { save.world.bodies = this.list.map( ( { mesh, ...b } ) => b ); void mesh; }
+	serialize( save ) { save.world.bodies = this.list.map( b => ( { id: b.id, x: b.x, y: b.y, z: b.z, yaw: b.yaw, hour: b.hour, items: b.items } ) ); }
 	load( save ) {
 		for ( const b of this.list ) b.mesh?.removeFromParent();
 		this.list = ( save.world?.bodies || [] ).map( b => ( { ...b } ) );

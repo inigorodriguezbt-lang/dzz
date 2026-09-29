@@ -225,22 +225,28 @@ const TERRAIN_ALBEDO = /* glsl */`
 	float macro = fbm2( xz / 260.0 );
 	float dist = length( wp - uCamPos );
 
-	vec3 grass = texture2D( tGrass, xz / 3.2 ).rgb;
-	vec3 dry = texture2D( tDry, xz / 3.4 ).rgb;
-	vec3 forest = texture2D( tForest, xz / 4.1 ).rgb;
-	// the grass textures are temperate: push them towards the saturated tropical greens
-	grass *= vec3( 0.78, 1.0, 0.62 );
-	dry *= vec3( 1.02, 0.98, 0.78 );
-	float wet = clamp( moist + ( n1 - 0.5 ) * 0.35 + ( macro - 0.5 ) * 0.3, 0.0, 1.0 );
-	vec3 c = mix( dry, grass, smoothstep( 0.22, 0.55, wet ) );
-	c = mix( c, forest * vec3( 0.7, 0.95, 0.6 ), smoothstep( 0.6, 0.86, wet ) * ( 1.0 - pasture ) * 0.85 );
+	vec3 grassT = texture2D( tGrass, xz / 3.2 ).rgb;
+	vec3 dryT = texture2D( tDry, xz / 3.4 ).rgb;
+	vec3 forestT = texture2D( tForest, xz / 4.1 ).rgb;
+	// the scanned textures are temperate and dark: normalise them to their own luminance and repaint
+	// them with a tropical palette (Tidewater's meadow tones), keeping the texture's detail
+	float lg = dot( grassT, vec3( 0.3, 0.55, 0.15 ) ), ld = dot( dryT, vec3( 0.3, 0.55, 0.15 ) ), lf = dot( forestT, vec3( 0.3, 0.55, 0.15 ) );
+	vec3 lush = vec3( 0.05, 0.11, 0.02 ), green = vec3( 0.1, 0.175, 0.032 ), olive = vec3( 0.15, 0.17, 0.05 ), straw = vec3( 0.28, 0.245, 0.12 );
+	// the baked rainfall runs dry for the lowlands; Hawaiʻi reads greener than that except on the true leeward coasts
+	float wet = clamp( moist * 1.15 + 0.14 + ( n1 - 0.5 ) * 0.3 + ( macro - 0.5 ) * 0.28, 0.0, 1.0 );
+	vec3 grass = mix( green, lush, smoothstep( 0.55, 0.85, wet ) ) * ( grassT / max( lg, 0.02 ) ) * mix( 0.85, 1.15, n2 );
+	vec3 dry = mix( straw, olive, smoothstep( 0.18, 0.4, wet + ( n3 - 0.5 ) * 0.2 ) ) * ( dryT / max( ld, 0.02 ) );
+	vec3 forest = lush * 0.8 * ( forestT / max( lf, 0.02 ) );
+	vec3 c = mix( dry, grass, smoothstep( 0.22, 0.5, wet ) );
+	c = mix( c, forest, smoothstep( 0.66, 0.9, wet ) * ( 1.0 - pasture ) * 0.7 );
 	// pasture: short, even ranch grass
-	c = mix( c, grass * vec3( 1.05, 1.0, 0.75 ), pasture * 0.6 );
-	// bare dirt in dry country, red laterite on the old islands
+	c = mix( c, green * ( grassT / max( lg, 0.02 ) ) * 1.1, pasture * 0.6 );
+	// bare dirt in dry country, red laterite on the old islands where it is dry enough to show
 	vec3 dirt = texture2D( tDirt, xz / 4.0 ).rgb * vec3( 0.95, 0.85, 0.72 );
-	c = mix( c, dirt, smoothstep( 0.55, 0.85, ( 1.0 - wet ) * ( n2 * 0.6 + n3 * 0.6 ) ) * 0.8 );
+	c = mix( c, dirt, smoothstep( 0.62, 0.9, ( 1.0 - wet ) * ( n2 * 0.6 + n3 * 0.6 ) ) * 0.7 );
 	vec3 redc = texture2D( tRed, xz / 4.3 ).rgb;
-	c = mix( c, redc, smoothstep( 0.3, 0.65, red + ( n1 - 0.5 ) * 0.5 + ( n4 - 0.5 ) * 0.15 ) );
+	float redW = smoothstep( 0.42, 0.78, red + ( n1 - 0.5 ) * 0.45 + ( n4 - 0.5 ) * 0.15 ) * ( 1.0 - smoothstep( 0.38, 0.62, wet ) );
+	c = mix( c, redc, redW );
 	// farm fields in rows: pineapple (red soil, grey-green plants) and cane (dense green)
 	if ( field > 0.1 ) {
 		float rows = smoothstep( 0.35, 0.5, abs( fract( dot( xz, vec2( 0.7071 ) ) / 1.6 ) - 0.5 ) );
@@ -275,7 +281,7 @@ const TERRAIN_ALBEDO = /* glsl */`
 	vec3 snow = texture2D( tSnow, xz / 5.0 ).rgb;
 	c = mix( c, snow, smoothstep( 610.0, 680.0, wp.y + ( n1 - 0.5 ) * 60.0 ) * ( 1.0 - smoothstep( 0.3, 0.6, slope ) ) );
 	// towns: mown lawns and concrete lots; road shoulders are gravel
-	vec3 lawn = grass * vec3( 0.92, 1.08, 0.8 ) * ( 0.9 + n1 * 0.2 );
+	vec3 lawn = green * 1.05 * ( grassT / max( lg, 0.02 ) ) * ( 0.9 + n1 * 0.2 );
 	c = mix( c, lawn, smoothstep( 0.2, 0.8, city ) * 0.9 );
 	c = mix( c, dirt * vec3( 0.85, 0.82, 0.8 ), road * 0.85 );
 	// large scale variation breaks up the tiling

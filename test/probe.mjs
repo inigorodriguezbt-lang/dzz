@@ -10,6 +10,6 @@ await page.goto( url );
 try { await page.waitForFunction( () => window.__ready === true, null, { timeout: 240000 } ); } catch ( e ) { logs.push( 'TIMEOUT waiting for ready' ); }
 await page.waitForTimeout( 3000 );
 if ( expr ) { try { console.log( JSON.stringify( await page.evaluate( expr ), null, 1 ) ); } catch ( e ) { console.log( 'eval error', e.message ); } }
-if ( out ) { await page.waitForTimeout( 1500 ); await page.screenshot( { path: out } ); }
+if ( out ) { await page.waitForTimeout( 1500 ); await page.screenshot( { path: out, timeout: 180000 } ); }
 console.log( logs.slice( 0, 80 ).join( '\n' ) );
 await browser.close();
