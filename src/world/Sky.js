@@ -86,13 +86,13 @@ export class Sky {
 		this.cloudPass = new FullScreenQuad( new THREE.ShaderMaterial( {
 			name: 'Clouds',
 			uniforms: Object.assign( {
-				uInvProj: { value: new THREE.Matrix4() }, uCamWorld: { value: new THREE.Matrix4() }, uFrame: { value: 0 },
+				uInvProj: { value: new THREE.Matrix4() }, uCamWorld: { value: new THREE.Matrix4() }, uFrame: { value: 0 }, uSteps: { value: 36 },
 				uAmbTop: { value: new THREE.Color() }, uAmbBottom: { value: new THREE.Color() }, uMoonDir: { value: new THREE.Vector3() }, uMoonColor: { value: new THREE.Color() },
 			}, G ),
 			vertexShader: FS_VERT,
 			fragmentShader: /* glsl */`
 				${SHARED_PARS}
-				uniform mat4 uInvProj; uniform mat4 uCamWorld; uniform float uFrame;
+				uniform mat4 uInvProj; uniform mat4 uCamWorld; uniform float uFrame; uniform float uSteps;
 				uniform vec3 uAmbTop; uniform vec3 uAmbBottom; uniform vec3 uMoonDir; uniform vec3 uMoonColor;
 				varying vec2 vUv;
 				${COMMON_GLSL}
@@ -109,7 +109,7 @@ export class Sky {
 					t1 = min( t1, 60000.0 );
 					if ( t1 <= t0 ) { gl_FragColor = vec4( 0.0, 0.0, 0.0, 1.0 ); return; }
 					const int STEPS = 36;
-					float seg = ( t1 - t0 ) / float( STEPS );
+					float seg = ( t1 - t0 ) / uSteps;
 					float jit = hash12( gl_FragCoord.xy + uFrame * 7.13 );
 					vec3 sun = normalize( uSunDir );
 					bool moonLit = sun.y < -0.05;
@@ -119,6 +119,7 @@ export class Sky {
 					float phase = mix( hg( mu, 0.6 ), hg( mu, -0.25 ), 0.3 ) * 2.2 + 0.08;
 					float T = 1.0; vec3 S = vec3( 0.0 );
 					for ( int i = 0; i < STEPS; i ++ ) {
+						if ( float( i ) >= uSteps ) break;
 						vec3 p = ro + rd * ( t0 + ( float( i ) + jit ) * seg );
 						float d = cloudDensity( p, true );
 						if ( d > 0.0 ) {
@@ -322,6 +323,7 @@ export class Sky {
 		cu.uInvProj.value.copy( camera.projectionMatrixInverse );
 		cu.uCamWorld.value.copy( camera.matrixWorld );
 		cu.uFrame.value = this.frame % 64;
+		cu.uSteps.value = this.settings.get( 'clouds' ) === 'low' ? 18 : 36;
 		const top = new THREE.Color().setRGB( 0.35, 0.45, 0.6 ).multiplyScalar( dayF * 0.9 + 0.01 );
 		cu.uAmbTop.value.copy( top ).lerp( new THREE.Color( 0.7, 0.72, 0.75 ), 0.3 ).multiplyScalar( 1.0 + this.sunColor.r * 0.15 );
 		cu.uAmbBottom.value.copy( top ).multiplyScalar( 0.55 ).add( new THREE.Color( 0.05, 0.05, 0.045 ).multiplyScalar( dayF ) );

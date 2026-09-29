@@ -106,6 +106,15 @@ export class UI {
 		this.offs.push( game.events.on( 'item:pick', () => { game.stats.looted = ( game.stats.looted || 0 ) + 1; } ) );
 		this.lockHint.hidden = true;
 		this.app.input.lock();
+		this.announceSpawn();
+	}
+
+	announceSpawn() {
+		const g = this.game;
+		if ( ! g?.justSpawned ) return;
+		g.justSpawned = false;
+		const where = this.locationName( g.player.pos, true );
+		setTimeout( () => g.toast( g.mode === 'creative' ? `Creative mode — ${where}. Double-tap Space to fly.` : `You wake up on the shore. ${where}.`, 'info' ), 1200 );
 	}
 
 	exitGame() {

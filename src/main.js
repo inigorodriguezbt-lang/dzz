@@ -23,8 +23,8 @@ function status( s, p ) {
 // title-screen camera: slow drifts over famous views
 const VISTAS = [
 	{ at: [ - 3880, - 9660 ], h: 26, yaw: - 118, pitch: - 4, hour: 17.6 }, // Waikīkī towards Diamond Head
-	{ at: [ - 12330, - 16420 ], h: 40, yaw: 160, pitch: - 6, hour: 7.2 }, // North Shore
-	{ at: [ 26350, 3500 ], h: 90, yaw: 60, pitch: - 5, hour: 18.2 }, // Big Island
+	{ at: [ - 6760, - 15260 ], h: 7, yaw: 135, pitch: - 3, hour: 17.9 }, // Sunset Beach, North Shore
+	{ at: [ 19870, 13024 ], h: 12, yaw: 90, pitch: - 2, hour: 18.25 }, // Kailua-Kona, looking out to sea
 ];
 
 class App {

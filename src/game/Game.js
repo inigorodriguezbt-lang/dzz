@@ -12,6 +12,7 @@ import { Interact } from './Interact.js';
 import { Weather } from './Weather.js';
 import { Markers } from './Markers.js';
 import { Water } from './Water.js';
+import { Bodies } from './Bodies.js';
 import { makeStack, getItem } from './items/ItemDB.js';
 
 export class Game {
@@ -40,6 +41,7 @@ export class Game {
 		this.weather = new Weather( this );
 		this.markers = new Markers( this );
 		this.water = new Water( this );
+		this.bodies = new Bodies( this );
 		this.stats = save.stats;
 		this.time = save.time; // { hours, dayMinutes }
 		this.paused = false;
@@ -47,7 +49,7 @@ export class Game {
 		this.dead = false;
 		this.autosaveT = 0;
 		this.playTime = save.playTime || 0;
-		this.systems = [ this.markers ]; // { update(dt) } registered by the content modules
+		this.systems = [ this.markers, this.bodies ]; // { update(dt) } registered by the content modules
 		this.creativeSpeed = 1;
 		this.timeFrozen = false;
 		this.viewScene = new THREE.Scene();
@@ -98,6 +100,7 @@ export class Game {
 		this.player.stance = 'stand';
 		this.player.flying = this.mode === 'creative' && false;
 		this.stats.lifeStart = this.time.hours;
+		this.justSpawned = true;
 		if ( this.mode === 'creative' ) {
 			for ( const [ id, q ] of [ [ 'm4a1', 1 ], [ 'mag_stanag30', 3 ], [ 'glock17', 1 ], [ 'machete', 1 ], [ 'backpack_hiking', 1 ] ] ) {
 				const st = makeStack( id, q, { full: true } );
@@ -233,6 +236,7 @@ export class Game {
 		this.stats.lifeKills = 0;
 		this.spawnFresh();
 		this.player.alive = true;
+		this.app.ui?.announceSpawn?.();
 		this.survival.damageFlash = 0;
 		this.saveNow();
 	}

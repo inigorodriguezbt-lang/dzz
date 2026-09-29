@@ -91,7 +91,9 @@ export class InventoryUI {
 		clear( this.right );
 		const cs = inv.containers();
 		const cap = cs.reduce( ( a, c ) => a + c.capacity, 0 ), used = cs.reduce( ( a, c ) => a + containerVolume( c.items ), 0 );
-		this.right.appendChild( h( 'h3', {}, 'Carried', h( 'span.dim', { text: `${used} / ${cap} space` } ) ) );
+		this.right.appendChild( h( 'h3', {}, 'Carried', h( 'span', { style: { display: 'flex', gap: '8px', alignItems: 'center' } },
+			h( 'span.dim', { text: `${used} / ${cap} space` } ),
+			h( 'button.btn.small', { text: 'Sort', title: 'Sort every container by type and name', onclick: () => this._sort() } ) ) ) );
 		const sc = h( 'div.scroll' );
 		for ( const c of cs ) sc.appendChild( this._container( c, { type: 'container', container: c } ) );
 		if ( cs.length === 1 ) sc.appendChild( h( 'div.cont-empty', { style: { padding: '14px' }, text: 'Wear clothes with pockets or a backpack to carry more.' } ) );
@@ -434,6 +436,14 @@ export class InventoryUI {
 		// from me: into the open container, else onto the ground
 		if ( this.other ) this.move( stack, loc, { type: 'other', container: this.other, items: this.other.items } );
 		else this.move( stack, loc, { type: 'ground' } );
+	}
+
+	_sort() {
+		const order = [ 'firearm', 'magazine', 'ammo', 'attachment', 'melee', 'throwable', 'medical', 'food', 'drink', 'tool', 'fuel', 'clothing', 'backpack', 'material', 'misc' ];
+		const rank = s => { const d = getItem( s.id ); const i = order.indexOf( d?.cat ); return i < 0 ? 99 : i; };
+		for ( const c of this.inv.containers() ) c.items.sort( ( a, b ) => rank( a ) - rank( b ) || ( getItem( a.id )?.name || '' ).localeCompare( getItem( b.id )?.name || '' ) );
+		this.inv.changed();
+		this.app.audio.ui();
 	}
 
 	_takeAll( ground ) {
