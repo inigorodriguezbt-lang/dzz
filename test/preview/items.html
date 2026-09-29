@@ -1,0 +1,14 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Item preview</title>
+<style>
+html,body{margin:0;background:#1b2229;color:#dfe8ee;font:12px/1.3 system-ui,sans-serif;overflow:hidden}
+canvas#c{display:block}
+#sheet{position:absolute;inset:0;overflow:auto;padding:8px;display:none;flex-wrap:wrap;gap:6px;align-content:flex-start;background:#1b2229}
+#sheet .i{width:112px;text-align:center;background:#26303a;border-radius:6px;padding:4px}
+#sheet img{width:96px;height:96px;display:block;margin:0 auto;background:repeating-conic-gradient(#2c3642 0 25%,#323d4a 0 50%) 50%/16px 16px}
+#sheet span{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#hud{position:absolute;left:8px;top:8px;background:#000a;padding:6px 8px;border-radius:6px}
+</style></head>
+<body><canvas id="c"></canvas><div id="sheet"></div><div id="hud"></div>
+<script type="module" src="./items.js"></script>
+</body></html>

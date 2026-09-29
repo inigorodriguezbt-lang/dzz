@@ -12,15 +12,17 @@ export const PI = Math.PI;
 const mats = new Map();
 
 // A cached, patched MeshStandardMaterial. o: { rough, metal, map, emissive, emissiveIntensity, transparent,
-// opacity, side, flat, key }. Transparent materials go to the post layer (userData.layer = 1).
+// opacity, side, key }. Transparent materials go to the post layer (userData.layer = 1).
+// No flatShading: the world's material patch reads vNormal, which flat-shaded programs do not declare — facet the
+// geometry instead (facet() below).
 export function M( color = 0x888888, o = {} ) {
 	const key = [ typeof color === 'number' ? color : String( color ), o.rough ?? 0.7, o.metal ?? 0, o.map?.uuid || '', o.emissive ?? '', o.emissiveIntensity ?? '',
-		o.transparent ? 't' + ( o.opacity ?? 0.4 ) : '', o.side ?? '', o.flat ? 'f' : '', o.key || '' ].join( '|' );
+		o.transparent ? 't' + ( o.opacity ?? 0.4 ) : '', o.side ?? '', o.key || '' ].join( '|' );
 	let m = mats.get( key );
 	if ( m ) return m;
 	m = new THREE.MeshStandardMaterial( {
 		color, roughness: o.rough ?? 0.7, metalness: o.metal ?? 0, map: o.map || null,
-		emissive: o.emissive ?? 0x000000, emissiveIntensity: o.emissiveIntensity ?? 1, flatShading: !! o.flat,
+		emissive: o.emissive ?? 0x000000, emissiveIntensity: o.emissiveIntensity ?? 1,
 		side: o.side ?? THREE.FrontSide,
 	} );
 	if ( o.transparent ) {
@@ -342,6 +344,13 @@ export const G = {
 	},
 	prismX: ( w, h, len ) => new THREE.CylinderGeometry( 0.5, 0.5, len, 3 ).rotateZ( PI / 2 ).rotateX( PI / 2 ).scale( 1, h / 0.75, w / 0.866 ).translate( 0, h * 0.333, 0 ),
 };
+
+// hard-edged facets (stones, crumpled trash, coconut husk): split vertices so every face has its own normal
+export function facet( geo ) {
+	const g = geo.index ? geo.toNonIndexed() : geo;
+	g.computeVertexNormals();
+	return g;
+}
 
 // planar label UVs: faces pointing along `axis` (x|y|z) get the art (u in 0..split), other faces the side strip
 export function labelUV( geo, axis = 'z', split = 0.8 ) {

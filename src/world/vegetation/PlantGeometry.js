@@ -270,7 +270,7 @@ export function buildPalm( lod = 0, seed = 11 ) {
 		const col = ripe < 0.6 ? lin( 0x6f7f2a ) : ripe < 0.85 ? lin( 0xa08a30 ) : lin( 0x6a4a26 );
 		blob( b, c, new THREE.Vector3( s, s * 1.12, s ), lod === 0 ? 1 : 0, { part: PART.SOLID, crown: 20, col, ao: () => 0.6 } );
 	}
-	const fronds = palmFronds( rand, 15 );
+	const fronds = palmFronds( rand, 16 );
 	const use = lod === 0 ? fronds : fronds.filter( ( f, i ) => i % 3 !== 1 );
 	for ( const f of use ) {
 		const origin = new THREE.Vector3( Math.cos( f.azimuth ) * 0.14, H + f.attachY, Math.sin( f.azimuth ) * 0.14 );
@@ -427,7 +427,7 @@ export function buildPine( lod = 0, seed = 41 ) {
 	const pts = [];
 	for ( let k = 0; k <= ( lod === 0 ? 10 : 4 ); k ++ ) pts.push( new THREE.Vector3( 0, - 0.3 + k / ( lod === 0 ? 10 : 4 ) * ( H + 0.3 ), 0 ) );
 	tube( b, pts, ( f ) => 0.36 * ( 1 - f * 0.9 ) + 0.1 * Math.exp( - f * 30 ), { radial: lod === 0 ? 8 : 5, part: PART.BARK, veg, ao: () => 0.6, col: barkCol, texAround: 1, texLen: 2.2 } );
-	const step = lod === 0 ? 0.85 : 1.7;
+	const step = lod === 0 ? 0.85 : 1.15;
 	for ( let y = 2.4; y < H - 0.3; y += step * ( 0.85 + rand() * 0.3 ) ) {
 		const f = y / H;
 		// narrow column, a little wider low down, tapering to the spire
@@ -445,7 +445,7 @@ export function buildPine( lod = 0, seed = 41 ) {
 			const nH = new THREE.Vector3().crossVectors( dir, side ).normalize();
 			if ( nH.y < 0 ) nH.negate();
 			const ph = rand(), crr = rand();
-			for ( const [ n, w ] of lod === 0 ? [ [ nH, 1.1 ], [ side, 1.0 ] ] : [ [ nH.clone().lerp( side, 0.5 ).normalize(), 1.3 ] ] ) {
+			for ( const [ n, w ] of lod === 0 ? [ [ nH, 1.1 ], [ side, 1.0 ] ] : [ [ nH.clone().lerp( side, 0.5 ).normalize(), 1.6 ] ] ) {
 				card( b, {
 					center: c, w: L + 0.2, h: w * ( 0.6 + 0.3 * f ), normal: n, spin: Math.atan2( dir.y, 1 ) * 0 + angleInPlane( n, dir ),
 					tile: 'PINEBR', u0: 0, u1: 1, v0: 0, v1: 1, lobeC: new THREE.Vector3( 0, y, 0 ), lobeR: L + 0.3,
@@ -798,6 +798,6 @@ export function buildRock( lod = 0, seed = 151 ) {
 		// flattened bottom sitting in the ground
 		return k * ( d.y < - 0.2 ? 0.8 : 1 );
 	};
-	blob( b, new THREE.Vector3( 0, 0.5, 0 ), new THREE.Vector3( 1, 0.75, 0.9 ), lod === 0 ? 2 : 1, { part: PART.ROCK, uvScale: 2, col: [ 1, 1, 1 ], ao: ( d ) => 0.55 + 0.45 * Math.max( 0, d.y * 0.5 + 0.5 ), veg: () => [ 0, 0, 0, 0 ] }, disp );
+	blob( b, new THREE.Vector3( 0, 0.5, 0 ), new THREE.Vector3( 1, 0.75, 0.9 ), lod === 0 ? 3 : 1, { part: PART.ROCK, uvScale: 2, col: [ 1, 1, 1 ], ao: ( d ) => 0.55 + 0.45 * Math.max( 0, d.y * 0.5 + 0.5 ), veg: () => [ 0, 0, 0, 0 ] }, disp );
 	return b.build();
 }

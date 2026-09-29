@@ -204,6 +204,11 @@ function clearGround( ctx, x, z, r, flags ) {
 // ---- canopy: palms and trees ------------------------------------------------------------------------
 
 const CAN_SP = 4.6;
+// the forest thins out above ~300 m (1800 m real) and stops at the tree line (~3100 m real); the
+// high slopes and the summits get shrubs, grass and rocks only
+const TREELINE = 525;
+const treeAlt = ( h ) => ( 1 - sstep( 290, 400, h ) * 0.75 ) * ( 1 - sstep( 450, TREELINE, h ) );
+const PALM_MAX = 240; // coconut palms are lowland trees
 const W = new Float32Array( 7 ); // palm, monkeypod, kukui, ohia, pine, ironwood, kiawe
 const CAN_SPECIES = [ SP.PALM, SP.MONKEYPOD, SP.KUKUI, SP.OHIA, SP.PINE, SP.IRONWOOD, SP.KIAWE ];
 
@@ -212,10 +217,10 @@ function canopy( ctx ) {
 	lattice( ctx, CAN_SP, 101, ( x, z, gi, gj ) => {
 		env.at( x, z, e );
 		const h = e.h;
-		if ( h < 0.7 || h > 560 ) return;
+		if ( h < 0.7 || h > TREELINE ) return;
 		if ( e.flags & ( FLAG.CITY | FLAG.FIELD ) ) return; // towns get their own yard / street trees, fields stay clean
 		const m = e.m, sd = e.sd, lava = e.lava;
-		const alt = 1 - sstep( 320, 470, h ) * 0.85;
+		const alt = treeAlt( h );
 		const slopeK = 1 - sstep( 0.55, 1.05, e.sl );
 		// clearings and groves so forests aren't a uniform carpet
 		const clear = 0.3 + 0.7 * sstep( 0.28, 0.5, vnoise( x / 230, z / 230, 11 ) );
@@ -252,7 +257,9 @@ function placeTree( ctx, sp, x, z, gi, gj, e, salt = 0 ) {
 	const r0 = hash2( gi, gj, 121 + salt ), r1 = hash2( gi, gj, 122 + salt ), r2 = hash2( gi, gj, 123 + salt ), r3 = hash2( gi, gj, 124 + salt );
 	const rank = hash2( gi, gj, 125 + salt );
 	const yaw = r0 * TAU;
-	const y = hf.heightAt( x, z ) - 0.15 - Math.min( 0.6, e.sl * 0.5 );
+	const g = hf.heightAt( x, z );
+	if ( g < 0.5 ) return; // the 8 m environment grid rounds the shoreline: the real ground decides
+	const y = g - 0.15 - Math.min( 0.6, e.sl * 0.5 );
 	if ( sp === SP.PALM ) {
 		// 10 % young palms, the rest 7-16 m; beach palms lean seawards, some grow in a banana curve
 		const H = r1 < 0.1 ? 3.5 + r2 * 2.5 : 7 + 9 * Math.pow( r2, 0.9 );
@@ -301,10 +308,12 @@ function streetTrees( ctx ) {
 				if ( x < x0 || z < z0 || x >= x0 + size || z >= z0 + size ) continue;
 				if ( hash2( sid, n * 2 + ( side > 0 ? 1 : 0 ), 133 ) > STREET_P[ kind ] ) continue;
 				env.at( x, z, e );
-				if ( e.h < 0.8 || ( e.flags & ( FLAG.BUILDING | FLAG.RUNWAY ) ) ) continue;
+				if ( e.h < 0.8 || e.h > TREELINE - 60 || ( e.flags & ( FLAG.BUILDING | FLAG.RUNWAY ) ) ) continue;
+				if ( hash2( sid, n * 2 + ( side > 0 ? 1 : 0 ), 135 ) > treeAlt( e.h ) ) continue;
 				if ( nearBuilding( ctx.bld, x, z, 2.2 ) || nearRoad( ctx.seg, x, z, 0.6 ) ) continue;
 				const r = hash2( sid, n, 134 + side );
-				const sp = kind === 4 ? ( r < 0.85 ? SP.PALM : SP.MONKEYPOD ) : kind === 0 ? ( r < 0.6 ? SP.PALM : SP.IRONWOOD ) : ( ctx.isl === 5 && r < 0.5 ? SP.PINE : r < 0.55 ? SP.PALM : r < 0.85 ? SP.MONKEYPOD : SP.KUKUI );
+				let sp = kind === 4 ? ( r < 0.85 ? SP.PALM : SP.MONKEYPOD ) : kind === 0 ? ( r < 0.6 ? SP.PALM : SP.IRONWOOD ) : ( ctx.isl === 5 && r < 0.5 ? SP.PINE : r < 0.55 ? SP.PALM : r < 0.85 ? SP.MONKEYPOD : SP.KUKUI );
+				if ( sp === SP.PALM && e.h > PALM_MAX ) sp = e.m > 0.4 ? SP.KUKUI : SP.IRONWOOD;
 				placeTree( ctx, sp, x, z, sid, n * 2 + ( side > 0 ? 1 : 0 ), e, 40 );
 			}
 		}
@@ -316,11 +325,12 @@ function yardTrees( ctx ) {
 	const { env, e } = ctx;
 	lattice( ctx, 11, 141, ( x, z, gi, gj ) => {
 		env.at( x, z, e );
-		if ( ! ( e.flags & FLAG.CITY ) || ( e.flags & NO_GROW ) || e.h < 0.8 || e.h > 500 ) return;
+		if ( ! ( e.flags & FLAG.CITY ) || ( e.flags & NO_GROW ) || e.h < 0.8 || e.h > TREELINE - 60 ) return;
 		const beach = e.sd < 70 && e.h < 5;
-		if ( hash2( gi, gj, 142 ) > ( beach ? 0.3 : 0.1 ) ) return;
+		if ( hash2( gi, gj, 142 ) > ( beach ? 0.3 : 0.1 ) * treeAlt( e.h ) ) return;
 		const r = hash2( gi, gj, 143 );
-		const sp = beach || r < 0.6 ? SP.PALM : r < 0.82 ? SP.MONKEYPOD : ctx.isl === 5 ? SP.PINE : e.m < 0.3 ? SP.KIAWE : SP.KUKUI;
+		let sp = beach || r < 0.6 ? SP.PALM : r < 0.82 ? SP.MONKEYPOD : ctx.isl === 5 ? SP.PINE : e.m < 0.3 ? SP.KIAWE : SP.KUKUI;
+		if ( sp === SP.PALM && e.h > PALM_MAX ) sp = e.m > 0.4 ? SP.KUKUI : SP.IRONWOOD;
 		const clear = sp === SP.PALM ? 2 : 7;
 		if ( ! clearGround( ctx, x, z, 3, e.flags ) || nearBuilding( ctx.bld, x, z, clear ) || nearRoad( ctx.seg, x, z, sp === SP.PALM ? 1.2 : 4 ) ) return;
 		placeTree( ctx, sp, x, z, gi, gj, e, 60 );
@@ -351,11 +361,11 @@ function understory( ctx ) {
 		U[ 1 ] = 0.1 * sstep( 0.66, 0.88, m ) * band( h, 50, 90, 400, 450 ) * ( 1 - city ) * ( 0.4 + clump );
 		U[ 2 ] = 0.014 * sstep( 0.4, 0.6, m ) * band( h, 1.5, 3, 150, 200 ) * ( 0.2 + 2 * clump ) + city * 0.004;
 		U[ 3 ] = 0.012 * sstep( 0.45, 0.7, m ) * band( h, 1.5, 3, 280, 330 ) + city * 0.008;
-		U[ 4 ] = ( ( 0.025 + 0.06 * sstep( 0.12, 0.6, m ) ) * band( h, 1.2, 3, 520, 600 ) * ( 1 - sand * 0.85 ) + city * 0.02 ) * ( 1 - fresh * 0.8 );
+		U[ 4 ] = ( ( 0.025 + 0.06 * sstep( 0.12, 0.6, m ) ) * band( h, 1.2, 3, 520, 590 ) * ( 1 - sand * 0.85 ) + city * 0.02 ) * ( 1 - fresh * 0.8 );
 		U[ 5 ] = 0.34 * band( sd, 3, 7, 30, 48 ) * ( h < 6 ? 1 : 0 ) * ( 1 - city * 0.7 );
 		U[ 6 ] = ( 0.07 * open * sstep( 0.1, 0.25, m ) + 0.09 * sstep( 0.28, 0.12, m ) * ( 1 - fresh * 0.5 ) + 0.06 * band( lava, 0.15, 0.25, 0.6, 0.8 ) ) * band( h, 2, 5, 330, 420 ) * ( 1 - city ) * ( 1 - sand ) * ( e.use === 3 ? 0.15 : 1 );
 		U[ 7 ] = ( 0.004 + 0.06 * sstep( 0.45, 0.9, sl ) + 0.045 * sstep( 0.3, 0.6, lava ) + 0.1 * ( sd < 16 && sl > 0.22 ? 1 : 0 ) + 0.05 * sstep( 440, 520, h ) + 0.012 * sstep( 0.22, 0.1, m ) ) * ( 1 - city );
-		U[ 8 ] = 0.035 * sstep( 520, 560, h ) * ( 1 - sstep( 610, 640, h ) ); // sparse alpine scrub
+		U[ 8 ] = 0.035 * sstep( 520, 560, h ) * ( 1 - sstep( 585, 615, h ) ); // sparse alpine scrub, bare summits
 		let sum = 0;
 		for ( let k = 0; k < 9; k ++ ) sum += U[ k ];
 		const p = Math.min( 0.8, sum * alt * ( 1 - sstep( 0.9, 1.3, sl ) * 0.8 ) );
@@ -369,6 +379,7 @@ function understory( ctx ) {
 		const rank = hash2( gi, gj, 225 );
 		const yaw = r0 * TAU;
 		let y = hf.heightAt( x, z ), s = 1, a = 0, b = r3;
+		if ( y < 0.35 ) return;
 		switch ( sp ) {
 			case SP.FERN: s = 0.6 + 0.7 * r1; y -= 0.05; break;
 			case SP.TREEFERN: s = 0.6 + 0.8 * r1; a = 0.7 + 0.8 * r2; y -= 0.1; break;
@@ -462,6 +473,8 @@ function grass( ctx ) {
 		const r1 = hash2( gi, gj, 412 ), r2 = hash2( gi, gj, 413 );
 		const dry = city ? 0.1 * r2 : Math.min( 1, Math.max( 0, 1 - sstep( 0.1, 0.48, m ) + ( vnoise( x / 17, z / 17, 43 ) - 0.5 ) * 0.4 + e.lava * 0.4 ) );
 		const s = city ? 0.3 + 0.15 * r1 : e.use === 3 ? 0.5 + 0.3 * r1 : ( 0.6 + 0.55 * r1 ) * ( 0.8 + 0.4 * sstep( 0.2, 0.6, m ) );
-		ctx.out.add( SP.GRASS, x, ground.at( x, z ) - 0.03, z, s, hash2( gi, gj, 414 ) * TAU, hash2( gi, gj, 415 ), dry, city );
+		const gy = ground.at( x, z );
+		if ( gy < 0.4 ) return;
+		ctx.out.add( SP.GRASS, x, gy - 0.03, z, s, hash2( gi, gj, 414 ) * TAU, hash2( gi, gj, 415 ), dry, city );
 	} );
 }

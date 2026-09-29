@@ -1,6 +1,6 @@
 // Medical supplies, tools, vehicle parts, materials and odds and ends.
 import * as THREE from 'three';
-import { M, MAT, G, PI, add, group, ground, fabric, labelTex, labelUV, canvasTex, worldTex, shade, css } from './lib.js';
+import { M, MAT, G, PI, add, group, ground, fabric, labelTex, labelUV, canvasTex, worldTex, shade, css, facet } from './lib.js';
 
 const flatLabel = ( spec, o = {} ) => M( 0xffffff, { map: labelTex( spec ), rough: o.rough ?? 0.6, metal: o.metal ?? 0 } );
 
@@ -503,9 +503,9 @@ export function registerGearModels( reg ) {
 		const g = group();
 		const geo = G.sph( 0.05, 7, 5 );
 		const p = geo.attributes.position;
-		for ( let i = 0; i < p.count; i ++ ) { const k = 0.7 + ( ( Math.sin( i * 12.9 ) * 43758.5 ) % 1 + 1 ) % 1 * 0.5; p.setXYZ( i, p.getX( i ) * k, p.getY( i ) * k * 0.8, p.getZ( i ) * k ); }
-		geo.computeVertexNormals();
-		add( g, geo, M( s.color ?? 0xd8d4c8, { rough: 0.9, flat: true } ), [ 0, 0.035, 0 ] );
+		// jitter by position (not index) so the sphere's duplicated seam vertices move together and it stays closed
+		for ( let i = 0; i < p.count; i ++ ) { const k = 0.7 + ( ( Math.sin( p.getX( i ) * 131 + p.getY( i ) * 71 + p.getZ( i ) * 37 ) * 43758.5 ) % 1 + 1 ) % 1 * 0.5; p.setXYZ( i, p.getX( i ) * k, p.getY( i ) * k * 0.8, p.getZ( i ) * k ); }
+		add( g, facet( geo ), M( s.color ?? 0xd8d4c8, { rough: 0.9 } ), [ 0, 0.035, 0 ] );
 		return g;
 	} );
 
@@ -576,8 +576,7 @@ export function registerGearModels( reg ) {
 		const geo = new THREE.IcosahedronGeometry( r, 1 );
 		const p = geo.attributes.position;
 		for ( let i = 0; i < p.count; i ++ ) { const k = 0.8 + ( ( Math.sin( p.getX( i ) * 91 + p.getY( i ) * 57 + p.getZ( i ) * 33 ) * 43758.5 ) % 1 + 1 ) % 1 * 0.3; p.setXYZ( i, p.getX( i ) * k * 1.2, p.getY( i ) * k * 0.7, p.getZ( i ) * k ); }
-		geo.computeVertexNormals();
-		add( g, geo, M( s.color ?? 0x4a4644, { rough: 0.95, flat: true } ) );
+		add( g, facet( geo ), M( s.color ?? 0x4a4644, { rough: 0.95 } ) );
 		return ground( g );
 	} );
 	reg( 'feathers', () => {

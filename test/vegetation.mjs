@@ -1,0 +1,131 @@
+// Vegetation placement checks (Node, no browser): runs the worker-side scatter on the real terrain
+// at the test spots and checks the ecology rules (species by place, nothing on pavement / in the sea).
+//   node test/vegetation.mjs [x,z ...]
+import fs from 'node:fs';
+import zlib from 'node:zlib';
+import { HeightField, FLAG } from '../src/world/HeightField.js';
+import { scatterCell } from '../src/world/scatter.js';
+import { SP, NSP, STRIDE, SPECIES, LAYER, LAYER_CELL } from '../src/world/vegetation/species.js';
+
+const meta = JSON.parse( fs.readFileSync( 'public/data/world.json', 'utf8' ) );
+const raw = zlib.gunzipSync( fs.readFileSync( 'public/data/terrain.bin.gz' ) );
+const hf = new HeightField( raw.buffer.slice( raw.byteOffset, raw.byteOffset + raw.byteLength ), meta );
+
+let fails = 0, passes = 0;
+const ok = ( cond, msg ) => { if ( cond ) passes ++; else { fails ++; console.error( '  ✗ ' + msg ); } };
+
+// obstacles like Vegetation._obstaclesFor (buildings + roads / streets near a cell)
+const B = [], S = [];
+{
+	const bd = meta.buildings.data;
+	for ( let k = 0; k < bd.length; k += 11 ) B.push( [ bd[ k ], bd[ k + 1 ], bd[ k + 2 ] / 2, bd[ k + 3 ] / 2, bd[ k + 4 ], ( bd[ k + 8 ] || 1 ) * 3.2 ] );
+	for ( const rw of meta.runways || [] ) B.push( [ rw.x, rw.z, rw.len / 2 + 30, rw.w / 2 + 12, rw.angle, 0 ] );
+	const KINDS = { metro: 1, town: 2, village: 3, resort: 4, military: 5, airport: 5, observatory: 5 };
+	for ( const st of meta.streets ) S.push( [ st[ 1 ], st[ 2 ], st[ 4 ], st[ 5 ], st[ 7 ] / 2 + ( st[ 8 ] || 0 ), KINDS[ meta.cities[ st[ 0 ] ]?.kind ] || 2 ] );
+	for ( const rd of meta.roads ) { const p = rd.pts; for ( let k = 0; k + 5 < p.length; k += 3 ) S.push( [ p[ k ], p[ k + 1 ], p[ k + 3 ], p[ k + 4 ], rd.w / 2 + 1, 0 ] ); }
+}
+function obstacles( x0, z0, size ) {
+	const m = 60;
+	const bld = B.filter( b => b[ 0 ] > x0 - m - b[ 2 ] - b[ 3 ] && b[ 0 ] < x0 + size + m + b[ 2 ] + b[ 3 ] && b[ 1 ] > z0 - m - b[ 2 ] - b[ 3 ] && b[ 1 ] < z0 + size + m + b[ 2 ] + b[ 3 ] );
+	const seg = S.filter( s => Math.max( s[ 0 ], s[ 2 ] ) > x0 - m && Math.min( s[ 0 ], s[ 2 ] ) < x0 + size + m && Math.max( s[ 1 ], s[ 3 ] ) > z0 - m && Math.min( s[ 1 ], s[ 3 ] ) < z0 + size + m );
+	return { bld: bld.length ? new Float32Array( bld.flat() ) : null, seg: seg.length ? new Float32Array( seg.flat() ) : null };
+}
+
+function scatterArea( cx, cz, R, layer ) {
+	const size = LAYER_CELL[ layer ];
+	const counts = new Array( NSP ).fill( 0 );
+	const all = [];
+	let ms = 0, cells = 0;
+	for ( let j = Math.floor( ( cz - R ) / size ); j <= Math.floor( ( cz + R ) / size ); j ++ ) for ( let i = Math.floor( ( cx - R ) / size ); i <= Math.floor( ( cx + R ) / size ); i ++ ) {
+		const o = obstacles( i * size, j * size, size );
+		const t0 = performance.now();
+		const r = scatterCell( hf, { layer, i, j, bld: o.bld, seg: o.seg } );
+		ms += performance.now() - t0; cells ++;
+		ok( r.transfer && r.transfer.length === 2, 'scatter returns transfer buffers' );
+		for ( let s = 0; s < NSP; s ++ ) for ( let n = r.off[ s ]; n < r.off[ s + 1 ]; n ++ ) {
+			counts[ s ] ++;
+			all.push( [ s, ...r.data.subarray( n * STRIDE, n * STRIDE + STRIDE ) ] );
+		}
+	}
+	return { counts, all, ms, cells };
+}
+
+const fmt = ( counts ) => counts.map( ( c, s ) => c ? `${SPECIES[ s ].name} ${c}` : null ).filter( Boolean ).join( ', ' );
+
+// test spots: [ name, x, z, expectations: species that must be there (canopy + detail) ]
+const SPOTS = [
+	[ 'Waikiki beach', - 3973, - 9770, [ SP.PALM ] ],
+	[ 'North Shore beach', - 6840, - 15220, [ SP.PALM, SP.NAUPAKA ] ],
+	[ 'Kaneohe bay shore', - 2800, - 11840, [ SP.PALM ] ],
+	[ 'Koolau windward forest', - 4300, - 11800, [ SP.OHIA, SP.TREEFERN, SP.FERN ] ],
+	[ 'Hilo', 31920, 11860, [ SP.PALM ] ],
+	[ 'Kona coast', 19440, 12360, [ SP.KIAWE ] ],
+	[ 'Wahiawa pineapple', - 6384, - 13584, [ SP.PINEAPPLE ] ],
+	[ 'Maui sugar cane', 14224, - 3728, [ SP.CANE ] ],
+];
+const extra = process.argv.slice( 2 ).map( a => { const [ x, z ] = a.split( ',' ).map( Number ); return [ 'arg', x, z, [] ]; } );
+// distance from (x, z) to the nearest road / street edge (m, negative inside)
+const roadGap = ( x, z ) => {
+	let best = 1e9;
+	for ( const s of S ) {
+		const ex = s[ 2 ] - s[ 0 ], ez = s[ 3 ] - s[ 1 ], L2 = ex * ex + ez * ez;
+		let t = L2 > 0 ? ( ( x - s[ 0 ] ) * ex + ( z - s[ 1 ] ) * ez ) / L2 : 0;
+		t = Math.max( 0, Math.min( 1, t ) );
+		best = Math.min( best, Math.hypot( x - s[ 0 ] - ex * t, z - s[ 1 ] - ez * t ) - s[ 4 ] );
+	}
+	return best;
+};
+for ( const [ name, x, z, want ] of extra.length ? extra : SPOTS ) {
+	const h = hf.heightAt( x, z ), s = hf.surfaceAt( x, z );
+	console.log( `\n${name} (${x}, ${z}) h ${h.toFixed( 1 )} moist ${s[ 0 ].toFixed( 2 )} lava ${s[ 1 ].toFixed( 2 )} red ${s[ 2 ].toFixed( 2 )} use ${s[ 3 ]} flags ${hf.flagsNear( x, z )}` );
+	const seen = new Set();
+	for ( const [ layer, R ] of [ [ LAYER.CANOPY, 150 ], [ LAYER.DETAIL, 100 ], [ LAYER.GRASS, 40 ] ] ) {
+		const r = scatterArea( x, z, R, layer );
+		console.log( `  layer ${layer}: ${r.cells} cells ${( r.ms / r.cells ).toFixed( 2 )} ms/cell: ${fmt( r.counts )}` );
+		r.counts.forEach( ( c, sp ) => c && seen.add( sp ) );
+		// rules: never on pavement (street trees stand in the verge beside it), building pads or in the sea
+		let paved = 0, sea = 0, building = 0;
+		for ( const [ sp, px, , pz ] of r.all ) {
+			const fl = hf.flagsNear( px, pz );
+			if ( ( fl & ( FLAG.ROAD | FLAG.STREET | FLAG.RUNWAY ) ) && roadGap( px, pz ) < 0.5 ) paved ++;
+			if ( ( fl & FLAG.BUILDING ) && sp !== SP.GRASS ) building ++;
+			if ( hf.baseHeight( px, pz ) < 0.2 ) sea ++;
+		}
+		ok( paved === 0, `${name} layer ${layer}: ${paved} plants on pavement` );
+		ok( building === 0, `${name} layer ${layer}: ${building} plants on building pads` );
+		ok( sea === 0, `${name} layer ${layer}: ${sea} plants in the sea` );
+	}
+	for ( const sp of want ) ok( seen.has( sp ), `${name}: expected ${SPECIES[ sp ].name}` );
+}
+
+// ---- altitude: the summits are bare, no trees above the tree line, palms stay low ------------------
+{
+	const mk = meta.labels.find( l => l.name === 'Mauna Kea' );
+	const r = scatterArea( mk.x, mk.z, 400, LAYER.CANOPY );
+	ok( r.all.length === 0, `Mauna Kea summit bare of trees (${r.all.length} trees: ${fmt( r.counts )})` );
+	const d = scatterArea( mk.x, mk.z, 200, LAYER.DETAIL );
+	ok( d.all.filter( a => a[ 0 ] !== SP.ROCK ).length === 0, `Mauna Kea summit: only rocks (${fmt( d.counts )})` );
+	// a transect down the flank: count trees by altitude band
+	let high = 0, palmsHigh = 0, total = 0;
+	for ( const L of [ 'Mauna Kea', 'Mauna Loa', 'Haleakalā', 'Hualālai' ] ) {
+		const p = meta.labels.find( l => l.name === L );
+		if ( ! p ) continue;
+		for ( let k = 0; k < 24; k ++ ) {
+			const a = k / 24 * Math.PI * 2, rr = 800 + k * 260;
+			const c = scatterArea( p.x + Math.cos( a ) * rr, p.z + Math.sin( a ) * rr, 60, LAYER.CANOPY );
+			for ( const [ sp, , py ] of c.all ) { total ++; if ( py > 530 ) high ++; if ( sp === SP.PALM && py > 250 ) palmsHigh ++; }
+		}
+	}
+	ok( high === 0, `no trees above the tree line (${high} of ${total})` );
+	ok( palmsHigh === 0, `no palms in the uplands (${palmsHigh})` );
+}
+
+// determinism: the same cell twice gives the same data
+{
+	const o = obstacles( - 3973, - 9770, 64 );
+	const a = scatterCell( hf, { layer: 0, i: - 63, j: - 153, bld: o.bld, seg: o.seg } ), b = scatterCell( hf, { layer: 0, i: - 63, j: - 153, bld: o.bld, seg: o.seg } );
+	ok( a.data.length === b.data.length && a.data.every( ( v, k ) => v === b.data[ k ] ), 'scatter is deterministic' );
+}
+
+console.log( `\n${passes} passed, ${fails} failed` );
+process.exit( fails ? 1 : 0 );

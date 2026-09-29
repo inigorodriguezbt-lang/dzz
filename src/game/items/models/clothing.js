@@ -131,8 +131,10 @@ export function registerClothingModels( reg ) {
 				break;
 			}
 			case 'visor': {
-				add( g, G.torus( 0.08, 0.012, 5, 18, PI * 1.3 ), mat, [ 0, 0.012, 0 ], [ PI / 2, 0, PI * 0.35 ] );
-				add( g, G.cyl( 0.08, 0.08, 0.005, 16 ).scale( 1, 1, 0.9 ), acc, [ 0.085, 0.005, 0 ] );
+				// headband open at the back, a curved bill over the forehead (+x)
+				add( g, G.torus( 0.08, 0.012, 5, 18, PI * 1.3 ), mat, [ 0, 0.012, 0 ], [ PI / 2, 0, - PI * 0.65 ] );
+				const bill = new THREE.CylinderGeometry( 0.09, 0.09, 0.005, 16, 1, false, 0, PI ).scale( 0.9, 1, 1.05 );
+				add( g, bill, acc, [ 0.02, 0.004, 0 ], [ 0, 0, 0.12 ] );
 				break;
 			}
 			case 'hardhat': {

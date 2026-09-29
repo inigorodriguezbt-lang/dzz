@@ -1,7 +1,7 @@
 // Food and drink models: printed cans and tins, bottles (lathe profiles), cartons, jars, snack bags and bars,
 // cup noodles, printed boxes, Hawaiian fruit, plate lunches, meat and fish.
 import * as THREE from 'three';
-import { M, MAT, G, PI, add, group, ground, labelTex, labelUV, gradientTex, canvasTex, css, shade, hashStr } from './lib.js';
+import { M, MAT, G, PI, add, group, ground, labelTex, labelUV, gradientTex, canvasTex, css, shade, hashStr, facet } from './lib.js';
 
 // a wrap-around label texture repeated `rep` times around a can
 const wraps = new Map();
@@ -45,12 +45,23 @@ export function registerFoodModels( reg ) {
 	reg( 'tin', ( s ) => {
 		const [ w, h, d ] = s.size || [ 0.095, 0.075, 0.055 ], g = group();
 		const tin = MAT.tin();
-		const lab = labelMat( s.label, 2, 512, 256, { rough: 0.45, metal: 0.15 } );
 		const taper = s.taper ?? 1;
+		if ( h < 0.45 * Math.min( w, d ) ) {
+			// flat tins (sardines) carry the print on the lid
+			const geo = G.rbox( w, h, d, h * 0.3, 2 );
+			labelUV( geo, 'y', 0.85 );
+			add( g, geo, M( 0xffffff, { map: labelTex( { split: 0.85, h: 256, ...( s.label || {} ) } ), rough: 0.4, metal: 0.25 } ) );
+			add( g, G.torus( Math.min( w, d ) * 0.12, 0.002, 4, 12 ), tin, [ w * 0.36, h + 0.001, 0 ], [ PI / 2, 0, 0 ] );
+			return g;
+		}
+		// one full label per side (the texture repeats four times around), sized to the face so the print is not squashed
+		const faceH = h * 0.84, aspect = Math.max( 1, Math.min( 3, w / faceH ) );
+		const lab = labelMat( s.label, 4, Math.round( 256 * aspect / 16 ) * 16, 256, { rough: 0.45, metal: 0.15 } );
 		add( g, G.rbox( w * 0.99, h * 0.08, d * 0.99, 0.006 ), tin );
-		add( g, G.rectWrap( w, h * 0.84, d, taper ), lab, [ 0, h * 0.08, 0 ] );
+		add( g, G.rectWrap( w, faceH, d, taper ), lab, [ 0, h * 0.08, 0 ] );
 		add( g, G.rbox( w * taper * 0.99, h * 0.08, d * taper * 0.99, 0.006 ), tin, [ 0, h * 0.92, 0 ] );
 		if ( s.key ) add( g, G.box( w * 0.5, 0.003, 0.006 ), tin, [ - w * 0.1, h * 0.3, d / 2 + 0.003 ] );
+		else add( g, G.torus( Math.min( w, d ) * 0.14, 0.002, 4, 12 ), tin, [ w * 0.3, h + 0.001, 0 ], [ PI / 2, 0, 0 ] ); // pull tab
 		return g;
 	} );
 
@@ -217,8 +228,8 @@ export function registerFoodModels( reg ) {
 				break;
 			}
 			case 'coconut': {
-				const geo = G.sph( 0.085, 7, 9 ); geo.scale( 1.18, 0.95, 1 ); geo.translate( 0, 0.08, 0 );
-				add( g, geo, M( ck ? 0x6b4a2a : 0x6f8a3a, { rough: 0.85, flat: true, map: gradientTex( [ [ 0, 0x97a74e ], [ 0.6, 0x6d8537 ], [ 1, 0x5b5a2c ] ], 300, '#3a3a1a', 3 ) } ) );
+				const geo = facet( G.sph( 0.085, 7, 9 ).scale( 1.18, 0.95, 1 ).translate( 0, 0.08, 0 ) );
+				add( g, geo, M( ck ? 0x6b4a2a : 0x6f8a3a, { rough: 0.85, map: gradientTex( [ [ 0, 0x97a74e ], [ 0.6, 0x6d8537 ], [ 1, 0x5b5a2c ] ], 300, '#3a3a1a', 3 ) } ) );
 				add( g, G.cone( 0.018, 0.02, 6 ), M( 0x5a4a2a ), [ 0.09, 0.08, 0 ], [ 0, 0, - PI / 2 ] );
 				break;
 			}
@@ -395,7 +406,8 @@ export function registerFoodModels( reg ) {
 
 	// ---- meat: { kind: 'steak'|'chunk'|'chicken'|'ribs', color, cooked, fat } ----
 	const marble = ( c, cooked ) => canvasTex( `marble:${c}:${cooked}`, 128, 128, ( ctx, W, H ) => {
-		ctx.fillStyle = css( cooked ? shade( c, - 0.55 ) : c ); ctx.fillRect( 0, 0, W, H );
+		// cooked meat browns whatever it started as
+		ctx.fillStyle = css( cooked ? 0x6e3f1f : c ); ctx.fillRect( 0, 0, W, H );
 		ctx.strokeStyle = cooked ? 'rgba(40,20,5,0.7)' : 'rgba(255,235,225,0.55)'; ctx.lineWidth = cooked ? 5 : 2;
 		for ( let i = 0; i < ( cooked ? 5 : 14 ); i ++ ) {
 			ctx.beginPath();
@@ -439,7 +451,7 @@ export function registerFoodModels( reg ) {
 			}
 		}
 		// butcher paper under raw cuts
-		if ( ! ck && s.paper !== false && s.kind !== 'chicken' ) add( g, G.box( 0.22, 0.002, 0.17 ), M( 0xf2ece0, { rough: 1 } ), [ 0, - 0.002, 0 ] );
+		if ( ! ck && s.paper !== false && s.kind !== 'chicken' ) { add( g, G.box( 0.22, 0.002, 0.17 ), M( 0xf2ece0, { rough: 1 } ), [ 0, - 0.002, 0 ] ); ground( g, false ); }
 		return g;
 	} );
 

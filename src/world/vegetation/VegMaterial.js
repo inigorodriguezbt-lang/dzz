@@ -109,7 +109,7 @@ const VERT_PARS = /* glsl */`
 				vec3 o2 = normalize( o1 + disp + vec3( 0.0, 1e-5, 0.0 ) ) * L;
 				// a few fronds missing per palm: every crown is different
 				float k = aMat.w - 1.0;
-				if ( k > 0.5 && k < 19.5 && vegHash( vec2( k * 1.37, rank * 97.0 ) ) < 0.17 ) o2 = vec3( 0.0, - 0.3, 0.0 );
+				if ( k > 0.5 && k < 18.5 && vegHash( vec2( k * 1.37, rank * 97.0 ) ) < 0.12 ) o2 = vec3( 0.0, - 0.3, 0.0 );
 				lp = C + o2;
 				ln = N1;
 			}
@@ -216,7 +216,10 @@ const FRAG_COLOR = /* glsl */`
 		vegC *= uBarkTint * ( 0.85 + 0.3 * vegSeed ) * mix( 0.45, 1.0, vegAo );
 		vegRough = 0.92;
 	} else {
-		// rock: grey-brown boulders, black lava
+		// rock: grey-brown boulders, black lava. The texture only brings the detail: divided by its
+		// own mean (the last mip) so the tints set the albedo whatever the texture's brightness
+		vec3 vegAvg = max( textureLod( tRock, vec2( 0.5 ), 12.0 ).rgb, vec3( 1e-4 ) );
+		vegC = vegTx.rgb / dot( vegAvg, vec3( 0.333 ) ) * 0.36 * vVegCol;
 		vegC *= mix( uTintA, uTintB, vVegInst.z ) * mix( 0.5, 1.0, vegAo );
 		vegRough = 0.88;
 	}

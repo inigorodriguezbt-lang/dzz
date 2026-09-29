@@ -61,10 +61,25 @@ const AMMO_DESC = {
 	'flare': 'A signal flare. Bright, loud and it burns.',
 };
 
+// Exterior ballistics per calibre: pen = metres of wood (drywall, doors, planks) the round can punch through,
+// drag = velocity lost per second (1/s, a simple exponential), sub = subsonic (no supersonic crack).
+export const BALLISTIC = {
+	'9mm': { pen: 0.12, drag: 0.45, sub: 1 }, '.45acp': { pen: 0.1, drag: 0.5, sub: 1 }, '.357': { pen: 0.16, drag: 0.4 },
+	'.44mag': { pen: 0.2, drag: 0.4 }, '.50ae': { pen: 0.22, drag: 0.4 }, '.22lr': { pen: 0.05, drag: 0.6, sub: 1 },
+	'9x18': { pen: 0.1, drag: 0.5, sub: 1 }, '5.56': { pen: 0.25, drag: 0.14 }, '5.45': { pen: 0.25, drag: 0.14 },
+	'7.62x39': { pen: 0.3, drag: 0.2 }, '.308': { pen: 0.45, drag: 0.1 }, '7.62x54r': { pen: 0.45, drag: 0.1 },
+	'.50bmg': { pen: 1.6, drag: 0.05, concrete: 0.35 }, '12ga': { pen: 0.03, drag: 1.6, sub: 1 }, '.30-30': { pen: 0.35, drag: 0.18 },
+	'4.6x30': { pen: 0.3, drag: 0.3 }, arrow: { pen: 0.06, drag: 0.08, sub: 1 }, bolt: { pen: 0.07, drag: 0.08, sub: 1 },
+	flare: { pen: 0, drag: 0.25, sub: 1 },
+};
+
 const ammoDefs = AMMO.map( ( [ id, name, caliber, dmg, stack, w, rarity, tags, pellets ] ) => ( {
 	id, name, cat: 'ammo', weight: w, size: caliber === '.50bmg' ? 2 : 1, stack, rarity, tags,
 	desc: id === 'ammo_12ga_buck' ? '00 buckshot: nine pellets, devastating up close.' : id === 'ammo_12ga_slug' ? 'A single heavy lead slug. Accurate to 100 m.' : AMMO_DESC[ caliber ],
-	ammo: { caliber, damage: dmg, ...( pellets ? { pellets } : {} ), ...( caliber === 'flare' ? { tracer: true } : {} ) },
+	ammo: {
+		caliber, damage: dmg, ...( pellets ? { pellets } : {} ), ...( caliber === 'flare' ? { tracer: true } : {} ),
+		pen: id === 'ammo_12ga_slug' ? 0.15 : BALLISTIC[ caliber ].pen, drag: id === 'ammo_12ga_slug' ? 0.6 : BALLISTIC[ caliber ].drag,
+	},
 	model: { type: 'ammo_box', caliber },
 } ) );
 
@@ -173,7 +188,7 @@ const firearmDefs = [
 		model: { arch: 'pistol', v: 'ruger' } } ),
 	gun( 'flare_gun', 'Flare gun', 'Orange signal pistol. Lights up the night — and everything hears it.', {
 		weight: 0.5, size: 3, rarity: 'common', tags: [ 'civilian', 'boat', 'gas_station' ],
-		firearm: { cls: 'pistol', caliber: 'flare', feed: 'internal', capacity: 1, rpm: 60, modes: [ 'single' ], action: 'break', damage: 22, velocity: 70, range: 60, spread: 0.01, recoil: 0.7, noise: 200, reload: 1.8, perRound: 1.8, zero: 20, sound: 'flare_fire', pitch: 1 },
+		firearm: { cls: 'pistol', caliber: 'flare', feed: 'internal', capacity: 1, rpm: 60, modes: [ 'single' ], action: 'break', damage: 30, velocity: 70, range: 60, spread: 0.01, recoil: 0.7, noise: 200, reload: 1.8, perRound: 1.8, zero: 20, sound: 'flare_fire', pitch: 1 },
 		model: { arch: 'flare' } } ),
 
 	// ---- SMGs ----
@@ -369,7 +384,7 @@ const MELEE = [
 	[ 'kitchen_knife', 'Kitchen knife', 'A sharp chef\'s knife. Cuts, opens cans, skins game.', 24, 2.1, 1.35, 4, 'blade', false, 0.012, [ 'cut', 'open_can', 'skin' ], 0.2, 1, 'common', [ 'kitchen', 'civilian' ] ],
 	[ 'hunting_knife', 'Hunting knife', 'Fixed-blade hunting knife with a gut hook.', 30, 2.0, 1.4, 4, 'blade', false, 0.006, [ 'cut', 'skin', 'open_can' ], 0.3, 1, 'uncommon', [ 'hunting', 'sports' ] ],
 	[ 'combat_knife', 'Combat knife', 'Military fighting knife. Quick, quiet and tough.', 34, 2.1, 1.4, 4, 'blade', false, 0.004, [ 'cut', 'skin', 'open_can' ], 0.32, 1, 'rare', [ 'military' ] ],
-	[ 'machete', 'Machete', 'Long jungle blade. Clears brush and heads alike.', 46, 1.35, 1.85, 8, 'blade', false, 0.005, [ 'cut', 'chop', 'skin' ], 0.6, 3, 'common', [ 'farm', 'hardware', 'civilian' ] ],
+	[ 'machete', 'Machete', 'Long jungle blade. Clears brush and heads alike.', 46, 1.35, 1.85, 8, 'blade', false, 0.005, [ 'cut', 'chop', 'skin', 'open_can' ], 0.6, 3, 'common', [ 'farm', 'hardware', 'civilian' ] ],
 	[ 'cane_knife', 'Cane knife', 'Hooked sugar-cane knife from the old plantations.', 44, 1.35, 1.8, 8, 'blade', false, 0.006, [ 'cut', 'chop' ], 0.65, 3, 'uncommon', [ 'farm' ] ],
 	[ 'hatchet', 'Hatchet', 'Small axe. Chops wood and splits skulls.', 50, 1.25, 1.6, 9, 'axe', false, 0.004, [ 'chop', 'cut' ], 0.8, 2, 'common', [ 'hardware', 'farm', 'civilian' ] ],
 	[ 'fire_axe', 'Fire axe', 'Heavy two-handed axe with a pick. Breaks doors too.', 85, 0.75, 2.1, 17, 'axe', true, 0.003, [ 'chop', 'pry' ], 2.6, 5, 'uncommon', [ 'fire_station', 'hardware' ] ],

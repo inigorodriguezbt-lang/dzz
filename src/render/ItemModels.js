@@ -19,12 +19,35 @@ const cache = new Map();
 const infoCache = new Map();
 const partsCache = new Map();
 
+const listeners = new Set();
+
 export function registerModelBuilder( type, fn ) {
 	builders.set( type, fn );
+	sigCache.delete( type );
 	// a late registration (the weapons module loads after this one) replaces placeholder models built earlier
-	for ( const [ id, obj ] of cache ) if ( obj.userData.fallback && obj.userData.type === type ) { cache.delete( id ); infoCache.delete( id ); partsCache.delete( id ); }
+	const stale = [];
+	for ( const [ id, obj ] of cache ) if ( obj.userData.fallback && obj.userData.type === type ) { cache.delete( id ); infoCache.delete( id ); partsCache.delete( id ); stale.push( id ); }
+	for ( const fn2 of listeners ) { try { fn2( type, stale ); } catch ( e ) { console.error( e ); } }
 }
 export const hasModelBuilder = ( type ) => builders.has( type );
+
+// called with ( type, staleIds ) whenever a builder registers (the world item renderer rebuilds placeholders)
+export function onModelBuilder( fn ) { listeners.add( fn ); return () => listeners.delete( fn ); }
+
+// a short hash of a builder's source: cached icons re-render when the code that draws them changes
+const sigCache = new Map();
+export function builderSignature( type ) {
+	let s = sigCache.get( type );
+	if ( s !== undefined ) return s;
+	const fn = builders.get( type );
+	if ( ! fn ) return 'none';
+	const src = fn.toString();
+	let h = 2166136261;
+	for ( let i = 0; i < src.length; i ++ ) { h ^= src.charCodeAt( i ); h = Math.imul( h, 16777619 ); }
+	s = ( h >>> 0 ).toString( 36 );
+	sigCache.set( type, s );
+	return s;
+}
 
 export function buildItemModel( def ) {
 	if ( cache.has( def.id ) ) return cache.get( def.id );

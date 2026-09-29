@@ -133,7 +133,7 @@ function sign( C, cell, x, y, z, yaw, w, h, dbl = 0, dyn = 0 ) {
 	C.out.signs.push( dyn, cell, x - OX, y, z - OZ, yaw, w, h, dbl, 0 );
 }
 function decal( C, kind, x, z, yaw, sx, sz, alpha = 1, y = null ) {
-	C.out.decals.push( kind, x - OX, y ?? H( x, z ) + 0.08, z - OZ, yaw, sx, sz, alpha );
+	C.out.decals.push( kind, x - OX, y ?? H( x, z ) + 0.1, z - OZ, yaw, sx, sz, alpha );
 }
 function box( C, x, y, z, hx, hy, hz, yaw, mat ) {
 	C.out.boxes.push( x - OX, y, z - OZ, hx, hy, hz, yaw, MATS.indexOf( mat ) );
@@ -266,11 +266,18 @@ function highwayStrip( C, r, rh, rows ) {
 	const cls = r.lanes === 4 ? RC.FREEWAY : r.lanes === 2 ? RC.HIGHWAY : RC.DIRT;
 	ribbon( out.road, rows, cols, lifts, ( row, c, e ) => {
 		e[ 0 ] = cols[ c ]; e[ 1 ] = row.s; e[ 2 ] = cls; e[ 3 ] = r.w;
-		e[ 4 ] = rh % 997; e[ 5 ] = r.lanes; e[ 6 ] = 0; e[ 7 ] = 0;
+		e[ 4 ] = rh % 997; e[ 5 ] = r.lanes; e[ 6 ] = r.lanes === 1 ? redSoil( row ) : 0; e[ 7 ] = 0;
 	} );
 	// the median barrier on freeways
 	if ( r.lanes === 4 ) jersey( C, rows, 0, ! lod );
 	if ( ! lod && r.lanes >= 2 ) guardrails( C, r, rows );
+}
+
+// red dirt (Lānaʻi, Kauaʻi, upcountry Maui) tints the rural tracks
+const S4 = [ 0, 0, 0, 0 ];
+function redSoil( row ) {
+	if ( row.red === undefined ) row.red = Math.min( 1, hf.surfaceAt( row.x, row.z, S4 )[ 2 ] * 1.4 );
+	return row.red;
 }
 
 // Jersey barrier profile extruded along rows at across offset u
@@ -605,15 +612,15 @@ function walkStrip( C, st, side, a0, a1 ) {
 		if ( ! samples[ k ].ok ) { k ++; continue; }
 		let e = k;
 		while ( e + 1 < samples.length && samples[ e + 1 ].ok ) e ++;
-		if ( e > k ) walkPiece( G, samples.slice( k, e + 1 ), st, side, nx, nz, k > 0, e < samples.length - 1 );
+		if ( e > k ) walkPiece( C, G, samples.slice( k, e + 1 ), st, side, nx, nz, k > 0, e < samples.length - 1 );
 		k = e + 1;
 	}
 }
 
-function walkPiece( G, sm, st, side, nx, nz, capStart, capEnd ) {
+function walkPiece( C, G, sm, st, side, nx, nz, capStart, capEnd ) {
 	const hw = st.w / 2, wk = st.walk;
 	const R = sm.length;
-	const seed = hh( st.id, side, 3 );
+	const seed = net.cities[ st.city ].angle; // the paving pattern follows the city grid
 	// along coordinate increases along st.d; for side -1 the "right" order flips
 	const rowV = [];
 	for ( const s of sm ) {
@@ -662,6 +669,24 @@ function walkPiece( G, sm, st, side, nx, nz, capStart, capEnd ) {
 	};
 	if ( capStart ) cap( rowV[ 0 ], - 1 );
 	if ( capEnd ) cap( rowV[ R - 1 ], 1 );
+	// walkable slabs: runs of samples merged while the top stays within 5 cm
+	if ( C.lod ) return;
+	const yaw = yawZ( st.dx, st.dz );
+	let k = 0;
+	while ( k < R - 1 ) {
+		let e = k + 1, lo = Math.min( rowV[ k ].hi, rowV[ k ].ho, rowV[ e ].hi, rowV[ e ].ho ), hi = Math.max( rowV[ k ].hi, rowV[ k ].ho, rowV[ e ].hi, rowV[ e ].ho );
+		while ( e < R - 1 ) {
+			const r = rowV[ e + 1 ];
+			const nlo = Math.min( lo, r.hi, r.ho ), nhi = Math.max( hi, r.hi, r.ho );
+			if ( nhi - nlo > 0.05 || r.a - rowV[ k ].a > 24 ) break;
+			lo = nlo; hi = nhi; e ++;
+		}
+		const a = rowV[ k ], b = rowV[ e ];
+		const cx = ( a.ix + a.ox + b.ix + b.ox ) / 4, cz = ( a.iz + a.oz + b.iz + b.oz ) / 4;
+		const top = ( lo + hi ) / 2 + CURB, bot = lo - 0.4;
+		box( C, cx, ( top + bot ) / 2, cz, wk / 2, ( top - bot ) / 2, ( b.a - a.a ) / 2 + 0.02, yaw, 'concrete' );
+		k = e;
+	}
 }
 
 function streetProps( C, st ) {
@@ -848,7 +873,15 @@ function emitNodes( C ) {
 function nodeWalks( C, n, toW, eu, ev, has ) {
 	const G = C.out.walk;
 	const hw = n.w / 2, wk = n.walk;
-	const seed = hh( n.key % 1e9, 5 );
+	const seed = net.cities[ n.city ].angle;
+	const nodeYaw = yawX( eu[ 0 ], eu[ 1 ] );
+	// a walkable slab over a node-frame rectangle (local x along eu, local z along ev)
+	const slab = ( A0, A1, B0, B1 ) => {
+		const hs = [ [ A0, B0 ], [ A1, B0 ], [ A0, B1 ], [ A1, B1 ] ].map( ( [ a, b ] ) => lw( a, b )[ 1 ] );
+		const top = ( Math.max( ...hs ) + Math.min( ...hs ) ) / 2 + CURB, bot = Math.min( ...hs ) - 0.4;
+		const [ cx, cz ] = toW( ( A0 + A1 ) / 2, ( B0 + B1 ) / 2 );
+		box( C, cx, ( top + bot ) / 2, cz, ( A1 - A0 ) / 2, ( top - bot ) / 2, ( B1 - B0 ) / 2, nodeYaw, 'concrete' );
+	};
 	const lw = ( a, b ) => { const [ x, z ] = toW( a, b ); return [ x, H( x, z ) + LIFT.walk, z ]; };
 	const dirW = ( a, b ) => [ eu[ 0 ] * a + ev[ 0 ] * b, eu[ 1 ] * a + ev[ 1 ] * b ];
 	const hitHw = ( pts ) => pts.some( ( [ a, b ] ) => { const [ x, z ] = toW( a, b ); return onHighway( x, z, 0.3 ); } );
@@ -888,6 +921,9 @@ function nodeWalks( C, n, toW, eu, ev, has ) {
 				G.v( p[ 0 ], p[ 1 ] + CURB, p[ 2 ], nxw, 0, nzw, E );
 			}
 			for ( let k = 0; k < N; k ++ ) { const a = fb + k * 2; if ( up ) G.q( a + 1, a, a + 3, a + 2 ); else G.q( a, a + 1, a + 2, a + 3 ); }
+			// the part of the quarter disc a square slab can cover
+			const q = wk * 0.7;
+			slab( Math.min( ca, ca - sa * q ), Math.max( ca, ca - sa * q ), Math.min( cb, cb - sb * q ), Math.max( cb, cb - sb * q ) );
 		} else {
 			// square corner: top + faces towards any street and the outside
 			const A0 = Math.min( sa * hw, ca ), A1 = Math.max( sa * hw, ca ), B0 = Math.min( sb * hw, cb ), B1 = Math.max( sb * hw, cb );
@@ -895,6 +931,7 @@ function nodeWalks( C, n, toW, eu, ev, has ) {
 				a0: sa > 0 ? ( hasB ? 1 : 0 ) : ( hasA ? 0 : 2 ), a1: sa > 0 ? ( hasA ? 0 : 2 ) : ( hasB ? 1 : 0 ),
 				b0: sb > 0 ? ( hasA ? 1 : 0 ) : ( hasB ? 0 : 2 ), b1: sb > 0 ? ( hasB ? 0 : 2 ) : ( hasA ? 1 : 0 ),
 			} );
+			slab( A0, A1, B0, B1 );
 		}
 	}
 	// caps across missing arms
@@ -907,6 +944,7 @@ function nodeWalks( C, n, toW, eu, ev, has ) {
 		const mids = [ [ ( A0 + A1 ) / 2, ( B0 + B1 ) / 2 ], [ A0, B0 ], [ A1, B1 ], [ A0, B1 ], [ A1, B0 ] ];
 		if ( hitHw( mids ) ) continue;
 		walkBox( G, lw, dirW, A0, A1, B0, B1, seed, faces );
+		slab( A0, A1, B0, B1 );
 	}
 }
 
@@ -988,7 +1026,7 @@ function nodeProps( C, n, toW, has ) {
 			const top = big ? 3.2 : 2.75;
 			if ( su ) sign( C, SIGN_CELL.street( su.base ? 80 + su.name : su.name ), x, y + top, z, yawZ( n.sa, - n.ca ), 0.95, 0.2, 1 );
 			if ( sv ) sign( C, SIGN_CELL.street( sv.base ? 80 + sv.name : sv.name ), x, y + top - 0.24, z, yawZ( n.ca, n.sa ), 0.95, 0.2, 1 );
-			if ( big ) prop( C, PROP.SIGN_POST, x, z, 0, 1, 1.3, 0, y );
+			if ( big ) prop( C, PROP.SIGN_POST, x, z, 0, 1, 1.15, 0, y );
 		}
 	}
 	// corner furniture

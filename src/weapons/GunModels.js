@@ -1666,18 +1666,18 @@ export function magData( def ) {
 	return d;
 }
 
-// Upright first-person copy: { obj, info, parts, mag (Object3D or null) }
-export function buildGunView( def ) {
+// Upright copy for the first-person view (mode 'view': unfogged materials lit by the view scene): { obj, info, parts }
+export function buildGunView( def, mode = 'view' ) {
 	const data = gunData( def );
-	const mats = weaponMaterials();
+	const mats = weaponMaterials( mode );
 	const obj = instantiate( data.baked, mats, false );
 	const parts = obj.userData.parts;
 	if ( parts.mount ) parts.mount.visible = false;
 	return { obj, info: data.info, parts };
 }
 
-export function buildMagView( def ) {
-	const obj = instantiate( magData( def ).baked, weaponMaterials(), false );
+export function buildMagView( def, mode = 'view' ) {
+	const obj = instantiate( magData( def ).baked, weaponMaterials( mode ), false );
 	obj.name = def.id;
 	return obj;
 }
@@ -1747,16 +1747,14 @@ export function attachmentParts( def ) {
 	} else if ( k === 'holo' ) {
 		railClamp( P, - 0.045, 0.04, 0.014, 0.016 );
 		P.box( 'blk', - 0.045, 0.04, 0.012, 0.022, - 0.017, 0.017, 0.004 );
-		P.extFront( 'blk', [ [ - 0.019, 0.02 ], [ 0.019, 0.02 ], [ 0.019, 0.056, 0.006 ], [ - 0.019, 0.056, 0.006 ] ], - 0.03, 0.03, 0.002, 3 );
-		// the window: hood sides and top only
+		// the window: an open hood (sides and top) over the base, the laser housing at the back
+		P.box( 'blk', - 0.045, - 0.03, 0.02, 0.05, - 0.017, 0.017, 0.004 );
 		P.box( 'blk', - 0.03, 0.03, 0.022, 0.055, 0.0145, 0.019, 0.002 );
 		P.box( 'blk', - 0.03, 0.03, 0.022, 0.055, - 0.019, - 0.0145, 0.002 );
 		P.box( 'blk', - 0.03, 0.03, 0.051, 0.056, - 0.019, 0.019, 0.002 );
 		P.box( 'lens', 0.018, 0.02, 0.023, 0.051, - 0.0145, 0.0145, 0 );
 		P.box( 'rubber', - 0.047, - 0.04, 0.013, 0.02, - 0.012, 0.012, 0.002 );
 		info = { axisH: 0.037, rearX: - 0.03, frontX: 0.03, lensR: 0.014, lensH: 0.012, eyeRelief: 0.2, reticleX: 0.019, window: 1 };
-		// replace the solid block from extFront with nothing: the solid is the lower base only
-		P.geo.blk.splice( P.geo.blk.length - 4, 1 );
 	} else if ( k === 'prism' ) {
 		railClamp( P, - 0.03, 0.03, 0.012 );
 		P.box( 'blk', - 0.03, 0.03, 0.01, 0.047, - 0.0165, 0.0165, 0.004 );
@@ -1788,7 +1786,6 @@ export function attachmentParts( def ) {
 		P.cylY( 'blued', 0.0, axisH + r - 0.002, axisH + r + ( big ? 0.022 : 0.014 ), big ? 0.013 : 0.01, 0, 14 );
 		P.cylZ( 'blued', 0.0, axisH, r - 0.002, r + ( big ? 0.02 : 0.013 ), big ? 0.013 : 0.01, 14 );
 		if ( big ) P.cylZ( 'blued', 0.0, axisH, - r - 0.016, - r + 0.002, 0.011, 12 );
-		for ( let i = 0; i < 8; i ++ ) P.cyl( 'blued', ( big ? 0.009 : 0.007 ) * 0 + 0, 0, 0.0001, 0, 0, 3 ); // (kept tiny)
 		ring( P, - 0.063, axisH, r ); ring( P, 0.052, axisH, r );
 		P.cyl( 'lensDark', x1 + 0.074, x1 + 0.075, ro - 0.003, axisH, 0, 20 );
 		P.cyl( 'lens', x0 - 0.08, x0 - 0.079, re - 0.003, axisH, 0, 20 );
@@ -1832,9 +1829,9 @@ export function attachmentData( def ) {
 	ATT_CACHE.set( def.id, d );
 	return d;
 }
-export function buildAttachmentView( def ) {
+export function buildAttachmentView( def, mode = 'view' ) {
 	const d = attachmentData( def );
-	return { obj: instantiate( d.baked, weaponMaterials(), false ), info: d.info };
+	return { obj: instantiate( d.baked, weaponMaterials( mode ), false ), info: d.info };
 }
 registerModelBuilder( 'attachment', ( spec, def ) => {
 	const d = attachmentData( def );
@@ -2017,9 +2014,9 @@ export function meleeData( def ) {
 	MELEE_CACHE.set( def.id, d );
 	return d;
 }
-export function buildMeleeView( def ) {
+export function buildMeleeView( def, mode = 'view' ) {
 	const d = meleeData( def );
-	return { obj: instantiate( d.baked, weaponMaterials(), false ), info: d.info };
+	return { obj: instantiate( d.baked, weaponMaterials( mode ), false ), info: d.info };
 }
 registerModelBuilder( 'melee', ( spec, def ) => layDown( instantiate( meleeData( def ).baked, weaponMaterials(), true ), meleeData( def ).info.flat ? 0 : - PI / 2 ) );
 
@@ -2068,7 +2065,7 @@ export function throwableData( def ) {
 	THROW_CACHE.set( def.id, d );
 	return d;
 }
-export function buildThrowableView( def ) { return instantiate( throwableData( def ).baked, weaponMaterials(), false ); }
+export function buildThrowableView( def, mode = 'view' ) { return instantiate( throwableData( def ).baked, weaponMaterials( mode ), false ); }
 registerModelBuilder( 'throwable', ( spec, def ) => {
 	const inner = instantiate( throwableData( def ).baked, weaponMaterials(), true );
 	return layDown( inner, spec.kind === 'molotov' ? PI / 2 : 0 );
