@@ -287,6 +287,11 @@ const TERRAIN_ALBEDO = /* glsl */`
 	vec3 lv = texture2D( tLava, xz / 5.0 ).rgb * vec3( 0.55, 0.52, 0.5 );
 	float lavaW = smoothstep( 0.25, 0.55, lava + ( n1 - 0.5 ) * 0.35 + ( n4 - 0.5 ) * 0.2 );
 	c = mix( c, lv, lavaW );
+	// alpine desert on the high volcanoes: bare red-brown cinder and grey lava rock, nothing grows
+	// above ~3,000 m (real) on Mauna Kea, Mauna Loa and Haleakalā
+	float alpine = smoothstep( 430.0, 530.0, wp.y + ( n1 - 0.5 ) * 70.0 + ( macro - 0.5 ) * 40.0 );
+	vec3 cinder = mix( redc * vec3( 0.62, 0.46, 0.4 ), lv * 1.35, smoothstep( 0.35, 0.65, n3 * 0.7 + n2 * 0.3 ) );
+	c = mix( c, cinder, alpine );
 	// rock where it is steep (triplanar on the side faces)
 	vec3 an = abs( wN );
 	vec3 tri = texture2D( tRock, wp.zy / 6.0 ).rgb * an.x + texture2D( tRock, wp.xy / 6.0 ).rgb * an.z + texture2D( tCliff, xz / 24.0 ).rgb * an.y;
@@ -308,10 +313,15 @@ const TERRAIN_ALBEDO = /* glsl */`
 	}
 	// snow on the summits of Mauna Kea and Mauna Loa
 	vec3 snow = texture2D( tSnow, xz / 5.0 ).rgb;
-	c = mix( c, snow, smoothstep( 610.0, 680.0, wp.y + ( n1 - 0.5 ) * 60.0 ) * ( 1.0 - smoothstep( 0.3, 0.6, slope ) ) );
+	// only patches right at the top (Mauna Kea and Mauna Loa are mostly bare cinder), lingering in
+	// hollows and on the shaded north faces
+	float snowP = smoothstep( 0.52, 0.72, n1 * 0.5 + n3 * 0.3 + macro * 0.2 + max( -wN.z, 0.0 ) * 0.25 );
+	c = mix( c, snow, smoothstep( 660.0, 700.0, wp.y + ( n1 - 0.5 ) * 40.0 ) * snowP * ( 1.0 - smoothstep( 0.3, 0.6, slope ) ) );
 	// towns: mown lawns and concrete lots; road shoulders are gravel
 	vec3 lawn = green * 1.05 * ( grassT / max( lg, 0.02 ) ) * ( 0.9 + n1 * 0.2 );
-	c = mix( c, lawn, smoothstep( 0.2, 0.8, city ) * 0.9 );
+	c = mix( c, lawn, smoothstep( 0.2, 0.8, city ) * 0.9 * ( 1.0 - alpine ) );
+	// summit sites (the observatories) sit on graded cinder
+	c = mix( c, dirt * vec3( 0.62, 0.58, 0.56 ), smoothstep( 0.2, 0.8, city ) * alpine * 0.7 );
 	c = mix( c, dirt * vec3( 0.85, 0.82, 0.8 ), road * 0.85 );
 	// large scale variation breaks up the tiling
 	c *= 0.84 + macro * 0.32;
