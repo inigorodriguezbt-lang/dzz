@@ -7,6 +7,7 @@ import { World } from '../../src/game/World.js';
 import { Physics } from '../../src/game/Physics.js';
 import { G } from '../../src/render/Materials.js';
 import { install } from '../../src/city/Roads.js';
+import { LightPool } from '../../src/game/items/LightPool.js';
 
 const q = new URLSearchParams( location.search );
 const info = document.getElementById( 'info' );
@@ -71,13 +72,16 @@ window.__gallery = ( gx, gz ) => {
 	signs.push( 0, 3, 10, hf.heightAt( gx + 10, gz - 6 ) + 2.5, - 6, 0, 0.95, 0.2, 1, 0 );
 	for ( let k = 0; k < 12; k ++ ) decals.push( k, k * 4, hf.heightAt( gx + k * 4, gz - 12 ) + 0.1, - 12, 0, 3, 3, 1 );
 	const r = { lod: 0, ox: gx, oz: gz, props: new Float32Array( props ), cars: new Float32Array( cars ), signs: new Float32Array( signs ), decals: new Float32Array( decals ), boxes: new Float32Array( 0 ), wires: new Float32Array( 0 ) };
-	const c = { key: - 1, ci: Math.floor( gx / 320 ), cj: Math.floor( gz / 320 ), lod: - 1, job: null, meshes: [], boxes: [], inst: null, dyn: [], wrecks: [], dist: 0 };
+	const c = { key: - 1, ci: Math.floor( gx / 320 ), cj: Math.floor( gz / 320 ), lod: - 1, job: null, meshes: [], boxes: [], inst: null, dyn: [], wrecks: [], lamps: [], dist: 0 };
 	R.cells.set( - 1, c );
 	R._load( c, r );
 };
 
 window.__idle = () => ! [ ...game.roads.cells.values() ].some( c => c.job ) && world.pool.busy === 0 && world.terrain.pending === 0;
 install( game );
+// the items module's shared light pool (the roads module hangs real lights under flickering lamps in it)
+game.itemLights = new LightPool( game );
+systems.push( { update: ( dt ) => game.itemLights.update( dt ) } );
 await world.warmup( ( s, p ) => { info.textContent = s + ' ' + Math.round( p * 100 ) + '%'; } );
 // let the street cells arrive
 for ( let i = 0; i < 400; i ++ ) {

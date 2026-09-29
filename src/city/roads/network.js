@@ -174,7 +174,7 @@ export function roadPoint( r, s, out ) {
 export function buildNetwork( meta, hf ) {
 	const net = {
 		meta, hf, cities: meta.cities,
-		streets: [], nodes: new Map(), roads: [], runways: [], fences: [], events: [], signs: [], markers: [],
+		streets: [], nodes: new Map(), roads: [], runways: [], fences: [], events: [], signs: [], markers: [], regs: [],
 		shash: new SegHash( 48 ), // streets
 		rhash: new SegHash( 48 ), // drawn highway runs
 		allhash: new SegHash( 64 ), // every highway knot segment, drawn or not
@@ -472,6 +472,7 @@ function buildFences( net, meta ) {
 		const toW = ( u, v ) => [ c.x + u * ca - v * sa, c.z + u * sa + v * ca ];
 		const D = c.street / 2 + 6;
 		const segs = [];
+		const eu = [ ca, sa ], ev = [ - sa, ca ];
 		for ( const s of edges.values() ) {
 			const i = s.a.i, j = s.a.j;
 			// the blocks on either side of the edge
@@ -494,10 +495,11 @@ function buildFences( net, meta ) {
 				v0 = j * c.pv - cornerAdj( i, j ); v1 = ( j + 1 ) * c.pv + cornerAdj( i, j + 1 ); u0 = u1 = u;
 			}
 			const [ ax, az ] = toW( u0, v0 ), [ bx, bz ] = toW( u1, v1 );
-			segs.push( [ ax, az, bx, bz ] );
+			const o = s.axis === 0 ? ev : eu;
+			segs.push( [ ax, az, bx, bz, o[ 0 ] * out, o[ 1 ] * out ] );
 		}
 		// cut gates where highways (drawn or not) and runways cross the line
-		for ( const [ ax, az, bx, bz ] of segs ) {
+		for ( const [ ax, az, bx, bz, ox, oz ] of segs ) {
 			const L = Math.hypot( bx - ax, bz - az );
 			const n = Math.ceil( L / 1.5 );
 			let open = null;
@@ -517,7 +519,7 @@ function buildFences( net, meta ) {
 					open = null;
 				}
 			}
-			for ( const p of pieces ) net.fences.push( { ax: p[ 0 ], az: p[ 1 ], bx: p[ 2 ], bz: p[ 3 ], city: ci, military: c.kind === 'military' } );
+			for ( const p of pieces ) net.fences.push( { ax: p[ 0 ], az: p[ 1 ], bx: p[ 2 ], bz: p[ 3 ], ox, oz, city: ci, military: c.kind === 'military' } );
 		}
 	}
 }
@@ -535,6 +537,8 @@ function buildEvents( net, meta ) {
 		r.runs.forEach( ( q, qi ) => {
 			const L = q.s1 - q.s0;
 			if ( r.lanes >= 2 ) {
+				// speed limits for traffic leaving each end of the run (Hawaiʻi: 55 on the freeways, 45 on the highways)
+				if ( L > 320 ) for ( const dir of [ 1, - 1 ] ) net.regs.push( { road: r, s: ( dir > 0 ? q.s0 : q.s1 ) + dir * 110, side: dir, misc: r.lanes === 4 ? 4 : 3 } );
 				// mile markers on the right shoulder of the increasing direction
 				for ( let m = Math.ceil( q.s0 / MILE ); m * MILE < q.s1 - 5; m ++ ) {
 					if ( m * MILE < q.s0 + 20 ) continue;
@@ -583,6 +587,7 @@ function buildEvents( net, meta ) {
 	for ( const e of net.events ) { roadPoint( e.road, e.s, P ); e.x = P[ 0 ]; e.z = P[ 1 ]; }
 	for ( const s of net.signs ) { roadPoint( s.road, s.s, P ); s.x = P[ 0 ]; s.z = P[ 1 ]; }
 	for ( const m of net.markers ) { roadPoint( m.road, m.s, P ); m.x = P[ 0 ]; m.z = P[ 1 ]; }
+	for ( const g of net.regs ) { roadPoint( g.road, g.s, P ); g.x = P[ 0 ]; g.z = P[ 1 ]; }
 	net.signs.forEach( ( s, i ) => { s.id = i; } );
 }
 

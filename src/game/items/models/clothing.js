@@ -223,8 +223,16 @@ export function registerClothingModels( reg ) {
 		const g = group(), frame = M( s.color ?? 0x1a1a1a, { rough: 0.3, metal: s.style === 'aviator' ? 0.9 : 0.1 } );
 		const lens = M( s.lens ?? 0x1a1a22, { rough: 0.05, metal: 0.7, transparent: s.style === 'safety' || s.style === 'swim', opacity: 0.45 } );
 		switch ( s.style ) {
-			case 'ski': case 'dive': {
-				const dive = s.style === 'dive';
+			case 'ski': {
+				// lying face up: a wide mirrored lens in a soft frame, the elastic strap looped behind
+				add( g, G.rbox( 0.19, 0.028, 0.095, 0.02, 2 ), frame );
+				add( g, G.rbox( 0.176, 0.008, 0.08, 0.018, 2 ), M( s.lens ?? 0xe08a2a, { rough: 0.08, metal: 0.85 } ), [ 0, 0.024, 0.002 ] );
+				add( g, G.box( 0.03, 0.01, 0.012 ), frame, [ 0, 0.026, 0.044 ] ); // nose notch
+				add( g, G.torus( 0.098, 0.006, 4, 24, PI ), M( s.strap ?? 0x2a2a2a, { rough: 0.9 } ), [ 0, 0.01, - 0.02 ], [ - PI / 2, 0, 0 ], [ 1, 0.9, 1 ] );
+				break;
+			}
+			case 'dive': {
+				const dive = true;
 				const l = G.cyl( 0.045, 0.045, 0.04, 16 ); l.scale( dive ? 1.3 : 1.9, 1, 1 ); l.rotateZ( PI / 2 );
 				add( g, l, dive ? MAT.glass( 0xd8eef5, 0.35 ) : M( s.lens ?? 0xe08a2a, { rough: 0.05, metal: 0.8 } ), [ 0, 0.045, 0 ] );
 				add( g, G.torus( 0.07, 0.009, 5, 22, PI ), dive ? M( 0x1a1a1a, { rough: 0.6 } ) : frame, [ - 0.02, 0.045, 0 ], [ 0, PI / 2, 0 ], [ 1, 1, 1 ] );
@@ -260,18 +268,18 @@ export function registerClothingModels( reg ) {
 		add( g, G.rbox( 0.36, T, 0.3, 0.015 ), mat );
 		if ( style === 'plate' || style === 'rig' ) {
 			// magazine pouches across the front
-			for ( let i = 0; i < 3; i ++ ) add( g, G.rbox( 0.07, 0.035, 0.085, 0.006 ), mat, [ - 0.02, T, - 0.09 + i * 0.09 ] );
+			for ( let i = 0; i < 3; i ++ ) add( g, G.rbox( 0.07, 0.035, 0.085, 0.006, 1 ), mat, [ - 0.02, T, - 0.09 + i * 0.09 ] );
 			for ( let i = 0; i < 6; i ++ ) add( g, G.box( 0.008, 0.004, 0.28 ), acc, [ 0.1 - i * 0.025, T + ( i < 3 ? 0.035 : 0 ), 0 ] ); // MOLLE
 			if ( s.patch ) add( g, G.box( 0.05, 0.003, 0.14 ), M( s.patch, { rough: 0.6 } ), [ 0.13, T, 0 ] );
 		}
 		if ( style === 'hunting' || style === 'fishing' ) {
 			const n = style === 'fishing' ? 6 : 2;
-			for ( let i = 0; i < n; i ++ ) add( g, G.rbox( 0.06, 0.012, 0.06, 0.004 ), acc, [ 0.08 - Math.floor( i / 2 ) * 0.08, T, i % 2 ? 0.08 : - 0.08 ] );
+			for ( let i = 0; i < n; i ++ ) add( g, G.rbox( 0.06, 0.012, 0.06, 0.004, 1 ), acc, [ 0.08 - Math.floor( i / 2 ) * 0.08, T, i % 2 ? 0.08 : - 0.08 ] );
 		}
 		if ( style === 'hivis' || s.stripes ) for ( const x of [ - 0.07, 0.05 ] ) add( g, G.box( 0.025, 0.003, 0.3 ), M( 0xd8d8d8, { rough: 0.2, metal: 0.6, emissive: 0x666666, emissiveIntensity: 0.3 } ), [ x, T, 0 ] );
 		if ( style === 'life' ) for ( const z of [ - 0.08, 0.08 ] ) add( g, G.box( 0.3, 0.008, 0.02 ), M( 0x1a1a1a ), [ 0, T, z ] );
 		// shoulder straps (+x is the top)
-		for ( const z of [ - 0.09, 0.09 ] ) add( g, G.rbox( 0.08, T * 0.6, 0.05, 0.006 ), mat, [ 0.2, 0, z ] );
+		for ( const z of [ - 0.09, 0.09 ] ) add( g, G.rbox( 0.08, T * 0.6, 0.05, 0.006, 1 ), mat, [ 0.2, 0, z ] );
 		if ( s.text ) add( g, G.box( 0.05, 0.002, 0.16 ), M( 0xffffff, { map: null } ), [ - 0.12, T, 0 ] );
 		return g;
 	} );
@@ -281,11 +289,11 @@ export function registerClothingModels( reg ) {
 		const g = group(), m = M( s.color ?? 0x8a6a3a, { rough: s.style === 'latex' ? 0.4 : 0.85 } );
 		const cuff = M( s.color2 ?? shade( s.color ?? 0x8a6a3a, - 0.25 ), { rough: 0.8 } );
 		for ( const [ z, flip ] of [ [ - 0.055, 1 ], [ 0.055, - 1 ] ] ) {
-			add( g, G.rbox( 0.1, 0.022, 0.085, 0.008 ), m, [ 0, 0, z ] );
+			add( g, G.rbox( 0.1, 0.022, 0.085, 0.008, 1 ), m, [ 0, 0, z ] );
 			const fl = s.style === 'fingerless' ? 0.025 : 0.07;
-			for ( let i = 0; i < 4; i ++ ) add( g, G.capsX( 0.009, fl ), m, [ 0.05 + fl / 2, 0.011, z - 0.03 + i * 0.02 ] );
-			add( g, G.capsX( 0.01, 0.06 ), m, [ 0.02, 0.011, z + flip * 0.05 ], [ 0, flip * 0.7, 0 ] );
-			add( g, G.rbox( 0.05, 0.026, 0.09, 0.008 ), cuff, [ - 0.07, 0, z ] );
+			for ( let i = 0; i < 4; i ++ ) add( g, G.capsX( 0.009, fl, 6, 2 ), m, [ 0.05 + fl / 2, 0.011, z - 0.03 + i * 0.02 ] );
+			add( g, G.capsX( 0.01, 0.06, 6, 2 ), m, [ 0.02, 0.011, z + flip * 0.05 ], [ 0, flip * 0.7, 0 ] );
+			add( g, G.rbox( 0.05, 0.026, 0.09, 0.008, 1 ), cuff, [ - 0.07, 0, z ] );
 		}
 		return g;
 	} );
@@ -338,6 +346,23 @@ export function registerClothingModels( reg ) {
 				add( g, G.box( 0.2, 0.08, 0.004 ), M( 0xffffff, { rough: 0.5 } ), [ 0, 0.1, 0.121 ] );
 				break;
 			}
+			case 'improvised': {
+				// a tarp gathered into a lumpy sack, tied off with rope that doubles as the shoulder strap
+				const sack = G.sph( 0.2, 14, 10 );
+				const P = sack.attributes.position;
+				for ( let i = 0; i < P.count; i ++ ) {
+					const x = P.getX( i ), y = P.getY( i ), z = P.getZ( i );
+					const k = 1 + Math.sin( x * 31 + z * 17 ) * 0.06 + Math.sin( y * 23 - x * 13 ) * 0.05;
+					P.setXYZ( i, x * k * 1.15, y * k * ( y > 0 ? 0.75 : 0.55 ), z * k * 0.8 );
+				}
+				sack.computeVertexNormals();
+				add( g, sack, mat, [ 0, 0.11, 0 ] );
+				add( g, G.cone( 0.07, 0.12, 10 ), mat, [ 0.2, 0.08, 0 ], [ 0, 0, - PI / 2 ] ); // the gathered neck
+				const rope = M( s.color2 ?? 0xc8b07a, { rough: 0.95 } );
+				add( g, G.torus( 0.045, 0.01, 5, 14 ), rope, [ 0.215, 0.08, 0 ], [ 0, PI / 2, 0 ] );
+				add( g, G.torus( 0.2, 0.009, 4, 20, PI * 1.1 ), rope, [ 0.02, 0.1, 0 ], [ PI / 2, 0, 0.1 ] );
+				return ground( g );
+			}
 			case 'tote': {
 				add( g, G.cyl( 0.2 * Math.SQRT1_2 * 1.1, 0.2 * Math.SQRT1_2, 0.3, 4, false ).rotateY( PI / 4 ).scale( 1.6, 1, 0.5 ), mat );
 				for ( const z of [ - 0.05, 0.05 ] ) add( g, G.torus( 0.08, 0.008, 4, 14, PI ), acc, [ 0, 0.3, z ] );
@@ -350,10 +375,10 @@ export function registerClothingModels( reg ) {
 				add( g, G.rbox( W * 0.75, H * 0.4, D * 0.35, 0.03 ), mat, [ 0, H * 0.08, D * 0.55 ] ); // front pocket
 				add( g, G.box( W * 0.6, 0.004, 0.004 ), zip, [ 0, H * 0.46, D * 0.72 ] );
 				add( g, G.dome( W * 0.5, 12, 5 ).scale( 1, 0.45, D / W * 1.1 ), acc, [ 0, H - 0.02, 0.005 ] ); // lid
-				for ( const x of [ - W * 0.28, W * 0.28 ] ) add( g, G.rbox( 0.05, H * 0.8, 0.02, 0.008 ), M( 0x1c1c1c, { rough: 0.8 } ), [ x, H * 0.08, - D / 2 - 0.008 ] ); // straps
+				for ( const x of [ - W * 0.28, W * 0.28 ] ) add( g, G.rbox( 0.05, H * 0.8, 0.02, 0.008, 1 ), M( 0x1c1c1c, { rough: 0.8 } ), [ x, H * 0.08, - D / 2 - 0.008 ] ); // straps
 				add( g, G.torus( 0.035, 0.007, 4, 12, PI ), M( 0x1c1c1c ), [ 0, H + 0.005, - D * 0.2 ], [ 0, 0, 0 ] ); // grab handle
 				if ( style === 'hiking' || style === 'rucksack' ) {
-					for ( const x of [ - W / 2 - 0.02, W / 2 + 0.02 ] ) add( g, G.rbox( 0.05, H * 0.35, D * 0.6, 0.01 ), acc, [ x, H * 0.05, 0 ] );
+					for ( const x of [ - W / 2 - 0.02, W / 2 + 0.02 ] ) add( g, G.rbox( 0.05, H * 0.35, D * 0.6, 0.01, 1 ), acc, [ x, H * 0.05, 0 ] );
 					add( g, G.cylX( 0.06 * big, W * 1.05, 12 ), M( s.roll ?? 0x3a6a3a, { rough: 0.8 } ), [ 0, 0.06 * big, D * 0.55 ] ); // bedroll
 				}
 				if ( style === 'rucksack' || style === 'assault' ) for ( let i = 0; i < 4; i ++ ) add( g, G.box( W * 0.7, 0.008, 0.006 ), acc, [ 0, H * ( 0.55 + i * 0.08 ), D * 0.5 ] );

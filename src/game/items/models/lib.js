@@ -334,7 +334,7 @@ export const G = {
 	torus: ( R, r, rs = 8, ts = 24, arc = PI * 2 ) => new THREE.TorusGeometry( R, r, rs, ts, arc ),
 	lathe: ( pts, seg = 18, ps = 0, pl = PI * 2 ) => new THREE.LatheGeometry( pts.map( p => new THREE.Vector2( Math.max( 0, p[ 0 ] ), p[ 1 ] ) ), seg, ps, pl ),
 	cone: ( r, h, seg = 12 ) => new THREE.ConeGeometry( r, h, seg ).translate( 0, h / 2, 0 ),
-	capsX: ( r, len, seg = 10 ) => new THREE.CapsuleGeometry( r, Math.max( 0.001, len - r * 2 ), 4, seg ).rotateZ( PI / 2 ),
+	capsX: ( r, len, seg = 10, capSeg = 4 ) => new THREE.CapsuleGeometry( r, Math.max( 0.001, len - r * 2 ), capSeg, seg ).rotateZ( PI / 2 ),
 	tube: ( pts, r, seg = 12, rs = 6 ) => new THREE.TubeGeometry( new THREE.CatmullRomCurve3( pts.map( p => new THREE.Vector3( ...p ) ) ), seg, r, rs, false ),
 	// rectangular tin with a wrapped label: a 4-sided open cylinder turned 45° and stretched
 	rectWrap: ( w, h, d, topScale = 1 ) => {

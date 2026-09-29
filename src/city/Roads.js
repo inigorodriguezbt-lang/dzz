@@ -7,14 +7,17 @@
 // plus placement records. Near cells (lod 0) carry the props, cars, decals, signs and physics colliders; far
 // cells (lod 1) only coarse surfaces. Repeated things are drawn with a few global instanced meshes that are
 // refilled from the loaded cells whenever the camera has moved a few metres (distance bands, LODs, shadows).
+// The power is out: at night only a few failing streetlights flicker (emissive bulb, a light pool on the ground and,
+// for the nearest two, a real point light from the items module's shared light pool, game.itemLights).
 //
 // API (game.roads): update(dt), dispose(), nearestRoad(pos, maxDist) -> { point, dir, lanes, width, kind, name } | null,
 // spawnPoints(center, radius, n) -> [ { pos, yaw } ], plus the "Search trunk / glovebox" interaction on
 // lootable wrecks (state in save.world.wrecks).
 import * as THREE from 'three';
 import { buildNetwork, CELL, hashStr, mulberry32, nearestOnNetwork, roadsideSpots } from './roads/network.js';
-import { PROP, PROP_BOXES, MATS, MISC, CAR, CAR_DIMS, CF, CAR_STRIDE, PROP_STRIDE, SIGN_STRIDE, DECAL_STRIDE, BOX_STRIDE, ATLAS_SIZE, atlasRect } from './roads/kinds.js';
-import { roadMaterials, makeCarMaterial, makeDynSignMaterial, signBoardGeometry, decalGeometry, ROAD_LIFT } from './roads/materials.js';
+import { PROP, PROP_BOXES, MATS, CAR, CAR_DIMS, CF, CAR_STRIDE, PROP_STRIDE, SIGN_STRIDE, DECAL_STRIDE, BOX_STRIDE, ATLAS_SIZE, atlasRect } from './roads/kinds.js';
+import { roadMaterials, makeCarMaterial, makeDynSignMaterial, signBoardGeometry, decalGeometry, ROAD_LIFT, flickerAt } from './roads/materials.js';
+import { G } from '../render/Materials.js';
 import { MODELS, expandProp } from './roads/models.js';
 import { carGeometries, carSpec, carPanels } from './roads/cars.js';
 import { guideSign, ATLAS_H, GLOW_CELL } from './roads/textures.js';
@@ -23,6 +26,8 @@ import { rollLoot } from '../game/items/Loot.js';
 const R_NEAR = 470; // lod 0 cells (props, cars, colliders) within this distance of the camera (cell bounds)
 const R_NEAR_OUT = 590; // ... and back to lod 1 beyond this (hysteresis)
 const R_FAR_MAX = 1600; // far surfaces out to min(renderDistance, this)
+const LAMP_LIGHTS = 2; // real point lights (from the shared light pool) under the nearest flickering lamps
+const LAMP_RANGE = 90; // ... within this distance of the camera
 const REFILL_MOVE = 5; // refill the instance bands after the camera moved this far (m)
 const NEAR_BAND = 75; // props / cars closer than this cast sun shadows
 const QUALITY = { low: 0.65, medium: 0.85, high: 1, ultra: 1.2 }; // scales the near radius and the draw distances
@@ -34,8 +39,9 @@ const CAR_BAND = [ [ 0, 60, 'near', true ], [ 60, 150, 'far', false ], [ 150, 50
 // a week old: the blood has dried dull, oil stays glossy
 const DECAL_ROUGH = [ 0.7, 0.75, 0.8, 0.9, 0.2, 0.95, 0.3, 0.9, 0.85, 0.8, 0.9, 0.8 ];
 
-// atlas cells whose sign isn't a full rectangle (see textures.js)
-const SHAPED = new Set( [ 200 + MISC.STOP, 200 + MISC.YIELD, 200 + MISC.PED, 200 + MISC.CURVE, 200 + MISC.BIOHAZARD, 200 + MISC.H1 ] );
+// atlas cells whose sign doesn't fill its cell (octagons, diamonds, shields, the narrower regulatory plates in the
+// square misc cells): cut out by the atlas alpha (see textures.js)
+const isShaped = ( cell ) => cell >= 200 && cell < 300;
 
 const cellKey = ( ci, cj ) => ( ci + 1000 ) * 10000 + ( cj + 1000 );
 
@@ -200,6 +206,7 @@ export class Roads {
 	update( dt ) {
 		this.frame ++;
 		const cam = this.world.camera.position;
+		this._lampLights( dt, cam );
 		// finer terrain LODs (higher detail setting) need less lift far away
 		ROAD_LIFT.value = 2.5 / ( { low: 1.6, medium: 2.0, high: 2.5, ultra: 3.2 }[ this.settings.get( 'terrainDetail' ) ] || 2.5 );
 		this.evalT -= dt;
@@ -223,7 +230,7 @@ export class Roads {
 			if ( d > rFar ) continue;
 			const key = cellKey( ci, cj );
 			let c = this.cells.get( key );
-			if ( ! c ) { c = { key, ci, cj, lod: - 1, want: - 1, job: null, meshes: [], boxes: [], inst: null, dyn: [], wrecks: [] }; this.cells.set( key, c ); }
+			if ( ! c ) { c = { key, ci, cj, lod: - 1, want: - 1, job: null, meshes: [], boxes: [], inst: null, dyn: [], wrecks: [], lamps: [] }; this.cells.set( key, c ); }
 			// lod 0 near, lod 1 far, with hysteresis
 			let want = d < R_NEAR * qk ? 0 : 1;
 			if ( c.lod === 0 && d < R_NEAR_OUT * qk ) want = 0;
@@ -275,6 +282,7 @@ export class Roads {
 		if ( c.inst ) this.dirty = true;
 		c.inst = null;
 		c.wrecks.length = 0;
+		c.lamps.length = 0;
 		c.lod = - 1;
 		this._relistLootable();
 	}
@@ -371,8 +379,9 @@ export class Roads {
 					const gx = x + c0 * 2.5 * dir, gz = z - s0 * 2.5 * dir;
 					const gy = this.hf.heightAt( gx, gz ) + 0.12;
 					M.compose( V.set( gx, gy, gz ), Q.identity(), S.set( 11, 1, 11 ) );
-					const seed = ( ( Math.imul( Math.round( x * 10 ), 73856093 ) ^ Math.imul( Math.round( z * 10 ), 19349663 ) ) >>> 0 ) / 4294967296;
 					set( 'glow', DECAL_ATTRS ).add( M, gx, gz, [ GLOW_CELL, seed, 1, 0 ] );
+					// the luminaire (just under the cobra head) for the real light
+					c.lamps.push( { x: x + c0 * 2.2 * dir, y: y + ( type === PROP.STREETLIGHT2 ? 9.85 : 8.05 ), z: z - s0 * 2.2 * dir, seed } );
 				}
 			}
 			// colliders (upright things only)
@@ -399,7 +408,7 @@ export class Roads {
 			if ( dyn ) { this._dynSign( c, cell, M ); continue; }
 			const [ px, py, pw, ph ] = atlasRect( cell );
 			const rect = [ ( px + 1 ) / ATLAS_SIZE, 1 - ( py + ph - 1 ) / ATLAS_H, ( px + pw - 1 ) / ATLAS_SIZE, 1 - ( py + 1 ) / ATLAS_H ];
-			set( 'signs', SIGN_ATTRS ).add( M, x, z, [ ...rect, dbl, SHAPED.has( cell ) ? 1 : 0, 0, 0 ] );
+			set( 'signs', SIGN_ATTRS ).add( M, x, z, [ ...rect, dbl, isShaped( cell ) ? 1 : 0, 0, 0 ] );
 		}
 		// ---- decals ----
 		const Dc = r.decals;
@@ -445,6 +454,42 @@ export class Roads {
 		for ( const s of inst.values() ) s.seal();
 		c.inst = inst;
 		this._relistLootable();
+	}
+
+	// a real point light under the nearest few lamps that still flicker at night, blinking with their bulbs (the
+	// shared light pool of the items module picks the strongest sources near the camera; ours rank below fires,
+	// flares and carried lights)
+	_lampLights( dt, cam ) {
+		const pool = this.game.itemLights;
+		if ( ! pool ) return;
+		if ( ! this.lampSrc ) {
+			this.lampSrc = [];
+			for ( let i = 0; i < LAMP_LIGHTS; i ++ ) this.lampSrc.push( pool.add( { pos: new THREE.Vector3(), color: 0xffd6a8, intensity: 110, range: 36, on: false, priority: 0.5, lamp: null } ) );
+		}
+		const night = THREE.MathUtils.smoothstep( G.uNight.value, 0.3, 0.7 );
+		this.lampT = ( this.lampT || 0 ) - dt;
+		if ( this.lampT <= 0 ) {
+			// re-pick the nearest lamps a few times a second
+			this.lampT = 0.25;
+			const best = [];
+			if ( night > 0 ) for ( const c of this.cells.values() ) for ( const l of c.lamps ) {
+				const d2 = ( l.x - cam.x ) ** 2 + ( l.z - cam.z ) ** 2;
+				if ( d2 > LAMP_RANGE * LAMP_RANGE ) continue;
+				l.d2 = d2;
+				best.push( l );
+			}
+			best.sort( ( a, b ) => a.d2 - b.d2 );
+			for ( let i = 0; i < LAMP_LIGHTS; i ++ ) this.lampSrc[ i ].lamp = best[ i ] || null;
+		}
+		const t = G.uTime.value;
+		for ( const s of this.lampSrc ) {
+			const l = s.lamp;
+			const k = l ? night * flickerAt( l.seed, t ) : 0;
+			s.on = k > 0.02;
+			if ( ! l ) continue;
+			s.pos.set( l.x, l.y, l.z );
+			s.dim = k;
+		}
 	}
 
 	_dynSign( c, id, matrix ) {
@@ -617,6 +662,7 @@ export class Roads {
 	dispose() {
 		this.disposed = true;
 		this.removeProvider?.();
+		if ( this.lampSrc ) for ( const s of this.lampSrc ) this.game.itemLights?.remove( s );
 		for ( const c of this.cells.values() ) { if ( c.job ) c.job.cancelled = true; this._unload( c ); }
 		this.cells.clear();
 		for ( const b of this.batches ) b.dispose();

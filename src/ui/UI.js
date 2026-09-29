@@ -1,6 +1,6 @@
 // UI manager: owns the HUD, chat, menus, inventory and map, routes the menu hotkeys, and handles
 // pointer lock (losing it in game opens the pause menu).
-import { h, clear } from './dom.js';
+import { h, clear, unitPx } from './dom.js';
 import { HUD } from './HUD.js';
 import { Chat } from './Chat.js';
 import { Menus } from './Menus.js';
@@ -33,11 +33,16 @@ export class UI {
 		this.map = new MapUI( this );
 		this.mapView = null;
 		this.hud.el.hidden = true; this.chat.el.hidden = true;
-		this.tipEl = h( 'div.toast.tw-glass', { style: { position: 'absolute', left: '50%', top: 'calc(var(--tw-edge) + 64px)', transform: 'translateX(-50%)', maxWidth: '520px' }, hidden: true } );
-		this.lockHint = h( 'div.prompt-main.tw-glass', { style: { position: 'absolute', left: '50%', top: '58%', transform: 'translateX(-50%)', pointerEvents: 'none' }, hidden: true, text: 'Click to continue' } );
+		this.tipEl = h( 'div.plate', { style: { position: 'absolute', left: '50%', top: 'calc(var(--edge) + 64px)', transform: 'translateX(-50%)', maxWidth: 'calc(520 * var(--u))', padding: 'calc(6 * var(--u)) calc(12 * var(--u))' }, hidden: true } );
+		this.lockHint = h( 'div.prompt-main.tw-glass', { style: { position: 'absolute', left: '50%', top: '58%', transform: 'translateX(-50%)', pointerEvents: 'none' }, hidden: true, text: 'Click to resume' } );
 		this.root.append( this.hud.el, this.chat.el, this.tipEl, this.lockHint );
-		this.menuToasts = h( 'div.toasts', { style: { zIndex: 5 } } );
+		this.menuToasts = h( 'div.menu-toasts' );
 		this.root.appendChild( this.menuToasts );
+		// px per u for canvas code (minimap, map): re-measured when the window or the GUI scale changes
+		this.u = unitPx();
+		addEventListener( 'resize', () => { this.u = unitPx(); } );
+		app.settings.on( 'guiScale', () => { this.u = unitPx(); } );
+		this.confirmOpen = false;
 		app.input.onLockChange = ( locked ) => {
 			if ( locked || ! this.game || this.game.dead ) return;
 			if ( ! this.screen && ! this.chat.open ) this.menus.pause();
@@ -47,7 +52,7 @@ export class UI {
 			if ( this.game && ! this.screen && ! this.chat.open && ! this.game.dead ) app.input.lock();
 		} );
 		window.addEventListener( 'keydown', e => {
-			if ( ! this.game || ! this.screen || this.screenOpts.sticky || this.screenOpts.inventory ) return;
+			if ( ! this.game || ! this.screen || this.screenOpts.sticky || this.screenOpts.inventory || this.confirmOpen ) return;
 			if ( e.code === 'Escape' || ( this.screenOpts.map && this.app.input.codes( 'map' ).includes( e.code ) ) ) { e.preventDefault(); this.closeScreen(); }
 		}, true );
 		loadIcons();
@@ -60,6 +65,8 @@ export class UI {
 		this.screen = el;
 		this.screenOpts = opts;
 		el.classList.add( 'screen-host' );
+		// in game, a click on the scrim around a panel closes it (the inventory handles its own)
+		if ( this.game && ! opts.sticky && ! opts.inventory ) el.addEventListener( 'pointerdown', e => { if ( e.target === el && this.screen === el && el.querySelector( ':scope > .panel' ) ) this.closeScreen(); } );
 		this.root.appendChild( el );
 		if ( this.game ) {
 			this.app.input.unlock();
@@ -145,21 +152,43 @@ export class UI {
 
 	showDeath( info ) { this.chat.open && this.chat.hide(); this.menus.death( info ); }
 
-	confirm( title, text, ok = 'OK', cls = 'primary' ) {
+	// Small modal question over whatever is open. Resolves true for the verb, false for Cancel, Esc or a
+	// click outside. Enter presses the focused button, which starts on Cancel for destructive verbs.
+	// Other key handlers should ignore keys while ui.confirmOpen is set.
+	confirm( title, text = null, ok = 'OK', cls = 'primary' ) {
 		return new Promise( resolve => {
-			const wrap = h( 'div', { style: { position: 'fixed', inset: 0, zIndex: 3000, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.45)', pointerEvents: 'auto' } } );
-			const done = v => { wrap.remove(); resolve( v ); };
-			wrap.appendChild( h( 'div.panel', { style: { width: 'min(420px, 90vw)' } },
-				h( 'div.panel-head', {}, h( 'h2', { text: title } ) ), h( 'div.panel-body', { text: text } ),
-				h( 'div.panel-foot', {}, h( 'button.btn', { text: 'Cancel', onclick: () => done( false ) } ), h( 'button.btn.' + cls, { text: ok, onclick: () => done( true ) } ) ) ) );
+			const cancel = h( 'button.btn', { type: 'button', text: 'Cancel', onclick: () => done( false ) } );
+			const yes = h( 'button.btn.' + cls, { type: 'button', text: ok, onclick: () => done( true ) } );
+			const box = h( 'div.pop.confirm', { role: 'alertdialog', 'aria-label': title },
+				h( 'div.t-title', { text: title } ), text ? h( 'div.body', { text } ) : null, h( 'div.btns', {}, cancel, yes ) );
+			const wrap = h( 'div.confirm-wrap', { onpointerdown: e => { if ( e.target === wrap ) done( false ); } }, box );
+			const key = e => {
+				if ( e.code === 'Escape' ) done( false );
+				else if ( e.code === 'Enter' || e.code === 'NumpadEnter' ) done( document.activeElement !== cancel );
+				else return;
+				e.preventDefault(); e.stopImmediatePropagation();
+			};
+			const done = v => {
+				if ( ! wrap.isConnected ) return;
+				window.removeEventListener( 'keydown', key, true );
+				wrap.remove();
+				this.confirmOpen = false;
+				this.app.audio.ui();
+				resolve( v );
+			};
+			window.addEventListener( 'keydown', key, true );
+			this.confirmOpen = true;
 			this.root.appendChild( wrap );
+			( cls === 'danger' ? cancel : yes ).focus();
 		} );
 	}
 
+	// short status line over menus (Saved, Imported, errors), bottom centre
 	toastScreen( text, kind = 'good' ) {
-		const el = h( 'div.toast.tw-glass.' + kind, { text } );
+		const el = h( 'div.toast.plate', {}, kind === 'warn' || kind === 'bad' ? h( 'span.sd.' + kind ) : null, h( 'span', { text } ) );
 		this.menuToasts.appendChild( el );
-		setTimeout( () => { el.classList.add( 'out' ); setTimeout( () => el.remove(), 700 ); }, 3500 );
+		while ( this.menuToasts.children.length > 3 ) this.menuToasts.firstChild.remove();
+		setTimeout( () => { el.classList.add( 'out' ); setTimeout( () => el.remove(), 240 ); }, kind === 'bad' ? 5000 : 2500 );
 	}
 
 	locationName( p, long = false ) {
@@ -235,7 +264,7 @@ export class UI {
 			const raw = c => input.codePressed( c );
 			const hit = a => input.codes( a ).some( raw );
 			if ( hit( 'inventory' ) ) this.openInventory();
-			else if ( hit( 'map' ) ) { const ok = ! this.app.settings.get( 'realisticMap' ) || g.player.inventory.count( 'map_hawaii' ) || g.mode === 'creative'; if ( ok ) { this.seenMap = true; this.map.open(); } else g.toast( 'You need a map (realistic map is on in Options)', 'warn' ); }
+			else if ( hit( 'map' ) ) { const ok = ! this.app.settings.get( 'realisticMap' ) || g.player.inventory.count( 'map_hawaii' ) || g.mode === 'creative'; if ( ok ) { this.seenMap = true; this.map.open(); } else g.toast( 'No map', 'warn' ); }
 			else if ( hit( 'chat' ) ) { this.seenChat = true; this.chat.show( '' ); }
 			else if ( hit( 'command' ) ) { this.seenChat = true; this.chat.show( '/' ); }
 			else if ( hit( 'craft' ) ) { this.inventory.leftTab = 'craft'; this.openInventory(); }

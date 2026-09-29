@@ -88,8 +88,8 @@ export function registerGearModels( reg ) {
 	} );
 	reg( 'splint', ( s ) => {
 		const g = group();
-		for ( const z of [ - 0.035, 0.035 ] ) add( g, G.rbox( 0.42, 0.012, 0.045, 0.004 ), s.improvised ? MAT.wood() : M( s.color ?? 0xf28a2a, { rough: 0.6 } ), [ 0, 0, z ] );
-		for ( const x of [ - 0.14, 0, 0.14 ] ) add( g, G.rbox( 0.04, 0.02, 0.12, 0.006 ), s.improvised ? M( 0xd8cfc0 ) : M( 0x2a2a2a ), [ x, 0.001, 0 ] );
+		for ( const z of [ - 0.035, 0.035 ] ) add( g, G.rbox( 0.42, 0.012, 0.045, 0.004, 1 ), s.improvised ? MAT.wood() : M( s.color ?? 0xf28a2a, { rough: 0.6 } ), [ 0, 0, z ] );
+		for ( const x of [ - 0.14, 0, 0.14 ] ) add( g, G.rbox( 0.04, 0.02, 0.12, 0.006, 1 ), s.improvised ? M( 0xd8cfc0 ) : M( 0x2a2a2a ), [ x, 0.001, 0 ] );
 		return g;
 	} );
 	reg( 'spray', ( s ) => {
@@ -599,7 +599,7 @@ export function registerGearModels( reg ) {
 		const cols = s.colors || [ 0xf2f2ee, 0xf5c542, 0xe8607a ];
 		for ( let i = 0; i < 26; i ++ ) {
 			const a = i / 26 * PI * 2;
-			add( g, G.sph( 0.018, 7, 5 ).scale( 1, 0.6, 1 ), M( cols[ i % cols.length ], { rough: 0.7 } ), [ Math.cos( a ) * 0.13, 0.012, Math.sin( a ) * 0.1 ] );
+			add( g, G.sph( 0.018, 6, 4 ).scale( 1, 0.6, 1 ), M( cols[ i % cols.length ], { rough: 0.7 } ), [ Math.cos( a ) * 0.13, 0.012, Math.sin( a ) * 0.1 ] );
 		}
 		return g;
 	} );

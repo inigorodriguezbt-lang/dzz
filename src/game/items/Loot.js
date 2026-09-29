@@ -346,7 +346,7 @@ export function compileTable( table ) {
 	if ( c ) return c;
 	const entries = [];
 	for ( const e of table.items ) { const r = resolveEntry( e ); if ( r ) entries.push( r ); }
-	c = { entries, total: entries.reduce( ( a, e ) => a + e.w, 0 ) };
+	c = { entries, ws: entries.map( e => e.w ), total: entries.reduce( ( a, e ) => a + e.w, 0 ) };
 	compiled.set( table, c );
 	return c;
 }
@@ -366,6 +366,14 @@ function lootQty( def, q, rnd ) {
 	return 1 + Math.floor( rnd() * Math.min( def.stack, 3 ) );
 }
 
+// the loose-round item for a calibre (cached; rebuilt when the catalogue grows)
+const ammoCache = new Map();
+let ammoFor_ = - 1;
+function ammoFor( cal ) {
+	if ( ammoFor_ !== ITEMS.size ) { ammoCache.clear(); ammoFor_ = ITEMS.size; for ( const d of ITEMS.values() ) if ( d.cat === 'ammo' && d.ammo?.caliber && ! ammoCache.has( d.ammo.caliber ) ) ammoCache.set( d.ammo.caliber, d ); }
+	return ammoCache.get( cal ) || null;
+}
+
 export function rollLoot( table, rnd = Math.random, n = undefined ) {
 	const t = typeof table === 'string' ? LOOT_TABLES[ table ] : table;
 	if ( ! t ) return [];
@@ -374,7 +382,7 @@ export function rollLoot( table, rnd = Math.random, n = undefined ) {
 	if ( n === undefined || n === null ) { const [ a, b ] = t.rolls || [ 1, 2 ]; n = a + Math.floor( rnd() * ( b - a + 1 ) ); }
 	const out = [];
 	for ( let i = 0; i < n; i ++ ) {
-		const e = pick( c.entries, c.entries.map( x => x.w ), c.total, rnd );
+		const e = pick( c.entries, c.ws, c.total, rnd );
 		const id = e.ids.length === 1 ? e.ids[ 0 ] : pick( e.ids, e.weights, e.total, rnd );
 		const def = ITEMS.get( id );
 		const s = makeStack( id, lootQty( def, e.q, rnd ), { loot: true, rnd } );
@@ -385,7 +393,7 @@ export function rollLoot( table, rnd = Math.random, n = undefined ) {
 			const f = def.firearm;
 			if ( f.feed === 'mag' && f.mags?.length && rnd() < 0.3 ) { const m = makeStack( f.mags[ 0 ], 1, { loot: true, rnd } ); if ( m ) out.push( m ); }
 			if ( rnd() < 0.35 ) {
-				const ammo = [ ...ITEMS.values() ].find( d => d.cat === 'ammo' && d.ammo?.caliber === f.caliber );
+				const ammo = ammoFor( f.caliber );
 				if ( ammo ) out.push( makeStack( ammo.id, lootQty( ammo, null, rnd ), { loot: true, rnd } ) );
 			}
 		}

@@ -507,6 +507,6 @@ export function install( game ) {
 	game.gathering = game.register( new Gathering( game ) );
 	// creative / debug spawners
 	game.spawnables = game.spawnables || {};
-	game.spawnables.campfire = { desc: 'A lit campfire', spawn: ( pos ) => game.crafting.placeFire( 'campfire', pos, { lit: true, fuel: 3 } ) };
-	game.spawnables.loot = { desc: 'A random pile of kitchen loot', spawn: ( pos ) => items.spawnLoot( 'house_kitchen', pos ) };
+	game.spawnables.campfire = { desc: 'Lit campfire', spawn: ( pos ) => game.crafting.placeFire( 'campfire', pos, { lit: true, fuel: 3 } ) };
+	game.spawnables.loot = { desc: 'Kitchen loot pile', spawn: ( pos ) => items.spawnLoot( 'house_kitchen', pos ) };
 }

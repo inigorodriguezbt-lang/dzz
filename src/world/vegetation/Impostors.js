@@ -23,7 +23,7 @@ import { InstanceTarget } from './InstanceTarget.js';
 
 export const IMP_N = 6; // frames per side of a species block
 const FRAME = 80; // px per frame
-const BLEND_DIST = 220; // m: three-frame blending within, nearest frame beyond
+const BLEND_DIST = 220; // m: three-frame blending within, nearest frame beyond (default; see setRanges)
 const ATLAS_N = 2048; // leaf atlas size (mip level estimate in the bake)
 
 // species drawn as impostors somewhere (far: the canopy out to the render distance, mid: the small
@@ -63,7 +63,7 @@ const BAKE_FRAG = /* glsl */`
 		vec4 c;
 		float leaf = 0.0;
 		if ( part < 0.5 ) c = texture2D( tPalmBark, vUv );
-		else if ( part < 1.5 ) c = texture2D( tBark, vUv );
+		else if ( part < 1.5 ) c = vec4( texture2D( tBark, vUv ).rgb / dot( max( textureLod( tBark, vec2( 0.5 ), 12.0 ).rgb, vec3( 1e-4 ) ), vec3( 0.333 ) ), 1.0 ); // as the near shader
 		else {
 			vec2 dx = dFdx( vUv ), dy = dFdy( vUv );
 			c = textureGrad( tLeaf, vUv, dx, dy );
@@ -87,7 +87,7 @@ const VERT_PARS = /* glsl */`
 	uniform vec4 uImpA[ IMP_SLOTS ]; uniform vec4 uImpB[ IMP_SLOTS ]; uniform vec4 uImpRange[ IMP_SLOTS ];
 	uniform vec3 uImpTintA[ IMP_SLOTS ]; uniform vec3 uImpTintB[ IMP_SLOTS ]; uniform vec3 uImpBark[ IMP_SLOTS ];
 	uniform vec4 uImpThin;
-	varying vec3 vImpC; varying vec4 vImpX; varying vec4 vImpY; varying vec4 vImpZ; varying vec3 vImpTint; varying vec3 vImpBarkC;
+	varying vec3 vImpC; varying vec4 vImpX; varying vec4 vImpY; varying vec4 vImpZ; varying vec3 vImpTint; varying vec3 vImpBarkC; varying vec2 vImpQ;
 
 	float impHash( vec2 p ) { vec3 p3 = fract( vec3( p.xyx ) * 0.1031 ); p3 += dot( p3, p3.yzx + 33.33 ); return fract( ( p3.x + p3.y ) * p3.z ); }
 	float impNoise( vec2 p ) {
@@ -104,17 +104,20 @@ const VERT_PARS = /* glsl */`
 		vec3 wbase = base + modelMatrix[ 3 ].xyz;
 		float s = iPos.w, yaw = iDat.x, pa = iDat.z, pb = iDat.w;
 		float d = distance( wbase, uCamPos );
-		// LOD window (dithered cross-fade with the near / mid models) and distance thinning by rank
+		// fade in: a dithered cross-fade with the near / mid model (complementary, the plant stays
+		// solid). Everything past that shrinks instead of dissolving: the plants the distance
+		// thinning drops (by rank) and all of them at the end of the range, so the far canopy
+		// never turns into dither noise
 		float fin = smoothstep( Rg.x, Rg.y, d );
-		float fout = smoothstep( Rg.z, Rg.w, d );
+		float fend = 1.0 - smoothstep( Rg.z, Rg.w, d );
 		float thinK = uImpThin.y > 0.0 ? smoothstep( uImpThin.x, uImpThin.y, d ) : 0.0;
-		float keep = uDensity * mix( 1.0, uImpThin.z, thinK );
-		float thin = clamp( ( keep - rank ) / 0.05, 0.0, 1.0 );
-		vImpZ = vec4( min( fin, thin ), fout, B.y, B.z );
+		float rn = rank / max( uDensity, 0.01 );
+		float vis = clamp( ( mix( 1.0, uImpThin.z, thinK ) - rn ) / 0.15 + 1.0 - thinK, 0.0, 1.0 ) * fend;
+		vImpZ = vec4( fin, 0.0, B.y, B.z );
 		impN = vec3( 0.0, 1.0, 0.0 );
-		if ( vImpZ.x <= 0.0 || fout >= 1.0 ) { impP = base; return; }
+		if ( fin <= 0.0 || vis <= 0.0 ) { impP = base; return; }
 		// the survivors of a thinned forest grow so the canopy stays closed
-		float grow = 1.0 + thinK * ( inversesqrt( max( uImpThin.z, 0.1 ) ) - 1.0 ) * 0.7;
+		float grow = ( 1.0 + thinK * ( inversesqrt( max( uImpThin.z, 0.1 ) ) - 1.0 ) * 0.7 ) * sqrt( vis );
 		// instance transform: horizontal / vertical scale and a lean (shear per metre of height)
 		float kind = B.x;
 		float sh = s, sv = s;
@@ -146,6 +149,7 @@ const VERT_PARS = /* glsl */`
 		vec3 up = cross( toCam, right );
 		vec3 Q = C + toCam * min( A.y * max( sh, sv ) * ( 0.2 + 0.8 * ty ), d * 0.5 );
 		vec3 wp = Q + right * position.x * halfW + up * position.y * halfH;
+		vImpQ = position.xy * vec2( halfW, halfH ) / max( A.y * max( sh, sv ), 1e-3 );
 		impP = wp - modelMatrix[ 3 ].xyz;
 		impN = toCam;
 		vImpC = C;
@@ -161,7 +165,7 @@ const VERT_PARS = /* glsl */`
 
 const FRAG_PARS = /* glsl */`
 	uniform sampler2D tImpA; uniform sampler2D tImpB; uniform vec2 uImpGrid;
-	varying vec3 vImpC; varying vec4 vImpX; varying vec4 vImpY; varying vec4 vImpZ; varying vec3 vImpTint; varying vec3 vImpBarkC;
+	varying vec3 vImpC; varying vec4 vImpX; varying vec4 vImpY; varying vec4 vImpZ; varying vec3 vImpTint; varying vec3 vImpBarkC; varying vec2 vImpQ;
 	float impBayer( vec2 p ) {
 		ivec2 q = ivec2( mod( p, 4.0 ) );
 		int i = q.x + q.y * 4;
@@ -216,7 +220,10 @@ const FRAG_COLOR = /* glsl */`
 	impSample();
 	float impCov = impA.a;
 	float impBt = impBayer( gl_FragCoord.xy );
-	if ( impCov < 0.42 || impBt >= vImpZ.x || impBt < vImpZ.y ) discard;
+	// small on screen the atlas is read from its coarse mips, where coverage averages out: lower the
+	// cut-off with the footprint (as the near foliage does) so distant crowns keep their size
+	float impLod = log2( max( max( length( dFdx( vImpQ ) ), length( dFdy( vImpQ ) ) ) * ${( FRAME / 2 ).toFixed( 1 )}, 1e-4 ) );
+	if ( impCov < mix( 0.42, 0.2, clamp( ( impLod - 0.5 ) / 3.0, 0.0, 1.0 ) ) || impBt >= vImpZ.x ) discard;
 	vec3 impCol = impA.rgb / impCov;
 	impCol *= impCol;
 	float impLeaf = clamp( impB.a / impCov, 0.0, 1.0 );
@@ -297,6 +304,7 @@ export class Impostors {
 		this.models = models;
 		this.targets = [];
 		this.thin = new THREE.Vector4( 0, 0, 1, BLEND_DIST );
+		this.thinMid = new THREE.Vector4( 0, 0, 1, BLEND_DIST );
 		this.quad = buildQuad();
 		this.baked = false;
 		this._tryBake();
@@ -386,7 +394,7 @@ export class Impostors {
 
 	// an instance buffer drawn with the impostor material: 'far' (thinned with distance) or 'mid'
 	makeTarget( band ) {
-		const U = { uImpThin: { value: band === 'far' ? this.thin : new THREE.Vector4( 0, 0, 1, BLEND_DIST ) } };
+		const U = { uImpThin: { value: band === 'far' ? this.thin : this.thinMid } };
 		const m = new THREE.MeshStandardMaterial( { roughness: 0.8, metalness: 0 } );
 		patchMaterial( m, 'veg-impostor', ( shader ) => {
 			Object.assign( shader.uniforms, VG, this.uniforms, U );
@@ -412,24 +420,31 @@ export class Impostors {
 		return t;
 	}
 
-	// ranges: species -> { imp: [ start, end ] } (m); fade: cross-fade band as a share of the distance
+	// ranges: species -> { imp: [ start, end ] } (m); fade: the cross-fade band at the start as a share
+	// of the distance. The plants shrink away over the last 15-20 % of the range.
 	setRanges( ranges, q, fade = 0.1 ) {
 		let farEnd = 0;
 		this.species.forEach( ( s, k ) => {
 			const r = ranges[ s ]?.imp;
 			const v = this.uniforms.uImpRange.value[ k ];
 			if ( ! r ) { v.set( 1e6, 1e6, 1e6, 1e6 ); return; }
-			const a = r[ 0 ] * fade, b = r[ 1 ] * fade;
-			v.set( r[ 0 ] - a * 0.5, r[ 0 ] + a * 0.5, r[ 1 ] - b * 0.5, r[ 1 ] + b * 0.5 );
-			if ( this.spec[ s ].imp === 'far' ) farEnd = Math.max( farEnd, r[ 1 ] );
+			const far = this.spec[ s ].imp === 'far';
+			const a = r[ 0 ] * fade;
+			v.set( r[ 0 ] - a * 0.5, r[ 0 ] + a * 0.5, r[ 1 ] * ( far ? 0.8 : 0.85 ), r[ 1 ] );
+			if ( far ) farEnd = Math.max( farEnd, r[ 1 ] );
 		} );
 		// far forests thin out towards the end of the view: fewer, bigger crowns (a lower keep on the
 		// lower quality settings)
 		const keep = q.far < 0.7 ? 0.35 : q.far < 1 ? 0.42 : 0.5;
-		this.thin.set( Math.max( 420, farEnd * 0.3 ), Math.max( 480, farEnd ), keep, BLEND_DIST );
+		// blending the three nearest frames costs three times the texture reads but keeps the image
+		// steady (no frame switches) and soft far away: everywhere on the higher settings
+		const blend = q.blend ?? BLEND_DIST;
+		this.thin.set( Math.max( 420, farEnd * 0.3 ), Math.max( 480, farEnd ), keep, blend );
+		this.thinMid.w = blend;
 	}
 
-	// share of the plants kept at distance d (mirrors the shader; the CPU skips what the shader drops)
+	// share of the plants kept at distance d (mirrors the shader: a plant of normalised rank rn is drawn
+	// while rn < keepAt( d ) + 0.15, so the CPU skips the rest)
 	keepAt( d ) {
 		const t = this.thin;
 		if ( ! ( t.y > 0 ) ) return 1;

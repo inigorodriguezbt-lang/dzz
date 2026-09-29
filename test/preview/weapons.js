@@ -11,7 +11,7 @@ import { Entity, EntityManager } from '../../src/game/Entities.js';
 import { PlayerInventory } from '../../src/game/Inventory.js';
 import { Actions } from '../../src/game/Actions.js';
 import { makeStack, getItem, defineItems } from '../../src/game/items/ItemDB.js';
-import '../../src/game/items/defs/clothing.js';
+import '../../src/game/items/defs/index.js';
 import { install } from '../../src/weapons/Hands.js';
 
 const q = new URLSearchParams( location.search );
@@ -155,7 +155,9 @@ window.pose = ( o = {} ) => {
 		}
 		for ( let i = 0; i < 40; i ++ ) frame( 1 / 60 );
 	}
-	hands.vm.dbg = o.dbg || null;
+	// clothes on the arms: { torso: id | '', gloves: id | '' }
+	if ( o.torso !== undefined ) { inv.equip.torso = o.torso ? makeStack( o.torso ) : null; inv.changed(); }
+	if ( o.gloves !== undefined ) { inv.equip.hands = o.gloves ? makeStack( o.gloves ) : null; inv.changed(); }
 	const st = inv.heldStack();
 	if ( st && o.att ) { st.data.att = {}; for ( const id of o.att ) { const a = makeStack( id ); const fit = getItem( id ).attachment.slot; st.data.att[ fit ] = a; } inv.changed(); }
 	if ( o.time != null ) hands.vm.t = o.time;
@@ -167,6 +169,9 @@ window.pose = ( o = {} ) => {
 	for ( let i = 0; i < ( o.steps ?? 30 ); i ++ ) frame( 1 / 60 );
 	if ( o.fire ) { for ( let i = 0; i < o.fire; i ++ ) { pressed.add( 'fire' ); down.add( 'fire' ); frame( 1 / 60 ); down.delete( 'fire' ); for ( let k = 0; k < ( o.gap ?? 8 ); k ++ ) frame( 1 / 60 ); } }
 	if ( o.hold ) { down.add( 'fire' ); pressed.add( 'fire' ); for ( let i = 0; i < o.hold; i ++ ) frame( 1 / 60 ); down.delete( 'fire' ); released.add( 'fire' ); frame( 1 / 60 ); }
+	// hold fire without letting go (a drawn bow, a cooking grenade)
+	if ( o.holdKeep ) { down.add( 'fire' ); pressed.add( 'fire' ); for ( let i = 0; i < o.holdKeep; i ++ ) frame( 1 / 60 ); }
+	else down.delete( 'fire' );
 	if ( o.key ) { pressed.add( o.key ); down.add( o.key ); frame( 1 / 60 ); down.delete( o.key ); released.add( o.key ); }
 	if ( o.after ) for ( let i = 0; i < o.after; i ++ ) frame( 1 / 60 );
 	// freeze an action at a given moment for the screenshot

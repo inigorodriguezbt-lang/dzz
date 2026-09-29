@@ -1,0 +1,91 @@
+/* Rules moved unchanged from the old ui.css so nothing breaks while this screen is rebuilt to
+   docs/UI_SPEC.md. They use the legacy --tw-* aliases from tokens.css; replace them with the spec
+   rules (section 5 and 5.13) and delete what is no longer used. */
+
+/* ── HUD ───────────────────────────────────────────────────────────────── */
+
+.hud { position: absolute; inset: 0; pointer-events: none; transition: opacity var(--tw-slow) var(--tw-ease); }
+.hud.off { opacity: 0; }
+.crosshair { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); pointer-events: none; }
+.crosshair .dot { width: 4px; height: 4px; border-radius: 50%; background: rgba(255, 255, 255, 0.85); box-shadow: 0 0 2px rgba(0, 0, 0, 0.8); }
+.crosshair .lines { position: relative; width: 0; height: 0; }
+.crosshair .lines i { position: absolute; background: rgba(255, 255, 255, 0.85); box-shadow: 0 0 2px rgba(0, 0, 0, 0.8); transition: transform 80ms linear; }
+.crosshair .lines i:nth-child(1) { width: 2px; height: 8px; left: -1px; top: calc(-8px - var(--gap, 6px)); }
+.crosshair .lines i:nth-child(2) { width: 2px; height: 8px; left: -1px; top: var(--gap, 6px); }
+.crosshair .lines i:nth-child(3) { width: 8px; height: 2px; top: -1px; left: calc(-8px - var(--gap, 6px)); }
+.crosshair .lines i:nth-child(4) { width: 8px; height: 2px; top: -1px; left: var(--gap, 6px); }
+.hitmarker { position: absolute; left: 50%; top: 50%; width: 22px; height: 22px; transform: translate(-50%, -50%) rotate(45deg); opacity: 0; transition: opacity 140ms; }
+.hitmarker::before, .hitmarker::after { content: ''; position: absolute; background: #fff; box-shadow: 0 0 3px rgba(0, 0, 0, 0.7); }
+.hitmarker::before { left: 10px; top: 0; width: 2px; height: 22px; clip-path: polygon(0 0, 100% 0, 100% 35%, 0 35%, 0 65%, 100% 65%, 100% 100%, 0 100%); }
+.hitmarker::after { top: 10px; left: 0; height: 2px; width: 22px; clip-path: polygon(0 0, 35% 0, 35% 100%, 0 100%, 0 0, 65% 0, 100% 0, 100% 100%, 65% 100%); }
+.hitmarker.on { opacity: 1; transition: none; }
+.hitmarker.kill::before, .hitmarker.kill::after { background: var(--tw-coral); }
+
+.compass { position: absolute; top: var(--tw-4); left: 50%; transform: translateX(-50%); width: min(560px, 52vw); height: calc(34 * var(--tw-u)); overflow: hidden; border-radius: var(--tw-r-sm); -webkit-mask-image: linear-gradient(90deg, transparent, #000 18%, #000 82%, transparent); mask-image: linear-gradient(90deg, transparent, #000 18%, #000 82%, transparent); }
+.compass-strip { position: absolute; top: 0; left: 50%; height: 100%; white-space: nowrap; will-change: transform; }
+.compass-tick { position: absolute; top: 6px; width: 1px; height: 6px; background: rgba(255, 255, 255, 0.45); }
+.compass-tick.major { height: 10px; background: rgba(255, 255, 255, 0.8); }
+.compass-label { position: absolute; top: 15px; transform: translateX(-50%); font-size: var(--tw-fs-xs); font-weight: 600; color: var(--tw-ink-2); letter-spacing: 0.05em; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8); }
+.compass-label.card { color: var(--tw-ink); font-size: var(--tw-fs-sm); }
+.compass-label.north { color: var(--tw-sun); }
+.compass-marker { position: absolute; top: 1px; transform: translateX(-50%); font-size: 10px; color: var(--tw-aqua); text-shadow: 0 1px 3px #000; }
+.compass-needle { position: absolute; left: 50%; top: 0; width: 2px; height: 5px; margin-left: -1px; background: var(--tw-sun); }
+.compass-readout { position: absolute; top: calc(var(--tw-4) + 36 * var(--tw-u)); left: 50%; transform: translateX(-50%); font-family: var(--tw-mono); font-size: var(--tw-fs-xs); color: var(--tw-ink-3); text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8); white-space: nowrap; }
+
+.vitals { position: absolute; left: var(--tw-edge); bottom: var(--tw-edge); display: flex; flex-direction: column; gap: var(--tw-2); }
+.vital-row { display: flex; gap: var(--tw-2); }
+.vital { position: relative; display: flex; align-items: center; justify-content: center; width: calc(38 * var(--tw-u)); height: calc(38 * var(--tw-u)); border-radius: var(--tw-r-md); }
+.vital svg { width: 58%; height: 58%; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; position: relative; z-index: 1; }
+.vital .fill { position: absolute; left: 0; right: 0; bottom: 0; border-radius: 0 0 var(--tw-r-md) var(--tw-r-md); background: currentColor; opacity: 0.22; transition: height 400ms var(--tw-ease); }
+.vital.low { color: var(--tw-sun); }
+.vital.crit { color: var(--tw-coral); animation: tw-pulse 1s infinite; }
+.vital .arrow { position: absolute; right: 2px; top: 1px; font-size: 9px; line-height: 1; color: var(--tw-ink-2); z-index: 2; }
+.status-icons { display: flex; flex-wrap: wrap; gap: var(--tw-1); max-width: calc(260 * var(--tw-u)); }
+.status { display: flex; align-items: center; gap: 5px; height: calc(22 * var(--tw-u)); padding: 0 8px; border-radius: 20px; font-size: var(--tw-fs-xs); font-weight: 600; letter-spacing: 0.02em; }
+.status.bad { color: #ffd4d8; background: rgba(var(--tw-coral-rgb), 0.25); border: 1px solid rgba(var(--tw-coral-rgb), 0.45); }
+.status.warn { color: #ffe6c7; background: rgba(var(--tw-sun-rgb), 0.18); border: 1px solid rgba(var(--tw-sun-rgb), 0.4); }
+.status.good { color: #dbffd6; background: rgba(142, 224, 122, 0.16); border: 1px solid rgba(142, 224, 122, 0.4); }
+
+.weapon-hud { position: absolute; right: var(--tw-edge); bottom: var(--tw-edge); display: flex; flex-direction: column; align-items: flex-end; gap: var(--tw-2); }
+.weapon-card { display: flex; align-items: center; gap: var(--tw-3); padding: var(--tw-2) var(--tw-3); border-radius: var(--tw-r-md); min-width: calc(200 * var(--tw-u)); }
+.weapon-card img { width: calc(64 * var(--tw-u)); height: calc(40 * var(--tw-u)); object-fit: contain; }
+.weapon-name { font-weight: 600; font-size: var(--tw-fs-md); }
+.weapon-sub { font-size: var(--tw-fs-xs); color: var(--tw-ink-3); }
+.ammo { font-family: var(--tw-mono); font-size: calc(26 * var(--tw-u)); font-weight: 500; line-height: 1; text-align: right; }
+.ammo small { font-size: 0.5em; color: var(--tw-ink-3); }
+.ammo.empty { color: var(--tw-coral); }
+.durability { height: 3px; border-radius: 3px; background: rgba(255, 255, 255, 0.12); overflow: hidden; margin-top: 4px; }
+.durability i { display: block; height: 100%; background: var(--tw-green); }
+
+.hotbar { position: absolute; bottom: var(--tw-edge); left: 50%; transform: translateX(-50%); display: flex; gap: var(--tw-1); }
+.hot { position: relative; width: calc(50 * var(--tw-u)); height: calc(50 * var(--tw-u)); border-radius: var(--tw-r-md); display: flex; align-items: center; justify-content: center; }
+.hot img { width: 82%; height: 82%; object-fit: contain; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.5)); }
+.hot .n { position: absolute; left: 4px; top: 2px; font-family: var(--tw-mono); font-size: 9px; color: var(--tw-ink-3); }
+.hot .q { position: absolute; right: 4px; bottom: 2px; font-family: var(--tw-mono); font-size: 10px; color: var(--tw-ink); text-shadow: 0 1px 2px #000; }
+.hot.on { border-color: rgba(var(--tw-aqua-rgb), 0.8) !important; box-shadow: 0 0 0 1px rgba(var(--tw-aqua-rgb), 0.5), 0 0 18px -4px rgba(var(--tw-aqua-rgb), 0.6); }
+
+.prompt-main { display: flex; align-items: center; gap: var(--tw-2); padding: 6px 12px; border-radius: 20px; font-size: var(--tw-fs-md); font-weight: 500; white-space: nowrap; }
+.progress-ring { position: absolute; left: 50%; top: 50%; width: 64px; height: 64px; transform: translate(-50%, -50%) rotate(-90deg); }
+.progress-ring circle { fill: none; stroke-width: 3; }
+.progress-label { position: absolute; left: 50%; top: calc(50% + 42px); transform: translateX(-50%); font-size: var(--tw-fs-sm); font-weight: 500; text-shadow: 0 1px 3px #000; white-space: nowrap; }
+
+.toasts { position: absolute; left: var(--tw-edge); top: calc(var(--tw-edge) + 30px); display: flex; flex-direction: column; gap: var(--tw-1); width: calc(300 * var(--tw-u)); align-items: flex-start; }
+.pickups { position: absolute; right: var(--tw-edge); top: 40%; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
+.pickup { display: flex; align-items: center; gap: 6px; padding: 3px 9px 3px 4px; border-radius: 20px; font-size: var(--tw-fs-sm); animation: tw-toast var(--tw-med) var(--tw-ease); transition: opacity 500ms; }
+.pickup img { width: 22px; height: 22px; object-fit: contain; }
+.pickup.out { opacity: 0; }
+@keyframes tw-toast { from { opacity: 0; transform: translateX(-12px); } to { opacity: 1; transform: none; } }
+
+.subtitle { position: absolute; left: 50%; bottom: calc(96 * var(--tw-u)); transform: translateX(-50%); padding: 6px 14px; border-radius: var(--tw-r-sm); background: rgba(0, 0, 0, 0.55); font-size: var(--tw-fs-md); text-align: center; max-width: 60vw; }
+.fps { position: absolute; top: 8px; left: 10px; font: 500 11px/1.2 var(--tw-mono); color: #e8f6ff; background: rgba(8, 14, 22, 0.55); padding: 4px 8px; border-radius: 6px; }
+.debug { position: absolute; top: 34px; left: 10px; font: 500 11px/1.45 var(--tw-mono); color: #e8f6ff; background: rgba(8, 14, 22, 0.6); padding: 6px 10px; border-radius: 6px; white-space: pre; }
+.minimap { position: absolute; right: var(--tw-edge); top: var(--tw-edge); width: calc(170 * var(--tw-u)); height: calc(170 * var(--tw-u)); border-radius: 50%; overflow: hidden; }
+.minimap canvas { width: 100%; height: 100%; display: block; }
+.minimap-label { position: absolute; right: var(--tw-edge); top: calc(var(--tw-edge) + 174 * var(--tw-u)); width: calc(170 * var(--tw-u)); text-align: center; font-size: var(--tw-fs-xs); color: var(--tw-ink-2); text-shadow: 0 1px 3px #000; }
+.vehicle-hud { position: absolute; right: var(--tw-edge); bottom: calc(var(--tw-edge) + 90px); padding: var(--tw-3); border-radius: var(--tw-r-md); min-width: calc(180 * var(--tw-u)); }
+.speed { font-family: var(--tw-mono); font-size: calc(30 * var(--tw-u)); line-height: 1; }
+.speed small { font-size: 0.4em; color: var(--tw-ink-3); margin-left: 4px; }
+.gauge { height: 4px; border-radius: 4px; background: rgba(255, 255, 255, 0.12); overflow: hidden; margin-top: 6px; }
+.gauge i { display: block; height: 100%; background: var(--tw-aqua); }
+.dmg-dir { position: absolute; left: 50%; top: 50%; width: 220px; height: 220px; margin: -110px 0 0 -110px; pointer-events: none; }
+.dmg-dir i { position: absolute; left: 50%; top: 0; width: 60px; height: 14px; margin-left: -30px; border-radius: 50%; background: radial-gradient(closest-side, rgba(255, 40, 40, 0.8), transparent); transform-origin: 30px 110px; transition: opacity 800ms; }

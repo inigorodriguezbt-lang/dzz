@@ -4,7 +4,7 @@
 import fs from 'node:fs';
 import zlib from 'node:zlib';
 import { HeightField, FLAG } from '../src/world/HeightField.js';
-import { scatterCell } from '../src/world/scatter.js';
+import { scatterCell, citiesNear } from '../src/world/scatter.js';
 import { SP, NSP, STRIDE, SPECIES, LAYER, LAYER_CELL } from '../src/world/vegetation/species.js';
 
 const meta = JSON.parse( fs.readFileSync( 'public/data/world.json', 'utf8' ) );
@@ -28,7 +28,7 @@ function obstacles( x0, z0, size ) {
 	const m = 60;
 	const bld = B.filter( b => b[ 0 ] > x0 - m - b[ 2 ] - b[ 3 ] && b[ 0 ] < x0 + size + m + b[ 2 ] + b[ 3 ] && b[ 1 ] > z0 - m - b[ 2 ] - b[ 3 ] && b[ 1 ] < z0 + size + m + b[ 2 ] + b[ 3 ] );
 	const seg = S.filter( s => Math.max( s[ 0 ], s[ 2 ] ) > x0 - m && Math.min( s[ 0 ], s[ 2 ] ) < x0 + size + m && Math.max( s[ 1 ], s[ 3 ] ) > z0 - m && Math.min( s[ 1 ], s[ 3 ] ) < z0 + size + m );
-	return { bld: bld.length ? new Float32Array( bld.flat() ) : null, seg: seg.length ? new Float32Array( seg.flat() ) : null };
+	return { bld: bld.length ? new Float32Array( bld.flat() ) : null, seg: seg.length ? new Float32Array( seg.flat() ) : null, cty: citiesNear( meta.cities, x0, z0, size ) };
 }
 
 function scatterArea( cx, cz, R, layer ) {
@@ -39,7 +39,7 @@ function scatterArea( cx, cz, R, layer ) {
 	for ( let j = Math.floor( ( cz - R ) / size ); j <= Math.floor( ( cz + R ) / size ); j ++ ) for ( let i = Math.floor( ( cx - R ) / size ); i <= Math.floor( ( cx + R ) / size ); i ++ ) {
 		const o = obstacles( i * size, j * size, size );
 		const t0 = performance.now();
-		const r = scatterCell( hf, { layer, i, j, bld: o.bld, seg: o.seg } );
+		const r = scatterCell( hf, { layer, i, j, bld: o.bld, seg: o.seg, cty: o.cty } );
 		ms += performance.now() - t0; cells ++;
 		ok( r.transfer && r.transfer.length === 2, 'scatter returns transfer buffers' );
 		for ( let s = 0; s < NSP; s ++ ) for ( let n = r.off[ s ]; n < r.off[ s + 1 ]; n ++ ) {
@@ -96,6 +96,18 @@ for ( const [ name, x, z, want ] of extra.length ? extra : SPOTS ) {
 		ok( sea === 0, `${name} layer ${layer}: ${sea} plants in the sea` );
 	}
 	for ( const sp of want ) ok( seen.has( sp ), `${name}: expected ${SPECIES[ sp ].name}` );
+}
+
+// ---- towns: lawns, yard and street trees only; no wild understory, no meadow grass off the lawns ------
+for ( const [ name, x, z ] of [ [ 'Waikiki city', - 3880, - 9660 ], [ 'Honolulu downtown', - 4390, - 10255 ], [ 'Hilo town', 31722, 11967 ] ] ) {
+	const can = scatterArea( x, z, 120, LAYER.CANOPY ), det = scatterArea( x, z, 120, LAYER.DETAIL ), gr = scatterArea( x, z, 40, LAYER.GRASS );
+	const area = Math.PI * 120 * 120;
+	console.log( `\n${name}: canopy ${fmt( can.counts )} | detail ${fmt( det.counts )} | grass ${gr.all.length}` );
+	ok( det.all.filter( a => Math.hypot( a[ 1 ] - x, a[ 3 ] - z ) < 120 ).length === 0, `${name}: no wild understory in town (${fmt( det.counts )})` );
+	const trees = can.all.filter( a => Math.hypot( a[ 1 ] - x, a[ 3 ] - z ) < 120 ).length;
+	ok( trees < area / 250, `${name}: sparse town trees (${trees} in ${( area / 1e4 ).toFixed( 1 )} ha)` );
+	const offLawn = gr.all.filter( a => ! ( hf.flagsNear( a[ 1 ], a[ 3 ] ) & FLAG.CITY ) ).length;
+	ok( offLawn === 0, `${name}: grass only on the town lawns (${offLawn} off them)` );
 }
 
 // ---- altitude: the summits are bare, no trees above the tree line, palms stay low ------------------

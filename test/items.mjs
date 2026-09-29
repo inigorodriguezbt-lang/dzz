@@ -329,6 +329,28 @@ console.log( 'item use' );
 	U.use( put( 'sleeping_bag' ) );
 	ok( slept && slept[ 0 ] >= 2 && slept[ 1 ] > 0.5, 'sleeping bag sleeps ' + slept?.[ 0 ] + ' h' );
 
+	// shore fishing: cast over deep water, the bobber bites, strike, land a fish (bait used)
+	{
+		const { Fishing } = await import( '../src/game/items/Fishing.js' );
+		game.physics = { waterLevel: () => 0, raycastBoxes: () => null, raycast: () => null };
+		game.hf = { heightAt: ( x ) => x < 3 ? 1 : - 4 };
+		game.player.pos.set( 0, 1, 0 ); game.player.swimming = false; game.player.vehicle = null;
+		const F = new Fishing( game );
+		const rod = put( 'fishing_rod' ); put( 'fishing_bait', 2 );
+		const tg = F.target( { origin: new THREE.Vector3( 0, 2.6, 0 ), dir: new THREE.Vector3( 1, - 0.2, 0 ).normalize() } );
+		ok( tg && tg.depth > 3, 'fishing: a cast lands on deep water' );
+		ok( ! F.target( { origin: new THREE.Vector3( 0, 2.6, 0 ), dir: new THREE.Vector3( - 1, - 0.2, 0 ).normalize() } ), 'fishing: no cast onto dry land' );
+		F.cast( rod, tg ); finish();
+		ok( F.state === 'wait', 'fishing: waiting for a bite' );
+		F.waitT = 0; F.update( 0.016 );
+		ok( F.state === 'bite', 'fishing: a bite' );
+		const fish0 = inv.findAll( ( x, d ) => d?.food ).length, bait0 = inv.count( 'fishing_bait' );
+		const rnd0 = Math.random; Math.random = () => 0.1;
+		try { F.strike(); finish(); } finally { Math.random = rnd0; }
+		ok( F.state === null && inv.findAll( ( x, d ) => d?.food ).length === fish0 + 1 && inv.count( 'fishing_bait' ) === bait0 - 1, 'fishing: strike lands a fish and uses bait' );
+		F.dispose();
+	}
+
 	// guides teach a skill once
 	const guide = put( 'fishing_guide' );
 	act( guide, /^Read$/ ).run(); finish();

@@ -21,7 +21,7 @@ export class MapUI {
 		const legend = h( 'div.map-legend.tw-glass', { html: `
 			<div><span class="sw" style="background:#ffc861"></span>Freeway</div><div><span class="sw" style="background:#fbf6e8"></span>Highway / street</div>
 			<div><span class="sw" style="background:#96704a"></span>Dirt road</div><div><span class="sw" style="background:#5c544e"></span>Building</div>
-			<div><span class="sw" style="background:#5fe3d4"></span>Marker</div><div><span class="sw" style="background:#ff7a85"></span>Your body</div>` } );
+			<div><span class="sw" style="background:#FF7A2E"></span>Marker</div><div><span class="sw" style="background:#FF5C5C"></span>Your body</div>` } );
 		const zoomBtns = h( 'div.map-tools.tw-glass', {},
 			h( 'button.btn.small', { text: '+', onclick: () => this._zoom( 1.5 ) } ), h( 'button.btn.small', { text: '−', onclick: () => this._zoom( 1 / 1.5 ) } ),
 			h( 'button.btn.small', { text: 'Me', onclick: () => { this.view.cx = g.player.pos.x; this.view.cz = g.player.pos.z; } } ),
@@ -122,7 +122,7 @@ export class MapUI {
 		ctx.font = '600 12px Inter, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
 		for ( const m of g.markers.list() ) {
 			const [ sx, sy ] = toScreen( m.x, m.z );
-			ctx.fillStyle = m.kind === 'death' ? '#ff7a85' : m.kind === 'locate' ? '#ffb86b' : '#5fe3d4';
+			ctx.fillStyle = m.kind === 'death' ? '#FF5C5C' : '#FF7A2E';
 			ctx.strokeStyle = 'rgba(0,0,0,0.6)'; ctx.lineWidth = 2;
 			ctx.beginPath(); ctx.moveTo( sx, sy - 12 ); ctx.lineTo( sx + 7, sy - 4 ); ctx.lineTo( sx, sy + 4 ); ctx.lineTo( sx - 7, sy - 4 ); ctx.closePath(); ctx.stroke(); ctx.fill();
 			ctx.lineWidth = 3; ctx.strokeText( m.label, sx + 10, sy - 4 ); ctx.fillStyle = '#fff'; ctx.fillText( m.label, sx + 10, sy - 4 );

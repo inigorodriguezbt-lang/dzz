@@ -393,7 +393,7 @@ export class Ballistics {
 		const g = this.game;
 		const st = makeStack( a.id, 1 );
 		const left = g.player.inventory.add( st );
-		if ( left > 0 ) { g.toast( 'No room for it', 'warn' ); return; }
+		if ( left > 0 ) { g.toast( 'No room', 'warn' ); return; }
 		g.events.emit( 'item:pick', { stack: st } );
 		g.audio?.play( 'pickup', { vol: 0.5 } );
 		a.mesh.parent?.remove( a.mesh );

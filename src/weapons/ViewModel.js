@@ -2,16 +2,18 @@
 // grenade, a tool or any item) and both arms, posed procedurally every frame in game.viewScene.
 //
 // Frames: view space = the view camera's (origin at the eye, -Z forward). A gun's own frame has +X towards the
-// muzzle (see GunModels.js); the `holder` group carries that frame. Poses are blended from a hip pose, the
-// aimed pose (the sight line through the eye), a sprint pose and the current action's keyframes, then weapon
-// sway, walk bob and spring-damped recoil are layered on. Hands are placed on grip cylinders (Arms.js) and the
-// arms are solved with IK from the shoulders.
+// muzzle (see GunModels.js); the `holder` group carries that frame. Poses are blended from a hold pose (long guns
+// at a low ready to the right pointing into the screen, pistols out in both hands, melee weapons from MELEE_HOLD,
+// grenades / tools / items from a posed right hand in HAND_HOLD), the aimed pose (the sight line through the eye),
+// a sprint pose and the current action's keyframes, then sway, walk bob and spring-damped recoil are layered on.
+// Hands wrap grip cylinders (Arms.js: diagonal power grip, solved finger curl); each forearm continues its hand's
+// line towards where the elbow hangs, and the upper arm reaches back to the shoulder.
 //
 // Hands.js drives it through `vm.s` (state) and calls fire() / eject() / setItem().
 import * as THREE from 'three';
 import { getItem } from '../game/items/ItemDB.js';
 import { buildGunView, buildMagView, buildAttachmentView, buildMeleeView, buildThrowableView, weaponMaterials, CALIBERS } from './GunModels.js';
-import { Arm, curlFor, wristMatrix } from './Arms.js';
+import { Arm, curlFor, wristMatrix, THUMB_POSE } from './Arms.js';
 import { reticleLens, integratedLens, aimLens, ScopeOverlay, OVERLAY_RETICLES } from './Optics.js';
 import { buildItemModel, modelInfo } from '../render/ItemModels.js';
 
@@ -19,6 +21,7 @@ const PI = Math.PI;
 const V = ( x = 0, y = 0, z = 0 ) => new THREE.Vector3( x, y, z );
 const E = ( x, y, z ) => new THREE.Quaternion().setFromEuler( new THREE.Euler( x, y, z, 'YXZ' ) );
 const GUN_Q = new THREE.Quaternion().setFromAxisAngle( V( 0, 1, 0 ), PI / 2 ); // gun +X -> view -Z
+const AX_X = V( 1, 0, 0 );
 const clamp = THREE.MathUtils.clamp;
 const smooth = ( t ) => t <= 0 ? 0 : t >= 1 ? 1 : t * t * ( 3 - 2 * t );
 const seg = ( t, a, b ) => smooth( ( t - a ) / ( b - a ) ); // 0 before a, 1 after b
@@ -39,12 +42,34 @@ function basisQ( x, y, out = new THREE.Quaternion() ) {
 	const X = x.clone().normalize(), Y = y.clone().addScaledVector( X, - y.dot( X ) ).normalize(), Z = X.clone().cross( Y );
 	return out.setFromRotationMatrix( _m.makeBasis( X, Y, Z ) );
 }
-const grip = ( p, a, n, r ) => ( { p: p.clone ? p.clone() : V( ...p ), a: ( a.clone ? a.clone() : V( ...a ) ).normalize(), n: ( n.clone ? n.clone() : V( ...n ) ).normalize(), r } );
+const grip = ( p, a, n, r, extra = null ) => ( { p: p.clone ? p.clone() : V( ...p ), a: ( a.clone ? a.clone() : V( ...a ) ).normalize(), n: ( n.clone ? n.clone() : V( ...n ) ).normalize(), r, ...extra } );
+// the right hand holding a grenade / tool / item: wrist position in view space, the knuckle line (x) and the back
+// of the hand (y)
+const HAND_HOLD = {
+	throw: { at: [ 0.13, - 0.17, - 0.33 ], x: [ - 0.4, 0.6, 0.7 ], y: [ 0.6, - 0.3, 0.75 ] },
+	item: { at: [ 0.13, - 0.16, - 0.32 ], x: [ - 0.2, 0.5, 0.85 ], y: [ 0.75, - 0.55, 0.3 ] },
+	// torches and other long things point forward, held overhand
+	long: { at: [ 0.2, - 0.17, - 0.32 ], x: [ - 0.1, 0.2, - 1 ], y: [ - 0.3, - 0.95, 0 ] },
+};
+// melee holds: where the right hand's grip sits in view space and how the item points
+const MELEE_HOLD = {
+	knife: { at: [ 0.17, - 0.16, - 0.33 ], x: [ - 0.38, 0.3, - 0.88 ], y: [ 0.9, 0.42, 0 ] },
+	one: { at: [ 0.2, - 0.17, - 0.36 ], x: [ - 0.35, 0.75, - 0.55 ], y: [ 1, 0.2, 0.2 ] },
+	two: { at: [ 0.16, - 0.15, - 0.42 ], x: [ 0.5, 0.75, - 0.35 ], y: [ - 0.3, 0.1, - 1 ] },
+	spear: { at: [ 0.14, - 0.17, - 0.32 ], x: [ - 0.1, 0.15, - 1 ], y: [ 0, 1, 0 ] },
+};
+// the bow's drawing hand: three fingers hooked on the string
+const BOW_CURL = [ [ 0.9, 1.1, 0.6 ], [ 0.9, 1.1, 0.6 ], [ 0.9, 1.1, 0.6 ], [ 1.4, 1.5, 1.0 ] ];
 
 // a simple damped spring (recoil channels)
 class Spring {
 	constructor( k = 220, c = 22 ) { this.k = k; this.c = c; this.x = 0; this.v = 0; }
-	step( dt ) { const a = - this.k * this.x - this.c * this.v; this.v += a * dt; this.x += this.v * dt; return this.x; }
+	// sub-stepped: a long frame (a hitch, a slow machine) must not blow the integration up
+	step( dt ) {
+		const n = Math.min( 12, Math.ceil( dt * 240 ) ), h = dt / n;
+		for ( let i = 0; i < n; i ++ ) { const a = - this.k * this.x - this.c * this.v; this.v += a * h; this.x += this.v * h; }
+		return this.x;
+	}
 }
 
 // ---- small procedural textures for the flash -------------------------------------------------------------------------
@@ -86,11 +111,12 @@ export class ViewModel {
 		this.root.add( this.holder );
 		this.armR = new Arm( 1 );
 		this.armL = new Arm( - 1 );
-		this.armR.pole.set( 0.75, - 1, 0.25 ).normalize();
-		this.armL.pole.set( - 0.75, - 1, 0.2 ).normalize();
 		this.root.add( this.armR.root, this.armL.root );
 		this.shoulderR = V( 0.19, - 0.25, 0.1 );
 		this.shoulderL = V( - 0.19, - 0.25, 0.08 );
+		// where the elbows hang when both hands are on a gun: tucked down, the right one out a little
+		this.elbowR = V( 0.3, - 0.42, 0.0 );
+		this.elbowL = V( - 0.14, - 0.52, - 0.2 );
 		// muzzle flash: a camera-facing star and crossed side flames along the barrel
 		const T = flashTextures();
 		const fm = ( map ) => new THREE.MeshBasicMaterial( { map, color: new THREE.Color( 7, 4.2, 1.9 ), blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, fog: false } );
@@ -107,8 +133,10 @@ export class ViewModel {
 		this.root.add( this.flashStar );
 		this.holder.add( this.flashSide );
 		this.flashT = 0;
+		// the flash's light lives in the scene itself, not under the (sometimes hidden) root: the light count the view
+		// materials are compiled for must never change, or every one of them recompiles
 		this.light = new THREE.PointLight( 0xffb070, 0, 2.5, 2 );
-		this.root.add( this.light );
+		scene.add( this.light );
 		// ejected brass in view (quick: they tumble out of frame in half a second)
 		this.casings = [];
 		const cgeo = new THREE.CylinderGeometry( 1, 1, 1, 8, 1 ); cgeo.rotateZ( PI / 2 );
@@ -234,10 +262,10 @@ export class ViewModel {
 			it.nockRest = info.bow ? - 0.16 : 0.385;
 			it.cams = info.bow ? [ V( - 0.07, 0.475, 0 ), V( - 0.07, - 0.475, 0 ) ] : [ V( 0.385, 0.012, 0.33 ), V( 0.385, 0.012, - 0.33 ) ];
 		}
-		// grips in the gun frame. A support hand under a handguard: palm up under it, fingers round the right side, the
-		// wrist hanging left and low (the models' generic normal puts the forearm above the gun)
+		// grips in the gun frame (GunModels). A support hand under a handguard cups it from below: the palm faces up
+		// and a little to the left, the wrist hangs low on the left, the fingers wrap round the right side
 		let L = info.grips.L;
-		if ( L && ! L.support && ! L.vert && ! L.under && ! L.bow ) L = { ...L, n: V( 0, - 1, 0.3 ).normalize() };
+		if ( L && ! L.support && ! L.vert && ! L.under && ! L.bow ) L = { ...L, n: V( 0, - 1, - 0.3 ).normalize() };
 		it.grips = { R: info.grips.R, L };
 		it.eye = this._eyePoint( it );
 		it.cls = f.cls;
@@ -266,20 +294,28 @@ export class ViewModel {
 		}
 		if ( info.integratedOptic ) return V( info.integratedOptic.x0 - 0.1, info.integratedOptic.y, 0 );
 		// a little further back than a real cheek weld: the view FOV is narrow and the irons would fill it
-		const extra = { pistol: 0.02, smg: 0.07, rifle: 0.08, sniper: 0.06, shotgun: 0.07, lmg: 0.08, bow: 0 }[ it.f.cls ] ?? 0.06;
+		// (pistols sit out at arm's length)
+		const extra = { pistol: 0.12, smg: 0.07, rifle: 0.08, sniper: 0.06, shotgun: 0.07, lmg: 0.08, bow: 0 }[ it.f.cls ] ?? 0.06;
+		// a bow is aimed past the right of its riser, looking down the arrow
+		if ( info.bow ) return V( info.rearX - info.eyeBack - 0.08, info.sightH * 0.9, 0.018 );
 		return V( info.rearX - info.eyeBack - extra, info.sightH, 0 );
 	}
 
 	_buildMelee( def ) {
 		const v = buildMeleeView( def, 'view' );
 		const info = v.info;
-		const two = !! def.melee.twoHanded && info.grip2 != null;
+		const m = def.melee;
+		const two = !! m.twoHanded && info.grip2 != null;
+		// the pose family: small blades held forward, one-handers up at the right, long two-handers across the body
+		const len = info.len || 0.4;
+		const hold = two ? ( m.kind === 'spear' ? 'spear' : 'two' ) : len < 0.34 ? 'knife' : 'one';
 		const r = 0.0135;
+		// right-handed on a two-hander: the left hand low by the end, the right hand up the handle
 		const it = {
-			kind: 'melee', def, obj: v.obj, info, two, len: info.len || 0.4,
+			kind: 'melee', def, obj: v.obj, info, two, len, hold,
 			grips: {
-				R: grip( [ info.grip, 0, 0 ], [ 1, 0, 0 ], [ 0, - 0.2, 1 ], r ),
-				L: two ? grip( [ info.grip2, 0, 0 ], [ 1, 0, 0 ], [ 0, - 0.2, - 1 ], r ) : null,
+				R: grip( [ two ? info.grip2 : info.grip, 0, 0 ], [ 1, 0, 0 ], [ 0, - 0.2, 1 ], r ),
+				L: two ? grip( [ info.grip, 0, 0 ], [ 1, 0, 0 ], [ 0, - 0.2, - 1 ], r ) : null,
 			},
 		};
 		return it;
@@ -324,16 +360,18 @@ export class ViewModel {
 	setEnvironment( tex ) {
 		this.env = tex;
 		for ( const m of Object.values( weaponMaterials( 'view' ) ) ) { m.envMap = tex; m.needsUpdate = true; }
+		this.armR.setEnvironment( tex, this._envI ?? 0.5 ); this.armL.setEnvironment( tex, this._envI ?? 0.5 );
 	}
 	setLighting( envIntensity ) {
 		if ( Math.abs( ( this._envI ?? - 1 ) - envIntensity ) < 0.01 ) return;
 		this._envI = envIntensity;
 		for ( const m of Object.values( weaponMaterials( 'view' ) ) ) m.envMapIntensity = envIntensity;
+		if ( this.env ) { this.armR.setEnvironment( this.env, envIntensity ); this.armL.setEnvironment( this.env, envIntensity ); }
 	}
 
-	// clothing on the arms: { skin, sleeve, long, glove }
+	// clothing on the arms: { skin, sleeve (colour), long, print (fabric texture), glove (colour) }
 	setArms( o ) {
-		const key = JSON.stringify( o );
+		const key = `${o.skin}:${o.sleeve}:${o.long}:${o.print?.uuid}:${o.glove}`;
 		if ( key === this._armKey ) return;
 		this._armKey = key;
 		this.armR.style( o ); this.armL.style( o );
@@ -457,23 +495,43 @@ export class ViewModel {
 		if ( it.strings ) this._strings( it );
 	}
 
+	// the resting hold of an item in view space -> it.hipP / it.hipQ
+	_holdPose( it ) {
+		const gun = it.kind === 'gun', cls = it.cls;
+		const hipP = it.hipP = V(), hipQ = it.hipQ = new THREE.Quaternion();
+		if ( gun ) {
+			// the gun frame's origin (trigger, on the bore line) in view space: long guns at a low ready to the right,
+			// pointing into the screen; pistols out in front in both hands
+			if ( cls === 'pistol' ) { hipP.set( 0.14, - 0.1, - 0.4 ); hipQ.copy( E( 0.0, 0.1, - 0.12 ) ).multiply( GUN_Q ); }
+			else if ( cls === 'bow' && it.info.bow ) { hipP.set( 0.0, - 0.1, - 0.5 ); hipQ.copy( E( 0.02, 0.12, - 0.4 ) ).multiply( GUN_Q ); }
+			else if ( it.heavy ) { hipP.set( 0.2, - 0.17, - 0.5 ); hipQ.copy( E( 0.0, 0.05, - 0.08 ) ).multiply( GUN_Q ); }
+			else { hipP.set( 0.2, - 0.15, - 0.48 ); hipQ.copy( E( 0.0, 0.05, - 0.08 ) ).multiply( GUN_Q ); }
+		} else if ( it.kind === 'melee' ) {
+			// the item's own frame: +x along it (handle -> tip), +y the spine / back of a blade (edges face -y, an axe's
+			// bit +y), +z the flat. The grip is placed at `at`; `x` / `y` orient it in view space
+			const MH = MELEE_HOLD[ it.hold ];
+			basisQ( V( ...MH.x ), V( ...MH.y ), hipQ );
+			const g = _v.copy( it.grips.R.p ).applyQuaternion( hipQ );
+			hipP.set( ...MH.at ).sub( g );
+		} else if ( it.kind === 'fists' ) { hipP.set( 0.14, - 0.2, - 0.32 ); hipQ.identity(); }
+		else {
+			// grenades, tools and anything else: the right hand is posed in view space and the item sits in its grip
+			const HH = HAND_HOLD[ it.kind === 'throw' ? 'throw' : it.long ? 'long' : 'item' ];
+			basisQ( V( ...HH.x ), V( ...HH.y ), _q2 );
+			_m.compose( V( ...HH.at ), _q2, _s.set( 1, 1, 1 ) );
+			wristMatrix( it.grips.R, 1, _m2 );
+			_m.multiply( _m2.invert() ).decompose( hipP, hipQ, _v );
+		}
+	}
+
 	// hip / aim / sprint / lowered / equip / action blend -> holder pose (P, Q)
 	_basePose( it, P, Q ) {
 		const s = this.s, act = s.act;
 		const gun = it.kind === 'gun';
 		const cls = it.cls;
-		// hip
-		const hipP = V(), hipQ = new THREE.Quaternion();
-		if ( gun ) {
-			if ( cls === 'pistol' ) { hipP.set( 0.1, - 0.115, - 0.42 ); hipQ.copy( E( 0.03, 0.06, 0 ) ).multiply( GUN_Q ); }
-			else if ( cls === 'bow' && it.info.bow ) { hipP.set( 0.01, - 0.07, - 0.55 ); hipQ.copy( E( 0.02, 0.02, - 0.25 ) ).multiply( GUN_Q ); }
-			else { hipP.set( 0.13, - 0.15, - 0.3 - ( it.heavy ? 0.03 : 0 ) ); hipQ.copy( E( 0.03, 0.035, - 0.02 ) ).multiply( GUN_Q ); }
-		} else if ( it.kind === 'melee' ) {
-			if ( it.two ) { hipP.set( 0.1, - 0.3, - 0.34 ); basisQ( V( - 0.3, 0.8, - 0.35 ), V( - 0.3, - 0.1, - 1 ), hipQ ); }
-			else { hipP.set( 0.2, - 0.25, - 0.32 ); basisQ( V( - 0.18, 0.85, - 0.45 ), V( - 0.4, 0.2, - 1 ), hipQ ); }
-		} else if ( it.kind === 'throw' ) { hipP.set( 0.11, - 0.12, - 0.3 ); hipQ.copy( E( 0.25, - 0.4, 0.15 ) ); }
-		else if ( it.kind === 'fists' ) { hipP.set( 0.14, - 0.2, - 0.32 ); hipQ.identity(); }
-		else { hipP.set( 0.15, - 0.18, - 0.34 ); hipQ.copy( E( 0.05, 0.35, 0.15 ) ).multiply( it.long ? GUN_Q : E( 0, 0.6, 0 ) ); }
+		// the hold (static per item: worked out once)
+		if ( ! it.hipP ) this._holdPose( it );
+		const hipP = it.hipP, hipQ = it.hipQ;
 		P.copy( hipP ); Q.copy( hipQ );
 		// aimed down the sights: the eye point sits on the view axis
 		if ( gun && s.ads > 0 ) {
@@ -487,24 +545,25 @@ export class ViewModel {
 		// sprint: rifles swing across the chest muzzle-down, pistols point at the ground
 		if ( s.sprint > 0 ) {
 			const k = smooth( s.sprint );
-			const sp = gun ? ( cls === 'pistol' ? V( 0.07, - 0.22, - 0.26 ) : V( 0.05, - 0.2, - 0.2 ) ) : V( hipP.x, hipP.y - 0.05, hipP.z + 0.04 );
-			const sq = gun ? ( cls === 'pistol' ? E( - 0.95, 0.15, 0.1 ) : E( - 0.45, 0.75, 0.55 ) ) : E( - 0.2, 0.1, 0 );
+			const sp = gun ? ( cls === 'pistol' ? V( 0.12, - 0.135, - 0.36 ) : V( 0.1, - 0.17, - 0.42 ) ) : V( hipP.x, hipP.y - 0.05, hipP.z + 0.04 );
+			const sq = gun ? ( cls === 'pistol' ? E( - 0.55, 0.3, 0.2 ) : E( - 0.25, 0.6, 0.35 ) ) : E( - 0.2, 0.1, 0 );
 			P.lerp( sp, k );
 			_q.copy( sq ).multiply( gun ? GUN_Q : hipQ );
 			Q.slerp( gun ? _q : _q, k * ( gun ? 1 : 0.6 ) );
 		}
 		// lowered (busy, swimming, climbing) and blocked by a wall
-		const low = Math.max( s.lower, 1 - s.equip );
+		// raising a weapon: it comes up fast and settles (ease-out), so it's on screen from the first frames
+		const low = Math.max( smooth( s.lower ), Math.pow( 1 - s.equip, 2 ) );
 		if ( low > 0 ) {
-			const k = smooth( low );
+			const k = low;
 			P.y -= 0.32 * k; P.z += 0.08 * k;
-			_q.setFromEuler( new THREE.Euler( - 0.9 * k, 0, 0 ) );
+			_q.setFromAxisAngle( AX_X, - 0.9 * k );
 			Q.premultiply( _q );
 		}
 		if ( s.block > 0 && gun ) {
 			const k = smooth( s.block );
 			P.z += 0.1 * k; P.y -= 0.04 * k;
-			_q.setFromAxisAngle( V( 1, 0, 0 ), 0.55 * k );
+			_q.setFromAxisAngle( AX_X, 0.55 * k );
 			Q.premultiply( _q );
 		}
 		if ( act ) this._actionPose( it, act, P, Q );
@@ -536,9 +595,7 @@ export class ViewModel {
 		switch ( act.type ) {
 			case 'reload_mag': case 'reload_belt': {
 				const k = bell( 0, 0.14, 0.86, 1 );
-				const o = this.dbg?.reloadOff;
-				if ( o ) off( ...o, k );
-				else if ( pistol ) off( - 0.04, 0.05, 0.04, 0.3, 0.4, 0.5, k );
+				if ( pistol ) off( - 0.04, 0.05, 0.04, 0.3, 0.4, 0.5, k );
 				else off( - 0.06, 0.085, 0.0, 0.1, 0.5, 0.6, k );
 				// the seat: a push up when the magazine clicks in
 				const bump = bell( act.p.magIn - 0.04, act.p.magIn, act.p.magIn, act.p.magIn + 0.06 );
@@ -554,7 +611,7 @@ export class ViewModel {
 			}
 			case 'revolver_open': case 'revolver_insert': case 'revolver_close': {
 				const k = act.type === 'revolver_open' ? seg( t, 0, 0.6 ) : act.type === 'revolver_close' ? 1 - seg( t, 0.35, 1 ) : 1;
-				off( - 0.05, 0.05, 0.05, 0.3, 0.45, 0.3, k );
+				off( - 0.07, 0.02, - 0.05, 0.35, 0.5, 0.35, k );
 				// dump the empties: muzzle up
 				if ( act.type === 'revolver_open' ) off( 0, 0.02, 0, 0.9, 0, 0, bell( 0.5, 0.7, 0.8, 1 ) );
 				break;
@@ -574,7 +631,8 @@ export class ViewModel {
 			case 'cycle': {
 				// bolt / lever: the gun dips and cants while the hand works it; pumps barely move
 				const k = bell( 0, 0.2, 0.75, 1 );
-				if ( it.info.boltHandle ) off( - 0.01, - 0.01, 0.02, - 0.03, 0.08, - 0.25, k * ( s.ads > 0.5 ? 0.35 : 1 ) );
+				// bolt guns come up and turn their right side in so the hand on the bolt stays in view
+				if ( it.info.boltHandle ) off( - 0.06, 0.06, 0.04, 0.06, 0.32, - 0.3, k * ( s.ads > 0.5 ? 0.35 : 1 ) );
 				else if ( it.info.lever ) off( 0, - 0.01, 0.01, - 0.05, 0, - 0.08, k );
 				else off( 0, 0, 0.01, 0.03, 0, 0, k );
 				break;
@@ -634,24 +692,25 @@ export class ViewModel {
 		if ( kind === 'spear' || act.p.stab ) {
 			K = [ [ 0, 0, 0, 0, 0, 0, 0 ], [ 0.3, 0.02, - 0.02, 0.12, - 1.2, 0.1, 0 ], [ 0.45, - 0.06, 0.05, - 0.38, - 1.35, 0.05, 0 ], [ 0.6, - 0.05, 0.04, - 0.32, - 1.3, 0.05, 0 ], [ 1, 0, 0, 0, 0, 0, 0 ] ];
 		} else if ( ( kind === 'axe' || act.p.heavy ) && v % 2 === 0 ) {
-			// overhead chop
-			K = [ [ 0, 0, 0, 0, 0, 0, 0 ], [ 0.33, - 0.05, 0.22, 0.12, 0.9, 0.1, 0.1 ], [ 0.46, - 0.1, - 0.02, - 0.3, - 1.3, 0.15, 0.1 ], [ 0.58, - 0.1, - 0.18, - 0.25, - 1.7, 0.2, 0.1 ], [ 1, 0, 0, 0, 0, 0, 0 ] ];
+			// overhead chop: the head goes back over the shoulder, then down through the middle of the screen
+			K = two ? [ [ 0, 0, 0, 0, 0, 0, 0 ], [ 0.33, 0.03, 0.07, - 0.04, 0.35, - 0.1, 0.05 ], [ 0.46, - 0.05, - 0.03, - 0.12, - 0.75, 0.3, 0.1 ], [ 0.58, - 0.07, - 0.1, - 0.1, - 1.05, 0.42, 0.15 ], [ 1, 0, 0, 0, 0, 0, 0 ] ]
+				: [ [ 0, 0, 0, 0, 0, 0, 0 ], [ 0.33, - 0.05, 0.16, 0.08, 0.9, 0.1, 0.1 ], [ 0.46, - 0.1, - 0.02, - 0.3, - 1.3, 0.15, 0.1 ], [ 0.58, - 0.1, - 0.18, - 0.25, - 1.7, 0.2, 0.1 ], [ 1, 0, 0, 0, 0, 0, 0 ] ];
 		} else if ( v % 2 === 0 ) {
 			// forehand: from up-right across to down-left
-			K = [ [ 0, 0, 0, 0, 0, 0, 0 ], [ 0.3, 0.1, 0.12, 0.1, 0.4, - 0.9, - 0.5 ], [ 0.44, - 0.08, - 0.02, - 0.2, - 0.6, 0.6, - 0.2 ], [ 0.56, - 0.3, - 0.12, - 0.12, - 1.0, 1.2, 0.2 ], [ 1, 0, 0, 0, 0, 0, 0 ] ];
+			K = [ [ 0, 0, 0, 0, 0, 0, 0 ], [ 0.3, 0.06, 0.1, 0.08, 0.4, - 0.6, - 0.4 ], [ 0.44, - 0.08, - 0.02, - 0.2, - 0.6, 0.6, - 0.2 ], [ 0.56, - 0.3, - 0.12, - 0.12, - 1.0, 1.2, 0.2 ], [ 1, 0, 0, 0, 0, 0, 0 ] ];
 		} else {
 			// backhand: from low-left up across to the right
 			K = [ [ 0, 0, 0, 0, 0, 0, 0 ], [ 0.3, - 0.26, 0.02, 0.02, - 0.2, 1.1, 0.8 ], [ 0.44, - 0.02, 0.02, - 0.24, - 0.5, 0.0, 0.3 ], [ 0.56, 0.16, 0.04, - 0.12, - 0.4, - 0.9, - 0.2 ], [ 1, 0, 0, 0, 0, 0, 0 ] ];
 		}
-		if ( two ) for ( const k of K ) { k[ 1 ] *= 1.3; k[ 3 ] *= 1.2; }
+		if ( two && ! ( ( kind === 'axe' || act.p.heavy ) && v % 2 === 0 ) ) for ( const k of K ) { k[ 1 ] *= 1.3; k[ 3 ] *= 1.2; }
 		let i = 0;
 		while ( i < K.length - 2 && t > K[ i + 1 ][ 0 ] ) i ++;
 		const a = K[ i ], b = K[ i + 1 ];
 		const u = smooth( ( t - a[ 0 ] ) / ( b[ 0 ] - a[ 0 ] ) );
 		const f = ( k ) => a[ k ] + ( b[ k ] - a[ k ] ) * u;
 		P.x += f( 1 ); P.y += f( 2 ); P.z += f( 3 );
-		// rotate about the hand
-		const g = _v.copy( it.grips.R.p ).applyQuaternion( Q ).add( P );
+		// rotate about the hand (a two-hander about the lower one, near the end of the handle)
+		const g = _v.copy( ( it.two && it.grips.L ? it.grips.L : it.grips.R ).p ).applyQuaternion( Q ).add( P );
 		_q.setFromEuler( new THREE.Euler( f( 4 ), f( 5 ), f( 6 ), 'YXZ' ) );
 		P.sub( g ).applyQuaternion( _q ).add( g );
 		Q.premultiply( _q );
@@ -779,32 +838,34 @@ export class ViewModel {
 		}
 		// defaults: both hands on their grips
 		if ( gR ) toView( gR, 1, this.handR ); else showR = false;
-		// the support palm presses a little into the handguard (flesh gives)
-		if ( gL ) toView( gL, - 1, this.handL, gL.support ? 0 : - 0.15 ); else showL = false;
-		let curlR = gR ? curlFor( gR.r ) : curlFor( 0.02, 1.3 ), curlL = gL ? curlFor( gL.r ) : curlFor( 0.03, 0.5 );
-		// thumbs: [ spread towards the index side, flex into the palm, joint 1, joint 2 ]. On a pistol grip the right
-		// thumb lies forward along the left of the frame; under a handguard the left one runs along its side
-		let thumbR = [ - 0.2, 0.2, 0.2, 0.15 ], thumbL = [ 0.95, - 0.5, 0.1, 0.1 ];
-		if ( gL && ! gL.support ) curlL = curlFor( gL.r, 0.8 );
-		if ( this.dbg ) { if ( this.dbg.thumbL ) thumbL = this.dbg.thumbL; if ( this.dbg.thumbR ) thumbR = this.dbg.thumbR; }
+		if ( gL ) toView( gL, - 1, this.handL ); else showL = false;
+		let curlR = gR ? curlFor( gR.r, 1, gR.beta ) : curlFor( 0.02, 1.3 ), curlL = gL ? curlFor( gL.r, gL.tight ?? 1, gL.beta ) : curlFor( 0.03, 0.5 );
+		let thumbR = THUMB_POSE.wrap, thumbL = gL?.thumb ? THUMB_POSE[ gL.thumb ] : THUMB_POSE.along;
 		if ( it.kind === 'gun' ) {
-			// trigger finger: straight along the frame until the trigger is pulled
-			const trig = gR?.trig;
-			if ( trig ) curlR[ 0 ] = [ 0.25 + s.trigger * 0.35, 0.55 + s.trigger * 0.5, 0.35 + s.trigger * 0.2 ];
-			if ( gL?.support ) { curlL = curlFor( 0.03, 0.9 ); thumbL = [ 0.2, 0.2, 0.1, 0.1 ]; }
+			// the trigger finger lies along the frame until the gun is aimed or fired
+			if ( gR?.trig ) {
+				const k = Math.max( s.trigger, smooth( s.ads ), this.cycleT < 0.4 ? 1 : 0 ) * ( 1 - s.sprint );
+				const c = this._curlR ||= curlR.map( f => f.slice() );
+				for ( let f = 1; f < 4; f ++ ) for ( let j = 0; j < 3; j ++ ) c[ f ][ j ] = curlR[ f ][ j ];
+				const pull = s.trigger;
+				c[ 0 ][ 0 ] = 0.1 + k * ( 0.42 + pull * 0.12 ); c[ 0 ][ 1 ] = 0.06 + k * ( 0.78 + pull * 0.3 ); c[ 0 ][ 2 ] = 0.04 + k * ( 0.35 + pull * 0.15 );
+				curlR = c;
+			}
+			// pistols: both thumbs forward along the frame, the support hand's over the firing hand's fingers
+			if ( gL?.support ) { thumbL = THUMB_POSE.forward; thumbR = THUMB_POSE.forward; }
 			if ( it.info.bow ) {
 				// the drawing hand hooks the string at the nock
 				const g = grip( [ it.nockX ?? - 0.16, - 0.01, 0.0 ], [ 0, 1, 0 ], [ - 0.2, 0, 1 ], 0.004 );
 				toView( g, 1, this.handR );
-				curlR = [ [ 0.9, 1.1, 0.6 ], [ 0.9, 1.1, 0.6 ], [ 0.9, 1.1, 0.6 ], [ 1.4, 1.5, 1.0 ] ];
+				curlR = BOW_CURL; thumbR = THUMB_POSE.fist;
 			}
 		} else if ( it.kind === 'fists' ) {
 			// fists up, the left one slightly back
 			const hold = act ? 0 : 1;
 			this.handR.compose( _v.set( 0.13, - 0.2 - 0.2 * hold, - 0.34 ), _q.copy( E( 0.4, 0.2, 1.4 ) ), _s.set( 1, 1, 1 ) );
 			this.handL.compose( _v.set( - 0.14, - 0.22 - 0.2 * hold, - 0.3 ), _q.copy( E( 0.4, - 0.2, - 1.4 ) ), _s.set( 1, 1, 1 ) );
-			curlR = curlFor( 0.004, 1.5 ); curlL = curlFor( 0.004, 1.5 );
-			thumbR = [ 0.1, 0.6, 0.6, 0.5 ]; thumbL = thumbR;
+			curlR = curlL = curlFor( 0.004, 1.4 );
+			thumbR = thumbL = THUMB_POSE.fist;
 			showL = showR = !! act;
 			if ( act?.type === 'punch' ) {
 				const k = seg( act.t, 0, 0.25 ) * ( 1 - seg( act.t, 0.4, 1 ) );
@@ -813,31 +874,33 @@ export class ViewModel {
 			if ( act?.type === 'shove' ) {
 				const k = seg( act.t, 0, 0.25 ) * ( 1 - seg( act.t, 0.45, 1 ) );
 				curlR = curlL = curlFor( 0.05, 0.3 );
+				thumbR = thumbL = THUMB_POSE.flat;
 				this.handR.compose( _v.set( 0.12, - 0.18 + 0.05 * k, - 0.3 - 0.2 * k ), _q.copy( E( 1.3, 0.1, 1.5 ) ), _s.set( 1, 1, 1 ) );
 				this.handL.compose( _v.set( - 0.12, - 0.18 + 0.05 * k, - 0.3 - 0.2 * k ), _q.copy( E( 1.3, - 0.1, - 1.5 ) ), _s.set( 1, 1, 1 ) );
 			}
 		}
 		// action choreography for the hands
 		if ( act && it.kind === 'gun' ) {
-			const r = this._reloadHands( it, act, curlL, thumbL );
-			if ( r ) { curlL = r.curl || curlL; showL = r.show ?? showL; if ( r.curlR ) curlR = r.curlR; }
+			const r = this._reloadHands( it, act );
+			if ( r ) { curlL = r.curl || curlL; thumbL = r.thumb || thumbL; showL = r.show ?? showL; if ( r.curlR ) curlR = r.curlR; }
 		}
 		if ( act?.type === 'bash' && it.kind === 'gun' && it.cls !== 'pistol' ) showL = !! gL;
 		// melee two-handers and the throw arm
-		if ( it.kind === 'melee' && it.two && gL ) { toView( gL, - 1, this.handL ); showL = true; curlL = curlFor( gL.r ); }
-		if ( it.kind === 'throw' ) { curlR = curlFor( it.grips.R.r, 1.35 ); thumbR = [ 0.3, 0.7, 0.5, 0.4 ]; }
-		if ( it.kind === 'tool' || it.kind === 'item' ) { curlR = curlFor( it.grips.R.r, 1 ); }
+		if ( it.kind === 'melee' && it.two && gL ) { toView( gL, - 1, this.handL ); showL = true; curlL = curlFor( gL.r ); thumbL = THUMB_POSE.wrap; }
+		if ( it.kind === 'throw' ) { curlR = curlFor( it.grips.R.r, 1.1 ); thumbR = THUMB_POSE.pinch; }
+		if ( it.kind === 'tool' || it.kind === 'item' ) { curlR = curlFor( it.grips.R.r, 1 ); thumbR = it.long ? THUMB_POSE.along : THUMB_POSE.pinch; }
 		// hide the arms when the scope fills the screen
 		if ( s.overlay ) showL = showR = false;
 		R.visible = showR; Lh.visible = showL;
-		if ( showR ) { R.setCurl( curlR, thumbR, 0.3 ); R.pose( this.shoulderR, this.handR ); }
-		if ( showL ) { Lh.setCurl( curlL, thumbL, 0.3 ); Lh.pose( this.shoulderL, this.handL ); }
+		const gunHold = it.kind === 'gun' && it.cls !== 'bow';
+		if ( showR ) { R.setCurl( curlR, thumbR ); R.pose( this.shoulderR, this.handR, 0.4, gunHold ? this.elbowR : null ); }
+		if ( showL ) { Lh.setCurl( curlL, thumbL ); Lh.pose( this.shoulderL, this.handL, 0.5, gunHold ? this.elbowL : null ); }
 		// what the reload hand carries
 		this._handProp( it, act );
 	}
 
 	// left-hand keyframes for reloads (and the right hand for bolts); returns curl overrides
-	_reloadHands( it, act, curlL, thumbL ) {
+	_reloadHands( it, act ) {
 		const t = act.t, info = it.info, O = it.obj.matrixWorld, p = act.p || {};
 		const pouch = _m2.compose( _v.set( - 0.06, - 0.55, - 0.1 ), _q.copy( E( 0.8, 0.3, - 1.2 ) ), _s.set( 1, 1, 1 ) );
 		const grasp = curlFor( 0.028, 1 );
@@ -854,26 +917,38 @@ export class ViewModel {
 				: grip( [ mi.p[ 0 ] + dx - Math.sin( mi.rake || 0 ) * - L * 0.55, mi.p[ 1 ] + dy - L * 0.55, mi.p[ 2 ] ], [ 0.15, 1, 0 ], [ - 0.3, - 0.1, - 1 ], 0.022 );
 			return wristMatrix( g, - 1, out ).premultiply( O );
 		};
+		// the support hand working the action. Handles on top are hooked from above (palm down, fingers round to the
+		// right), side handles are pinched from their own side, a pistol slide is gripped overhand
 		const chargeHand = ( pull, out ) => {
-			// AR pattern with the bolt locked back: slap the bolt catch on the left of the receiver
+			const f = it.def.firearm;
+			// AR pattern with the bolt locked back: the heel of the hand slaps the bolt catch on the left of the receiver
 			if ( it.def.model?.arch === 'ar' && act.type === 'reload_mag' ) {
-				const g = grip( [ 0.03 + pull * 0.01, - 0.03, - 0.02 ], [ 1, 0.2, 0 ], [ 0, 0.2, - 1 ], 0.012 );
+				const g = grip( [ 0.035 + pull * 0.012, - 0.04, - 0.045 ], [ - 1, - 0.15, 0 ], [ 0, 0.15, - 1 ], 0.03 );
 				return wristMatrix( g, - 1, out ).premultiply( O );
 			}
-			// grab the charging handle / slide / bolt handle: from the left side, over the top
-			let x = info.rearX ?? - 0.1, y = ( info.sightH ?? 0.05 ) * 0.7, z = 0;
-			if ( it.parts.charge ) { const c = it.parts.charge.userData.rest; x = c.x; y = c.y + 0.005; z = c.z; }
-			else if ( it.parts.slide ) { x = ( info.rearX ?? - 0.07 ) + 0.02; y = 0.01; }
-			else if ( it.parts.bolt ) { const c = it.parts.bolt.userData.rest; x = c.x + 0.06; y = c.y; z = c.z + 0.02; }
-			else if ( it.parts.boltHandle ) { x = - 0.09; y = - 0.03; z = 0.06; }
-			x -= pull * ( info.chargeTravel || info.slideTravel || info.boltTravel || 0.06 );
-			const g = grip( [ x, y + 0.01, z ], [ 1, 0.1, 0 ], [ - 0.2, 1, - 0.4 ], 0.012 );
+			const travel = pull * ( info.chargeTravel || info.slideTravel || info.boltTravel || 0.06 );
+			let g;
+			if ( it.parts.slide && f.cls === 'pistol' ) {
+				g = grip( [ ( info.rearX ?? - 0.07 ) + 0.03 - travel, 0.004, 0 ], [ - 1, 0, 0 ], [ 0, 1, 0.15 ], 0.014 );
+			} else {
+				let c = null;
+				if ( it.parts.charge ) c = it.parts.charge.userData.rest;
+				else if ( it.parts.bolt ) c = it.parts.bolt.userData.rest;
+				if ( ! c ) return out.copy( this.handL ); // bolt guns: the right hand works the bolt
+				const x = c.x - travel;
+				if ( c.z < - 0.008 ) g = grip( [ x, c.y, c.z - 0.012 ], [ 0, 1, 0 ], [ 0, 0.2, - 1 ], 0.01 );
+				else if ( c.z > 0.008 ) g = grip( [ x, c.y - 0.008, c.z + 0.014 ], [ 1, 0, 0 ], [ 0, - 0.6, 0.8 ], 0.01 ); // under the gun, round to the right side
+				else g = grip( [ x, c.y + 0.012, 0 ], [ - 1, 0, 0 ], [ 0, 1, - 0.3 ], 0.012 );
+			}
 			return wristMatrix( g, - 1, out ).premultiply( O );
 		};
+		// feeding rounds: pump guns palm up under the receiver (thumb pushing into the port), top loaders from above
 		const port = ( out, lift = 0 ) => {
 			const sp = info.shellPort || info.eject || [ 0, 0, 0.02 ];
-			const g = grip( [ sp[ 0 ] + 0.02, sp[ 1 ] - 0.02 - lift, sp[ 2 ] - 0.03 ], [ 1, 0, 0 ], [ 0, - 0.6, - 1 ], 0.012 );
-			return wristMatrix( g, - 1, out, lift ).premultiply( O );
+			const g = p.port === 'bottom'
+				? grip( [ sp[ 0 ] + 0.02, sp[ 1 ] - 0.035 - lift, sp[ 2 ] ], [ 0, 0, - 1 ], [ 0, - 1, 0 ], 0.016 )
+				: grip( [ sp[ 0 ] + 0.01, sp[ 1 ] + 0.03 + lift, sp[ 2 ] + 0.01 ], [ - 1, 0, 0 ], [ 0, 1, 0.3 ], 0.012 );
+			return wristMatrix( g, - 1, out ).premultiply( O );
 		};
 		const M1 = new THREE.Matrix4(), M2 = new THREE.Matrix4();
 		switch ( act.type ) {
@@ -901,7 +976,7 @@ export class ViewModel {
 				const home = M2.copy( this.handL );
 				const k = seg( t, 0.05, 0.25 ) * ( 1 - seg( t, 0.75, 0.95 ) );
 				blendMat( home, chargeHand( seg( t, 0.25, 0.5 ) * ( 1 - seg( t, 0.55, 0.7 ) ), M1 ), k, this.handL );
-				return { curl: k > 0.5 ? curlFor( 0.012, 1.2 ) : null, show: true };
+				return { curl: k > 0.5 ? curlFor( 0.012, 1.2 ) : null, thumb: k > 0.5 ? THUMB_POSE.wrap : null, show: true };
 			}
 			case 'shells_open': {
 				const home = M2.copy( this.handL );
@@ -932,7 +1007,8 @@ export class ViewModel {
 			case 'cycle': {
 				// bolt actions work with the right hand
 				if ( it.parts.boltHandle ) {
-					const knob = grip( [ - 0.07 - 0.02, - 0.034, 0.054 ], [ 1, 0.3, 0 ], [ 0, 1, 0.8 ], 0.009 );
+					// the hand comes up from the grip: palm to the gun, fingers up and over the knob, the wrist low behind it
+					const knob = grip( [ - 0.09, - 0.03, 0.054 ], [ - 0.82, 0.12, - 0.3 ], [ - 0.3, 0.2, 0.9 ], 0.01 );
 					const hb = it.parts.boltHandle;
 					const Mb = hb.matrixWorld.clone();
 					const g = wristMatrix( knob, 1, M1 );
@@ -959,7 +1035,8 @@ export class ViewModel {
 		const c = it.parts.cyl;
 		if ( ! c ) return out.copy( this.handL );
 		c.updateWorldMatrix( true, false );
-		const g = grip( [ - 0.06, 0.0, - 0.02 ], [ 0, 1, 0 ], [ - 1, 0, - 0.3 ], 0.01 );
+		// behind the swung-out cylinder, fingertips forward to its face
+		const g = grip( [ - 0.075, - 0.012, - 0.035 ], [ - 0.48, 0.48, 0.64 ], [ 0, 0.8, - 0.6 ], 0.008 );
 		return wristMatrix( g, - 1, out ).premultiply( it.obj.matrixWorld );
 	}
 	_breech( it, out ) {
@@ -1046,18 +1123,24 @@ export class ViewModel {
 			aimLens( it.lens, _q2 );
 			it.lens.userData.uniforms.uGlow.value = s.lit ? 3 : 6;
 		}
-		const ov = it.kind === 'gun' && it.optic?.overlay;
+		// magnified optics (and the AUG's built-in 1.5x, whose housing would otherwise fill the view) become a
+		// full-screen sight picture at the end of the raise
+		const integ = it.kind === 'gun' && ! it.optic && !! it.info?.integratedOptic;
+		const ov = it.kind === 'gun' && ( it.optic?.overlay || integ );
 		const k = ov ? smooth( clamp( ( s.ads - 0.82 ) / 0.16, 0, 1 ) ) : 0;
 		s.overlay = k > 0.98;
 		this.holder.visible = ! s.overlay;
 		if ( ov ) {
-			const a = it.optic.def.attachment;
-			this.overlay.set( a.reticle, a.color ?? ( a.reticle === 'pso' ? 0xff4a10 : 0xff2010 ), s.lit ? 2.5 : 5 );
+			if ( integ ) this.overlay.set( 'ring', 0x000000, 1 );
+			else {
+				const a = it.optic.def.attachment;
+				this.overlay.set( a.reticle, a.color ?? ( a.reticle === 'pso' ? 0xff4a10 : 0xff2010 ), s.lit ? 2.5 : 5 );
+			}
 			// the picture follows the gun's sway: centre on the optic axis' screen position
 			const d = this.sightDir( _v );
 			const tv = Math.tan( this.viewFovV * PI / 360 );
 			const cx = d.x / - d.z / tv, cy = d.y / - d.z / tv;
-			this.overlay.update( k, this.aspect, cx, cy, 0.92 );
+			this.overlay.update( k, this.aspect, cx, cy, integ ? 1.05 : 0.92 );
 		} else if ( s.binoc ) {
 			this.overlay.set( 'binoc' );
 			this.overlay.update( smooth( s.binoc ), this.aspect, 0, 0, 0.95 );
@@ -1094,7 +1177,8 @@ export class ViewModel {
 
 	dispose() {
 		this.clear();
-		this.scene.remove( this.root );
+		this.scene.remove( this.root, this.light );
+		this.armR.dispose(); this.armL.dispose();
 	}
 }
 

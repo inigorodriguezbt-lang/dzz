@@ -9,7 +9,8 @@ import * as THREE from 'three';
 
 export const ATLAS = 2048;
 
-// x, y, w, h in atlas pixels
+// x, y, w, h in atlas pixels; a fifth entry 1 marks a tile stored rotated (tile u runs down the canvas,
+// v across), which lets a long tile use a wide free strip
 export const TILE = {
 	FROND: [ 0, 0, 256, 2048 ], // palm frond wing: u across (0 rachis .. 1 leaflet tips), v along (0 base .. 1 tip)
 	FERN: [ 256, 0, 256, 1024 ], // fern frond wing, same layout
@@ -27,12 +28,15 @@ export const TILE = {
 	PLUME: [ 640, 1536, 128, 512 ], // grass seed heads (v 0 top .. 1 base)
 	WHITE: [ 776, 1544, 16, 16 ], // opaque white for untextured parts (vertex colour only)
 	PANDAN: [ 800, 1536, 128, 512 ], // long narrow leaf with a spiny edge (pineapple, spare)
+	DEADFROND: [ 928, 1536, 1024, 128, 1 ], // dry brown palm frond wing (rotated: v along the canvas x)
 };
 
 export function atlasUV( tile, u, v, out ) {
 	const t = TILE[ tile ];
-	out[ 0 ] = ( t[ 0 ] + Math.min( 0.998, Math.max( 0.002, u ) ) * t[ 2 ] ) / ATLAS;
-	out[ 1 ] = ( t[ 1 ] + Math.min( 0.998, Math.max( 0.002, v ) ) * t[ 3 ] ) / ATLAS;
+	u = Math.min( 0.998, Math.max( 0.002, u ) ); v = Math.min( 0.998, Math.max( 0.002, v ) );
+	if ( t[ 4 ] ) { const k = u; u = v; v = k; }
+	out[ 0 ] = ( t[ 0 ] + u * t[ 2 ] ) / ATLAS;
+	out[ 1 ] = ( t[ 1 ] + v * t[ 3 ] ) / ATLAS;
 	return out;
 }
 
@@ -95,13 +99,16 @@ function clipTile( ctx, t ) {
 
 // coconut frond wing: ~64 leaflets leaving the rachis at the left edge, their length varying, a few
 // broken short; young leaflets lighter at the base, darker and yellowing towards the tips
-function drawFrond( ctx, w, h, rnd ) {
-	const N = 64;
-	const base = hex( 0x6a8f2a ), tipc = hex( 0x46631c ), young = hex( 0x9db448 ), dry = hex( 0x9a8446 );
+const GREEN_FROND = { n: 64, base: 0x6a8f2a, tip: 0x46631c, young: 0x9db448, dry: 0x9a8446, broken: 0.05, rachis: [ '#b8a860', '#8f8440' ] };
+const DEAD_FROND = { n: 40, base: 0x8c7046, tip: 0x6c5434, young: 0xa8905c, dry: 0x5e4a30, broken: 0.25, rachis: [ '#a08a5a', '#7a6640' ] };
+
+function drawFrond( ctx, w, h, rnd, pal = GREEN_FROND ) {
+	const N = pal.n;
+	const base = hex( pal.base ), tipc = hex( pal.tip ), young = hex( pal.young ), dry = hex( pal.dry );
 	for ( let k = 0; k < N; k ++ ) {
 		const s = ( k + 0.5 ) / N;
 		const y = s * h;
-		const broken = rnd() < 0.05;
+		const broken = rnd() < pal.broken;
 		const len = w * ( 0.72 + 0.28 * rnd() ) * ( broken ? 0.45 : 1 );
 		const hw = h / N * ( 0.3 + 0.08 * rnd() );
 		const col = mixc( mixc( base, tipc, 0.3 + 0.4 * rnd() ), young, rnd() * 0.25 );
@@ -129,10 +136,10 @@ function drawFrond( ctx, w, h, rnd ) {
 		ctx.restore();
 	}
 	// the rachis along the left edge
-	const g = ctx.createLinearGradient( 0, 0, 14, 0 );
-	g.addColorStop( 0, '#b8a860' ); g.addColorStop( 1, '#8f8440' );
+	const g = ctx.createLinearGradient( 0, 0, 14 * w / 256, 0 );
+	g.addColorStop( 0, pal.rachis[ 0 ] ); g.addColorStop( 1, pal.rachis[ 1 ] );
 	ctx.fillStyle = g;
-	ctx.fillRect( 0, 0, 9, h );
+	ctx.fillRect( 0, 0, 9 * w / 256, h );
 }
 
 // fern wing: pinnae with lobed pinnules
@@ -338,7 +345,7 @@ function drawNeedles( ctx, w, h, rnd ) {
 
 // Cook pine branch: brown branch along the middle (u along), foxtail branchlets curving down / up
 function drawPineBranch( ctx, w, h, rnd ) {
-	const cols = [ '#2f4a26', '#365428', '#2a4222', '#3c5a2c' ];
+	const cols = [ '#44643a', '#4e703e', '#3e5c34', '#587a44' ];
 	const cy = h * 0.42;
 	for ( let k = 0; k < 34; k ++ ) {
 		const x0 = w * ( 0.04 + 0.92 * ( k / 34 ) ) + rnd() * 8;
@@ -482,15 +489,17 @@ export function buildLeafAtlas() {
 	const tile = ( name, fn ) => {
 		const t = TILE[ name ];
 		clipTile( ctx, t );
-		fn( ctx, t[ 2 ], t[ 3 ], rnd );
+		// rotated tiles: draw in tile space (x = u, y = v), swapped onto the canvas
+		if ( t[ 4 ] ) { ctx.transform( 0, 1, 1, 0, 0, 0 ); fn( ctx, t[ 3 ], t[ 2 ], rnd ); } else fn( ctx, t[ 2 ], t[ 3 ], rnd );
 		ctx.restore();
 	};
 	tile( 'FROND', drawFrond );
+	tile( 'DEADFROND', ( x, w, h, r ) => drawFrond( x, w, h, r, DEAD_FROND ) );
 	tile( 'FERN', drawFern );
 	tile( 'BANANA', drawBanana );
 	tile( 'BROAD', ( x, w, h, r ) => drawCluster( x, w, h, r, {
 		grid: 3, leaves: 5, L: 62, W: 26, holes: 0.12, opts: { tip: 0.35, base: 0.3, light: 1.25, dark: 0.85 },
-		cols: [ hex( 0x7f9a62 ), hex( 0x8aa46c ), hex( 0x71905a ), hex( 0x98ae7a ) ], twig: '#6a6048',
+		cols: [ hex( 0x6a8850 ), hex( 0x76925a ), hex( 0x5e7c48 ), hex( 0x829c66 ) ], twig: '#6a6048',
 	} ) );
 	tile( 'SMALL', ( x, w, h, r ) => drawCluster( x, w, h, r, {
 		grid: 5, leaves: 7, L: 24, W: 11, holes: 0.2, opts: { tip: 0.2, base: 0.4 },
@@ -504,9 +513,9 @@ export function buildLeafAtlas() {
 		flowers: { p: 0.16, draw: hibiscus },
 	} ) );
 	tile( 'NAUPAKA', ( x, w, h, r ) => drawCluster( x, w, h, r, {
-		grid: 4, leaves: 9, L: 40, W: 16, holes: 0.08, opts: { tip: 0.25, base: 0.5, light: 1.35, dark: 0.9 },
-		cols: [ hex( 0x6ea03a ), hex( 0x7cae44 ), hex( 0x62923a ), hex( 0x88b64e ) ],
-		flowers: { p: 0.35, draw: naupakaFlower }, twig: '#6a7a40',
+		grid: 5, leaves: 7, L: 30, W: 12, holes: 0.1, opts: { tip: 0.25, base: 0.5, light: 1.25, dark: 0.85 },
+		cols: [ hex( 0x5a8a30 ), hex( 0x669638 ), hex( 0x4e7c2c ), hex( 0x72a042 ) ],
+		flowers: { p: 0.25, draw: naupakaFlower }, twig: '#6a7a40',
 	} ) );
 	tile( 'NEEDLE', drawNeedles );
 	tile( 'PINEBR', drawPineBranch );

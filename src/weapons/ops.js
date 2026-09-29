@@ -90,10 +90,10 @@ export function attachmentFits( gunDef, attDef ) {
 	const f = gunDef?.firearm, a = attDef?.attachment;
 	if ( ! f || ! a ) return { ok: false, reason: 'Not an attachment' };
 	const slot = a.slot;
-	if ( ! ( f.rails || [] ).includes( slot ) ) return { ok: false, slot, reason: `The ${gunDef.name} has no ${slot === 'optic' ? 'optic rail' : slot === 'muzzle' ? 'threaded muzzle' : 'light rail'}` };
-	if ( slot === 'muzzle' && ! ( f.muzzles || [] ).includes( attDef.id ) ) return { ok: false, slot, reason: `${attDef.name} doesn't fit the ${gunDef.name}` };
+	if ( ! ( f.rails || [] ).includes( slot ) ) return { ok: false, slot, reason: slot === 'optic' ? 'No optic rail' : slot === 'muzzle' ? 'No threaded muzzle' : 'No light rail' };
+	if ( slot === 'muzzle' && ! ( f.muzzles || [] ).includes( attDef.id ) ) return { ok: false, slot, reason: 'Does not fit' };
 	const fits = a.fits || [];
-	if ( fits.length && ! fits.includes( f.cls ) && ! fits.includes( gunDef.id ) ) return { ok: false, slot, reason: `${attDef.name} doesn't fit the ${gunDef.name}` };
+	if ( fits.length && ! fits.includes( f.cls ) && ! fits.includes( gunDef.id ) ) return { ok: false, slot, reason: 'Does not fit' };
 	return { ok: true, slot };
 }
 

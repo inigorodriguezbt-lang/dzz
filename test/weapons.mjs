@@ -237,5 +237,34 @@ try {
 	console.log( 'model checks skipped:', e.message );
 }
 
+// ---- first-person arms: the rig builds, fingers close further round thinner grips, the hand frame is a rotation --------
+try {
+	const THREE = await import( 'three' );
+	const A = await import( '../src/weapons/Arms.js' );
+	for ( const side of [ 1, - 1 ] ) {
+		const arm = new A.Arm( side );
+		ok( arm.bones.length === 18 && arm.skin.skeleton, `arm ${side} rig` );
+		const tris = arm.skin.geometry.index.count / 3;
+		ok( tris > 3000 && tris < 12000, `arm ${side} skin ${tris} tris` );
+		const g = { p: new THREE.Vector3( 0.1, - 0.1, - 0.4 ), a: new THREE.Vector3( 0.3, 0.95, 0 ).normalize(), n: new THREE.Vector3( 0, 0.1, 1 ).normalize(), r: 0.017 };
+		const m = A.wristMatrix( g, side );
+		const x = new THREE.Vector3(), y = new THREE.Vector3(), z = new THREE.Vector3();
+		m.extractBasis( x, y, z );
+		ok( Math.abs( x.length() - 1 ) < 1e-6 && Math.abs( x.dot( y ) ) < 1e-6 && Math.abs( m.determinant() - 1 ) < 1e-6, `arm ${side} wrist frame is a rotation` );
+		arm.setCurl( A.curlFor( 0.017 ), A.THUMB_POSE.wrap );
+		arm.pose( new THREE.Vector3( side * 0.19, - 0.25, 0.1 ), m );
+		arm.skin.updateMatrixWorld( true );
+		const w = new THREE.Vector3().setFromMatrixPosition( arm.wrist.matrixWorld ), want = new THREE.Vector3().setFromMatrixPosition( m );
+		ok( w.distanceTo( want ) < 1e-4, `arm ${side} puts the wrist where it is asked (${w.distanceTo( want ).toFixed( 5 )})` );
+		const e = arm.foreBone.getWorldPosition( new THREE.Vector3() );
+		ok( Math.abs( e.distanceTo( w ) - A.FORE_LEN ) < 1e-4, `arm ${side} forearm keeps its length` );
+	}
+	const sum = ( c ) => c.reduce( ( s, f ) => s + f[ 0 ] + f[ 1 ] + f[ 2 ], 0 );
+	ok( sum( A.curlFor( 0.01 ) ) > sum( A.curlFor( 0.02 ) ) && sum( A.curlFor( 0.02 ) ) > sum( A.curlFor( 0.04 ) ), 'fingers close further round thinner grips' );
+	for ( const r of [ 0.004, 0.012, 0.02, 0.03, 0.05 ] ) ok( A.curlFor( r ).every( f => f.every( a => a >= 0 && a <= 2 ) ), `curl angles in range for r ${r}` );
+} catch ( e ) {
+	fails ++; console.error( '  ✗ arms:', e.message );
+}
+
 console.log( `\n${passes} passed, ${fails} failed` );
 process.exit( fails ? 1 : 0 );

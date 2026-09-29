@@ -1,7 +1,11 @@
 // Item model / icon preview (not shipped). Open /test/preview/items.html on the dev server:
 //   ?mode=grid (default) 3D models on a table in rows, ?cat=food|clothing|… filter, ?q=substring, ?cols=N
 //   ?mode=icons          the icon sheet rendered by src/render/Icons.js
-//   drag to orbit, wheel to zoom. Sets window.__ready / __done for headless screenshots (test/shot.mjs).
+//   ?fresh=1             re-render every icon (clears the icon store)
+//   ?fire=1[&night=1]    a lit campfire and camp stove next to the grid (use ?q=none for the fires alone)
+//   drag to orbit, wheel to zoom. Sets window.__ready / __done for headless screenshots:
+//   node test/preview/items-sheet.mjs "http://127.0.0.1:<port>/test/preview/items.html?mode=icons&cat=food" out.png
+// Model statistics (triangles, parts, size per item): /test/preview/items-stats.html (window.__stats).
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import '../../src/game/items/defs/index.js';
@@ -102,8 +106,21 @@ if ( mode === 'icons' ) {
 	canvas.addEventListener( 'wheel', e => { dist *= Math.exp( e.deltaY * 0.001 ); place(); } );
 	addEventListener( 'resize', () => { r.setSize( innerWidth, innerHeight ); cam.aspect = innerWidth / innerHeight; cam.updateProjectionMatrix(); } );
 	hud.textContent = `${defs.length} items · ${Math.round( tris )} triangles (avg ${Math.round( tris / Math.max( 1, defs.length ) )}) · built in ${buildMs.toFixed( 0 )} ms`;
-	let frames = 0;
+	// ?fire=1: a lit campfire and a camp stove in front of the grid (Campfire with a stand-in game), lit by a point light
+	const fires = [];
+	if ( q.get( 'fire' ) ) {
+		const { Campfire } = await import( '../../src/game/items/Campfire.js' );
+		const fakeGame = { scene, camera: cam, time: { hours: 20 }, world: { isIndoors: () => false }, weather: null, audio: null, player: { pos: new THREE.Vector3( 1e5, 0, 0 ), vehicle: null }, survival: null };
+		const at = new THREE.Vector3( target.x - 0.9, 0, target.z + span * 0.5 + 0.6 );
+		fires.push( new Campfire( fakeGame, { lights: null }, 'campfire', at, { lit: true, fuel: 3 } ) );
+		fires.push( new Campfire( fakeGame, { lights: null }, 'stove', at.clone().add( new THREE.Vector3( 1.1, 0, 0.1 ) ), { lit: true, fuel: 1 } ) );
+		const glow = new THREE.PointLight( 0xff8a3a, 6, 6, 2 ); glow.position.copy( at ).add( new THREE.Vector3( 0, 0.45, 0 ) ); scene.add( glow );
+		if ( q.get( 'night' ) ) { sun.intensity = 0.05; scene.background.setHex( 0x0a0f18 ); scene.environmentIntensity = 0.05; }
+	}
+	let frames = 0, last = performance.now();
 	const loop = () => {
+		const now = performance.now(), dt = Math.min( 0.1, ( now - last ) / 1000 ); last = now;
+		for ( const f of fires ) f.update( dt, 0 );
 		r.render( scene, cam );
 		if ( ++ frames === 2 ) { window.__ready = true; window.__done = true; }
 		requestAnimationFrame( loop );

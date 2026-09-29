@@ -14,7 +14,7 @@ import { getItem } from '../game/items/ItemDB.js';
 import { buildItemModel, hasModelBuilder, builderSignature } from './ItemModels.js';
 import { G as UNI } from './Materials.js';
 
-export const ICON_VERSION = 4; // bump to invalidate every stored icon (lighting / framing changes)
+export const ICON_VERSION = 5; // bump to invalidate every stored icon (lighting / framing changes)
 const SIZE = 128, SS = 2, RT = SIZE * SS;
 const WEAPON_TYPES = new Set( [ 'gun', 'mag', 'ammo_box', 'attachment', 'melee', 'throwable' ] );
 
@@ -114,7 +114,7 @@ export function iconFor( id ) {
 	return p;
 }
 
-// forget everything (debug: window.__icons.clear())
+// forget everything (the item preview page's ?fresh=1)
 export async function clearIcons() {
 	mem.clear();
 	try { if ( db ) db.transaction( 'icons', 'readwrite' ).objectStore( 'icons' ).clear(); localStorage.removeItem( LS_KEY ); } catch ( e ) { /* ignore */ }
@@ -130,6 +130,7 @@ function schedule() {
 		await storeReady;
 		const t0 = performance.now();
 		// a few per frame so opening a full inventory never stalls the game
+		const later = [];
 		while ( queue.length && ( performance.now() - t0 < 7 ) ) {
 			const job = queue.shift();
 			const cached = iconSync( job.id );
@@ -140,11 +141,16 @@ function schedule() {
 				await loadWeaponModels();
 				sigs.delete( job.id );
 			}
+			// a model textured with a world image that is still downloading would bake a black icon into the
+			// store: wait for it (a few seconds at most, then draw it anyway but do not keep it)
+			const ready = texturesReady( buildItemModel( def ) );
+			if ( ! ready && ( job.tries = ( job.tries || 0 ) + 1 ) < 60 ) { later.push( job ); continue; }
 			let url = null;
-			try { url = render( def ); } catch ( e ) { console.warn( 'icon', job.id, e ); }
+			try { url = render( def, ! ready ); } catch ( e ) { console.warn( 'icon', job.id, e ); }
 			job.resolve( url );
 		}
 		scheduled = false;
+		if ( later.length ) { queue.push( ...later ); if ( ! scheduled ) setTimeout( schedule, 100 ); return; }
 		if ( queue.length ) schedule();
 	};
 	if ( typeof requestAnimationFrame === 'function' ) requestAnimationFrame( () => { run(); } );
@@ -154,6 +160,23 @@ function schedule() {
 // ---- the stage ----------------------------------------------------------------------------------------------
 
 let stage = null;
+
+// every texture the model samples has its image decoded
+const TEX_SLOTS = [ 'map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'emissiveMap', 'alphaMap' ];
+function texturesReady( obj ) {
+	let ok = true;
+	obj.traverse( ( o ) => {
+		if ( ! ok || ! o.isMesh ) return;
+		for ( const m of Array.isArray( o.material ) ? o.material : [ o.material ] ) {
+			for ( const k of TEX_SLOTS ) {
+				const img = m?.[ k ]?.image;
+				if ( ! m?.[ k ] ) continue;
+				if ( ! img || ( img.complete === false ) || ( img.naturalWidth === 0 && img.width === 0 ) ) { ok = false; return; }
+			}
+		}
+	} );
+	return ok;
+}
 
 function getRenderer() {
 	if ( renderer ) return renderer;
@@ -224,7 +247,7 @@ function makeStage( r ) {
 const _box = new THREE.Box3(), _v = new THREE.Vector3(), _dir = new THREE.Vector3(), _up = new THREE.Vector3( 0, 1, 0 );
 const _right = new THREE.Vector3(), _camUp = new THREE.Vector3();
 
-function render( def ) {
+function render( def, noKeep = false ) {
 	const r = getRenderer();
 	if ( ! stage || stage.renderer !== r ) { disposeStage(); stage = makeStage( r ); }
 	const S = stage;
@@ -238,26 +261,43 @@ function render( def ) {
 	const size = _box.getSize( new THREE.Vector3() ), centre = _box.getCenter( new THREE.Vector3() );
 
 	// view direction by shape: long things in profile, flat things from above, everything else 3/4
-	const long = size.x > 2.2 * Math.max( size.y, size.z );
+	const thick = Math.max( size.y, size.z, 1e-4 );
+	const long = size.x > 2.2 * thick;
 	const flat = size.y < 0.18 * Math.max( size.x, size.z );
 	if ( long ) _dir.set( 0.18, 0.42, 1 );
 	else if ( flat ) _dir.set( 0.45, 1.25, 0.9 );
 	else _dir.set( 0.8, 0.7, 1 );
 	_dir.normalize();
+	// long things (rifles, blades, rods) fill a square icon better on the diagonal; the very thin ones (a rod,
+	// a pole) also get a fatter cross-section so the handle, reel or guard still reads
+	const ratio = size.x / thick;
+	// long guns all tilt the same way whatever their magazine or stock does to the proportions
+	const diagonal = def.firearm ? [ 'rifle', 'sniper', 'shotgun', 'lmg', 'launcher' ].includes( def.firearm.cls ) : ratio > 3.2;
+	const fatten = ratio > 14 ? Math.min( 2.6, ratio / 14 ) : 1;
+	const prevScale = model.scale.clone();
+	if ( fatten > 1 ) { model.scale.set( prevScale.x, prevScale.y * fatten, prevScale.z * fatten ); model.updateMatrixWorld( true ); _box.setFromObject( model, true ); _box.getCenter( centre ); _box.getSize( size ); }
 	const cam = S.camera;
 	const dist = size.length() * 2 + 1;
 	cam.position.copy( centre ).addScaledVector( _dir, dist );
 	cam.up.copy( _up );
 	cam.lookAt( centre );
+	if ( diagonal ) cam.rotateZ( - Math.PI / 4 ); // the far (+x) end towards the top right
 	cam.updateMatrixWorld( true );
-	// fit the eight corners in view space
+	// fit what is actually drawn: every vertex projected on the view plane (the bounding box corners of a
+	// diagonal rod would leave half the icon empty)
 	_right.setFromMatrixColumn( cam.matrixWorld, 0 ); _camUp.setFromMatrixColumn( cam.matrixWorld, 1 );
 	let minX = Infinity, maxX = - Infinity, minY = Infinity, maxY = - Infinity;
-	for ( let i = 0; i < 8; i ++ ) {
-		_v.set( i & 1 ? _box.max.x : _box.min.x, i & 2 ? _box.max.y : _box.min.y, i & 4 ? _box.max.z : _box.min.z ).sub( cam.position );
-		const x = _v.dot( _right ), y = _v.dot( _camUp );
-		minX = Math.min( minX, x ); maxX = Math.max( maxX, x ); minY = Math.min( minY, y ); maxY = Math.max( maxY, y );
-	}
+	model.traverse( ( o ) => {
+		if ( ! o.isMesh || ! o.visible ) return;
+		const pos = o.geometry.attributes.position;
+		const step = Math.max( 1, Math.floor( pos.count / 4000 ) );
+		for ( let i = 0; i < pos.count; i += step ) {
+			_v.fromBufferAttribute( pos, i ).applyMatrix4( o.matrixWorld ).sub( cam.position );
+			const x = _v.dot( _right ), y = _v.dot( _camUp );
+			if ( x < minX ) minX = x; if ( x > maxX ) maxX = x; if ( y < minY ) minY = y; if ( y > maxY ) maxY = y;
+		}
+	} );
+	if ( ! Number.isFinite( minX ) ) { minX = minY = - 0.1; maxX = maxY = 0.1; }
 	// square frame with a margin, centred on the projected bounds
 	const half = Math.max( maxX - minX, maxY - minY ) * 0.5 * 1.1;
 	const cx = ( minX + maxX ) / 2, cy = ( minY + maxY ) / 2;
@@ -290,6 +330,8 @@ function render( def ) {
 		r.autoClear = prevAuto; r.xr.enabled = prevXR; r.shadowMap.enabled = prevShadow;
 		UNI.uFogDensity.value = saved.fog; UNI.uWet.value = saved.wet; UNI.uCloudShadowK.value = saved.cs; UNI.uCamPos.value.copy( saved.cam );
 		S.scene.remove( model );
+		model.scale.copy( prevScale );
+		model.updateMatrixWorld( true );
 		if ( prevParent ) prevParent.add( model );
 	}
 	// GL rows are bottom-up
@@ -299,10 +341,10 @@ function render( def ) {
 	S.octx.clearRect( 0, 0, SIZE, SIZE );
 	S.octx.drawImage( S.canvas, 0, 0, SIZE, SIZE );
 	url = S.webp ? S.out.toDataURL( 'image/webp', 0.92 ) : S.out.toDataURL( 'image/png' );
-	const entry = { sig: sigFor( def.id ), url, fallback };
+	const entry = { sig: sigFor( def.id ), url, fallback: fallback || noKeep };
+	if ( noKeep ) return url; // textures never arrived: show it this once, try again next time
 	mem.set( def.id, entry );
 	if ( ! fallback ) persist( def.id, entry );
 	return url;
 }
 
-if ( typeof window !== 'undefined' ) window.__icons = { iconFor, iconSync, clear: clearIcons, version: ICON_VERSION };

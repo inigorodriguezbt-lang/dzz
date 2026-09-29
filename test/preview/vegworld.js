@@ -27,6 +27,14 @@ const renderer = new Renderer( canvas, settings );
 const world = new World( renderer, settings );
 await world.load( ( s, p ) => { info.textContent = `${s} ${( p * 100 ) | 0}%`; } );
 const cam = world.camera;
+// ?skyfix=1: try the sky dome change proposed to the lead (no clouds below the horizon, full haze there)
+if ( q.get( 'skyfix' ) ) {
+	const m = world.sky.domeMat;
+	m.fragmentShader = m.fragmentShader
+		.replace( 'c = c * cl.a + cl.rgb;', 'float clk = smoothstep( -0.01, 0.03, d.y ); c = mix( c, c * cl.a + cl.rgb, clk );' )
+		.replace( 'c = mix( c, texture2D( uSkyLUT, skyLutUv( hv ) ).rgb * 0.95, hz * 0.8 );', 'c = mix( c, texture2D( uSkyLUT, skyLutUv( hv ) ).rgb * 0.95, hz );' );
+	m.needsUpdate = true;
+}
 function resize() {
 	renderer.resize( innerWidth, innerHeight );
 	world.sky.resize( renderer.width, renderer.height );
@@ -50,6 +58,12 @@ cam.rotation.set( + ( q.get( 'pitch' ) || 0 ) * Math.PI / 180, + ( q.get( 'yaw' 
 cam.updateMatrixWorld();
 const hour = + ( q.get( 'hour' ) || 10 );
 world.sky.setTime( hour, 120 );
+
+// ?lights=1: the game's extra (dark) lights — flashlight spots and the light pool's point lights
+if ( q.get( 'lights' ) ) {
+	for ( let i = 0; i < 2; i ++ ) { const l = new THREE.SpotLight( 0xffffff, 0, 40, 0.45, 0.55, 2 ); world.scene.add( l, l.target ); }
+	for ( let i = 0; i < 5; i ++ ) world.scene.add( new THREE.PointLight( 0xffaa66, 0, 12, 2 ) );
+}
 
 // the parts of Game the vegetation touches
 const boxes = new Set();
@@ -89,13 +103,19 @@ window.__grab = () => { frame( 0.016 ); return canvas.toDataURL( 'image/png' ); 
 function loop() {
 	const now = performance.now(), dt = Math.min( 0.1, ( now - last ) / 1000 );
 	last = now;
+	if ( readyAt < 0 ) {
+		// stream without drawing until everything around the camera is in (SwiftShader frames are slow)
+		veg.update( dt );
+		world.update( dt );
+		const busy = world.pool.busy + veg.pending + world.terrain.pending;
+		settled = busy === 0 ? settled + 1 : 0;
+		info.textContent = `loading: jobs ${busy} cells ${veg.cells.size}`;
+		if ( settled >= settle ) { readyAt = frames; window.__ready = true; }
+		setTimeout( loop, 30 );
+		return;
+	}
 	frame( dt );
 	frames ++;
-	const busy = world.pool.busy + veg.inFlight + world.terrain.pending;
-	if ( readyAt < 0 ) {
-		settled = busy === 0 ? settled + 1 : 0;
-		if ( settled >= settle ) { readyAt = frames; window.__ready = true; }
-	}
 	const r = renderer.gl.info.render, s = veg.stats;
 	info.textContent = `install ${installMs.toFixed( 0 )} ms  bake ${veg.impostors.bakeMs?.toFixed( 0 )} ms  calls ${r.calls}  tris ${( r.triangles / 1000 ) | 0}k\n` +
 		`cells ${veg.cells.size}  near ${s.near} mid ${s.mid} far ${s.far} grass ${s.grass}  refill ${s.rebuildMs.toFixed( 1 )} ms  colliders ${boxes.size}`;

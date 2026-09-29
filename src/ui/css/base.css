@@ -1,0 +1,57 @@
+/* ---- base: reset, root scaling, type, icons (docs/UI_SPEC.md 2.4, 2.8) ------------------------------ */
+html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: var(--bg-0); }
+#app { position: fixed; inset: 0; }
+#app canvas { display: block; outline: none; touch-action: none; width: 100%; height: 100%; }
+
+/* every UI size derives from the root font and --u, so the GUI-scale option (--gui) scales all of it */
+.tw-root { position: fixed; inset: 0; z-index: 100; pointer-events: none; font: 500 calc(13 * var(--u)) / calc(18 * var(--u)) var(--font); letter-spacing: -0.003em; color: var(--ink-1); font-optical-sizing: auto; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; -webkit-user-select: none; user-select: none; }
+.tw-root *, .tw-root *::before, .tw-root *::after { box-sizing: border-box; }
+.tw-root [hidden] { display: none !important; }
+.tw-root input, .tw-root textarea { -webkit-user-select: text; user-select: text; }
+:where(.tw-root) button { margin: 0; padding: 0; border: 0; background: none; font: inherit; color: inherit; text-align: inherit; cursor: pointer; }
+:where(.tw-root) h1, :where(.tw-root) h2, :where(.tw-root) h3, :where(.tw-root) h4, :where(.tw-root) p { margin: 0; }
+:where(.tw-root) a { color: var(--accent); text-decoration: none; }
+:where(.tw-root) a:hover { text-decoration: underline; }
+:where(.tw-root) :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+:where(.tw-root) :focus:not(:focus-visible) { outline: none; }
+.tnum { font-variant-numeric: tabular-nums; }
+
+/* ---- type scale ------------------------------------------------------------------------------------- */
+.t-label { font: 600 calc(11 * var(--u)) / calc(14 * var(--u)) var(--font); letter-spacing: 0.06em; text-transform: uppercase; font-feature-settings: 'case'; }
+.t-body { font: 500 calc(13 * var(--u)) / calc(18 * var(--u)) var(--font); letter-spacing: -0.003em; }
+.t-strong { font-weight: 600; }
+.t-title { font: 600 calc(17 * var(--u)) / calc(24 * var(--u)) var(--font); letter-spacing: -0.013em; }
+.t-num { font: 600 calc(28 * var(--u)) / 1 var(--font); letter-spacing: -0.021em; font-variant-numeric: tabular-nums; }
+.t-display { font: 600 calc(40 * var(--u)) / calc(44 * var(--u)) var(--font); letter-spacing: -0.02em; }
+.t-mono { font: 500 calc(12 * var(--u)) / calc(16 * var(--u)) var(--mono); font-variant-numeric: tabular-nums; }
+.t-micro { font: 600 calc(10 * var(--u)) / calc(12 * var(--u)) var(--mono); }
+.wordmark { margin: 0; font: 600 calc(56 * var(--u)) / 1 var(--font); letter-spacing: 0.3em; margin-right: -0.3em; color: var(--ink-1); }
+.ink-2 { color: var(--ink-2); } .ink-3 { color: var(--ink-3); }
+.ellip { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---- icons (icons.js): 24 grid, stroke 1.5 -> exactly 1px at 16u -------------------------------------- */
+.i { width: calc(16 * var(--u)); height: calc(16 * var(--u)); flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.i.i24 { width: calc(24 * var(--u)); height: calc(24 * var(--u)); }
+.i.i12 { width: calc(12 * var(--u)); height: calc(12 * var(--u)); }
+/* trend chevrons: the heavier stroke keeps them readable at 10u */
+.i.i10 { width: calc(10 * var(--u)); height: calc(10 * var(--u)); stroke-width: 2.5; }
+.i.r90 { transform: rotate(90deg); } .i.r-90 { transform: rotate(-90deg); } .i.r180 { transform: rotate(180deg); }
+
+/* ---- motion ------------------------------------------------------------------------------------------ */
+@keyframes fade-in { from { opacity: 0; } }
+@keyframes blink { 50% { opacity: 0.4; } }
+@media (prefers-reduced-motion: reduce) {
+	/* every animation collapses to a short fade: no slides, no blinking */
+	.tw-root *, .tw-root *::before, .tw-root *::after { animation-duration: 80ms !important; animation-delay: 0ms !important; animation-iteration-count: 1 !important; transition-duration: 80ms !important; }
+}
+
+/* ---- legacy (remove when no screen uses them) --------------------------------------------------------
+   Zero specificity, so any component that sets its own colour (.plate.warn keeps white text) wins. */
+/* the root line-height is a length (18u), so headings that only set a big font-size need their own */
+:where(.tw-root) :is(h1, h2, h3, h4) { line-height: 1.15; }
+:where(.tw-root) :where(.mono) { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+:where(.tw-root) :where(.dim) { color: var(--ink-3); }
+:where(.tw-root) :where(.warn) { color: var(--warn); }
+:where(.tw-root) :where(.bad) { color: var(--alarm); }
+:where(.tw-root) :where(.good) { color: var(--ink-2); }
+@keyframes tw-pulse { 50% { opacity: 0.55; } }

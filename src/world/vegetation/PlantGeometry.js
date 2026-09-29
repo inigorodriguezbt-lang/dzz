@@ -275,11 +275,11 @@ export function buildPalm( lod = 0, seed = 11 ) {
 	for ( const f of use ) {
 		const origin = new THREE.Vector3( Math.cos( f.azimuth ) * 0.14, H + f.attachY, Math.sin( f.azimuth ) * 0.14 );
 		const Lf = f.length;
-		// colour by age: young fronds a fresh yellow-green, old ones yellowing, the dead one brown
-		const col = f.dead ? lin( 0x8a7048 ) : [ 1 + 0.12 * ( 1 - f.a ) - 0.05, 1.02, 0.85 + 0.1 * f.a ].map( ( v, q ) => v * ( q === 2 ? 1 - 0.25 * smooth( 0.75, 1, f.a ) : 1 ) );
+		// colour by age: young fronds a fresh yellow-green, old ones yellowing, the dead one brown (its own tile)
+		const col = f.dead ? [ 1, 1, 1 ] : [ 1 + 0.12 * ( 1 - f.a ) - 0.05, 1.02, 0.85 + 0.1 * f.a ].map( ( v, q ) => v * ( q === 2 ? 1 - 0.25 * smooth( 0.75, 1, f.a ) : 1 ) );
 		frond( b, {
 			origin, azimuth: f.azimuth, elevation: f.elevation, bend: f.bend, twist: f.twist, length: Lf,
-			segs: lod === 0 ? 9 : 4, cross: lod === 0 ? 2 : 1, tile: 'FROND',
+			segs: lod === 0 ? 9 : 4, cross: lod === 0 ? 2 : 1, tile: f.dead ? 'DEADFROND' : 'FROND',
 			leafLen: ( s ) => ( lod === 0 ? 1 : 1.1 ) * 0.2 * Lf * ( smooth( 0.03, 0.22, s ) * ( 1 - 0.6 * smooth( 0.35, 1.0, s ) ) ),
 			leafAngle: ( s ) => 1.05 - 0.4 * s,
 			droop: ( s ) => ( f.dead ? 1.25 : 0.45 + 0.5 * f.a ) + 0.32 * s,
@@ -486,11 +486,11 @@ export function buildTreeFern( lod = 0, seed = 51 ) {
 		frond( b, {
 			origin: top.clone().add( new THREE.Vector3( Math.cos( az ) * 0.12, 0.05, Math.sin( az ) * 0.12 ) ), azimuth: az,
 			elevation: dead ? - 1.2 : 1.1 - 0.75 * a + ( rand() - 0.5 ) * 0.2, bend: dead ? 0.2 : 1.0 + 0.6 * a, twist: ( rand() - 0.5 ) * 0.3, length: Lf,
-			segs: lod === 0 ? 7 : 3, cross: 1, bendPow: 1.3, tile: 'FERN',
+			segs: lod === 0 ? 7 : 3, cross: 1, bendPow: 1.3, tile: dead ? 'DEADFROND' : 'FERN',
 			leafLen: ( s ) => 0.36 * Lf * ( smooth( 0.02, 0.2, s ) * ( 1 - 0.75 * smooth( 0.4, 1, s ) ) ),
 			leafAngle: () => 1.35, droop: ( s ) => 0.12 + 0.25 * s, curl: 0.1, minWidth: 0.02,
 			veg: { u0: 1, flutter: 0.6, phase: rand() },
-			mat: [ PART.LEAF, 0.5 + 0.5 * ( 1 - a ), rand(), 0 ], col: dead ? lin( 0x8a6a40 ) : [ 1, 1, 1 ],
+			mat: [ PART.LEAF, 0.5 + 0.5 * ( 1 - a ), rand(), 0 ], col: dead ? [ 0.85, 0.78, 0.7 ] : [ 1, 1, 1 ],
 		} );
 	}
 	return b.build();
@@ -520,7 +520,7 @@ export function buildBanana( lod = 0, seed = 61 ) {
 				leafLen: ( s ) => W * Math.pow( Math.max( 0, Math.sin( Math.PI * Math.min( 1, Math.max( 0, ( s - 0.12 ) / 0.88 ) ) ) ), 0.5 ),
 				leafAngle: () => 1.45, droop: ( s ) => 0.15 + 0.35 * s, curl: 0.12, minWidth: 0.02,
 				veg: { u0: 0.8, flutter: 0.8, phase: rand() },
-				mat: [ PART.LEAF, 0.6 + 0.4 * ( 1 - a ), rand(), 0 ], col: old ? lin( 0xa08850 ) : [ 1, 1, 1 ],
+				mat: [ PART.LEAF, 0.6 + 0.4 * ( 1 - a ), rand(), 0 ], col: old ? [ 1.15, 0.95, 0.5 ] : [ 1, 1, 1 ],
 			} );
 		}
 	}
@@ -614,7 +614,7 @@ export function buildNaupaka( lod = 0, seed = 91 ) {
 	const rand = mulberry32( seed + 5 );
 	for ( let i = 0; i < 7; i ++ ) { const a = i / 7 * 6.28 + rand() * 0.5, r = 0.5 + rand() * 0.8; L.push( [ Math.cos( a ) * r, 0.45 + rand() * 0.35, Math.sin( a ) * r, 0.55 + rand() * 0.25 ] ); }
 	L.push( [ 0, 0.85, 0, 0.7 ] );
-	return buildLobed( L, { H: 1.2, c: [ 0, 0.55, 0 ], r: [ 1.4, 0.6, 1.4 ] }, 'NAUPAKA', lod, seed, { size: 0.75, clumpR: 0.4, clumpsPerR: 5.5, cardsPer: 3, flatten: 0.6, stems: 0 } );
+	return buildLobed( L, { H: 1.2, c: [ 0, 0.55, 0 ], r: [ 1.4, 0.6, 1.4 ] }, 'NAUPAKA', lod, seed, { size: 0.6, clumpR: 0.36, clumpsPerR: 6.5, cardsPer: 3, flatten: 0.6, stems: 0 } );
 }
 
 // ---- grasses ----------------------------------------------------------------------------------------------------
@@ -737,16 +737,17 @@ export function buildPineappleRow( lod = 0, seed = 131 ) {
 			const cx = - 1.2 + ( k + 0.5 + ( row > 0 ? 0.5 : 0 ) ) * 0.8 - ( row > 0 ? 0.4 : 0 ) + ( rand() - 0.5 ) * 0.1;
 			const cz = row + ( rand() - 0.5 ) * 0.06;
 			const base = new THREE.Vector3( cx, 0, cz );
-			const n = 11;
+			// the mid level: fewer, wider single-segment leaves (a field shows thousands of rows)
+			const n = lod === 0 ? 11 : 6;
 			for ( let q = 0; q < n; q ++ ) {
-				const az = q * 2.39996 + rand() * 0.3;
+				const az = q * ( lod === 0 ? 2.39996 : Math.PI * 2 / n ) + rand() * 0.3;
 				const el = 0.35 + rand() * 0.8;
 				const dir = new THREE.Vector3( Math.cos( az ) * Math.cos( el ), Math.sin( el ), Math.sin( az ) * Math.cos( el ) );
-				leafStrip( b, base, dir, 0.45 + rand() * 0.3, 0.07, 0.25 + rand() * 0.4, 'PANDAN', [ PART.LEAF, 0.4 + 0.6 * rand(), rand(), 0 ], leafCol.map( v => v * ( 0.85 + rand() * 0.3 ) ), [ 0, 0.6, 0.4, rand() ], 2 );
+				leafStrip( b, base, dir, 0.45 + rand() * 0.3, lod === 0 ? 0.07 : 0.1, 0.25 + rand() * 0.4, 'PANDAN', [ PART.LEAF, 0.4 + 0.6 * rand(), rand(), 0 ], leafCol.map( v => v * ( 0.85 + rand() * 0.3 ) ), [ 0, 0.6, 0.4, rand() ], lod === 0 ? 2 : 1 );
 			}
 			if ( lod === 0 ) {
 				const fy = 0.42 + rand() * 0.08;
-				blob( b, base.clone().add( new THREE.Vector3( 0, fy, 0 ) ), new THREE.Vector3( 0.08, 0.12, 0.08 ), 1, { part: PART.SOLID, crown: 99, col: lin( 0xc08a2a ), ao: () => 0.8 } );
+				blob( b, base.clone().add( new THREE.Vector3( 0, fy, 0 ) ), new THREE.Vector3( 0.08, 0.12, 0.08 ), 0, { part: PART.SOLID, crown: 99, col: lin( 0xc08a2a ), ao: () => 0.8 } );
 				for ( let q = 0; q < 5; q ++ ) {
 					const az = q / 5 * 6.28;
 					leafStrip( b, base.clone().add( new THREE.Vector3( 0, fy + 0.1, 0 ) ), new THREE.Vector3( Math.cos( az ) * 0.4, 1, Math.sin( az ) * 0.4 ), 0.13, 0.04, 0.2, 'PANDAN', [ PART.LEAF, 0.9, 0.5, 99 ], leafCol, [ 0, 0.3, 0.2, 0 ], 1 );

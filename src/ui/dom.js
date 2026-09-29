@@ -1,4 +1,6 @@
 // Small DOM helpers for the UI.
+import { PATHS, icon as svgIcon, iconHTML } from './icons.js';
+
 export function h( tag, attrs = {}, ...children ) {
 	const [ t, ...cls ] = tag.split( '.' );
 	const el = document.createElement( t || 'div' );
@@ -39,25 +41,44 @@ export function fmtDate( ms ) {
 
 export function fmtDist( m ) { return m >= 1000 ? ( m / 1000 ).toFixed( m >= 10000 ? 0 : 1 ) + ' km' : Math.round( m ) + ' m'; }
 
-// line icons (24x24, stroke currentColor)
-export const ICON = {
-	health: '<path d="M12 21s-7.5-4.6-9.3-9.6C1.4 7.6 4 4.5 7.2 4.5c2 0 3.6 1.1 4.8 2.8 1.2-1.7 2.8-2.8 4.8-2.8 3.2 0 5.8 3.1 4.5 6.9C19.5 16.4 12 21 12 21z"/>',
-	blood: '<path d="M12 3s6 6.6 6 11a6 6 0 0 1-12 0c0-4.4 6-11 6-11z"/>',
-	food: '<path d="M7 3v8M5 3v5a2 2 0 0 0 4 0V3M7 11v10M16 3c-1.7 1.3-2.5 3.6-2.5 6.5V13H17V3zM17 13v8"/>',
-	water: '<path d="M8 3h8l-1 3v2c2 1 3 3 3 5v6a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2v-6c0-2 1-4 3-5V6z"/><path d="M6 14h12"/>',
-	stamina: '<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>',
-	temp: '<path d="M14 14.8V4a2 2 0 0 0-4 0v10.8a4 4 0 1 0 4 0z"/><path d="M12 11v6"/>',
-	energy: '<path d="M20 14.5A8.5 8.5 0 0 1 9.5 4 8.5 8.5 0 1 0 20 14.5z"/>',
-	breath: '<circle cx="8" cy="15" r="3"/><circle cx="15" cy="9" r="4"/><circle cx="17" cy="18" r="2"/>',
-	bag: '<path d="M6 8h12l1 12H5z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/>',
-	map: '<path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2z"/><path d="M9 4v14M15 6v14"/>',
-	gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
-	craft: '<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.1-.4-.4-2.1z"/>',
-	skull: '<path d="M12 3a8 8 0 0 0-8 8c0 2.5 1.2 4.3 3 5.4V20h10v-3.6c1.8-1.1 3-2.9 3-5.4a8 8 0 0 0-8-8z"/><circle cx="9" cy="11" r="1.6"/><circle cx="15" cy="11" r="1.6"/><path d="M10 20v-2M14 20v-2"/>',
-	wind: '<path d="M3 8h11a3 3 0 1 0-3-3M3 12h15a3 3 0 1 1-3 3M3 16h8"/>',
-	search: '<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>',
-};
+// Durations in game hours: 35 min, 4 h, 2 d 4 h
+export function fmtDur( hours ) {
+	hours = Math.max( 0, hours );
+	if ( hours < 1 ) return Math.round( hours * 60 ) + ' min';
+	if ( hours < 24 ) return Math.floor( hours ) + ' h';
+	const d = Math.floor( hours / 24 ), hh = Math.floor( hours % 24 );
+	return hh ? `${d} d ${hh} h` : `${d} d`;
+}
 
-export function icon( name, cls = '' ) {
-	return `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICON[ name ] || ''}</svg>`;
+// px per u, measured: the custom property itself can't be read as a number (it resolves to calc() text).
+// UI keeps the result in ui.u; canvas code multiplies font sizes, line widths and marker sizes by it.
+let _probe = null;
+export function unitPx() {
+	if ( ! _probe ) {
+		_probe = document.createElement( 'div' );
+		_probe.style.cssText = 'position:absolute;left:0;top:0;visibility:hidden;pointer-events:none;width:calc(100 * var(--u))';
+		document.body.appendChild( _probe );
+	}
+	return _probe.getBoundingClientRect().width / 100 || 1;
+}
+
+// Icons live in icons.js (PATHS, icon() -> SVG element). This string form keeps the old signature.
+export const ICON = PATHS;
+export function icon( name, cls = '' ) { return iconHTML( name, 16, cls ); }
+
+// Key cap: kc( input.label( 'reload' ) ) -> <span class="kc">R</span>. Mouse buttons (LMB / RMB from
+// prettyCode) draw the mouse glyph instead of text; anything after it stays ('LMB 2×' -> glyph + 2×).
+export function kc( label, cls = '' ) {
+	const el = h( 'span.kc', { class: cls || null } );
+	const m = /^(LMB|RMB)\s*(.*)$/.exec( String( label ) );
+	if ( m ) {
+		el.appendChild( svgIcon( m[ 1 ] === 'LMB' ? 'mouseL' : 'mouseR', 12 ) );
+		if ( m[ 2 ] ) el.appendChild( document.createTextNode( m[ 2 ] ) );
+	} else el.textContent = String( label );
+	return el;
+}
+
+// key cap followed by its 1-2 word verb: hint( 'F', 'Search' )
+export function hint( label, verb, cls = '' ) {
+	return h( 'span.hint', { class: cls || null }, kc( label ), h( 'span', { text: verb } ) );
 }

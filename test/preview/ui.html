@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<title>UI harness</title>
+	<link rel="preconnect" href="https://fonts.googleapis.com" />
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+	<link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,500..600&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet" />
+	<link rel="stylesheet" href="/src/ui/ui.css" />
+	<style>
+		/* stand-ins for the 3D view: worst-case backgrounds for HUD legibility */
+		#bg { position: fixed; inset: 0; background-size: cover; background-position: center; }
+		#bg.sky { background: linear-gradient(180deg, #8ec5ef 0%, #cfe8fa 55%, #f4f8fb 62%, #6e8f5a 63%, #4b6b3a 100%); }
+		#bg.sand { background: linear-gradient(180deg, #bfe0f7 0%, #e8f3fb 40%, #efe2c4 41%, #e6d3a8 100%); }
+		#bg.foliage { background: radial-gradient(circle at 30% 40%, #6f9a3c, transparent 40%), radial-gradient(circle at 70% 70%, #2f4f1c, transparent 45%), #4d7a2b; }
+		#bg.street { background: linear-gradient(180deg, #a9cdea 0%, #e5f0f7 45%, #8b8b86 46%, #5e5e5a 100%); }
+		#bg.night { background: linear-gradient(180deg, #05070c 0%, #0b1220 60%, #111a12 61%, #070a07 100%); }
+		#bg.dusk { background: linear-gradient(180deg, #2a2f5a 0%, #e0875a 55%, #f3c08a 62%, #3a3024 63%, #1d1a14 100%); }
+		#app canvas { opacity: 0; }
+		.kit { position: absolute; inset: 0; overflow: auto; pointer-events: auto; padding: 24px; display: grid; grid-template-columns: repeat(auto-fill, minmax(calc(420 * var(--u)), 1fr)); gap: 16px; align-content: start; }
+		.kit > section { padding: 16px; }
+		.kit h5 { margin: 0 0 8px; }
+		.kit .r { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }
+		.kit .icons { display: grid; grid-template-columns: repeat(auto-fill, calc(64 * var(--u))); gap: 4px; }
+		.kit .icons > div { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 0; border-radius: var(--r-sm); background: var(--fill-1); color: var(--ink-1); }
+		.kit .icons span { font-size: calc(10 * var(--u)); color: var(--ink-3); }
+		.kit .static { position: static; animation: none; }
+	</style>
+</head>
+<body>
+	<div id="bg"></div>
+	<div id="app"><canvas id="view" tabindex="0"></canvas></div>
+	<div id="ui" class="tw-root"></div>
+	<script type="module" src="./ui.js"></script>
+</body>
+</html>

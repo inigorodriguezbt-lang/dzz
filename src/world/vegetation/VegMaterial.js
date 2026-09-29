@@ -28,8 +28,8 @@ export const VG = {
 const VERT_PARS = /* glsl */`
 	attribute vec4 aVeg; attribute vec4 aMat; attribute vec3 aCol;
 	attribute vec4 iPos; attribute vec4 iDat;
-	uniform float uTime; uniform vec3 uCamPos; uniform vec2 uWind;
-	uniform vec4 uLod; uniform float uKind; uniform vec3 uThin;
+	uniform float uTime; uniform vec3 uCamPos; uniform vec2 uWind; uniform vec3 uSunDir;
+	uniform vec4 uLod; uniform float uKind; uniform vec3 uThin; uniform float uShrinkEnd;
 	uniform float uWindStr; uniform float uDensity; uniform vec3 uPlayer; uniform float uShadowFar;
 	varying vec2 vVegUv; varying vec4 vVegMat; varying vec3 vVegCol; varying vec2 vVegFade; varying vec4 vVegInst;
 
@@ -49,13 +49,18 @@ const VERT_PARS = /* glsl */`
 		float yaw = iDat.x, rank = iDat.y, pa = iDat.z, pb = iDat.w;
 		vec3 wbase = base + modelMatrix[ 3 ].xyz;
 		float d = distance( wbase, uCamPos );
-		// LOD window (dithered cross-fade bands) and thinning by rank
+		// LOD window: a dithered cross-fade with the neighbouring level (the two images are
+		// complementary, so the plant stays solid); the CPU already dropped rank >= density
 		float fin = uLod.x > 0.0 ? smoothstep( uLod.x, uLod.y, d ) : 1.0;
 		float fout = smoothstep( uLod.z, uLod.w, d );
-		float thinK = uThin.x > 0.0 ? smoothstep( uThin.x, uThin.y, d ) : 0.0;
-		float keep = uDensity * mix( 1.0, uThin.z, thinK );
-		float thin = clamp( ( keep - rank ) / 0.05, 0.0, 1.0 );
-		vVegFade = vec2( min( fin, thin ), fout );
+		// distance thinning (grass): the plants that drop out shrink away instead of dissolving, the
+		// survivors grow a little so the cover holds
+		float thinK = uThin.y > 0.0 ? smoothstep( uThin.x, uThin.y, d ) : 0.0;
+		float rn = rank / max( uDensity, 0.01 );
+		float vis = clamp( ( mix( 1.0, uThin.z, thinK ) - rn ) / 0.12 + 1.0 - thinK, 0.0, 1.0 );
+		// the last level of a plant has nothing to hand over to: it shrinks into the ground
+		if ( uShrinkEnd > 0.5 ) { vis *= 1.0 - fout; fout = 0.0; }
+		vVegFade = vec2( fin, fout );
 		#ifdef VEG_DEPTH
 		// outside the shadow map: collapse before any of the work below
 		if ( d > uShadowFar ) vVegFade.x = 0.0;
@@ -64,9 +69,8 @@ const VERT_PARS = /* glsl */`
 		vVegMat = aMat;
 		vVegCol = aCol;
 		vVegUv = uv;
-		if ( vVegFade.x <= 0.0 || fout >= 1.0 ) { vegP = base; vegN = vec3( 0.0, 1.0, 0.0 ); return; }
-		// distant survivors grow a little so a thinned forest keeps its cover
-		float grow = 1.0 + thinK * ( 1.0 - uThin.z ) * 0.35;
+		if ( vVegFade.x <= 0.0 || fout >= 1.0 || vis <= 0.0 ) { vegP = base; vegN = vec3( 0.0, 1.0, 0.0 ); return; }
+		float grow = ( 1.0 + thinK * ( 1.0 - uThin.z ) * 0.35 ) * vis;
 
 		float cy = cos( yaw ), sy = sin( yaw );
 		vec2 wd = normalize( uWind + vec2( 1e-4 ) );
@@ -201,7 +205,7 @@ const FRAG_COLOR = /* glsl */`
 	if ( vegPart > 1.5 && vegPart < 3.5 ) {
 		// per-plant tint: by a random (trees, shrubs) or by dryness (grasses)
 		vec3 tint = uMode.x > 0.5 ? mix( uTintA, uTintB, clamp( vVegInst.y, 0.0, 1.0 ) ) : mix( uTintA, uTintB, vegSeed );
-		if ( uKind == 6.0 ) tint = mix( tint, vec3( 0.78, 1.02, 0.62 ), vVegInst.z * 0.6 ); // watered town lawns
+		if ( uKind == 6.0 ) tint = mix( tint, vec3( 0.105, 0.2, 0.036 ), vVegInst.z * 0.85 ); // watered town lawns
 		if ( vegPart > 2.5 && uKind != 6.0 ) tint = vec3( 1.0 );
 		// blossoms are the saturated red texels: recoloured or hidden per plant
 		float red = uMode.z > 0.5 ? smoothstep( 0.05, 0.2, vegTx.r - vegTx.g * 2.2 ) : 0.0;
@@ -218,6 +222,9 @@ const FRAG_COLOR = /* glsl */`
 		vegC *= mix( 0.42, 1.05, vegAo );
 		vegRough = 0.68;
 	} else if ( vegPart < 1.5 ) {
+		// tree bark: the texture brings the detail only (divided by its own mean, the last mip), the
+		// vertex colour sets the albedo. The palm bark texture is used as it is.
+		if ( vegPart > 0.5 ) vegC = vegTx.rgb / dot( max( textureLod( tBark, vec2( 0.5 ), 12.0 ).rgb, vec3( 1e-4 ) ), vec3( 0.333 ) ) * vVegCol;
 		vegC *= uBarkTint * ( 0.85 + 0.3 * vegSeed ) * mix( 0.45, 1.0, vegAo );
 		vegRough = 0.92;
 	} else {
@@ -262,6 +269,7 @@ export function vegUniforms( kind, tintA, tintB, barkTint, mode = [ 0, 0, 0, 0 ]
 	return {
 		uMode: { value: new THREE.Vector4( ...mode ) },
 		uLod: { value: new THREE.Vector4( 0, 0, 1e6, 1e6 ) },
+		uShrinkEnd: { value: 0 },
 		uKind: { value: kind },
 		uThin: { value: new THREE.Vector3( 0, 0, 1 ) },
 		uTintA: { value: new THREE.Color( ...tintA ) },
@@ -269,6 +277,13 @@ export function vegUniforms( kind, tintA, tintB, barkTint, mode = [ 0, 0, 0, 0 ]
 		uBarkTint: { value: new THREE.Color( ...( barkTint || [ 1, 1, 1 ] ) ) },
 	};
 }
+
+// Thin foliage is lit from whichever side the sun is on, so its shadow lookup must be offset towards the
+// sun: the normal bias along a leaf normal facing away from it would put the leaf into its own shadow
+// (black hanging fronds).
+const SHADOW_VERT = THREE.ShaderChunk.shadowmap_vertex.replace(
+	/(vec3 shadowWorldNormal = [^;]+;)/,
+	'$1\n\t\tif ( vVegMat.x > 1.5 && vVegMat.x < 3.5 && dot( shadowWorldNormal, uSunDir ) < 0.0 ) shadowWorldNormal = - shadowWorldNormal;' );
 
 export function makeVegMaterial( U ) {
 	const m = new THREE.MeshStandardMaterial( { roughness: 0.75, metalness: 0, side: THREE.DoubleSide } );
@@ -278,7 +293,8 @@ export function makeVegMaterial( U ) {
 		shader.vertexShader = shader.vertexShader
 			.replace( '#include <common>', '#include <common>\n' + VERT_PARS )
 			.replace( '#include <beginnormal_vertex>', 'vegDeform( position, normal );\nvec3 objectNormal = vegN;' )
-			.replace( '#include <begin_vertex>', 'vec3 transformed = vegP;' );
+			.replace( '#include <begin_vertex>', 'vec3 transformed = vegP;' )
+			.replace( '#include <shadowmap_vertex>', SHADOW_VERT );
 		shader.fragmentShader = shader.fragmentShader
 			.replace( '#include <common>', '#include <common>\n' + FRAG_PARS )
 			.replace( '#include <map_fragment>', FRAG_COLOR )

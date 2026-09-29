@@ -23,7 +23,7 @@ const GLYPH = {
 export function glyphFor( id ) {
 	const d = getItem( id );
 	const g = GLYPH[ d?.cat ] || GLYPH.misc;
-	return 'data:image/svg+xml;utf8,' + encodeURIComponent( `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#cfe6ee" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round">${g}</svg>` );
+	return 'data:image/svg+xml;utf8,' + encodeURIComponent( `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#B6BAC1" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round">${g}</svg>` );
 }
 
 // sets img.src to the best icon now and upgrades it when the rendered one arrives

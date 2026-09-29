@@ -15,10 +15,27 @@ import '../game/items/defs/firearms.js';
 import { getItem, makeStack, displayName } from '../game/items/ItemDB.js';
 import * as ops from './ops.js';
 import { ViewModel } from './ViewModel.js';
+import { weaponMaterials, gunData, meleeData } from './GunModels.js';
+import { reticleLens } from './Optics.js';
 import { Ballistics, hitEntity, coneDir } from './Ballistics.js';
 import { Throwables } from './Throwables.js';
 import { FX } from '../render/FX.js';
 import { ensureWeaponSounds } from './Sounds.js';
+import { printTex } from '../game/items/models/lib.js';
+
+// the worn top's fabric on the sleeves (a tiling print from the items module), cached per print
+const PRINTS = new Map();
+function sleevePrint( m ) {
+	const k = `${m.print}:${m.color}:${m.color2}:${m.color3}`;
+	if ( PRINTS.has( k ) ) return PRINTS.get( k );
+	let t = null;
+	try {
+		t = printTex( m.print, m.color ?? 0x888888, m.color2 ?? 0xffffff, m.color3 ?? null )?.clone() || null;
+		if ( t ) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set( 1.2, 1.2 ); t.needsUpdate = true; }
+	} catch ( e ) { t = null; }
+	PRINTS.set( k, t );
+	return t;
+}
 
 const PI = Math.PI;
 const clamp = THREE.MathUtils.clamp;
@@ -68,6 +85,7 @@ export class Hands {
 		this.frame = 0;
 		this.lookYaw = 0; this.lookPitch = 0; this._py = null; this._pp = null;
 		this.shotCount = 0;
+		this._built = new Set();
 		// world flashlight (a constant light count: no shader recompiles when it toggles)
 		this.spot = new THREE.SpotLight( 0xfff4e0, 0, 45, 0.42, 0.45, 2 );
 		this.spot.castShadow = false;
@@ -89,6 +107,58 @@ export class Hands {
 		this._offs = [
 			game.events.on( 'playerDeath', () => { this._cancelAct(); this.adsWant = false; this.game.player.aimFov = 1; } ),
 		];
+		this._warmUp();
+	}
+
+	// Compile every shader the hands and the effects will need while the world is still loading, so the first
+	// weapon drawn (and the first shot) shows up at once instead of stalling on shader compiles.
+	_warmUp() {
+		const g = this.game, gl = g.renderer?.gl;
+		if ( ! gl?.compile ) return;
+		try {
+			const vm = this.vm;
+			// one tiny mesh per weapon material (every gun, magazine and optic uses this shared set)
+			const box = new THREE.BoxGeometry( 0.001, 0.001, 0.001 );
+			const warm = new THREE.Group();
+			for ( const m of Object.values( weaponMaterials( 'view' ) ) ) warm.add( new THREE.Mesh( box, m ) );
+			const red = getItem( 'optic_reddot' );
+			if ( red ) warm.add( reticleLens( red, { lensR: 0.012, axisH: 0.03 } ) );
+			vm.root.add( warm );
+			// both arms, one of them gloved
+			const wasVis = vm.root.visible, mats = vm.armL.skin.material;
+			vm.root.visible = true;
+			vm.armL.skin.material = [ vm.armL.mSkin, vm.armL.mGlove, vm.armL.mGlove ];
+			gl.compile( g.viewScene, g.viewCamera );
+			vm.armL.skin.material = mats;
+			vm.root.visible = wasVis;
+			vm.root.remove( warm );
+			box.dispose();
+			// the effects in the world scene (particles, decals, tracers, brass), lit like the world
+			const fx = this.game.fx;
+			if ( fx && g.scene ) {
+				const objs = [ fx.alpha?.mesh, fx.add?.mesh, fx.decals, fx.beams, fx.cas ].filter( Boolean );
+				const tmp = new THREE.Scene();
+				for ( const o of objs ) tmp.add( o );
+				gl.compile( tmp, g.camera, g.scene );
+				for ( const o of objs ) g.scene.add( o );
+			}
+		} catch ( e ) { console.warn( 'weapons warm-up', e ); }
+	}
+
+	// build the view models of the carried weapons ahead of time (one per call), so switching never waits on it
+	_prefetch() {
+		const inv = this.inv;
+		const list = [ inv.weapons?.primary, inv.weapons?.secondary, inv.weapons?.sidearm, inv.weapons?.melee, ...( inv.hotbar || [] ).map( u => inv.findUid( u ) ) ];
+		for ( const st of list ) {
+			const def = st && getItem( st.id );
+			if ( ! def || this._built.has( def.id ) ) continue;
+			this._built.add( def.id );
+			try {
+				if ( def.firearm ) gunData( def );
+				else if ( def.melee ) meleeData( def );
+			} catch ( e ) { console.warn( 'prefetch', def.id, e ); }
+			return;
+		}
 	}
 
 	get inv() { return this.game.player.inventory; }
@@ -115,7 +185,7 @@ export class Hands {
 	select( stack ) {
 		if ( ! stack ) return this.holster();
 		const inv = this.inv;
-		if ( ! inv.findUid( stack.uid ) ) { this.game.toast( 'Pick it up first', 'warn' ); return false; }
+		if ( ! inv.findUid( stack.uid ) ) { this.game.toast( 'Not in inventory', 'warn' ); return false; }
 		if ( inv.hands === stack.uid ) return true;
 		const def = getItem( stack.id );
 		if ( def?.cat === 'firearm' ) ops.sanitizeGun( stack );
@@ -154,9 +224,9 @@ export class Hands {
 		const def = getItem( stack?.id );
 		if ( ! def ) return false;
 		const done = () => { stack.qty --; if ( stack.qty <= 0 ) this.inv.remove( stack ); this.inv.changed(); };
-		if ( def.food ) g.actions.start( { label: `Eating ${def.name}`, time: 3, sound: 'eat', onDone: () => { g.survival.eat( stack ); done(); } } );
-		else if ( def.drink ) g.actions.start( { label: `Drinking ${def.name}`, time: 2.5, sound: 'drink', onDone: () => { g.survival.drink( def ); done(); } } );
-		else if ( def.medical ) g.actions.start( { label: `Using ${def.name}`, time: def.medical.use || 3, sound: 'bandage', onDone: () => { g.survival.medicate( def ); done(); } } );
+		if ( def.food ) g.actions.start( { label: 'Eating', time: 3, sound: 'eat', onDone: () => { g.survival.eat( stack ); done(); } } );
+		else if ( def.drink ) g.actions.start( { label: 'Drinking', time: 2.5, sound: 'drink', onDone: () => { g.survival.drink( def ); done(); } } );
+		else if ( def.medical ) g.actions.start( { label: 'Using', time: def.medical.use || 3, sound: 'bandage', onDone: () => { g.survival.medicate( def ); done(); } } );
 		else return false;
 		return true;
 	}
@@ -167,6 +237,7 @@ export class Hands {
 		const g = this.game, p = g.player, inv = this.inv;
 		this.frame ++;
 		ensureWeaponSounds( g.audio );
+		if ( this.frame % 20 === 0 ) this._prefetch();
 		// the held uid must still be in the inventory (dropped, eaten, traded away): holster quietly
 		if ( inv.hands && ! inv.findUid( inv.hands ) ) { inv.hands = null; inv.changed(); this._cancelAct(); }
 		const held = this.held;
@@ -374,11 +445,11 @@ export class Hands {
 			return;
 		}
 		if ( ! ready || ! this._canFire() || this.fireCD > 0 ) return;
-		if ( gun.cond <= 0 ) { if ( first ) { this._sfx( 'dryfire', 0.6 ); g.toast( `The ${def.name} is ruined`, 'bad' ); } return; }
+		if ( gun.cond <= 0 ) { if ( first ) { this._sfx( 'dryfire', 0.6 ); g.toast( `${def.name} ruined`, 'bad' ); } return; }
 		if ( gun.data.jam ) {
 			if ( first ) {
 				this._sfx( 'dryfire', 0.7 );
-				if ( performance.now() - this.jamWarned > 3000 ) { this.jamWarned = performance.now(); g.toast( 'Jammed — press R to clear it', 'warn' ); }
+				if ( performance.now() - this.jamWarned > 3000 ) { this.jamWarned = performance.now(); g.toast( 'Jammed', 'warn' ); }
 			}
 			return;
 		}
@@ -460,7 +531,7 @@ export class Hands {
 			if ( suppOk ) att.muzzle.cond = Math.max( 0, att.muzzle.cond - 0.0025 );
 			const jamP = gun.cond < 0.72 ? Math.pow( 0.72 - gun.cond, 2 ) * 0.28 : 0;
 			if ( selfLoad && gun.data.chamber && rnd() < jamP ) { gun.data.jam = true; this._sfx( 'jam', 0.6 ); }
-			if ( gun.cond <= 0 ) g.toast( `Your ${def.name} is ruined`, 'bad' );
+			if ( gun.cond <= 0 ) g.toast( `${def.name} ruined`, 'bad' );
 		}
 		// bolt / pump / lever: work the action (automatically, after the recoil)
 		if ( ops.manualCycle( f, mode ) && ! ops.roundsOnly( f ) ) {
@@ -525,7 +596,7 @@ export class Hands {
 		if ( f.modes.length < 2 ) return;
 		gun.data.mode = ( ( gun.data.mode || 0 ) + 1 ) % f.modes.length;
 		this._sfx( 'switch_mode', 0.5 );
-		this.game.toast( `${def.name}: ${ops.modeName( gun )}`, 'info' );
+		this.game.toast( ops.modeName( gun ), 'info' );
 		this.inv.changed();
 	}
 
@@ -577,7 +648,7 @@ export class Hands {
 			if ( ! best ) {
 				if ( ops.canChamber( gun ) ) { this._rack( gun, def ); return true; }
 				if ( gun.data.mag && gun.data.mag.data.rounds >= getItem( gun.data.mag.id ).magazine.capacity ) this._inspect();
-				else g.toast( ops.spareMags( inv, gun ).length ? 'Your spare magazines are empty — load them from the inventory' : `No magazine for the ${def.name}`, 'warn' );
+				else g.toast( ops.spareMags( inv, gun ).length ? 'Magazines empty' : 'No magazine', 'warn' );
 				return false;
 			}
 			const empty = ! gun.data.chamber && f.action !== 'open';
@@ -590,11 +661,11 @@ export class Hands {
 				[ p.magOut, () => p.hadMag && this._sfx( 'mag_out', 0.7 ) ],
 				[ p.magIn, () => {
 					// the swap happens here, atomically: cancelled before this point nothing moved
-					if ( ! inv.findUid( best.uid ) ) { g.toast( 'That magazine is gone', 'warn' ); return; }
+					if ( ! inv.findUid( best.uid ) ) { g.toast( 'Magazine missing', 'warn' ); return; }
 					const old = gun.data.mag;
 					inv.remove( best );
 					gun.data.mag = best;
-					if ( old && inv.add( old, { autoEquip: false } ) > 0 ) { g.dropStack( old ); g.toast( 'No room: dropped the empty magazine', 'warn' ); }
+					if ( old && inv.add( old, { autoEquip: false } ) > 0 ) { g.dropStack( old ); g.toast( 'No room, magazine dropped', 'warn' ); }
 					this._sfx( 'mag_in', 0.8 );
 					inv.changed();
 				} ],
@@ -607,13 +678,13 @@ export class Hands {
 		const room = ops.internalRoom( gun );
 		if ( f.action === 'bow' || f.action === 'crossbow' ) {
 			if ( gun.data.rounds > 0 ) return false;
-			if ( ! ammo ) { g.toast( `No ${f.caliber === 'arrow' ? 'arrows' : 'bolts'}`, 'warn' ); return false; }
+			if ( ! ammo ) { g.toast( f.caliber === 'arrow' ? 'No arrows' : 'No bolts', 'warn' ); return false; }
 			return this._nock( gun, def, ammo );
 		}
 		if ( ! room || ! ammo ) {
 			if ( ops.canChamber( gun ) ) { this._rack( gun, def ); return true; }
 			if ( ! room ) this._inspect();
-			else g.toast( `No ${getItem( ops.ammoIdsFor( f.caliber )[ 0 ] )?.name || f.caliber + ' ammo'}`, 'warn' );
+			else g.toast( 'No ammo', 'warn' );
 			return false;
 		}
 		if ( f.action === 'revolver' ) return this._loop( gun, def, 'revolver', 0.55, 0.4 );
@@ -741,7 +812,7 @@ export class Hands {
 	_swing( stack, def, heavy ) {
 		const g = this.game, m = def.melee;
 		if ( this.act || this.equip < 0.85 || g.player.swimming || g.actions.busy ) return;
-		if ( stack.cond <= 0 ) { g.toast( `The ${def.name} is broken`, 'bad' ); return; }
+		if ( stack.cond <= 0 ) { g.toast( `${def.name} broken`, 'bad' ); return; }
 		const S = g.survival;
 		const cost = m.stamina * ( heavy ? 1.8 : 1 );
 		const weak = ! this.creative && S && S.stamina < cost;
@@ -845,7 +916,7 @@ export class Hands {
 		if ( ! stack || ! w || this.creative ) return;
 		const before = stack.cond;
 		stack.cond = Math.max( 0, stack.cond - w );
-		if ( before > 0 && stack.cond <= 0 ) { this.game.toast( `Your ${def.name} broke`, 'bad' ); this._sfx( 'hit_metal', 0.5, 0.6 ); }
+		if ( before > 0 && stack.cond <= 0 ) { this.game.toast( `${def.name} broke`, 'bad' ); this._sfx( 'hit_metal', 0.5, 0.6 ); }
 		this.inv.changed();
 	}
 
@@ -871,7 +942,7 @@ export class Hands {
 			const lit = this.creative || inv.hasTool( 'lighter' ) || inv.hasTool( 'matches' );
 			this.throwing.lit = !! lit;
 			if ( lit ) this._sfx( 'fire_whoosh', 0.3, 1.6 );
-			else g.toast( 'No lighter — the rag is not lit', 'warn' );
+			else g.toast( 'No lighter', 'warn' );
 		}
 		this._startAct( 'throw', 1, { hold: true, under }, [] );
 	}
@@ -1011,7 +1082,7 @@ export class Hands {
 		let target = 1;
 		const ads = this.adsT;
 		if ( kind === 'gun' ) {
-			const ovl = this.vm.item?.optic?.overlay;
+			const ovl = this.vm.item?.optic?.overlay || ( ! this.vm.item?.optic && this.vm.item?.info?.integratedOptic );
 			const k = ovl ? clamp( ( ads - 0.75 ) / 0.25, 0, 1 ) : ads;
 			const base = g.settings.get( 'fov' ) * PI / 180;
 			const zf = zoom > 1.01 ? 2 * Math.atan( Math.tan( base / 2 ) / zoom ) / base : 1;
@@ -1036,7 +1107,9 @@ export class Hands {
 		return clamp( this.game.player.aimFov, 0.05, 1 ) * 0.92;
 	}
 
-	viewFov() { return 1 - 0.05 * this.adsT; }
+	// the view model's own field of view (a multiplier on the core's): a little narrower than the world's so the
+	// weapon keeps its proportions instead of stretching towards the screen edge
+	viewFov() { return 0.85 * ( 1 - 0.05 * this.adsT ); }
 
 	crosshairSpread( forShot = false ) {
 		const g = this.game, p = g.player, def = this.def;
@@ -1070,7 +1143,7 @@ export class Hands {
 		else target = this._headlamp();
 		if ( ! target ) { this.game.toast( 'No light', 'warn' ); return; }
 		const td = getItem( target.id );
-		if ( td?.tool?.battery && ! ( target.data.charge > 0 ) ) { this.game.toast( 'The batteries are dead', 'warn' ); this._sfx( 'flashlight', 0.4 ); return; }
+		if ( td?.tool?.battery && ! ( target.data.charge > 0 ) ) { this.game.toast( 'Batteries dead', 'warn' ); this._sfx( 'flashlight', 0.4 ); return; }
 		target.data.on = ! target.data.on;
 		this._sfx( 'flashlight', 0.5 );
 		inv.changed();
@@ -1097,7 +1170,7 @@ export class Hands {
 		// batteries drain in game hours
 		if ( sd.tool?.battery && ! this.creative ) {
 			src.data.charge = Math.max( 0, ( src.data.charge ?? sd.tool.battery ) - dt / ( g.time.dayMinutes * 60 ) * 24 );
-			if ( src.data.charge <= 0 ) { src.data.on = false; g.toast( `The ${sd.name} died`, 'warn' ); this.inv.changed(); }
+			if ( src.data.charge <= 0 ) { src.data.on = false; g.toast( `${sd.name} dead`, 'warn' ); this.inv.changed(); }
 		}
 		const cam = g.camera;
 		const low = src.data.charge != null && sd.tool?.battery ? clamp( src.data.charge / ( sd.tool.battery * 0.15 ), 0.25, 1 ) : 1;
@@ -1116,22 +1189,19 @@ export class Hands {
 		this.lamp.position.set( 0.15, - 0.05, - 0.3 );
 	}
 
-	// sleeves and gloves from what's worn
+	// sleeves and gloves from what's worn: long sleeves for jackets, hoodies and warm shirts, the top's own print
 	_dressArms() {
 		const eq = this.inv.equip;
 		const top = eq.torso ? getItem( eq.torso.id ) : null;
-		const vest = eq.vest ? getItem( eq.vest.id ) : null;
 		const gl = eq.hands ? getItem( eq.hands.id ) : null;
-		const c = top?.clothing;
-		const style = top?.model?.style;
-		const long = !! c && ( ( c.insulation ?? 0 ) >= 0.15 || [ 'hoodie', 'jacket', 'coat', 'longsleeve' ].includes( style ) || ( c.waterproof ?? 0 ) >= 0.3 );
-		this.vm.setArms( {
-			skin: 0xc48a66,
-			sleeve: c ? ( c.color ?? 0x777777 ) : null,
-			long,
-			glove: gl ? ( gl.clothing?.color ?? 0x2a2a2a ) : null,
-			vest: vest?.clothing?.color ?? null,
-		} );
+		const c = top?.clothing, m = top?.model;
+		const style = m?.style;
+		const long = !! c && style !== 'tank' && style !== 'tee' && style !== 'polo' && ( [ 'hoodie', 'jacket', 'coat', 'suit', 'wetsuit' ].includes( style ) || ( c.insulation ?? 0 ) >= 0.15 || ( c.waterproof ?? 0 ) >= 0.3 );
+		// tank tops leave the arms bare
+		const sleeve = c && style !== 'tank' ? ( c.color ?? m?.color ?? 0x777777 ) : null;
+		let print = null;
+		if ( sleeve != null && m?.print && m.print !== 'plain' && ! String( m.print ).startsWith( 'text:' ) ) print = sleevePrint( m );
+		this.vm.setArms( { skin: 0xb98467, sleeve, long, print, glove: gl ? ( gl.clothing?.color ?? gl.model?.color ?? 0x2a2a2a ) : null } );
 	}
 
 	_viewLight() {
@@ -1189,15 +1259,15 @@ export class Hands {
 		const g = this.game;
 		const md = getItem( mag?.id )?.magazine, ad = getItem( ammo?.id )?.ammo;
 		if ( ! md || ! ad ) return false;
-		if ( md.caliber !== ad.caliber ) { g.toast( `${getItem( ammo.id ).name} don't fit a ${getItem( mag.id ).name}`, 'warn' ); return false; }
+		if ( md.caliber !== ad.caliber ) { g.toast( 'Wrong ammo', 'warn' ); return false; }
 		const room = md.capacity - ( mag.data.rounds || 0 );
 		const n = Math.min( room, ammo.qty );
-		if ( n <= 0 ) { g.toast( room <= 0 ? 'The magazine is full' : 'No rounds', 'info' ); return false; }
+		if ( n <= 0 ) { g.toast( room <= 0 ? 'Magazine full' : 'No rounds', 'info' ); return false; }
 		const per = 0.14;
 		let loaded = 0;
 		const put = ( k ) => { const m = ops.loadMagazine( mag, ammo, k - loaded ); loaded += m; this._spend( ammo ); this.inv.changed(); };
 		const a = g.actions.start( {
-			label: `Loading ${getItem( mag.id ).name}`, time: Math.max( 0.4, n * per ), cancelOnMove: false, sound: null,
+			label: 'Loading', time: Math.max( 0.4, n * per ), cancelOnMove: false, sound: null,
 			onDone: () => { put( n ); this._sfx( 'mag_in', 0.35, 1.4 ); },
 			onCancel: () => put( Math.floor( n * Math.min( 1, a.t / a.time ) ) ),
 		} );
@@ -1213,11 +1283,11 @@ export class Hands {
 		if ( ! md || ! ( mag.data.rounds > 0 ) ) return false;
 		const n = mag.data.rounds;
 		const a = g.actions.start( {
-			label: `Emptying ${getItem( mag.id ).name}`, time: Math.max( 0.3, n * 0.05 ), cancelOnMove: false,
+			label: 'Unloading', time: Math.max( 0.3, n * 0.05 ), cancelOnMove: false,
 			onDone: () => {
 				const r = ops.unloadMagazine( mag );
 				const rest = ops.giveRounds( this.inv, r.id, r.qty );
-				if ( rest ) { g.dropStack( rest ); g.toast( 'No room: some rounds dropped', 'warn' ); }
+				if ( rest ) { g.dropStack( rest ); g.toast( 'No room, rounds dropped', 'warn' ); }
 				this.inv.changed();
 			},
 		} );
@@ -1227,7 +1297,7 @@ export class Hands {
 	insertMagazine( gun, mag ) {
 		const g = this.game, def = getItem( gun?.id );
 		if ( ! def?.firearm || ! mag ) return false;
-		if ( ! ops.magFits( def, mag.id ) ) { g.toast( `${getItem( mag.id ).name} doesn't fit the ${def.name}`, 'warn' ); return false; }
+		if ( ! ops.magFits( def, mag.id ) ) { g.toast( 'Does not fit', 'warn' ); return false; }
 		ops.sanitizeGun( gun );
 		// in hand: the full animation does the swap
 		if ( gun === this.held && this.shown === gun && ! this.act && this._owned( mag ) ) {
@@ -1263,7 +1333,7 @@ export class Hands {
 		const m = gun?.data?.mag;
 		if ( ! m ) return false;
 		gun.data.mag = null;
-		if ( inv.add( m, { autoEquip: false } ) > 0 ) { g.dropStack( m ); g.toast( 'No room: dropped the magazine', 'warn' ); }
+		if ( inv.add( m, { autoEquip: false } ) > 0 ) { g.dropStack( m ); g.toast( 'No room, magazine dropped', 'warn' ); }
 		this._sfx( 'mag_out', 0.6 );
 		if ( gun === this.held ) this.vm.s.empty = ! ops.readyToFire( gun );
 		inv.changed();
@@ -1288,16 +1358,16 @@ export class Hands {
 		const g = this.game, def = getItem( gun?.id ), f = def?.firearm;
 		const ad = getItem( ammo?.id )?.ammo;
 		if ( ! f || ! ad ) return false;
-		if ( f.feed !== 'internal' ) { g.toast( `The ${def.name} takes magazines`, 'info' ); return false; }
-		if ( f.caliber !== ad.caliber ) { g.toast( `Wrong ammunition for the ${def.name}`, 'warn' ); return false; }
+		if ( f.feed !== 'internal' ) { g.toast( 'Takes magazines', 'info' ); return false; }
+		if ( f.caliber !== ad.caliber ) { g.toast( 'Wrong ammo', 'warn' ); return false; }
 		ops.sanitizeGun( gun );
 		if ( gun === this.held && this.shown === gun ) return this.reload();
 		const n = Math.min( ops.internalRoom( gun ), ammo.qty );
-		if ( n <= 0 ) { g.toast( 'It is full', 'info' ); return false; }
+		if ( n <= 0 ) { g.toast( 'Full', 'info' ); return false; }
 		let loaded = 0;
 		const put = ( k ) => { loaded += ops.loadInternal( gun, ammo, k - loaded ); this._spend( ammo ); this.inv.changed(); };
 		const a = g.actions.start( {
-			label: `Loading ${def.name}`, time: Math.max( 0.4, n * f.perRound ), cancelOnMove: false,
+			label: 'Loading', time: Math.max( 0.4, n * f.perRound ), cancelOnMove: false,
 			onDone: () => { put( n ); this._sfx( 'shell_in', 0.5 ); },
 			onCancel: () => put( Math.floor( n * Math.min( 1, a.t / a.time ) ) ),
 		} );
@@ -1319,7 +1389,7 @@ export class Hands {
 		gun.data.att[ slot ] = att;
 		if ( old && inv.add( old, { autoEquip: false } ) > 0 ) g.dropStack( old );
 		this._sfx( slot === 'muzzle' ? 'bolt' : 'mag_in', 0.45, 1.3 );
-		g.toast( `${ad.name} attached to the ${def.name}`, 'good' );
+		g.toast( `${ad.name} attached`, 'good' );
 		inv.changed();
 		return true;
 	}
@@ -1330,7 +1400,7 @@ export class Hands {
 		if ( ! a ) return false;
 		gun.data.att[ slot ] = null;
 		delete gun.data.att[ slot ];
-		if ( inv.add( a, { autoEquip: false } ) > 0 ) { g.dropStack( a ); g.toast( 'No room: dropped it', 'warn' ); }
+		if ( inv.add( a, { autoEquip: false } ) > 0 ) { g.dropStack( a ); g.toast( 'No room, dropped', 'warn' ); }
 		this._sfx( 'mag_out', 0.4, 1.3 );
 		inv.changed();
 		return true;

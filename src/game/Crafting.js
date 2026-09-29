@@ -1,5 +1,5 @@
 // Crafting and fires (game.crafting).
-//   recipes            every recipe whose ingredients exist (src/game/items/recipes.js)
+//   recipes            every recipe whose ingredients exist (src/game/items/recipes.js); r.toolLabels names r.tools
 //   available()        the ones you can make right now
 //   canCraft( r ) / check( r ) -> { ok, reason } / craft( r )
 // Recipes consume their `in` items, need their `tools` (a tool's kind, or a melee weapon's tools: 'cut', 'chop'…),
@@ -28,6 +28,8 @@ export class Crafting {
 		this.game = game;
 		this.lights = lights;
 		this.recipes = allRecipes().filter( r => ITEMS.has( r.out[ 0 ] ) && r.in.every( ( [ id ] ) => ITEMS.has( id ) ) );
+		// display names for the tool kinds ('cut' -> 'blade') so the crafting panel can show them plainly
+		for ( const r of this.recipes ) r.toolLabels = ( r.tools || [] ).map( t => TOOL_LABEL[ t ] || t );
 		this.fires = [];
 		this.lastHours = game.time.hours;
 		game.nearFire = ( pos, r = null ) => this.nearFire( pos, r );
@@ -291,4 +293,5 @@ export class Crafting {
 	}
 }
 
+const TOOL_LABEL = { cut: 'blade', chop: 'axe', saw: 'saw', hammer: 'hammer', pot: 'cooking pot', toolbox: 'toolbox', canopener: 'can opener' };
 const TOOL_NEED = { cut: 'a blade', chop: 'an axe or machete', saw: 'a saw', hammer: 'a hammer', pot: 'a cooking pot', toolbox: 'a toolbox', canopener: 'a can opener' };

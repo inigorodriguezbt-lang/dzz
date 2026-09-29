@@ -67,6 +67,25 @@ const LINES_GLSL = /* glsl */`
 	float dashAA( float s, float period, float on ) { return stripeAA( s, period, on * 0.5, on * 0.5 ); }
 `;
 
+// A failing lamp: mostly on with short drop-outs and long dark spells. Built from a few sines of a wrapped time
+// so the GPU (float32) and the CPU twin below agree: the real light the module hangs under the nearest
+// flickering lamp blinks with its bulb.
+const FLICKER_GLSL = /* glsl */`
+	float flickerAt( float seed ) {
+		float t = mod( uTime, 628.3185 );
+		float w = sin( t * 13.0 + seed * 40.0 ) + 0.8 * sin( t * 31.7 + seed * 17.0 ) + 0.6 * sin( t * 5.3 + seed * 3.1 );
+		float dead = step( 0.72, fract( t * 0.11 + seed * 3.7 ) );
+		return step( - 0.9, w ) * ( 1.0 - dead * 0.9 ) * ( 0.85 + 0.15 * sin( t * 50.0 ) );
+	}
+`;
+export function flickerAt( seed, time ) {
+	const t = time % 628.3185;
+	const w = Math.sin( t * 13 + seed * 40 ) + 0.8 * Math.sin( t * 31.7 + seed * 17 ) + 0.6 * Math.sin( t * 5.3 + seed * 3.1 );
+	const f = t * 0.11 + seed * 3.7;
+	const dead = f - Math.floor( f ) >= 0.72 ? 1 : 0;
+	return ( w >= - 0.9 ? 1 : 0 ) * ( 1 - dead * 0.9 ) * ( 0.85 + 0.15 * Math.sin( t * 50 ) );
+}
+
 let _cache = null;
 export function roadMaterials() {
 	if ( _cache ) return _cache;
@@ -108,6 +127,7 @@ function makeRoadMaterial() {
 				float rMetal = 0.0;
 				vec3 rNT = vec3( 0.0 );
 				float rNS = 0.55;
+				float rEnv = 1.0;
 				{
 					float cls = floor( vRd.z + 0.5 );
 					float u = vRd.x, s = vRd.y, W = vRd.w, hw = W * 0.5, au = abs( u );
@@ -131,12 +151,15 @@ function makeRoadMaterial() {
 					vec2 pf = vec2( fract( s / 9.0 ), fract( ( u + 40.0 ) / 3.3 ) );
 					float ph = hash12( pc + vec2( floor( vRd2.x * 0.37 ), cls * 7.0 ) );
 					float patchM = step( ph, 0.04 ) * boxAA( pf.x, 0.08, 0.35 + 0.55 * hash12( pc + 3.1 ) ) * boxAA( pf.y, 0.1, 0.9 );
+					// the lines stop short of a junction with a city street or another highway (vRd2.w: distance to it)
+					float join = smoothstep( 4.0, 10.0, vRd2.w );
 					if ( cls < 0.5 ) {
 						// freeway: yellow inner edge by the median, dashed white lane divider, white outer edge
-						yel += lineAA( au - 0.95, 0.075 );
-						paint += lineAA( au - 4.4, 0.075 ) * dashAA( s + vRd2.x, 12.0, 3.0 );
-						paint += lineAA( au - 7.9, 0.09 );
-						col = mix( col, texture2D( tConc, wp * 0.3 ).rgb * 0.95, 1.0 - smoothstep( 0.5, 0.62, au ) );
+						yel += lineAA( au - 0.95, 0.075 ) * join;
+						paint += lineAA( au - 4.4, 0.075 ) * dashAA( s + vRd2.x, 12.0, 3.0 ) * join;
+						paint += lineAA( au - 7.9, 0.09 ) * join;
+						// the concrete strip under the median barrier (which ends 14 m before a junction)
+						col = mix( col, texture2D( tConc, wp * 0.3 ).rgb * 0.95, ( 1.0 - smoothstep( 0.5, 0.62, au ) ) * smoothstep( 13.0, 14.0, vRd2.w ) );
 						// the outer shoulder is older and cracked, with rumble strips
 						float sh = smoothstep( 7.95, 8.05, au );
 						col *= 1.0 - sh * ( 0.08 + 0.1 * step( 0.5, fract( s * 1.6 ) ) * step( au, 8.4 ) );
@@ -149,8 +172,8 @@ function makeRoadMaterial() {
 						float seg = hash12( vec2( floor( ( s + vRd2.x * 17.0 ) / 160.0 ), vRd2.x ) );
 						float passA = step( 0.72, seg ), passB = step( seg, 0.18 );
 						float dsh = dashAA( s, 12.0, 3.0 );
-						yel += lineAA( u - 0.11, 0.05 ) * mix( 1.0, dsh, passA ) + lineAA( u + 0.11, 0.05 ) * mix( 1.0, dsh, passB );
-						paint += lineAA( au - 3.78, 0.06 );
+						yel += ( lineAA( u - 0.11, 0.05 ) * mix( 1.0, dsh, passA ) + lineAA( u + 0.11, 0.05 ) * mix( 1.0, dsh, passB ) ) * join;
+						paint += lineAA( au - 3.78, 0.06 ) * join;
 						col *= 1.0 - 0.07 * exp( - pow( ( au - 1.95 ) / 0.4, 2.0 ) );
 						crackAmt = max( crackAmt, smoothstep( 3.6, 4.2, au ) * 0.7 );
 						gravel = smoothstep( hw - 0.05, hw + 0.35, au );
@@ -292,11 +315,14 @@ function makeRoadMaterial() {
 					// puddles in the low spots when it rains (and for a while after)
 					if ( uWet > 0.02 ) {
 						float pn = texture2D( tNoise, wp * 0.031 ).r * 0.62 + nf.g * 0.38 + edgeWet * 0.22;
-						float pud = smoothstep( 0.66 - uWet * 0.16, 0.69 - uWet * 0.16, pn ) * smoothstep( 0.05, 0.5, uWet );
+						float pud = smoothstep( 0.66 - uWet * 0.14, 0.72 - uWet * 0.14, pn ) * smoothstep( 0.05, 0.5, uWet );
 						col *= 1.0 - 0.5 * pud;
 						// not below ~0.07: a sharper sun highlight overflows the half-float scene target into black specks
 						rRough = mix( rRough, 0.07, pud );
 						rNS *= 1.0 - pud;
+						// the sky dome IBL is dimmer relative to the sunlit ground than the real sky: without a boost the
+						// standing water reads as dark stains instead of mirrors of the sky
+						rEnv = 1.0 + 1.1 * pud;
 						// raindrop rings
 						vec2 rp = wp * 2.0;
 						vec2 ci = floor( rp );
@@ -312,6 +338,7 @@ function makeRoadMaterial() {
 			` )
 			.replace( '#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = rRough;' )
 			.replace( '#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\nmetalnessFactor = rMetal;' )
+			.replace( '#include <lights_fragment_maps>', '#include <lights_fragment_maps>\nradiance *= rEnv;' )
 			.replace( '#include <normal_fragment_maps>', /* glsl */`
 				{
 					vec3 nw = normalize( normalize( vWN ) + vec3( rNT.x, 0.0, rNT.y ) * rNS );
@@ -419,7 +446,7 @@ function makeKitMaterial() {
 					} else {
 						// galvanised steel with white rust and a few rust streaks
 						kcol *= 0.85 + 0.3 * n1.r;
-						vec3 rs = texture2D( tRust, wp.xz * 0.5 + wp.y ).rgb;
+						vec3 rs = vec3( 0.29, 0.1, 0.04 ) * dot( texture2D( tRust, wp.xz * 0.5 + wp.y ).rgb, vec3( 0.3, 0.59, 0.11 ) ) / 0.3;
 						float rm = smoothstep( 0.62, 0.8, n1.b );
 						kcol = mix( kcol, rs * 0.55, rm );
 						kRough = mix( kRough, 0.85, rm ); kMetal = mix( kMetal, 0.2, rm );
@@ -491,12 +518,7 @@ function makePropMaterial() {
 		sh.fragmentShader = beforeMain( sh.fragmentShader, /* glsl */`
 			uniform sampler2D tNoise;
 			varying vec3 vPbr; varying vec3 vTint; varying vec4 vMisc; varying vec3 vObj;
-			float flickerAt( float seed ) {
-				float t = uTime * ( 7.0 + seed * 9.0 ) + seed * 40.0;
-				float f = step( 0.35, fract( sin( floor( t ) * 12.9898 + seed * 78.233 ) * 43758.5453 ) );
-				float dead = step( 0.72, fract( uTime * 0.11 + seed * 3.7 ) ); // long dark spells
-				return f * ( 1.0 - dead * 0.9 ) * ( 0.75 + 0.25 * sin( uTime * 50.0 ) );
-			}
+			${FLICKER_GLSL}
 		` );
 		sh.fragmentShader = sh.fragmentShader
 			.replace( '#include <color_fragment>', /* glsl */`#include <color_fragment>
@@ -565,7 +587,8 @@ function makeGlowMaterial() {
 				vec3 transformed = position;
 				vDuv = duv; vDec = iDec;
 				vWorldPos = ( modelMatrix * instanceMatrix * vec4( position, 1.0 ) ).xyz;
-				${PULL_GLSL}
+				// 0.3 m towards the eye as well, so the curb and sidewalk (the lamps stand on them) don't cut the pool
+				${PULL_GLSL.replace( 'gl_Position =', 'mvPosition.xyz *= max( 0.0, 1.0 - 0.3 / max( length( mvPosition.xyz ), 0.5 ) );\n\t\tgl_Position =' )}
 			}`,
 		fragmentShader: /* glsl */`
 			uniform sampler2D tDecal;
@@ -574,17 +597,12 @@ function makeGlowMaterial() {
 			uniform float uCloudCover; uniform vec2 uCloudOffset; uniform float uCloudShadowK; uniform float uNight;
 			varying vec2 vDuv; varying vec4 vDec; varying vec3 vWorldPos;
 			${COMMON_GLSL}
-			float flickerAt( float seed ) {
-				float t = uTime * ( 7.0 + seed * 9.0 ) + seed * 40.0;
-				float f = step( 0.35, fract( sin( floor( t ) * 12.9898 + seed * 78.233 ) * 43758.5453 ) );
-				float dead = step( 0.72, fract( uTime * 0.11 + seed * 3.7 ) );
-				return f * ( 1.0 - dead * 0.9 ) * ( 0.75 + 0.25 * sin( uTime * 50.0 ) );
-			}
+			${FLICKER_GLSL}
 			void main() {
 				vec2 cuv = ( vec2( 0.0, 0.0 ) + 0.02 + vDuv * 0.96 ) / 4.0; // cell 12 = column 0, bottom row
 				float a = texture2D( tDecal, cuv ).a;
 				float lit = smoothstep( 0.3, 0.7, uNight ) * flickerAt( vDec.y ) * vDec.z;
-				vec3 c = vec3( 1.0, 0.72, 0.4 ) * a * lit * 0.5;
+				vec3 c = vec3( 1.0, 0.72, 0.4 ) * a * lit * 0.35;
 				// fade with the atmosphere like everything else
 				vec3 fogged = atmosphereFog( c, vWorldPos ) - atmosphereFog( vec3( 0.0 ), vWorldPos );
 				gl_FragColor = vec4( max( fogged, vec3( 0.0 ) ), 1.0 );
@@ -727,7 +745,7 @@ export function makeCarMaterial( u ) {
 		` );
 		sh.fragmentShader = sh.fragmentShader
 			.replace( '#include <color_fragment>', /* glsl */`#include <color_fragment>
-				float cRough = vPart.y, cMetal = vPart.z;
+				float cRough = vPart.y, cMetal = vPart.z, cEnv = 1.0;
 				{
 					int part = int( vPart.x + 0.5 );
 					int fl = int( vCar.w + 0.5 );
@@ -754,10 +772,14 @@ export function makeCarMaterial( u ) {
 					// rust: only old beaters have it (a week of apocalypse doesn't rust a car), in spots growing from the
 					// sills, the wheel arches and panel edges
 					float ra = rust * rust;
-					float low = 1.0 - smoothstep( 0.2, 0.75, lp.y - uArch.w * 0.5 );
-					float rm = smoothstep( 0.92 - ra * 0.5, 0.97 - ra * 0.5, n1.b * 0.55 + n2.r * 0.45 + low * ra * 0.6 );
+					// (the loose door / lid panels are in unit coordinates: no sills there)
+					float low = uPanel > 0.5 ? 0.0 : 1.0 - smoothstep( 0.2, 0.75, lp.y - uArch.w * 0.5 );
+					// (the flat tops only speckle on the very worst)
+					float rm = smoothstep( 1.0 - ra * 0.55, 1.04 - ra * 0.55, n1.b * 0.55 + n2.r * 0.45 + low * 0.45 * sqrt( ra ) );
 					if ( part <= 2 || part == 4 ) {
-						vec3 rc = texture2D( tRust, lp.zy * 0.8 + lp.x ).rgb * vec3( 0.52, 0.34, 0.22 );
+						// the rust texture is a light, yellowish scan: keep its detail, give it iron oxide's dark red-brown
+						float rl = min( 1.5, dot( texture2D( tRust, lp.zy * 0.8 + lp.x ).rgb, vec3( 0.3, 0.59, 0.11 ) ) / 0.3 );
+						vec3 rc = vec3( 0.105, 0.036, 0.014 ) * rl;
 						col = mix( col, rc, rm );
 						cRough = mix( cRough, 0.92, rm ); cMetal = mix( cMetal, 0.05, rm );
 					}
@@ -780,19 +802,29 @@ export function makeCarMaterial( u ) {
 						if ( ! screen ) {
 							float win = floor( ( lp.z + 20.0 ) / 0.95 ) + ( lp.x > 0.0 ? 50.0 : 0.0 ) + ( part == 6 ? 100.0 : 0.0 );
 							float h = fract( sin( win * 12.9898 + vCar2.x * 78.233 ) * 43758.5453 );
-							if ( ( all || ( some && h < 0.45 ) ) && n2.a > 0.16 ) discard;
+							// a jagged row of shards stays in the bottom of the frame (door panels: unit y, glass from 0.58 up)
+							float keep = ( uPanel > 0.5 ? 0.6 : uDoorY.z + 0.16 ) + 0.07 * n2.r - 0.03 * n2.a;
+							if ( ( all || ( some && h < 0.45 ) ) && lp.y > keep ) discard;
 						} else if ( all || ( some && fract( vCar2.x * 3.3 ) < 0.5 ) ) {
 							vec2 c = vec2( lp.x - ( fract( vCar2.x * 7.1 ) - 0.5 ) * uArch.x * 0.8, lp.y - ( uDoorY.z + uDoorY.w ) * 0.5 );
 							float r = length( c );
 							float a = atan( c.y, c.x ) / 6.2832 + 0.5;
-							// distance (m) to the nearest of 9 jagged radial cracks, and to the concentric rings
-							float rad = abs( fract( a * 9.0 + n2.r * 0.12 ) - 0.5 ) / 9.0 * 6.2832 * r;
-							float ring = abs( fract( r * 4.0 + n2.g * 0.5 ) - 0.5 ) / 4.0;
-							float web = max( 1.0 - smoothstep( 0.003, 0.011, rad ), ( 1.0 - smoothstep( 0.002, 0.008, ring ) ) * step( r, 0.42 ) );
-							web *= 1.0 - smoothstep( 0.3, 0.8, r );
-							web = max( web, 1.0 - smoothstep( 0.02, 0.07, r ) );
-							col = mix( col, vec3( 0.5, 0.52, 0.52 ), web * 0.7 );
-							cRough = mix( cRough, 0.7, web );
+							// a star of hairline cracks of random length around the impact, short arcs between them close
+							// to it and a milky crushed spot in the middle; thin lines fade to their average coverage when
+							// they get smaller than a pixel so the web never turns into a solid white disc far away
+							float ai = a * 14.0 + n2.r * 0.35;
+							float id = floor( ai );
+							float len = 0.14 + 0.42 * fract( sin( id * 91.7 + vCar2.x * 17.3 ) * 43758.5453 );
+							float rad = abs( fract( ai ) - 0.5 ) / 14.0 * 6.2832 * r;
+							float fw = max( fwidth( r ), 1e-4 );
+							float thin = min( 1.0, 0.004 / fw );
+							float radial = ( 1.0 - smoothstep( 0.0, 0.0015 + fw, rad ) ) * ( 1.0 - smoothstep( len * 0.55, len, r ) ) * thin;
+							float ring = abs( fract( r * 9.0 + n2.g * 0.8 ) - 0.5 ) / 9.0;
+							float arcs = ( 1.0 - smoothstep( 0.0, 0.001 + fw, ring ) ) * step( 0.45, fract( sin( id * 12.3 + floor( r * 9.0 ) * 7.1 ) * 4375.85 ) ) * ( 1.0 - smoothstep( 0.06, 0.2, r ) ) * thin;
+							float web = max( radial, arcs * 0.8 );
+							web = max( web, ( 1.0 - smoothstep( 0.012, 0.045, r ) ) * 0.85 );
+							col = mix( col, vec3( 0.36, 0.38, 0.39 ), web * 0.6 );
+							cRough = mix( cRough, 0.55, web );
 						}
 					}
 					// open doors / trunk / hood: the body panel is gone from its opening
@@ -812,11 +844,15 @@ export function makeCarMaterial( u ) {
 					// the inside of the shell (seen through the holes) is dark
 					if ( ! gl_FrontFacing ) { col = vec3( 0.018 ); cRough = 1.0; cMetal = 0.0; }
 					if ( part == 7 ) { cRough = 0.08; }
+					// the sky IBL is dim next to the sun: let glass and clear coat mirror a bit more of it so windows don't read
+					// as black holes and the paint doesn't look like plastic
+					cEnv = glassPart ? 1.7 : part == 0 ? 1.4 : 1.0;
 					diffuseColor.rgb = col;
 				}
 			` )
 			.replace( '#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = cRough;' )
-			.replace( '#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\nmetalnessFactor = cMetal;' );
+			.replace( '#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\nmetalnessFactor = cMetal;' )
+			.replace( '#include <lights_fragment_maps>', '#include <lights_fragment_maps>\nradiance *= cEnv;' );
 	} );
 	return mat;
 }

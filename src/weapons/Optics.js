@@ -160,6 +160,9 @@ const OVERLAY_FS = /* glsl */`
 			for ( int i = 1; i <= 10; i ++ ) { float x = - float( i ) * 0.055; lit = max( lit, segV( u, x, 0.0, i == 5 || i == 10 ? 0.04 : 0.025, 0.003 ) ); }
 			float curve = band( u.y, - 0.55 + 0.12 / ( 1.0 + ( u.x + 0.6 ) * 6.0 ), 0.003 ) * step( - 0.9, u.x ) * step( u.x, - 0.25 );
 			lit = max( lit, curve );
+		} else if ( uType > 1.5 && uType < 2.5 ) {
+			// AUG 1.5x: a black ring with a centre dot
+			black = max( band( length( u ), 0.2, 0.006 ), dot2( u, vec2( 0.0 ), 0.01 ) );
 		} else if ( uType > 6.5 ) {
 			// binoculars: a mil scale
 			black = segH( u, 0.0, - 0.3, 0.3, 0.002 ) * 0.7;

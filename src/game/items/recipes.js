@@ -15,7 +15,7 @@ const BASE = [
 	// ---- medical ----
 	R( 'rag_bandage', 'Rag bandage', [ 'bandage_rag', 1 ], [ [ 'rags', 2 ] ], { time: 4, cat: 'medical' } ),
 	R( 'splint', 'Improvised splint', [ 'splint_improvised', 1 ], [ [ 'stick', 2 ], [ 'rags', 2 ] ], { time: 8, cat: 'medical' } ),
-	R( 'rags_tshirt', 'Rags from a t-shirt', [ 'rags', 4 ], [ [ 'tshirt', 1 ] ], { time: 4, cat: 'medical' } ),
+	R( 'rags_tshirt', 'Rags (t-shirt)', [ 'rags', 4 ], [ [ 'tshirt', 1 ] ], { time: 4, cat: 'medical' } ),
 
 	// ---- fire and light ----
 	R( 'campfire_kit', 'Fire kit', [ 'campfire_kit', 1 ], [ [ 'stick', 4 ], [ 'newspaper', 1 ] ], { time: 6, cat: 'survival' } ),
@@ -43,7 +43,7 @@ const BASE = [
 	// ---- at a fire ----
 	R( 'boil_water', 'Boil water', [ 'cooking_pot', 0 ], [], { special: 'boil', station: 'fire', time: 12, cat: 'food' } ),
 	R( 'cook_rice', 'Cook rice', [ 'cooked_rice', 5 ], [ [ 'rice_bag', 1 ] ], { tools: [ 'pot' ], liquid: { kind: 'water', litres: 1 }, station: 'fire', time: 20, cat: 'food' } ),
-	R( 'cook_egg', 'Boil an egg', [ 'cooked_egg', 1 ], [ [ 'eggs', 1 ] ], { tools: [ 'pot' ], liquid: { kind: 'water', litres: 0.2 }, station: 'fire', time: 8, cat: 'food' } ),
+	R( 'cook_egg', 'Boil egg', [ 'cooked_egg', 1 ], [ [ 'eggs', 1 ] ], { tools: [ 'pot' ], liquid: { kind: 'water', litres: 0.2 }, station: 'fire', time: 8, cat: 'food' } ),
 	R( 'poi', 'Pound poi', [ 'poi', 1 ], [ [ 'cooked_taro', 1 ] ], { liquid: { kind: 'water', litres: 0.25 }, time: 14, cat: 'food' } ),
 ];
 

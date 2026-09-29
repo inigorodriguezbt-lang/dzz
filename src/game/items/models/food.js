@@ -381,7 +381,7 @@ export function registerFoodModels( reg ) {
 			}
 			case 'mochi': {
 				add( g, G.box( 0.16, 0.012, 0.12 ), M( 0xcfcfd4, { rough: 0.3, metal: 0.9 } ) );
-				for ( let i = 0; i < 6; i ++ ) add( g, G.rbox( 0.045, 0.028, 0.05, 0.004 ), M( 0xe0a64a, { rough: 0.7 } ), [ - 0.05 + ( i % 3 ) * 0.05, 0.012, - 0.027 + Math.floor( i / 3 ) * 0.054 ] );
+				for ( let i = 0; i < 6; i ++ ) add( g, G.rbox( 0.045, 0.028, 0.05, 0.004, 1 ), M( 0xe0a64a, { rough: 0.7 } ), [ - 0.05 + ( i % 3 ) * 0.05, 0.012, - 0.027 + Math.floor( i / 3 ) * 0.054 ] );
 				break;
 			}
 			case 'rice': {

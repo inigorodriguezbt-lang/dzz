@@ -1,0 +1,24 @@
+/* Rules moved unchanged from the old ui.css so nothing breaks while this screen is rebuilt to
+   docs/UI_SPEC.md. They use the legacy --tw-* aliases from tokens.css; replace them with the spec
+   rules (section 9 and 22) and delete what is no longer used. */
+
+/* ── chat ──────────────────────────────────────────────────────────────── */
+
+.chat { position: absolute; left: var(--tw-edge); bottom: calc(150 * var(--tw-u)); width: min(560px, 50vw); display: flex; flex-direction: column; gap: 4px; }
+.chat-log { display: flex; flex-direction: column; gap: 2px; max-height: 32vh; overflow: hidden; -webkit-mask-image: linear-gradient(0deg, #000 80%, transparent); mask-image: linear-gradient(0deg, #000 80%, transparent); }
+.chat.open .chat-log { overflow: auto; pointer-events: auto; }
+.chat-line { padding: 2px 8px; border-radius: 4px; font-size: var(--tw-fs-md); background: rgba(0, 0, 0, 0.4); width: fit-content; max-width: 100%; transition: opacity 1s; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8); word-wrap: break-word; }
+.chat-line.faded { opacity: 0; }
+.chat.open .chat-line.faded { opacity: 1; }
+.chat-line.sys { color: var(--tw-sun); }
+.chat-line.err { color: var(--tw-coral); }
+.chat-line.ok { color: var(--tw-aqua); }
+.chat-line.cmd { color: var(--tw-ink-3); font-family: var(--tw-mono); font-size: var(--tw-fs-sm); }
+.chat-input { display: none; pointer-events: auto; }
+.chat.open .chat-input { display: block; }
+.chat-input input { font-family: var(--tw-mono); }
+.chat-input .input { width: 100%; }
+.suggest { display: flex; flex-direction: column; border-radius: var(--tw-r-sm); overflow: hidden; pointer-events: auto; max-height: 30vh; overflow-y: auto; }
+.suggest div { padding: 3px 10px; font-family: var(--tw-mono); font-size: var(--tw-fs-sm); color: var(--tw-ink-2); cursor: pointer; display: flex; justify-content: space-between; gap: 16px; }
+.suggest div.on, .suggest div:hover { background: rgba(var(--tw-aqua-rgb), 0.18); color: var(--tw-ink); }
+.suggest div .dim { font-family: var(--tw-font); }

@@ -1,7 +1,7 @@
 // In-game HUD: crosshair, hit markers, compass, vitals, conditions, weapon / ammo, hotbar, prompts,
 // timed-action ring, toasts, pickups, minimap, damage direction, vehicle gauges, debug overlay.
 import * as THREE from 'three';
-import { h, icon, fmtDist } from './dom.js';
+import { h, icon, kc, fmtDist } from './dom.js';
 import { getItem, displayName, ammoOf, condColor } from '../game/items/ItemDB.js';
 import { setIcon } from './itemIcons.js';
 import { fmtHour } from '../game/Commands.js';
@@ -41,8 +41,9 @@ export class HUD {
 			this.hotSlots.push( { el, img, q, uid: null } );
 			this.hotbar.appendChild( el );
 		}
-		this.prompt = h( 'div.prompt', {}, this.promptMain = h( 'div.prompt-main.tw-glass' ), this.promptSub = h( 'div.prompt-sub' ) );
-		this.ring = h( 'div', { hidden: true }, this.ringSvg = h( 'div', { html: `<svg class="progress-ring" viewBox="0 0 64 64"><circle cx="32" cy="32" r="26" stroke="rgba(255,255,255,0.15)"/><circle class="arc" cx="32" cy="32" r="26" stroke="#5fe3d4" stroke-dasharray="163.4" stroke-dashoffset="163.4" stroke-linecap="round"/></svg>` } ), this.ringLabel = h( 'div.progress-label' ) );
+		// key cap (wrapped in a hold ring for hold targets) + label, sub line under the label
+		this.prompt = h( 'div.prompt.plate', { hidden: true }, this.promptCap = h( 'span' ), this.promptLbl = h( 'span.lbl' ), this.promptSub = h( 'span.sub', { hidden: true } ) );
+		this.ring = h( 'div', { hidden: true }, this.ringSvg = h( 'div', { html: `<svg class="progress-ring" viewBox="0 0 64 64"><circle cx="32" cy="32" r="26" stroke="rgba(255,255,255,0.15)"/><circle class="arc" cx="32" cy="32" r="26" style="stroke: var(--accent)" stroke-dasharray="163.4" stroke-dashoffset="163.4" stroke-linecap="round"/></svg>` } ), this.ringLabel = h( 'div.progress-label' ) );
 		this.toasts = h( 'div.toasts' );
 		this.pickups = h( 'div.pickups' );
 		this.mini = h( 'div.minimap.tw-glass', {}, this.miniCanvas = h( 'canvas', { width: 340, height: 340 } ) );
@@ -85,12 +86,14 @@ export class HUD {
 	}
 
 	toast( text, kind = 'info', iconId = null ) {
-		const el = h( 'div.toast.tw-glass.' + ( kind || 'info' ) );
-		if ( iconId ) { const img = h( 'img' ); setIcon( img, iconId ); el.appendChild( img ); }
+		// one line on a plate: item render when there is one, else a warn / bad dot (info and good get none)
+		const el = h( 'div.toast.plate' );
+		if ( iconId ) { const img = h( 'img', { alt: '' } ); setIcon( img, iconId ); el.appendChild( img ); }
+		else if ( kind === 'warn' || kind === 'bad' ) el.appendChild( h( 'span.sd.' + kind ) );
 		el.appendChild( h( 'span', { text } ) );
 		this.toasts.appendChild( el );
-		while ( this.toasts.children.length > 6 ) this.toasts.firstChild.remove();
-		setTimeout( () => { el.classList.add( 'out' ); setTimeout( () => el.remove(), 700 ); }, kind === 'bad' ? 6000 : 4200 );
+		while ( this.toasts.children.length > 4 ) this.toasts.firstChild.remove();
+		setTimeout( () => { el.classList.add( 'out' ); setTimeout( () => el.remove(), 240 ); }, kind === 'bad' ? 5000 : 3500 );
 		if ( kind === 'bad' || kind === 'warn' ) this.app.audio.ui( 'ui_error', 0.25 );
 	}
 
@@ -172,7 +175,7 @@ export class HUD {
 		const tempF = 1 - Math.min( 1, Math.abs( S.temp - 36.9 ) / 2.2 );
 		vset( 'temp', tempF, 0.55, 0.3 );
 		V.temp.el.title = `Body temperature ${S.temp.toFixed( 1 )} °C — outside ${Math.round( S.envTemp )} °C`;
-		V.temp.el.style.color = S.temp < 36 ? '#8fc8ff' : S.temp > 38 ? '#ffb86b' : '';
+		V.temp.el.style.color = S.temp < 36 ? 'var(--cold)' : S.temp > 38 ? 'var(--warn)' : '';
 		this.breath.hidden = S.breath > 99.5;
 		this.breathFill.style.height = S.breath + '%';
 		const mS = S.maxStamina();
@@ -199,15 +202,21 @@ export class HUD {
 		this.prompt.hidden = ! showPrompt;
 		if ( showPrompt ) {
 			const key = this.app.input.label( t.key || 'interact' );
-			const hold = t.hold ? `<span class="dim" style="margin-left:4px">hold</span>` : '';
-			const html = `<kbd>${key}</kbd>${hold}<span>${escapeHtml( t.label )}</span>`;
-			if ( html !== this._promptHtml ) { this._promptHtml = html; this.promptMain.innerHTML = html; }
-			this.promptSub.textContent = t.sub || '';
-			if ( t.hold && g.interact.holdT > 0 ) this._ringShow( g.interact.holdT / t.hold, t.label ); else if ( ! g.actions.busy ) this.ring.hidden = true;
+			if ( key !== this._promptKey ) { this._promptKey = key; this.promptCap.replaceChildren( kc( key ) ); }
+			// hold targets fill a ring around the key cap instead of saying "hold"
+			const hold = !! t.hold;
+			if ( hold !== this._promptHold ) { this._promptHold = hold; this.promptCap.className = hold ? 'kc-hold' : ''; }
+			if ( hold ) this.promptCap.style.setProperty( '--p', Math.min( 1, ( g.interact.holdT || 0 ) / t.hold ).toFixed( 3 ) );
+			if ( t.label !== this._promptLbl ) { this._promptLbl = t.label; this.promptLbl.textContent = t.label; }
+			const sub = t.sub || '';
+			if ( sub !== this._promptSubT ) { this._promptSubT = sub; this.promptSub.textContent = sub; this.promptSub.hidden = ! sub; }
 		}
-		// action progress
-		if ( g.actions.busy ) this._ringShow( g.actions.progress, g.actions.current.label + '…' + '  ' + '(move to cancel)' );
-		else if ( ! ( t?.hold && g.interact.holdT > 0 ) ) this.ring.hidden = true;
+		// action progress: label and the seconds left
+		if ( g.actions.busy ) {
+			const c = g.actions.current || {};
+			const left = c.time != null && c.t != null ? `  ${Math.max( 0, c.time - c.t ).toFixed( 1 )} s` : '';
+			this._ringShow( g.actions.progress, ( c.label || '' ) + left );
+		} else this.ring.hidden = true;
 
 		// damage direction
 		if ( S.lastHitDir && set.get( 'damageIndicators' ) ) {
@@ -312,7 +321,7 @@ export class HUD {
 		for ( const m of g.markers?.list?.() || [] ) {
 			const [ sx, sy ] = toScreen( m.x, m.z );
 			const cxs = Math.max( 12, Math.min( W - 12, sx ) ), cys = Math.max( 12, Math.min( W - 12, sy ) );
-			ctx.fillStyle = m.kind === 'death' ? '#ff7a85' : '#5fe3d4';
+			ctx.fillStyle = m.kind === 'death' ? '#FF5C5C' : '#FF7A2E';
 			ctx.beginPath(); ctx.arc( cxs, cys, 6, 0, Math.PI * 2 ); ctx.fill();
 		}
 		// player arrow (the map rotates, the arrow always points up)
@@ -324,7 +333,7 @@ export class HUD {
 		// north tick
 		const [ nx, ny ] = [ W / 2 - Math.sin( yaw ) * ( W / 2 - 14 ), W / 2 - Math.cos( yaw ) * ( W / 2 - 14 ) ];
 		ctx.font = '600 20px Inter, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-		ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(0,0,0,0.6)'; ctx.strokeText( 'N', nx, ny ); ctx.fillStyle = '#ffb86b'; ctx.fillText( 'N', nx, ny );
+		ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(0,0,0,0.6)'; ctx.strokeText( 'N', nx, ny ); ctx.fillStyle = '#ffffff'; ctx.fillText( 'N', nx, ny );
 		if ( this.app.frame % 30 === 0 ) this.miniLabel.textContent = this.ui.locationName( p.pos, true );
 	}
 

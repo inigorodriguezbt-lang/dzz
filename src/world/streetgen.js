@@ -240,20 +240,23 @@ function emitHighways( C ) {
 				const a = Math.max( q.s0, j * CH ), b = Math.min( q.s1, ( j + 1 ) * CH );
 				if ( b - a < 1e-3 ) continue;
 				roadPoint( r, ( a + b ) / 2, P );
-				if ( ! mine( P[ 0 ], P[ 1 ], ci, cj ) ) { if ( rows ) { highwayStrip( C, r, rh, rows ); rows = null; } continue; }
+				if ( ! mine( P[ 0 ], P[ 1 ], ci, cj ) ) { if ( rows ) { highwayStrip( C, r, rh, q, rows ); rows = null; } continue; }
 				chunks.push( [ a, b ] );
 				if ( ! rows ) rows = [ rowAt( r, a ) ];
 				const step = lod ? ( r.lanes === 1 ? 8 : 12 ) : 3;
 				const n = Math.max( 1, Math.round( ( b - a ) / step ) );
 				for ( let k = 1; k <= n; k ++ ) rows.push( rowAt( r, a + ( b - a ) * k / n ) );
 			}
-			if ( rows ) highwayStrip( C, r, rh, rows );
+			if ( rows ) highwayStrip( C, r, rh, q, rows );
 			if ( ! lod && chunks.length ) highwayProps( C, r, rh, q, chunks );
 		}
 	}
 }
 
-function highwayStrip( C, r, rh, rows ) {
+// distance (m) along the run to the nearest end where it joins a city street or another highway (99: none)
+function joinDist( q, s ) { return Math.min( q.t0 ? s - q.s0 : 99, q.t1 ? q.s1 - s : 99, 99 ); }
+
+function highwayStrip( C, r, rh, q, rows ) {
 	const { lod, out } = C;
 	const hw = r.hw;
 	const base = lod ? COLS_FAR[ r.lanes ] : COLS[ r.lanes ];
@@ -264,11 +267,15 @@ function highwayStrip( C, r, rh, rows ) {
 	const cls = r.lanes === 4 ? RC.FREEWAY : r.lanes === 2 ? RC.HIGHWAY : RC.DIRT;
 	ribbon( out.road, rows, cols, lifts, ( row, c, e ) => {
 		e[ 0 ] = cols[ c ]; e[ 1 ] = row.s; e[ 2 ] = cls; e[ 3 ] = r.w;
-		e[ 4 ] = rh % 997; e[ 5 ] = r.lanes; e[ 6 ] = r.lanes === 1 ? redSoil( row ) : 0; e[ 7 ] = 0;
+		e[ 4 ] = rh % 997; e[ 5 ] = r.lanes; e[ 6 ] = r.lanes === 1 ? redSoil( row ) : 0; e[ 7 ] = joinDist( q, row.s );
 	} );
-	// the median barrier on freeways
-	if ( r.lanes === 4 ) jersey( C, rows, 0, ! lod );
-	if ( ! lod && r.lanes >= 2 ) guardrails( C, r, rows );
+	// the median barrier on freeways, ending short of the junctions so it never sticks into a street or the
+	// other highway's lanes
+	if ( r.lanes === 4 ) {
+		const mid = rows.filter( w => joinDist( q, w.s ) > 14 );
+		if ( mid.length > 1 ) jersey( C, mid, 0, ! lod );
+	}
+	if ( ! lod && r.lanes >= 2 ) guardrails( C, r, q, rows );
 }
 
 // red dirt (Lānaʻi, Kauaʻi, upcountry Maui) tints the rural tracks
@@ -317,7 +324,7 @@ function jersey( C, rows, u, colliders ) {
 }
 
 // W-beam guardrails where the road bends hard or runs along a drop
-function guardrails( C, r, rows ) {
+function guardrails( C, r, q, rows ) {
 	const R = rows.length;
 	for ( const side of [ - 1, 1 ] ) {
 		const need = new Uint8Array( R );
@@ -334,10 +341,12 @@ function guardrails( C, r, rows ) {
 			if ( Math.abs( turn ) > 0.22 && Math.sign( turn ) === - side ) need[ k ] = 1;
 			// never across another road or into a street
 			if ( highwayEdgeDist( net, ex, ez, 20 )[ 1 ] !== r && highwayEdgeDist( net, ex, ez, 20 )[ 0 ] < 1.5 ) need[ k ] = 0;
+			if ( joinDist( q, w.s ) < 16 ) need[ k ] = 0;
 		}
 		// dilate, drop singles
 		const m = new Uint8Array( R );
 		for ( let k = 0; k < R; k ++ ) if ( need[ k ] ) for ( let d = - 2; d <= 2; d ++ ) if ( k + d >= 0 && k + d < R ) m[ k + d ] = 1;
+		for ( let k = 0; k < R; k ++ ) if ( joinDist( q, rows[ k ].s ) < 12 ) m[ k ] = 0;
 		let k = 0;
 		while ( k < R ) {
 			if ( ! m[ k ] ) { k ++; continue; }
@@ -367,7 +376,7 @@ function railRun( C, rows, u, side ) {
 				const dn = ( a1 - a0 ), dy = ( b1 - b0 );
 				let nn = dy * face, ny = - dn * face;
 				const l = Math.hypot( nn, ny ) || 1; nn /= l; ny /= l;
-				E[ 0 ] = 0.66; E[ 1 ] = 0.68; E[ 2 ] = 0.7; E[ 3 ] = 0.42; E[ 4 ] = 0.7; E[ 5 ] = 0;
+				E[ 0 ] = 0.62; E[ 1 ] = 0.62; E[ 2 ] = 0.6; E[ 3 ] = 0.5; E[ 4 ] = 0.6; E[ 5 ] = 0;
 				const off = face === 1 ? 0 : - 0.004;
 				G.v( p.x + p.nx * t * ( a0 + off ), p.y + b0, p.z + p.nz * t * ( a0 + off ), p.nx * t * nn, ny, p.nz * t * nn, E );
 				G.v( p.x + p.nx * t * ( a1 + off ), p.y + b1, p.z + p.nz * t * ( a1 + off ), p.nx * t * nn, ny, p.nz * t * nn, E );
@@ -454,6 +463,17 @@ function highwayProps( C, r, rh, q, chunks ) {
 		const yaw = yawZ( - w.tx, - w.tz );
 		prop( C, PROP.MILE_POST, x, z, yaw );
 		sign( C, SIGN_CELL.mile( m.n ), x, H( x, z ) + 1.05, z, yaw, 0.32, 0.32, 0 );
+	}
+	// speed limits on the right shoulder
+	for ( const g of net.regs ) {
+		if ( g.road !== r || ! inChunks( g.s ) ) continue;
+		const w = rowAt( r, g.s );
+		const off = g.side * ( hw + 1.9 );
+		const x = w.x + w.nx * off, z = w.z + w.nz * off;
+		const yaw = yawZ( - w.tx * g.side, - w.tz * g.side );
+		const y = H( x, z );
+		prop( C, PROP.SIGN_POST, x, z, yaw );
+		sign( C, SIGN_CELL.misc( g.misc ), x, y + 2.05, z, yaw, 0.75, 0.75, 0 );
 	}
 	// guide signs and welcome signs
 	for ( const g of net.signs ) {
@@ -687,6 +707,9 @@ function walkPiece( C, G, sm, st, side, nx, nz, capStart, capEnd ) {
 	}
 }
 
+const NOTICES = [ WIDE.SHELTER, WIDE.CURFEW, WIDE.INFECTED, WIDE.QUARANTINE, WIDE.ROAD_CLOSED ];
+const NOTICES_OAHU = [ WIDE.EVAC, ...NOTICES ];
+
 function streetProps( C, st ) {
 	const rnd = mulberry32( hashStr( 'st' + st.id ) );
 	const hw = st.w / 2, wk = st.walk;
@@ -760,6 +783,19 @@ function streetProps( C, st ) {
 			prop( C, PROP.SIGN_POST, sx, sz, 0, 0, 1, 0, sy );
 			sign( C, SIGN_CELL.misc( MISC.BUS ), sx, sy + 2.2, sz, yawZ( st.dx * side, st.dz * side ), 0.45, 0.45, 1 );
 			taken.push( [ a, side ], [ a - 3, side ] );
+		}
+	}
+	// notices from the first days of the outbreak, on sawhorses in the parking lane
+	if ( town && rnd() < 0.08 ) {
+		const side = rnd() < 0.5 ? 1 : - 1, a = a0 + ( a1 - a0 ) * ( 0.2 + rnd() * 0.6 );
+		const u = side * ( hw - 1.2 );
+		const [ x, z ] = at( a, u );
+		if ( free( a, side, 5 ) && ! onHighway( x, z, 2 ) ) {
+			const pool = net.cities[ st.city ].island === 3 ? NOTICES_OAHU : NOTICES;
+			const dir = rnd() < 0.5 ? 1 : - 1;
+			prop( C, PROP.SAWHORSE, x, z, yawX( nx, nz ) + ( rnd() - 0.5 ) * 0.2 );
+			sign( C, SIGN_CELL.wide( pool[ Math.floor( rnd() * pool.length ) ] ), x, H( x, z ) + 1.27, z, yawZ( st.dx * dir, st.dz * dir ), 1.9, 0.48, 1 );
+			taken.push( [ a, side ] );
 		}
 	}
 	// metro downtown: parking meters and newspaper boxes
@@ -1021,9 +1057,11 @@ function nodeProps( C, n, toW, has ) {
 		}
 	}
 	// street name blades on one corner post
+	let nameQ = - 1;
 	if ( n.deg >= 3 || ( n.deg === 2 && ( n.arms === 3 || n.arms === 6 || n.arms === 12 || n.arms === 9 ) ) ) {
 		let q = [ 3, 1, 0, 2 ].find( qq => has( qq ) && has( qq + 1 ) && cornerOk( qq, inset + 0.4 ) );
 		if ( q !== undefined ) {
+			nameQ = q;
 			const [ x, z ] = corner( q, inset + 0.35 );
 			const su = n.streets[ 0 ] || n.streets[ 2 ], sv = n.streets[ 1 ] || n.streets[ 3 ];
 			const y = H( x, z ) + ( wk ? LIFT.walk + CURB : 0 );
@@ -1032,6 +1070,16 @@ function nodeProps( C, n, toW, has ) {
 			if ( su ) sign( C, SIGN_CELL.street( su.base ? 80 + su.name : su.name ), x, y + top, z, yawZ( n.sa, - n.ca ), 0.95, 0.2, 1 );
 			if ( sv ) sign( C, SIGN_CELL.street( sv.base ? 80 + sv.name : sv.name ), x, y + top - 0.24, z, yawZ( n.ca, n.sa ), 0.95, 0.2, 1 );
 			if ( big ) prop( C, PROP.SIGN_POST, x, z, 0, 1, 1.15, 0, y );
+		}
+	}
+	// tsunami evacuation zone signs in the low-lying coastal blocks (they are everywhere along Hawaiian shores)
+	if ( n.kind !== SK.BASE && n.deg >= 3 && H( n.x, n.z ) < 6 && hh( n.key % 1e9, 71 ) < 0.14 ) {
+		const q = [ 0, 2, 1, 3 ].find( qq => qq !== nameQ && has( qq ) && has( qq + 1 ) && cornerOk( qq, inset + 0.4 ) );
+		if ( q !== undefined ) {
+			const [ x, z ] = corner( q, inset + 0.2 );
+			const d = dir( q ), y = walkY( x, z );
+			prop( C, PROP.SIGN_POST, x, z, 0, 0, 1, 0, y );
+			sign( C, SIGN_CELL.misc( MISC.TSUNAMI ), x, y + 2.0, z, yawZ( d[ 0 ], d[ 1 ] ), 0.62, 0.62, 0 );
 		}
 	}
 	// corner furniture
@@ -1145,6 +1193,15 @@ function emitFences( C ) {
 				// outrigger arm for barbed wire, leaning outwards
 				wireArm( out, x, y + HT, z, dx, dz );
 			}
+		}
+		// warning signs on the outside every ~70 m
+		const nS = Math.floor( L / 70 );
+		for ( let k = 0; k < nS; k ++ ) {
+			const t = ( k + 0.5 ) / nS;
+			const x = f.ax + ( f.bx - f.ax ) * t + f.ox * 0.07, z = f.az + ( f.bz - f.az ) * t + f.oz * 0.07;
+			const y = H( x, z );
+			if ( f.military ) sign( C, SIGN_CELL.misc( MISC.MILITARY ), x, y + 1.45, z, yawZ( f.ox, f.oz ), 0.62, 0.62, 0 );
+			else sign( C, SIGN_CELL.wide( WIDE.RESTRICTED ), x, y + 1.45, z, yawZ( f.ox, f.oz ), 1.3, 0.33, 0 );
 		}
 		// fabric
 		const G = out.fence;

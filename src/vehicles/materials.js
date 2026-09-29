@@ -311,7 +311,7 @@ export function makeGlassMaterial( opts = {} ) {
 	const u = {
 		uCrack: { value: opts.crack ?? 0 },
 		uGDirt: { value: opts.dirt ?? 0 },
-		uTint: { value: opts.tint ?? 0.35 },
+		uTint: { value: opts.tint ?? 0.2 },
 	};
 	const m = new THREE.MeshStandardMaterial( {
 		color: 0x121a20, roughness: 0.02, metalness: 0.0, transparent: true, opacity: 0.3, depthWrite: false,

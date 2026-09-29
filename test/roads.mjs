@@ -30,6 +30,19 @@ for ( const [ x, z, want ] of [ [ - 4390, - 10255, 'street' ], [ - 6682, - 10946
 	check( r && r.kind === want && r.dist < 80 && Math.abs( Math.hypot( r.dx, r.dz ) - 1 ) < 1e-6, 'nearest road at ' + x + ',' + z );
 }
 check( nearestOnNetwork( net, 0, 0, 50 ) === null, 'no road in the channel' );
+check( net.regs.length > 20 && net.regs.every( g => Number.isFinite( g.x + g.z ) ), 'speed limit signs (' + net.regs.length + ')' );
+check( net.fences.length > 0 && net.fences.every( f => Math.abs( Math.hypot( f.ox, f.oz ) - 1 ) < 1e-6 ), 'fence outward normals' );
+// the outward normal points away from the base: the fence midpoint moved outward is farther from the city centre
+check( net.fences.every( f => { const c = meta.cities[ f.city ], mx = ( f.ax + f.bx ) / 2, mz = ( f.az + f.bz ) / 2; return Math.hypot( mx + f.ox * 5 - c.x, mz + f.oz * 5 - c.z ) > Math.hypot( mx - c.x, mz - c.z ); } ), 'fences face outward' );
+// the lamp flicker's CPU twin (drives the real lights) stays in range
+{
+	const { flickerAt } = await import( '../src/city/roads/materials.js' ).catch( () => ( {} ) );
+	if ( flickerAt ) {
+		let on = 0;
+		for ( let t = 0; t < 600; t += 0.37 ) { const f = flickerAt( 0.42, t ); check( f >= 0 && f <= 1, 'flicker range' ); if ( f > 0.5 ) on ++; }
+		console.log( 'flicker duty', ( on / ( 600 / 0.37 ) ).toFixed( 2 ) );
+	}
+}
 const spotsN = roadsideSpots( net, - 4390, - 10255, 150 );
 check( spotsN.length > 50 && spotsN.every( ( [ x, z, yaw ] ) => Number.isFinite( x + z + yaw ) && Math.hypot( x + 4390, z + 10255 ) <= 150 ), 'roadside spots downtown' );
 console.log( 'roadside spots downtown', spotsN.length );

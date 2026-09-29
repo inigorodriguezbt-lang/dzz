@@ -1,4 +1,4 @@
-// Full-page screenshot of a preview page: node test/preview/sheet.mjs <url> <out.png> [width] [height]
+// Full-page screenshot of the item preview page (not shipped): node test/preview/items-sheet.mjs <url> <out.png> [width] [height]
 import { chromium } from 'playwright';
 const [ url, out, w = '1400', h = '900' ] = process.argv.slice( 2 );
 const browser = await chromium.launch( { args: [ '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist' ] } );

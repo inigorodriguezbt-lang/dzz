@@ -107,6 +107,17 @@ export class RigInfo {
 			p.toArray( this.bindPos, i * 3 );
 		}
 		this.restPelvis.copy( bones[ BONE.pelvis ].position );
+		// the pelvis' parent (Bip01) frame in character space: pelvis offsets are stored in that frame
+		{
+			const pi = bank.index.get( BONE.pelvis ) * 4;
+			const w = new THREE.Quaternion( this.bindW[ pi ], this.bindW[ pi + 1 ], this.bindW[ pi + 2 ], this.bindW[ pi + 3 ] );
+			const l = new THREE.Quaternion( this.bindL[ pi ], this.bindL[ pi + 1 ], this.bindL[ pi + 2 ], this.bindL[ pi + 3 ] );
+			this.pelvisParent = w.multiply( l.invert() ); // character space <- Bip01 local
+			this.pelvisParentInv = this.pelvisParent.clone().invert();
+			// Bip01's origin in character space: pelvis = bip01Pos + pelvisParent * pelvisLocal
+			const bp = new THREE.Vector3().fromArray( this.bindPos, pi / 4 * 3 );
+			this.bip01Pos = bp.sub( this.restPelvis.clone().applyQuaternion( this.pelvisParent ) );
+		}
 		const I = ( k ) => bank.index.get( BONE[ k ] );
 		// the joint each bone points at
 		const child = {
@@ -160,7 +171,10 @@ export class Rig {
 		this.ov = new Float32Array( B * 4 );
 		this.hasOv = new Uint8Array( B );
 		this.aim = new Float32Array( B * 4 ); // dir xyz (character space) + weight
-		this.pelvisOff = new THREE.Vector3(); // extra pelvis offset (cm)
+		this.pelvisOff = new THREE.Vector3(); // extra pelvis offset (cm, Bip01 frame; see offsetPelvis)
+		this.pelvisAbs = null; // Vector3: absolute pelvis position (character space, cm) overriding the blend
+		this.absW = new Float32Array( B * 4 ); // absolute character-space world rotations (ragdoll)
+		this.hasAbs = new Uint8Array( B );
 		this.pelvisScale = 1;
 		this.jaw = bones.Bip01_MJaw || null;
 		this.jawRest = this.jaw ? this.jaw.quaternion.clone() : null;
@@ -214,7 +228,47 @@ export class Rig {
 		this.hasOv.fill( 0 );
 		this.aim.fill( 0 );
 		this.pelvisOff.set( 0, 0, 0 );
+		this.pelvisAbs = null;
+		this.hasAbs.fill( 0 );
 		this.jawOpen = 0;
+	}
+
+	// a character-space offset of the pelvis (cm), converted into the frame the pelvis position lives in
+	offsetPelvis( x, y, z ) {
+		_v.set( x, y, z ).applyQuaternion( this.info.pelvisParentInv );
+		this.pelvisOff.add( _v );
+	}
+
+	// set bone k's character-space world rotation outright (ignores the blend and its parent)
+	setWorld( k, x, y, z, w ) {
+		const i = this.info.idx[ k ];
+		const a = this.absW;
+		a[ i * 4 ] = x; a[ i * 4 + 1 ] = y; a[ i * 4 + 2 ] = z; a[ i * 4 + 3 ] = w;
+		this.hasAbs[ i ] = 1;
+	}
+
+	// blend a stored pose (see snapshot) like a clip
+	addPose( pose, w ) {
+		if ( ! pose || w <= 1e-3 ) return;
+		const B = this.bank.B, q = this.q, r = pose.q;
+		for ( let b = 0; b < B * 4; b += 4 ) {
+			const s = q[ b ] * r[ b ] + q[ b + 1 ] * r[ b + 1 ] + q[ b + 2 ] * r[ b + 2 ] + q[ b + 3 ] * r[ b + 3 ] < 0 ? - w : w;
+			q[ b ] += r[ b ] * s; q[ b + 1 ] += r[ b + 1 ] * s; q[ b + 2 ] += r[ b + 2 ] * s; q[ b + 3 ] += r[ b + 3 ] * s;
+		}
+		this.p[ 0 ] += pose.p[ 0 ] * w; this.p[ 1 ] += pose.p[ 1 ] * w; this.p[ 2 ] += pose.p[ 2 ] * w;
+		this.wsum += w;
+	}
+
+	// the final local pose of the last end() (bones' quaternions and the pelvis offset from rest)
+	snapshot( out = { q: new Float32Array( this.bank.B * 4 ), p: new Float32Array( 3 ) } ) {
+		const bones = this.bones;
+		for ( let i = 0; i < bones.length; i ++ ) {
+			const b = bones[ i ].quaternion;
+			out.q[ i * 4 ] = b.x; out.q[ i * 4 + 1 ] = b.y; out.q[ i * 4 + 2 ] = b.z; out.q[ i * 4 + 3 ] = b.w;
+		}
+		const pel = bones[ this.info.idx.pelvis ].position, rp = this.info.restPelvis, s = this.pelvisScale || 1;
+		out.p[ 0 ] = ( pel.x - rp.x ) / s; out.p[ 1 ] = ( pel.y - rp.y ) / s; out.p[ 2 ] = ( pel.z - rp.z ) / s;
+		return out;
 	}
 
 	// rotate bone k by angle about a character-space axis (accumulates)
@@ -253,8 +307,11 @@ export class Rig {
 		// bones are stored parent-first (the pack order), so one pass does FK
 		for ( let i = 0; i < B; i ++ ) {
 			const k = i * 4, p = par[ i ];
-			if ( p >= 0 ) qmul( W, p * 4, q, k, W, k ); else { W[ k ] = q[ k ]; W[ k + 1 ] = q[ k + 1 ]; W[ k + 2 ] = q[ k + 2 ]; W[ k + 3 ] = q[ k + 3 ]; }
-			if ( ! this.hasOv[ i ] ) continue;
+			if ( this.hasAbs[ i ] ) {
+				const A = this.absW;
+				W[ k ] = A[ k ]; W[ k + 1 ] = A[ k + 1 ]; W[ k + 2 ] = A[ k + 2 ]; W[ k + 3 ] = A[ k + 3 ];
+			} else if ( p >= 0 ) qmul( W, p * 4, q, k, W, k ); else { W[ k ] = q[ k ]; W[ k + 1 ] = q[ k + 1 ]; W[ k + 2 ] = q[ k + 2 ]; W[ k + 3 ] = q[ k + 3 ]; }
+			if ( ! this.hasOv[ i ] && ! this.hasAbs[ i ] ) continue;
 			// character-space rotation
 			qmul( ov, k, W, k, W, k );
 			// aim: rotate so the bone axis points at the target direction
@@ -276,7 +333,11 @@ export class Rig {
 			b.quaternion.set( q[ k ], q[ k + 1 ], q[ k + 2 ], q[ k + 3 ] );
 		}
 		const pel = bones[ info.idx.pelvis ], s = this.pelvisScale;
-		pel.position.set( info.restPelvis.x + this.p[ 0 ] * ws * s + this.pelvisOff.x, info.restPelvis.y + this.p[ 1 ] * ws * s + this.pelvisOff.y, info.restPelvis.z + this.p[ 2 ] * ws * s + this.pelvisOff.z );
+		if ( this.pelvisAbs ) {
+			// absolute character-space position -> Bip01 local
+			_v.copy( this.pelvisAbs ).sub( info.bip01Pos ).applyQuaternion( info.pelvisParentInv );
+			pel.position.copy( _v );
+		} else pel.position.set( info.restPelvis.x + this.p[ 0 ] * ws * s + this.pelvisOff.x, info.restPelvis.y + this.p[ 1 ] * ws * s + this.pelvisOff.y, info.restPelvis.z + this.p[ 2 ] * ws * s + this.pelvisOff.z );
 		for ( let i = 0; i < B; i ++ ) bones[ i ].updateMatrix();
 		if ( this.jaw ) {
 			// open about the head's sideways axis (a head-local rotation of the jaw joint)
