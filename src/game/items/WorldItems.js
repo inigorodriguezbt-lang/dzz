@@ -212,7 +212,7 @@ export class WorldItems {
 			// part of a stack fitted
 			g.audio?.play( 'pickup', { vol: 0.4 } );
 			g.events.emit( 'item:pick', { stack: { ...s, qty: before - left } } );
-			g.toast( 'Not enough room for all of it', 'warn' );
+			g.toast( 'Not enough room', 'warn' );
 			this.dirty = true;
 		} else {
 			g.toast( 'Not enough room', 'warn' );

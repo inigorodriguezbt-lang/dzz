@@ -70,8 +70,8 @@ export class Fishing {
 	provide( ray ) {
 		const g = this.game;
 		if ( g.player.vehicle ) return null;
-		if ( this.state === 'bite' ) return [ { t: 0.01, id: 'fish:strike', label: 'Strike!', sub: 'Something is biting', noOcclusion: true, action: () => this.strike() } ];
-		if ( this.state === 'wait' ) return [ { t: 2.4, id: 'fish:reel', label: 'Reel in', sub: 'Waiting for a bite…', noOcclusion: true, action: () => this.stop( 'You reel in the line' ) } ];
+		if ( this.state === 'bite' ) return [ { t: 0.01, id: 'fish:strike', label: 'Strike', sub: 'Bite', noOcclusion: true, action: () => this.strike() } ];
+		if ( this.state === 'wait' ) return [ { t: 2.4, id: 'fish:reel', label: 'Reel in', sub: 'Waiting', noOcclusion: true, action: () => this.stop() } ];
 		if ( this.state ) return null;
 		if ( ray.dir.y > 0.25 ) return null;
 		const rod = this.bestRod();
@@ -79,18 +79,18 @@ export class Fishing {
 		const tg = this.target( ray );
 		if ( ! tg ) return null;
 		const bait = this.inv.count( 'fishing_bait' );
-		return [ { t: 2.5, id: 'fish:cast', label: 'Cast the line', sub: `${getItem( rod.id ).name}${bait ? ` · ${bait} bait` : ' · no bait'}`, noOcclusion: true, action: () => this.cast( rod, tg ) } ];
+		return [ { t: 2.5, id: 'fish:cast', label: 'Cast', sub: bait ? `${bait} bait` : 'No bait', noOcclusion: true, action: () => this.cast( rod, tg ) } ];
 	}
 
 	// from the rod's inventory action: cast where you are looking if that is water
 	cast( rod = null, tg = null ) {
 		const g = this.game;
 		rod = rod || this.bestRod();
-		if ( ! rod ) { g.toast( 'You need a fishing rod', 'warn' ); return false; }
+		if ( ! rod ) { g.toast( 'Need a fishing rod', 'warn' ); return false; }
 		if ( ! tg ) {
 			const cam = g.camera;
 			tg = this.target( { origin: cam.position.clone(), dir: new THREE.Vector3( 0, 0, - 1 ).applyQuaternion( cam.quaternion ) } );
-			if ( ! tg ) { g.toast( 'Stand at the water and look at it to cast', 'warn' ); return false; }
+			if ( ! tg ) { g.toast( 'Look at open water', 'warn' ); return false; }
 			g.app?.ui?.closeScreen?.();
 		}
 		this.rod = rod;
@@ -145,9 +145,9 @@ export class Fishing {
 		if ( this.inv.count( 'fishing_bait' ) > 0 ) this.inv.consume( 'fishing_bait', 1 );
 		ensureItemSound( g.audio, 'reel' );
 		g.actions.start( {
-			label: big ? 'Fighting a big one' : 'Reeling in', time: big ? 5 + Math.random() * 3 : 2.5 + Math.random() * 1.5, sound: 'reel', cancelOnMove: true,
+			label: 'Reeling in', time: big ? 5 + Math.random() * 3 : 2.5 + Math.random() * 1.5, sound: 'reel', cancelOnMove: true,
 			onDone: () => this._land(),
-			onCancel: () => this.stop( 'It got away', 'warn' ),
+			onCancel: () => this.stop( 'Got away', 'warn' ),
 		} );
 	}
 
@@ -158,17 +158,17 @@ export class Fishing {
 		let chance = 0.72 * q + ( g.itemUse?.knowledge?.fishing ? 0.12 : 0 ) - ( big ? 0.18 : 0 );
 		chance *= 0.6 + 0.4 * rod.cond;
 		rod.cond = Math.max( 0.02, rod.cond - ( big ? 0.03 : 0.01 ) );
-		if ( Math.random() > Math.min( 0.95, chance ) ) { this.stop( big ? 'The line snaps — it was a big one' : 'It slips off the hook', 'warn' ); return; }
+		if ( Math.random() > Math.min( 0.95, chance ) ) { this.stop( big ? 'Line snapped' : 'Got away', 'warn' ); return; }
 		let id = this.catchId;
 		if ( id === 'junk' ) id = JUNK[ Math.floor( Math.random() * JUNK.length ) ];
 		const s = makeStack( id, 1, { loot: id !== this.catchId } );
 		if ( ! s ) { this.stop(); return; }
 		if ( getItem( id ).cat === 'food' ) { s.data.age = 0; s.cond = 1; }
 		g.audio?.play( 'splash', { pos: this.bobberPos, vol: 0.6 } );
-		if ( this.inv.add( s ) > 0 ) { g.dropStack( s ); g.toast( 'No room — it flops onto the ground', 'warn' ); }
+		if ( this.inv.add( s ) > 0 ) { g.dropStack( s ); g.toast( 'No room, dropped', 'warn' ); }
 		g.events.emit( 'item:pick', { stack: s } );
 		const name = getItem( id ).name.replace( /^Raw /, '' );
-		g.toast( this.catchId === 'junk' ? `You reel in… ${name.toLowerCase()}. Great.` : `You caught ${/^[aeiou]/i.test( name ) ? 'an' : 'a'} ${name}!`, this.catchId === 'junk' ? 'info' : 'good' );
+		g.toast( `Caught: ${name}`, this.catchId === 'junk' ? 'info' : 'good' );
 		g.stats.fish = ( g.stats.fish || 0 ) + ( this.catchId === 'junk' ? 0 : 1 );
 		this.inv.changed();
 		this.stop();
@@ -209,7 +209,7 @@ export class Fishing {
 		const moved = g.player.pos.distanceTo( this.castFrom ) > 2.2;
 		if ( moved || g.player.vehicle || g.player.swimming || g.dead || ( this.rod && ! this.inv.findUid( this.rod.uid ) ) ) {
 			if ( this.state === 'reel' ) g.actions.cancel();
-			this.stop( moved ? 'You reel in the line' : null );
+			this.stop();
 			return;
 		}
 		if ( this.state === 'cast' ) return;
@@ -233,7 +233,7 @@ export class Fishing {
 			this.biteT -= dt;
 			if ( this.biteT <= 0 ) {
 				// missed it: the fish may steal the bait
-				if ( Math.random() < 0.5 && this.inv.count( 'fishing_bait' ) > 0 ) { this.inv.consume( 'fishing_bait', 1 ); g.toast( 'Missed it — and it took the bait', 'info' ); } else g.toast( 'Missed it', 'info' );
+				if ( Math.random() < 0.5 && this.inv.count( 'fishing_bait' ) > 0 ) { this.inv.consume( 'fishing_bait', 1 ); g.toast( 'Missed, bait taken', 'info' ); } else g.toast( 'Missed', 'info' );
 				this.state = 'wait';
 				this.waitT = this._biteTime();
 			}

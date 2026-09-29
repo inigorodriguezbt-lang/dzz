@@ -27,7 +27,8 @@ const REFILL_MOVE = 5; // refill the instance bands after the camera moved this 
 const NEAR_BAND = 75; // props / cars closer than this cast sun shadows
 const QUALITY = { low: 0.65, medium: 0.85, high: 1, ultra: 1.2 }; // scales the near radius and the draw distances
 
-const CAR_NAMES = [ 'Sedan', 'Hatchback', 'SUV', 'Pickup truck', 'Van', 'Police cruiser', 'Humvee', 'Army truck', 'Bus' ];
+// what the rear storage of each body type is called (prompt "Search <part>", container label)
+const PART_NAME = [ 'Trunk', 'Trunk', 'Trunk', 'Truck bed', 'Cargo', 'Trunk', 'Cargo', 'Cargo', 'Luggage' ];
 const TRUNK_CAP = [ 24, 18, 32, 36, 48, 22, 30, 60, 30 ];
 const CAR_BAND = [ [ 0, 60, 'near', true ], [ 60, 150, 'far', false ], [ 150, 500, 'low', false ] ];
 // a week old: the blood has dried dull, oil stays glossy
@@ -526,10 +527,10 @@ export class Roads {
 				const D = CAR_DIMS[ w.type ];
 				const rear = lz > D.L * 0.2 || w.type === CAR.MTRUCK;
 				const kind = rear ? 'trunk' : 'glovebox';
-				const label = rear ? ( w.type === CAR.PICKUP ? 'Search truck bed' : w.type === CAR.MTRUCK ? 'Search cargo' : w.type === CAR.VAN || w.type === CAR.SUV ? 'Search cargo area' : 'Search trunk' ) : 'Search glovebox';
+				const label = rear ? 'Search ' + PART_NAME[ w.type ].toLowerCase() : 'Search glovebox';
 				const key = w.key + ':' + ( rear ? 't' : 'g' );
 				const seen = this.wrecks.get( key );
-				const sub = ( w.burn > 0.5 ? 'Burnt-out ' + CAR_NAMES[ w.type ].toLowerCase() : 'Abandoned ' + CAR_NAMES[ w.type ].toLowerCase() ) + ( seen && ! seen.items.length ? ' · empty' : '' );
+				const sub = seen && ! seen.fresh && ! seen.items.length ? 'Empty' : '';
 				best = { t, label, sub, id: key, owner: w, ownerBox: w.box, action: () => this.openWreck( w, kind, key ) };
 			}
 			return best ? [ best ] : null;
@@ -551,7 +552,7 @@ export class Roads {
 		}
 		c = {
 			key, kind: glove ? 'car_glovebox' : 'car_trunk',
-			label: glove ? 'Glovebox' : type === CAR.PICKUP ? 'Truck bed' : type === CAR.MTRUCK ? 'Cargo' : 'Trunk',
+			label: glove ? 'Glovebox' : PART_NAME[ type ],
 			capacity: glove ? 4 : TRUNK_CAP[ type ],
 			items, pos: new THREE.Vector3( w.x, w.y + 0.8, w.z ), fresh,
 		};
@@ -566,7 +567,7 @@ export class Roads {
 		const open = () => { c.fresh = false; g.app?.ui?.openContainer?.( c ); };
 		if ( c.fresh && g.actions?.start ) {
 			g.audio?.play?.( kind === 'glovebox' ? 'door_open' : 'container_open', { pos: c.pos, vol: 0.5 } );
-			g.actions.start( { label: kind === 'glovebox' ? 'Searching the glovebox' : 'Searching', time: kind === 'glovebox' ? 1.4 : 2.4, cancelOnMove: true, onDone: open } );
+			g.actions.start( { label: 'Searching', time: kind === 'glovebox' ? 1.4 : 2.4, cancelOnMove: true, onDone: open } );
 		} else open();
 	}
 

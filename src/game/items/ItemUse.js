@@ -1,42 +1,29 @@
 // What you can do with an item (game.itemUse): the right-click menu and double-click default of the inventory,
 // quick-heal, and everything that follows — eating (portions, opening cans with the right tool, cracking coconuts,
 // cooking at a fire), drinking (cans, bottles, canteens of water / seawater / dirty water), medicine and kits,
-// lights with batteries, reading, repairing, ripping clothes into rags, flares and chemlights, sleeping.
+// lights with batteries, reading guides, repairing, ripping clothes into rags, flares and chemlights, sleeping.
 //   actions( stack ) -> [ { label, run } ]   (the first is the double-click default)
 //   use( stack )                             runs the default action
 //   fillFrom( kind, stack? )                 'sea' | 'tap' | 'rain' (| 'dirty'): fills a water container
-//   toggleLight( stack? )                    the flashlight key (the hands module can call it)
+//   toggleLight( stack? )                    the flashlight key when no hands module handles it
 // Also per frame: food spoils in game hours (inventory, the open container, the ground; cooler bags slow it),
-// batteries drain in lights that are on, the carried light is fed to the light pool, dropped chemlights and
-// burning flares glow.
+// batteries drain in lights that are on, carried lights feed the light pool, dropped chemlights and burning
+// flares glow.
+// Player-facing text stays short and functional: menu labels are a verb (+ object), toasts a few words.
 import * as THREE from 'three';
 import { getItem, makeStack, cloneStack, newUid, freshness } from './ItemDB.js';
 import { playItemSound, ensureItemSound } from './sounds.js';
 import { liquidName, worstLiquid, provides, fmtHour, cardinal } from './util.js';
 
+// progress labels for medical verbs
 const GERUND = {
-	'Bandage': 'Bandaging', 'Pack wounds': 'Packing the wounds', 'Apply tourniquet': 'Tightening the tourniquet', 'Stitch wounds': 'Stitching the wounds',
-	'Disinfect wounds': 'Disinfecting', 'Clean wounds': 'Cleaning the wounds', 'Inject': 'Injecting', 'Apply': 'Applying', 'Splint leg': 'Splinting your leg',
-	'Start IV': 'Running the IV', 'Transfuse': 'Transfusing', 'Bandage with a rag': 'Bandaging', 'Purify water': 'Purifying',
+	'Bandage': 'Bandaging', 'Pack wounds': 'Packing wounds', 'Apply tourniquet': 'Applying tourniquet', 'Stitch wounds': 'Stitching',
+	'Disinfect': 'Disinfecting', 'Clean wounds': 'Cleaning wounds', 'Inject': 'Injecting', 'Apply': 'Applying', 'Splint leg': 'Splinting',
+	'Start IV': 'Running IV', 'Transfuse': 'Transfusing', 'Purify water': 'Purifying', 'Take': 'Taking',
 };
+const SKILL_NAME = { fishing: 'fishing', survival: 'survival', foraging: 'foraging', first_aid: 'first aid' };
 
-const RADIO = [
-	'"…this is the Emergency Alert System. Residents of Oʻahu should remain indoors. Evacuation points at Aloha Stadium are closed…"',
-	'"…Coast Guard Sector Honolulu, all vessels: Kewalo Basin is not safe. Repeat, Kewalo Basin is not safe…"',
-	'A pre-recorded voice reads the tide tables for Hilo Bay. Nobody has changed the tape in days.',
-	'"…if you can hear this, we are at the Kahului airport terminal. We have water. Come in daylight, come slow, hands where we can see them…"',
-	'Slack-key guitar on KINE, looping the same three songs. Someone left the automation running.',
-	'"…National Guard checkpoint at the H-3 tunnels has been abandoned. Do not attempt to cross the Koʻolau…"',
-	'Static, then a child counting in Hawaiian — ʻekahi, ʻelua, ʻekolu — then static again.',
-	'"…Molokaʻi is quiet. Stay off our island." The same message, every hour.',
-];
-const PHONE = [
-	'12 unread messages. The last one: "where are you?? pick up"',
-	'No service. The lock screen is a photo of a dog on a surfboard.',
-	'A news alert from six days ago: "Governor declares state of emergency".',
-	'Voicemail full. Battery low.',
-];
-
+// clothes that do not rip into rags (synthetics, armour, rubber)
 const RIP_EXCLUDE = /wetsuit|hazmat|rain_|leather|down_jacket|firefighter|ghillie|police_vest|plate|stab|rig|life_jacket|vest|helmet|hard_hat/;
 
 export class ItemUse {
@@ -49,8 +36,8 @@ export class ItemUse {
 		this.carried = lights ? lights.add( { pos: new THREE.Vector3(), color: 0xffaa66, intensity: 0, range: 8, on: false, priority: 4, lift: 0 } ) : null;
 		this.flares = []; // burning road flares in the world
 		this.glows = new Map(); // lit chemlights on the ground: WorldItem -> { src, sprite }
-		this._fwd = new THREE.Vector3();
 		this.glowTex = null;
+		this.glowT = 0;
 	}
 
 	get inv() { return this.game.player.inventory; }
@@ -73,30 +60,23 @@ export class ItemUse {
 		if ( d.food ) {
 			const f = d.food;
 			if ( d.unpack ) add( 'Unpack', () => this.unpack( stack ) );
-			if ( d.opensTo ) {
-				const b = this.blade();
-				add( b ? `Crack open (${getItem( b.id ).name})` : 'Crack open (needs a blade)', () => this.crack( stack ) );
-			} else if ( f.opener && ! stack.data.open ) {
-				const o = f.opener === 'cut' ? this.cutOption() : this.openOption();
-				add( o ? o.label : ( f.opener === 'cut' ? 'Cut open (needs a blade)' : 'Open (needs a can opener, a knife or a stone)' ), () => this.openFood( stack ) );
-			} else {
+			if ( d.opensTo ) add( 'Crack open', () => this.crack( stack ) );
+			else if ( f.opener && ! stack.data.open ) add( f.opener === 'cut' ? 'Cut open' : 'Open', () => this.openFood( stack ) );
+			else {
 				const left = stack.data.left ?? f.portions;
 				let label = f.raw ? 'Eat raw' : 'Eat';
 				if ( f.portions > 1 ) label += ` (${left}/${f.portions})`;
-				if ( f.spoil && freshness( stack ) <= 0 ) label += ' — rotten!';
+				if ( f.spoil && freshness( stack ) <= 0 ) label += ' (rotten)';
 				add( label, () => this.eat( stack ) );
 			}
-			if ( f.raw && f.cooked && getItem( f.cooked ) ) {
-				if ( nearFire ) first( 'Cook on the fire', () => this.cook( stack ) );
-				else add( 'Cook (needs a fire)', () => this.cook( stack ) );
-			}
+			if ( f.raw && f.cooked && getItem( f.cooked ) && nearFire ) first( 'Cook', () => this.cook( stack ) );
 		}
 
 		// ---- drinks ----
 		if ( d.drink ) {
 			const k = d.drink, left = stack.data.left ?? k.portions;
 			add( k.portions > 1 ? `Drink (${left}/${k.portions})` : 'Drink', () => this.drinkItem( stack ) );
-			if ( k.container && getItem( k.container ) ) add( 'Pour it out', () => this.pourOut( stack ) );
+			if ( k.container && getItem( k.container ) ) add( 'Pour out', () => this.pourOut( stack ) );
 		}
 
 		// ---- medicine (and rags) ----
@@ -113,46 +93,41 @@ export class ItemUse {
 		// ---- liquid containers ----
 		if ( d.tool?.liquid ) {
 			const L = stack.data.amount || 0, liq = stack.data.liquid;
-			if ( L > 0.01 && liq && liq !== 'fuel' ) add( `Drink ${liquidName( liq )}${liq === 'sea' ? ' (salty!)' : liq === 'dirty' ? ' (risky)' : ''}`, () => this.drinkFrom( stack ) );
-			if ( L > 0.01 && liq === 'dirty' ) { const p = this.purifier(); if ( p ) add( `Purify with ${getItem( p.id ).name}`, () => this.purify( p, stack ) ); }
+			if ( L > 0.01 && liq && liq !== 'fuel' ) add( `Drink ${liquidName( liq )}`, () => this.drinkFrom( stack ) );
+			if ( L > 0.01 && liq === 'dirty' && this.purifier() ) add( 'Purify', () => this.purify( this.purifier(), stack ) );
 			if ( L < d.tool.liquid - 0.01 && this.canCollectRain() ) add( 'Collect rain', () => this.fillFrom( 'rain', stack ) );
-			if ( L > 0.01 ) add( 'Empty it', () => this.emptyContainer( stack ) );
+			if ( L > 0.01 ) add( 'Empty', () => this.emptyContainer( stack ) );
 		}
 
 		// ---- fuel ----
 		if ( d.fuel ) {
-			if ( d.fuel.kind === 'propane' ) { const st = inv.find( ( s, dd ) => dd?.tool?.kind === 'stove' ); if ( st ) add( 'Fit to the camp stove', () => this.refillStove( stack, st ) ); }
-			if ( ( stack.data.amount || 0 ) > 0.01 && d.fuel.kind !== 'propane' ) add( 'Empty it', () => this.emptyFuel( stack ) );
+			if ( d.fuel.kind === 'propane' ) { const st = inv.find( ( s, dd ) => dd?.tool?.kind === 'stove' ); if ( st ) add( 'Refill stove', () => this.refillStove( stack, st ) ); }
+			else if ( ( stack.data.amount || 0 ) > 0.01 ) add( 'Empty', () => this.emptyFuel( stack ) );
 		}
 
 		// ---- tools ----
 		if ( d.tool ) this._toolActions( stack, d, add );
 
-		// ---- throwables we light ourselves ----
+		// ---- road flares ----
 		if ( d.throwable?.kind === 'flare' ) {
-			add( 'Strike and throw', () => this.lightFlare( stack, true ) );
-			add( 'Strike and drop', () => this.lightFlare( stack, false ) );
+			add( 'Light and throw', () => this.lightFlare( stack, true ) );
+			add( 'Light and drop', () => this.lightFlare( stack, false ) );
 		}
 
 		// ---- clothing ----
 		if ( d.cat === 'clothing' || d.cat === 'backpack' ) {
-			if ( stack.cond < 0.95 && this.findKind( 'sewing' ) ) add( 'Repair (sewing kit)', () => this.repair( this.findKind( 'sewing' ), stack ) );
-			if ( stack.cond < 0.8 && this.findKind( 'tape' ) ) add( 'Patch up (duct tape)', () => this.repair( this.findKind( 'tape' ), stack ) );
+			if ( stack.cond < 0.95 && this.findKind( 'sewing' ) ) add( 'Repair', () => this.repair( this.findKind( 'sewing' ), stack ) );
+			else if ( stack.cond < 0.8 && this.findKind( 'tape' ) ) add( 'Patch', () => this.repair( this.findKind( 'tape' ), stack ) );
 			if ( this.rippable( d ) ) add( 'Rip into rags', () => this.rip( stack ) );
 		}
 
-		// ---- fuel for a fire ----
-		if ( nearFire && this.game.crafting?.fuelValue?.( d.id ) ) add( 'Put on the fire', () => this.game.crafting.addFuel( stack ) );
+		// ---- a fire nearby burns it ----
+		if ( nearFire && g.crafting?.fuelValue?.( d.id ) && d.id !== 'campfire_kit' ) add( 'Add to fire', () => g.crafting.addFuel( stack ) );
 
-		// ---- reading and odds and ends ----
-		if ( d.book ) add( 'Read', () => this.read( stack ) );
-		switch ( d.id ) {
-			case 'newspaper': add( 'Read the paper', () => this.read( stack ) ); break;
-			case 'ukulele': add( 'Play', () => this.noiseMaker( stack, 'strum', 45, 'You strum a few bars of "Hawaiʻi Aloha". It carries a long way.' ) ); break;
-			case 'rubber_duck': add( 'Squeeze', () => this.noiseMaker( stack, 'squeak', 18, 'Squeak.' ) ); break;
-			case 'laptop': add( 'Open it', () => this.game.toast( 'The battery is dead. Somebody\'s whole life is on it.', 'info' ) ); break;
-			case 'family_photo': add( 'Look at it', () => this.game.toast( 'A family grinning on Waikīkī beach. "Summer 2019" on the back.', 'info' ) ); break;
-		}
+		// ---- guides and odds and ends ----
+		if ( d.book?.skill && ! this.knowledge[ d.book.skill ] ) add( 'Read', () => this.read( stack ) );
+		if ( d.id === 'ukulele' ) add( 'Play', () => this.noiseMaker( 'strum', 45 ) );
+		if ( d.id === 'rubber_duck' ) add( 'Squeeze', () => this.noiseMaker( 'squeak', 18 ) );
 		return A;
 	}
 
@@ -161,42 +136,39 @@ export class ItemUse {
 		// lights
 		if ( t.light ) {
 			if ( t.kind === 'chemlight' ) {
-				if ( stack.data.on ) add( 'Drop it (lit)', () => this.dropLit( stack ) );
-				else { add( 'Snap to light', () => this.snapChemlight( stack, false ) ); add( 'Snap and drop', () => this.snapChemlight( stack, true ) ); }
+				if ( stack.data.on ) add( 'Drop', () => this.dropLit( stack ) );
+				else { add( 'Snap', () => this.snapChemlight( stack, false ) ); add( 'Snap and drop', () => this.snapChemlight( stack, true ) ); }
 			} else if ( t.kind === 'torch' ) {
-				add( stack.data.on ? 'Put out the torch' : ( this.fireSource() ? 'Light the torch' : 'Light the torch (needs a lighter or matches)' ), () => this.toggleLight( stack ) );
-			} else {
-				const dead = ! ( stack.data.charge > 0 );
-				add( stack.data.on ? 'Turn off' : dead ? 'Turn on (batteries dead)' : 'Turn on', () => this.toggleLight( stack ) );
-			}
+				add( stack.data.on ? 'Put out' : 'Light', () => this.toggleLight( stack ) );
+			} else add( stack.data.on ? 'Turn off' : 'Turn on', () => this.toggleLight( stack ) );
 		}
-		if ( t.battery && t.kind !== 'chemlight' && t.kind !== 'torch' && ( stack.data.charge ?? 0 ) < t.battery * 0.95 && inv.count( 'batteries' ) > 0 ) add( 'Replace the batteries', () => this.replaceBatteries( stack ) );
+		if ( t.battery && ! [ 'chemlight', 'torch' ].includes( t.kind ) && ( stack.data.charge ?? 0 ) < t.battery * 0.95 && inv.count( 'batteries' ) > 0 ) add( 'Replace batteries', () => this.replaceBatteries( stack ) );
 		switch ( t.kind ) {
 			case 'battery': {
 				const dev = this.lowestDevice();
-				if ( dev ) add( `Put into ${getItem( dev.id ).name}`, () => this.replaceBatteries( dev ) );
+				if ( dev ) add( `Insert into ${getItem( dev.id ).name}`, () => this.replaceBatteries( dev ) );
 				break;
 			}
-			case 'map': add( 'Read the map', () => { g.app?.ui?.closeScreen?.(); g.app?.ui?.map?.open?.(); } ); break;
+			case 'map': add( 'Open map', () => { g.app?.ui?.closeScreen?.(); g.app?.ui?.map?.open?.(); } ); break;
 			case 'compass': add( 'Check heading', () => { const deg = ( ( - g.player.yaw * 180 / Math.PI ) % 360 + 360 ) % 360; g.toast( `Heading ${Math.round( deg )}° ${cardinal( deg )}`, 'info' ); } ); break;
-			case 'watch': add( 'Check the time', () => g.toast( `${fmtHour( g.hour )} — day ${g.day}`, 'info' ) ); break;
+			case 'watch': add( 'Check time', () => g.toast( `${fmtHour( g.hour )}, day ${g.day}`, 'info' ) ); break;
+			case 'phone': add( 'Check time', () => this.phoneTime( stack ) ); break;
 			case 'gps': add( 'Check position', () => this.gps( stack ) ); break;
-			case 'radio': add( 'Listen', () => this.radio( stack ) ); break;
-			case 'phone': add( 'Check messages', () => this.phone( stack ) ); break;
-			case 'rangefinder': add( 'Measure distance', () => this.rangefind( stack ) ); break;
-			case 'binoculars': add( 'Look through them', () => { if ( g.hands?.select ) { g.hands.select( stack ); g.toast( 'Aim to look through the binoculars', 'info' ); } else g.toast( 'You scan the horizon.', 'info' ); } ); break;
-			case 'fishingrod': add( 'Fish here', () => g.fishing?.cast?.( stack ) ); break;
-			case 'tent': add( 'Pitch the tent and sleep', () => this.sleep( 1.0 ) ); break;
+			case 'radio': if ( d.id !== 'walkie_talkie' ) add( 'Listen', () => this.radio( stack ) ); break;
+			case 'rangefinder': add( 'Measure', () => this.rangefind( stack ) ); break;
+			case 'binoculars': if ( g.hands?.select ) add( 'Use', () => { g.app?.ui?.closeScreen?.(); g.hands.select( stack ); } ); break;
+			case 'fishingrod': add( 'Fish', () => g.fishing?.cast?.( stack ) ); break;
+			case 'tent': add( 'Sleep', () => this.sleep( 1.0 ) ); break;
 			case 'sleepingbag': add( 'Sleep', () => this.sleep( 0.85 ) ); break;
-			case 'whistle': add( 'Blow the whistle', () => this.noiseMaker( stack, 'whistle', 110, 'A shrill blast. Every infected within a hundred metres heard that.' ) ); break;
-			case 'stove': add( ( stack.data.uses ?? t.uses ) > 0 ? 'Set up the stove' : 'Set up the stove (canister empty)', () => this.placeStove( stack ) ); break;
-			case 'campfire': add( 'Place the campfire', () => this.placeCampfire( stack ) ); break;
-			case 'sewing': { const tg = this.mostDamaged( ( s, dd ) => dd.cat === 'clothing' || dd.cat === 'backpack', 0.95 ); add( tg ? `Repair ${getItem( tg.id ).name}` : 'Repair clothing (nothing torn)', () => this.repair( stack, tg ) ); break; }
-			case 'tape': { const tg = this.mostDamaged( ( s, dd ) => dd.cat !== 'firearm' && dd.cat !== 'food', 0.8 ); add( tg ? `Patch up ${getItem( tg.id ).name}` : 'Patch something up (nothing damaged)', () => this.repair( stack, tg ) ); break; }
-			case 'cleaning': { const tg = this.mostDamaged( ( s, dd ) => dd.cat === 'firearm', 0.98 ); add( tg ? `Clean ${getItem( tg.id ).name}` : 'Clean a gun (none need it)', () => this.repair( stack, tg ) ); break; }
-			case 'canopener': { const c = this.inv.find( ( s, dd ) => dd?.food?.opener === true && ! s.data.open ); if ( c ) add( `Open ${getItem( c.id ).name}`, () => this.openFood( c ) ); break; }
-			case 'solar': { const dev = this.lowestDevice( true ); add( dev ? `Charge ${getItem( dev.id ).name}` : 'Charge (nothing to charge)', () => this.solarCharge( dev ) ); break; }
-			case 'lighter': case 'matches': { const tch = this.inv.find( ( s, dd ) => dd?.tool?.kind === 'torch' && ! s.data.on ); if ( tch ) add( 'Light a torch', () => this.toggleLight( tch ) ); break; }
+			case 'whistle': add( 'Blow', () => this.noiseMaker( 'whistle', 110 ) ); break;
+			case 'stove': add( 'Place', () => this.placeStove( stack ) ); break;
+			case 'campfire': add( 'Place', () => this.placeCampfire( stack ) ); break;
+			case 'sewing': { const tg = this.mostDamaged( ( s, dd ) => dd.cat === 'clothing' || dd.cat === 'backpack', 0.95 ); if ( tg ) add( `Repair ${getItem( tg.id ).name}`, () => this.repair( stack, tg ) ); break; }
+			case 'tape': { const tg = this.mostDamaged( ( s, dd ) => dd.cat !== 'firearm' && dd.cat !== 'food', 0.8 ); if ( tg ) add( `Patch ${getItem( tg.id ).name}`, () => this.repair( stack, tg ) ); break; }
+			case 'cleaning': { const tg = this.mostDamaged( ( s, dd ) => dd.cat === 'firearm', 0.98 ); if ( tg ) add( `Clean ${getItem( tg.id ).name}`, () => this.repair( stack, tg ) ); break; }
+			case 'canopener': { const c = inv.find( ( s, dd ) => dd?.food?.opener === true && ! s.data.open ); if ( c ) add( `Open ${getItem( c.id ).name}`, () => this.openFood( c ) ); break; }
+			case 'solar': { const dev = this.lowestDevice( true ); if ( dev ) add( `Charge ${getItem( dev.id ).name}`, () => this.solarCharge( dev ) ); break; }
+			case 'lighter': case 'matches': { const tch = inv.find( ( s, dd ) => dd?.tool?.kind === 'torch' && ! s.data.on ); if ( tch ) add( 'Light torch', () => this.toggleLight( tch ) ); break; }
 		}
 	}
 
@@ -296,7 +268,7 @@ export class ItemUse {
 		const max = d.tool?.uses ?? d.medical?.uses;
 		if ( ! max ) { this.consumeOne( stack ); return; }
 		stack.data.uses = this.usesLeft( stack ) - n;
-		if ( stack.data.uses <= 0 ) { this.game.toast( `${d.name} is used up`, 'info' ); this.consumeOne( stack ); } else this.inv.changed();
+		if ( stack.data.uses <= 0 ) { this.game.toast( `${d.name} used up`, 'info' ); this.consumeOne( stack ); } else this.inv.changed();
 	}
 
 	timed( label, time, sound, onDone, opts = {} ) {
@@ -315,23 +287,27 @@ export class ItemUse {
 	blade() { return this.inv.find( ( s ) => provides( s, 'cut' ) ); }
 	fireSource() { return this.inv.find( ( s, d ) => ( d?.tool?.kind === 'lighter' || d?.tool?.kind === 'matches' ) && this.usesLeft( s ) > 0 ); }
 	purifier() { return this.inv.find( ( s, d ) => d?.medical?.purify > 0 ); }
+	// the best way to open a can with what you carry: a can opener is clean, a knife spills a little, bashing it
+	// open with an axe, a hammer or a stone spills more
 	openOption() {
 		const inv = this.inv;
 		const op = inv.find( ( s ) => provides( s, 'canopener' ) );
-		if ( op ) return { tool: op, label: `Open with ${getItem( op.id ).name}`, time: 3, loss: 0 };
+		if ( op ) return { tool: op, time: 3, loss: 0 };
 		const knife = inv.find( ( s ) => provides( s, 'open_can' ) );
-		if ( knife ) return { tool: knife, label: `Open with ${getItem( knife.id ).name}`, time: 5, loss: 0.1, wear: 0.01 };
+		if ( knife ) return { tool: knife, time: 5, loss: 0.1, wear: 0.01 };
 		const heavy = inv.find( ( s, d ) => d?.melee && ( d.melee.tools?.some( t => [ 'chop', 'hammer', 'pry', 'break' ].includes( t ) ) || d.melee.kind === 'blunt' || d.melee.kind === 'axe' ) );
-		if ( heavy ) return { tool: heavy, label: `Bash open with ${getItem( heavy.id ).name}`, time: 5, loss: 0.25, wear: 0.02, sound: 'hit_metal' };
+		if ( heavy ) return { tool: heavy, time: 5, loss: 0.25, wear: 0.02, sound: 'hit_metal' };
 		const stone = inv.find( ( s, d ) => d?.id === 'stone' );
-		if ( stone ) return { tool: stone, label: 'Bash open with a stone', time: 6, loss: 0.3, sound: 'hit_metal' };
+		if ( stone ) return { tool: stone, time: 6, loss: 0.3, sound: 'hit_metal' };
 		return null;
 	}
 	cutOption() {
 		const b = this.blade();
-		return b ? { tool: b, label: `Cut open (${getItem( b.id ).name})`, time: 4, loss: 0, wear: 0.005 } : null;
+		return b ? { tool: b, time: 4, loss: 0, wear: 0.005 } : null;
 	}
-	wear( stack, amount ) { if ( stack && amount ) { stack.cond = Math.max( 0.02, stack.cond - amount ); } }
+	wear( stack, amount ) { if ( stack && amount ) stack.cond = Math.max( 0.02, stack.cond - amount ); }
+	// the first aid handbook makes every treatment quicker
+	medTime( t ) { return t * ( this.knowledge.first_aid ? 0.7 : 1 ); }
 
 	// ============================================================================================================
 	// eating and drinking
@@ -340,12 +316,12 @@ export class ItemUse {
 	openFood( stack ) {
 		const d = getItem( stack.id ), f = d.food;
 		const opt = f.opener === 'cut' ? this.cutOption() : this.openOption();
-		if ( ! opt ) { this.game.toast( f.opener === 'cut' ? 'You need a knife or machete to cut this open' : 'You need a can opener or a knife — or bash it open with a stone', 'warn' ); return; }
+		if ( ! opt ) { this.game.toast( f.opener === 'cut' ? 'Need a blade' : 'Need a can opener or blade', 'warn' ); return; }
 		const one = this.splitOne( stack );
 		this.timed( `Opening ${d.name}`, opt.time, opt.sound || ( f.opener === 'cut' ? 'tear' : 'can_open' ), () => {
 			if ( ! this.exists( one ) ) return;
 			one.data.open = true;
-			if ( opt.loss ) { one.data.spill = opt.loss; this.game.toast( 'You spill some of it opening it that way', 'info' ); }
+			if ( opt.loss ) { one.data.spill = opt.loss; this.game.toast( 'Spilled some', 'info' ); }
 			this.wear( opt.tool, opt.wear );
 			this.changed( this.where( one ) );
 		} );
@@ -354,8 +330,8 @@ export class ItemUse {
 	crack( stack ) {
 		const d = getItem( stack.id );
 		const b = this.blade();
-		if ( ! b ) { this.game.toast( 'You need a blade — a machete, a knife — to crack a coconut', 'warn' ); return; }
-		this.timed( `Cracking the ${d.name.toLowerCase()}`, 3.5, 'hit_wood', () => {
+		if ( ! b ) { this.game.toast( 'Need a blade', 'warn' ); return; }
+		this.timed( `Opening ${d.name}`, 3.5, 'hit_wood', () => {
 			if ( ! this.exists( stack ) ) return;
 			this.transform( stack, d.opensTo, { age: 0 } );
 			this.wear( b, 0.005 );
@@ -364,17 +340,17 @@ export class ItemUse {
 
 	eat( stack ) {
 		const d = getItem( stack.id ), f = d.food;
-		if ( f.opener && ! stack.data.open && ! d.opensTo ) { this.openFood( stack ); return; }
 		if ( d.opensTo ) { this.crack( stack ); return; }
+		if ( f.opener && ! stack.data.open ) { this.openFood( stack ); return; }
 		const one = f.portions > 1 ? this.splitOne( stack ) : stack;
 		const time = 2.5 + Math.min( 3, ( f.kcal / f.portions ) / 350 );
 		this.timed( `Eating ${d.name}`, time, 'eat', () => {
 			if ( ! this.exists( one ) ) return;
 			const S = this.S;
 			const msg = S.eat( one );
+			// food spilled opening the can with the wrong tool is lost from every portion
 			if ( one.data.spill ) S.hunger = Math.max( 0, S.hunger - f.kcal / 20 / f.portions * one.data.spill );
 			if ( msg ) this.game.toast( msg, 'warn' );
-			else if ( f.raw ) this.game.toast( 'That was raw…', 'warn' );
 			one.data.left = ( one.data.left ?? f.portions ) - 1;
 			if ( one.data.left <= 0 ) this.consumeOne( one );
 			else this.changed( this.where( one ) );
@@ -383,12 +359,11 @@ export class ItemUse {
 
 	cook( stack ) {
 		const g = this.game, d = getItem( stack.id ), f = d.food;
-		if ( ! g.nearFire?.( g.player.pos ) ) { g.toast( 'You need a campfire to cook on — place a fire kit and light it', 'warn' ); return; }
+		if ( ! g.nearFire?.( g.player.pos ) ) { g.toast( 'Need a fire', 'warn' ); return; }
 		const one = this.splitOne( stack );
 		this.timed( `Cooking ${d.name.replace( /^Raw /, '' )}`, d.weight > 1 ? 16 : 11, 'sizzle', () => {
 			if ( ! this.exists( one ) ) return;
 			this.transform( one, f.cooked, { age: 0 } );
-			g.toast( `${getItem( f.cooked ).name} is ready`, 'good' );
 		} );
 	}
 
@@ -400,7 +375,7 @@ export class ItemUse {
 	drinkItem( stack ) {
 		const d = getItem( stack.id ), k = d.drink;
 		const one = k.portions > 1 ? this.splitOne( stack ) : stack;
-		const sound = /can/.test( d.model?.type || '' ) && d.model?.style === 'soda' ? 'can_open' : 'drink';
+		const sound = d.model?.type === 'can' && d.model?.style === 'soda' && ! one.data.left ? 'can_open' : 'drink';
 		this.timed( `Drinking ${d.name}`, 2.5, sound, () => {
 			if ( ! this.exists( one ) ) return;
 			this.S.drink( this.scaledDrink( k, k.portions ), 0.33, 'water' );
@@ -418,16 +393,15 @@ export class ItemUse {
 	}
 
 	drinkFrom( stack ) {
-		const g = this.game, S = this.S;
+		const S = this.S;
 		const liq = stack.data.liquid;
 		const sip = Math.min( stack.data.amount || 0, 0.5 );
 		if ( sip <= 0 ) return;
-		this.timed( 'Drinking', 3, 'drink', () => {
+		this.timed( `Drinking ${liquidName( liq )}`, 3, 'drink', () => {
 			if ( ! this.exists( stack ) ) return;
 			S.drink( null, sip, liq );
 			stack.data.amount = Math.max( 0, ( stack.data.amount || 0 ) - sip );
 			if ( stack.data.amount < 0.005 ) { stack.data.amount = 0; stack.data.liquid = null; }
-			if ( liq === 'water' && S.thirst >= 100 ) g.toast( 'You are no longer thirsty', 'good' );
 			this.changed( this.where( stack ) );
 		} );
 	}
@@ -437,7 +411,7 @@ export class ItemUse {
 	}
 
 	emptyFuel( stack ) {
-		this.timed( 'Emptying the can', 3, 'pour', () => { stack.data.amount = 0; this.changed( this.where( stack ) ); } );
+		this.timed( 'Emptying', 3, 'pour', () => { stack.data.amount = 0; this.changed( this.where( stack ) ); } );
 	}
 
 	canCollectRain() {
@@ -449,20 +423,20 @@ export class ItemUse {
 	fillFrom( kind, stack = null ) {
 		const g = this.game;
 		const liq = kind === 'sea' ? 'sea' : kind === 'dirty' ? 'dirty' : 'water';
+		// rain only tops up what already holds clean water (or nothing); the sea and a tap fill anything
 		const ok = ( s, d ) => d?.tool?.liquid && ( s.data.amount || 0 ) < d.tool.liquid - 0.01 && ( ! s.data.liquid || ( s.data.amount || 0 ) < 0.01 || s.data.liquid === liq || kind !== 'rain' );
 		const c = stack && ok( stack, getItem( stack.id ) ) ? stack : this.inv.find( ( s, d ) => ok( s, d ) && ( ! s.data.liquid || s.data.liquid === liq || ( s.data.amount || 0 ) < 0.01 ) ) || this.inv.find( ok );
-		if ( ! c ) { g.toast( 'You have nothing to fill — find a bottle, canteen or pot', 'warn' ); return false; }
-		if ( kind === 'rain' && ! this.canCollectRain() ) { g.toast( 'It needs to be raining, and you need to be outside', 'warn' ); return false; }
+		if ( ! c ) { g.toast( 'Nothing to fill', 'warn' ); return false; }
+		if ( kind === 'rain' && ! this.canCollectRain() ) { g.toast( 'Not raining here', 'warn' ); return false; }
 		const d = getItem( c.id ), cap = d.tool.liquid;
 		const time = kind === 'rain' ? 8 : Math.min( 8, 2 + cap * 1.2 );
-		this.timed( kind === 'rain' ? 'Collecting rainwater' : `Filling the ${d.name.toLowerCase()}`, time, kind === 'rain' ? null : 'pour', () => {
+		this.timed( `Filling ${d.name}`, time, kind === 'rain' ? null : 'pour', () => {
 			if ( ! this.exists( c ) ) return;
 			const cur = c.data.amount || 0;
 			const add = kind === 'rain' ? Math.min( cap - cur, 0.15 + 0.35 * ( g.weather?.rain || 0.5 ) ) : cap - cur;
 			c.data.liquid = cur > 0.01 && c.data.liquid ? worstLiquid( c.data.liquid, liq ) : liq;
 			c.data.amount = Math.min( cap, cur + add );
-			const what = liquidName( c.data.liquid );
-			g.toast( `${d.name}: ${c.data.amount.toFixed( 2 )} L of ${what}${c.data.liquid === 'sea' ? ' — boil it at a fire before drinking' : ''}`, c.data.liquid === 'water' ? 'good' : 'info' );
+			g.toast( `${d.name}: ${c.data.amount.toFixed( 1 )} L ${liquidName( c.data.liquid )}`, c.data.liquid === 'water' ? 'good' : 'info' );
 			this.changed( this.where( c ) );
 		} );
 		return true;
@@ -474,18 +448,18 @@ export class ItemUse {
 		const c = target || this.inv.find( ( s, dd ) => dd?.tool?.liquid && s.data.liquid === 'dirty' && s.data.amount > 0.01 );
 		if ( ! c ) {
 			const salty = this.inv.find( ( s, dd ) => dd?.tool?.liquid && s.data.liquid === 'sea' );
-			g.toast( salty ? 'Tablets do nothing for salt — boil seawater at a fire instead' : 'You have no dirty water to purify', 'warn' );
+			g.toast( salty ? 'Boil seawater instead' : 'No dirty water', 'warn' );
 			return;
 		}
 		const need = Math.max( 1, Math.ceil( ( c.data.amount || 0 ) / ( d.medical.purify || 1 ) ) );
 		const have = d.medical.uses ? this.usesLeft( tab ) : tab.qty;
-		if ( have < need ) { g.toast( `You need ${need} ${d.medical.uses ? 'doses' : 'tablets'} for ${( c.data.amount || 0 ).toFixed( 1 )} L`, 'warn' ); return; }
-		this.timed( 'Purifying water', 4, 'pills', () => {
+		if ( have < need ) { g.toast( `Need ${need} ${d.medical.uses ? 'doses' : 'tablets'}`, 'warn' ); return; }
+		this.timed( 'Purifying', 4, 'pills', () => {
 			if ( ! this.exists( c ) || ! this.exists( tab ) ) return;
 			c.data.liquid = 'water';
 			if ( d.medical.uses ) this.useUp( tab, need );
 			else { tab.qty -= need; if ( tab.qty <= 0 ) this.discard( tab ); }
-			g.toast( 'The water is safe to drink', 'good' );
+			g.toast( 'Water purified', 'good' );
 		} );
 	}
 
@@ -496,22 +470,19 @@ export class ItemUse {
 	medicate( stack ) {
 		const g = this.game, S = this.S, d = getItem( stack.id ), m = d.medical;
 		// refuse what would only be wasted
-		if ( m.splint && ! S.fracture ) { g.toast( 'Nothing is broken', 'info' ); return; }
-		if ( m.splint && S.splint ) { g.toast( 'Your leg is already splinted', 'info' ); return; }
-		if ( m.bleed && S.bleeding <= 0 ) { g.toast( 'You are not bleeding', 'info' ); return; }
-		if ( m.infection && ! S.infected && ! m.heal && ! m.pain && ! ( m.sick && S.sick > 0.1 ) ) { g.toast( 'You have no infection to treat', 'info' ); return; }
-		if ( m.blood && S.blood > 4900 ) { g.toast( 'You have not lost any blood', 'info' ); return; }
-		if ( m.sick && ! m.infection && ! m.heal && S.sick <= 0.05 ) { g.toast( 'Your stomach is fine', 'info' ); return; }
+		if ( m.splint && ! S.fracture ) { g.toast( 'Nothing broken', 'info' ); return; }
+		if ( m.splint && S.splint ) { g.toast( 'Already splinted', 'info' ); return; }
+		if ( m.bleed && S.bleeding <= 0 ) { g.toast( 'Not bleeding', 'info' ); return; }
+		if ( m.infection && ! S.infected && ! m.heal && ! m.pain && ! ( m.sick && S.sick > 0.1 ) ) { g.toast( 'No infection', 'info' ); return; }
+		if ( m.blood && S.blood > 4900 ) { g.toast( 'No blood loss', 'info' ); return; }
+		if ( m.sick && ! m.infection && ! m.heal && S.sick <= 0.05 ) { g.toast( 'Not sick', 'info' ); return; }
 		const verb = m.verb || 'Use';
-		const label = GERUND[ verb ] || ( /^Take/.test( verb ) ? 'Taking medicine' : verb );
-		this.timed( label, m.use || 3, m.sound || 'bandage', () => {
+		this.timed( GERUND[ verb ] || verb, this.medTime( m.use || 3 ), m.sound || 'bandage', () => {
 			if ( ! this.exists( stack ) ) return;
 			const bleeding = S.bleeding;
 			S.medicate( d );
-			if ( m.bleed && bleeding > 0 ) g.toast( S.bleeding > 0 ? `Still bleeding (${S.bleeding} wound${S.bleeding > 1 ? 's' : ''})` : 'The bleeding has stopped', S.bleeding > 0 ? 'warn' : 'good' );
-			if ( m.infection && S.infected ) g.toast( 'The infection is still there — keep treating it', 'warn' );
-			else if ( m.infection && ! m.bleed && ! S.infected ) g.toast( 'The wound looks clean', 'good' );
-			if ( m.splint ) g.toast( 'Leg splinted — take it slow while it heals', 'good' );
+			if ( m.bleed && bleeding > 0 ) g.toast( S.bleeding > 0 ? `Still bleeding (${S.bleeding})` : 'Bleeding stopped', S.bleeding > 0 ? 'warn' : 'good' );
+			if ( m.infection && S.infected ) g.toast( 'Still infected', 'warn' );
 			if ( m.uses ) this.useUp( stack ); else this.consumeOne( stack );
 		} );
 	}
@@ -520,10 +491,10 @@ export class ItemUse {
 		const g = this.game, d = getItem( stack.id );
 		this.timed( `Unpacking ${d.name}`, 2.5, 'unwrap', () => {
 			if ( ! this.exists( stack ) ) return;
-			const names = [];
-			for ( const [ id, q ] of d.unpack || [] ) { if ( ! getItem( id ) ) continue; this.give( id, q, { full: true } ); names.push( `${q > 1 ? q + '× ' : ''}${getItem( id ).name}` ); }
+			let n = 0;
+			for ( const [ id, q ] of d.unpack || [] ) { if ( ! getItem( id ) ) continue; this.give( id, q, { full: true } ); n += q; }
 			this.consumeOne( stack );
-			g.toast( names.length ? 'Unpacked: ' + names.join( ', ' ) : 'It was empty', 'good' );
+			if ( ! n ) g.toast( 'Empty', 'info' );
 		} );
 	}
 
@@ -533,26 +504,26 @@ export class ItemUse {
 
 	isLight( d ) { return !! d?.tool?.light; }
 
-	// the flashlight key, or a light's Turn on / off action
+	// the flashlight key (when no hands module owns it), or a light's Turn on / off action
 	toggleLight( stack = null ) {
 		const g = this.game, inv = this.inv;
 		if ( ! stack ) {
-			const on = inv.findAll( ( s, d ) => this.isLight( d ) && s.data.on && d.tool.kind !== 'chemlight' );
-			if ( on.length ) { for ( const s of on ) if ( getItem( s.id ).tool.kind !== 'torch' ) s.data.on = false; playItemSound( g, 'click', { vol: 0.4 } ); inv.changed(); return; }
+			const on = inv.findAll( ( s, d ) => this.isLight( d ) && s.data.on && ! [ 'chemlight', 'torch' ].includes( d.tool.kind ) );
+			if ( on.length ) { for ( const s of on ) s.data.on = false; playItemSound( g, 'click', { vol: 0.4 } ); inv.changed(); return; }
 			const order = [ 'headlamp', 'flashlight', 'lantern', 'phone' ];
 			const cand = inv.findAll( ( s, d ) => this.isLight( d ) && order.includes( d.tool.kind ) && s.data.charge > 0 ).sort( ( a, b ) => order.indexOf( getItem( a.id ).tool.kind ) - order.indexOf( getItem( b.id ).tool.kind ) );
-			if ( ! cand.length ) { g.toast( 'You have no working light', 'warn' ); return; }
+			if ( ! cand.length ) { g.toast( 'No working light', 'warn' ); return; }
 			stack = cand[ 0 ];
 		}
 		const d = getItem( stack.id );
 		if ( d.tool.kind === 'torch' ) {
 			if ( stack.data.on ) { stack.data.on = false; playItemSound( g, 'snap', { vol: 0.3 } ); inv.changed(); return; }
 			const src = this.fireSource();
-			if ( ! src ) { g.toast( 'You need a lighter or matches', 'warn' ); return; }
-			this.timed( 'Lighting the torch', 2, 'strike', () => { stack.data.on = true; if ( ! ( stack.data.charge > 0 ) ) stack.data.charge = d.tool.battery; this.useUp( src ); } );
+			if ( ! src ) { g.toast( 'Need a lighter or matches', 'warn' ); return; }
+			this.timed( 'Lighting torch', 2, 'strike', () => { stack.data.on = true; if ( ! ( stack.data.charge > 0 ) ) stack.data.charge = d.tool.battery; this.useUp( src ); } );
 			return;
 		}
-		if ( ! stack.data.on && ! ( stack.data.charge > 0 ) ) { g.toast( `The ${d.name.toLowerCase()} is dead — it needs batteries`, 'warn' ); return; }
+		if ( ! stack.data.on && ! ( stack.data.charge > 0 ) ) { g.toast( 'Batteries dead', 'warn' ); return; }
 		stack.data.on = ! stack.data.on;
 		playItemSound( g, 'click', { vol: 0.45 } );
 		inv.changed();
@@ -561,12 +532,11 @@ export class ItemUse {
 	replaceBatteries( dev ) {
 		const g = this.game, d = getItem( dev.id );
 		const bat = this.inv.find( ( s ) => s.id === 'batteries' );
-		if ( ! bat ) { g.toast( 'You have no batteries', 'warn' ); return; }
-		this.timed( `Changing the batteries`, 3, 'click', () => {
+		if ( ! bat ) { g.toast( 'No batteries', 'warn' ); return; }
+		this.timed( 'Replacing batteries', 3, 'click', () => {
 			if ( ! this.exists( bat ) ) return;
 			dev.data.charge = d.tool.battery;
 			this.consumeOne( bat );
-			g.toast( `${d.name}: fresh batteries`, 'good' );
 		} );
 	}
 
@@ -578,12 +548,12 @@ export class ItemUse {
 
 	solarCharge( dev ) {
 		const g = this.game;
-		if ( ! dev ) { g.toast( 'Nothing needs charging', 'info' ); return; }
-		if ( g.world.sky.sunDir.y < 0.12 || g.world.isIndoors?.( g.player.pos ) ) { g.toast( 'The panel needs direct sunlight', 'warn' ); return; }
+		if ( ! dev ) { g.toast( 'Nothing to charge', 'info' ); return; }
+		if ( g.world.sky.sunDir.y < 0.12 || g.world.isIndoors?.( g.player.pos ) ) { g.toast( 'Needs direct sunlight', 'warn' ); return; }
 		const d = getItem( dev.id );
 		this.timed( `Charging ${d.name}`, 15, null, () => {
 			dev.data.charge = Math.min( d.tool.battery, ( dev.data.charge || 0 ) + d.tool.battery * 0.35 * Math.min( 1, 1.25 - ( g.weather?.cover ?? 0.3 ) ) );
-			g.toast( `${d.name}: ${Math.round( dev.data.charge / d.tool.battery * 100 )}% charged`, 'good' );
+			g.toast( `${d.name}: ${Math.round( dev.data.charge / d.tool.battery * 100 )}%`, 'good' );
 		} );
 	}
 
@@ -608,14 +578,14 @@ export class ItemUse {
 	lightFlare( stack, thrown ) {
 		const g = this.game, p = g.player;
 		const d = getItem( stack.id );
-		this.timed( 'Striking the flare', 1, 'strike', () => {
+		this.timed( 'Lighting flare', 1, 'strike', () => {
 			if ( ! this.exists( stack ) ) return;
 			this.consumeOne( stack );
 			const eye = new THREE.Vector3( p.pos.x, p.eye - 0.2, p.pos.z );
 			const dir = p.lookDir( new THREE.Vector3() );
 			const f = {
 				pos: eye.clone().addScaledVector( dir, 0.4 ), vel: thrown ? dir.clone().multiplyScalar( 11 ).add( new THREE.Vector3( 0, 3, 0 ) ) : new THREE.Vector3( dir.x, 0.5, dir.z ).multiplyScalar( 1.5 ),
-				burn: d.throwable.burn || 420, flying: true, noiseT: 0, light: d.throwable.light, obj: null, snd: null, src: null,
+				burn: d.throwable.burn || 420, flying: true, noiseT: 0, light: d.throwable.light, sprite: null, snd: null, src: null,
 			};
 			this.flares.push( f );
 			this._flareVisual( f );
@@ -645,7 +615,9 @@ export class ItemUse {
 		const g = this.game;
 		f.sprite = this._sprite( f.light.color, 1.4 );
 		f.src = this.lights?.add( { pos: f.pos, color: f.light.color, intensity: f.light.intensity, range: f.light.range, on: true, flicker: true, priority: 3, lift: 0.3 } );
-		f.snd = g.audio?.loop ? ( ensureItemSound( g.audio, 'flare_loop' ), g.audio.loop( 'flare_loop', { pos: f.pos, vol: 0.5, bus: 'sfx' } ) ) : null;
+		if ( g.audio?.loop ) { ensureItemSound( g.audio, 'flare_loop' ); f.snd = g.audio.loop( 'flare_loop', { pos: f.pos, vol: 0.5, bus: 'sfx' } ); }
+		f.step = new THREE.Vector3();
+		f.dir = new THREE.Vector3();
 	}
 
 	_updateFlares( dt ) {
@@ -654,16 +626,17 @@ export class ItemUse {
 			const f = this.flares[ i ];
 			if ( f.flying ) {
 				f.vel.y -= 18 * dt;
-				const step = f.vel.clone().multiplyScalar( dt );
+				const step = f.step.copy( f.vel ).multiplyScalar( dt );
 				const len = step.length();
-				const hit = len > 0 ? g.physics.raycast( f.pos, step.clone().divideScalar( len ), len + 0.05, { water: true } ) : null;
+				const hit = len > 0 ? g.physics.raycast( f.pos, f.dir.copy( step ).divideScalar( len ), len + 0.05, { water: true } ) : null;
 				if ( hit ) {
 					f.pos.copy( hit.point ).addScaledVector( hit.normal, 0.05 );
-					if ( hit.kind === 'water' ) { f.burn = Math.min( f.burn, 8 ); } // it fizzles out in the sea
+					if ( hit.kind === 'water' ) f.burn = Math.min( f.burn, 8 ); // it fizzles out in the sea
 					if ( hit.normal.y > 0.5 || f.vel.length() < 2 ) f.flying = false;
 					else f.vel.reflect( hit.normal ).multiplyScalar( 0.35 );
 				} else f.pos.add( step );
-				if ( f.pos.y < g.hf.heightAt( f.pos.x, f.pos.z ) ) { f.pos.y = g.hf.heightAt( f.pos.x, f.pos.z ) + 0.05; f.flying = false; }
+				const gy = g.hf.heightAt( f.pos.x, f.pos.z );
+				if ( f.pos.y < gy ) { f.pos.y = gy + 0.05; f.flying = false; }
 			}
 			f.burn -= dt;
 			const k = Math.min( 1, f.burn / 20 );
@@ -684,19 +657,33 @@ export class ItemUse {
 		this.flares.splice( i, 1 );
 	}
 
-	// carried lights: the best spot light (flashlight / headlamp / phone) and the best point light (lantern, torch,
-	// chemlight) of everything switched on; batteries drain in game hours
+	// the light the hands module draws itself (held light, gun light or worn headlamp): skipped here so it is not lit
+	// or drained twice
+	_handsLight() {
+		const g = this.game, inv = this.inv;
+		if ( ! g.hands ) return null;
+		const held = inv.heldStack?.();
+		const hd = held ? getItem( held.id ) : null;
+		if ( held && hd?.tool && held.data.on && ( hd.tool.light || hd.tool.kind === 'flashlight' ) ) return held;
+		if ( held && hd?.firearm && held.data.att?.light?.data?.on ) return held.data.att.light;
+		return inv.find( ( s, d ) => d?.tool?.kind === 'headlamp' && s.data.on );
+	}
+
+	// carried lights: the best spot light (a flashlight clipped to your gear, a phone) and the best point light
+	// (lantern, torch, chemlight) of everything switched on; charge drains in game hours
 	_updateLights( dh ) {
 		const g = this.game, inv = this.inv;
+		const skip = this._handsLight();
 		let spot = null, spotScore = 0, point = null, pointScore = 0;
 		for ( const s of inv.findAll( ( st, d ) => this.isLight( d ) && st.data.on ) ) {
+			if ( s === skip ) continue;
 			const d = getItem( s.id ), t = d.tool, L = t.light;
-			if ( dh > 0 ) s.data.charge = Math.max( 0, ( s.data.charge ?? t.battery ) - dh );
+			if ( dh > 0 && g.mode !== 'creative' ) s.data.charge = Math.max( 0, ( s.data.charge ?? t.battery ) - dh );
 			if ( ! ( s.data.charge > 0 ) ) {
 				s.data.on = false;
-				if ( t.kind === 'chemlight' ) { g.toast( 'Your chemlight has faded', 'info' ); this.consumeOne( s ); }
-				else if ( t.kind === 'torch' ) { g.toast( 'The torch has burned out', 'info' ); this.consumeOne( s ); }
-				else g.toast( `Your ${d.name.toLowerCase()} died — the batteries are flat`, 'warn' );
+				if ( t.kind === 'chemlight' ) { g.toast( 'Chemlight faded', 'info' ); this.consumeOne( s ); }
+				else if ( t.kind === 'torch' ) { g.toast( 'Torch burned out', 'info' ); this.consumeOne( s ); }
+				else g.toast( `${d.name}: batteries dead`, 'warn' );
 				inv.changed();
 				continue;
 			}
@@ -721,7 +708,7 @@ export class ItemUse {
 		const g = this.game, items = g.items3d;
 		if ( ! items ) return;
 		// rescan a few times a second (chemlights rarely move); keep the glows glued to their items every frame
-		this.glowT = ( this.glowT ?? 0 ) - dt;
+		this.glowT -= dt;
 		if ( this.glowT > 0 && dh <= 0 ) {
 			for ( const [ it, gl ] of this.glows ) { gl.sprite.position.copy( it.pos ); gl.sprite.position.y += 0.03; gl.src?.pos.copy( it.pos ); }
 			return;
@@ -754,94 +741,101 @@ export class ItemUse {
 	// tools and odds and ends
 	// ============================================================================================================
 
-	gps( stack ) {
-		const g = this.game, p = g.player.pos;
-		if ( ! ( stack.data.charge > 0 ) ) { g.toast( 'The GPS is dead', 'warn' ); return; }
-		stack.data.charge = Math.max( 0, stack.data.charge - 0.05 );
-		const where = g.app?.ui?.locationName?.( p, true ) || '';
-		const grid = `${Math.round( p.x )} E, ${Math.round( - p.z )} N`;
-		g.toast( `${where} · ${grid} · elev ${Math.round( Math.max( 0, p.y ) * 6 )} m`, 'info' );
+	drain( stack, hours ) {
+		if ( this.game.mode !== 'creative' ) stack.data.charge = Math.max( 0, ( stack.data.charge || 0 ) - hours );
 	}
 
+	gps( stack ) {
+		const g = this.game, p = g.player.pos;
+		if ( ! ( stack.data.charge > 0 ) ) { g.toast( 'Batteries dead', 'warn' ); return; }
+		this.drain( stack, 0.05 );
+		const where = g.app?.ui?.locationName?.( p, true ) || '';
+		const grid = `${Math.round( p.x )} E ${Math.round( - p.z )} N`;
+		g.toast( `${where ? where + ' · ' : ''}${grid} · ${Math.round( Math.max( 0, p.y ) * 6 )} m`, 'info' );
+	}
+
+	// the emergency radio reads the weather service: what it is doing now and roughly when it turns
 	radio( stack ) {
 		const g = this.game;
 		if ( ! ( stack.data.charge > 0 ) ) {
 			// the emergency radio has a hand crank
-			if ( getItem( stack.id ).id === 'radio' ) { this.timed( 'Cranking the radio', 6, 'reel', () => { stack.data.charge = Math.min( getItem( stack.id ).tool.battery, 2 ); this.radio( stack ); } ); return; }
-			g.toast( 'Dead batteries', 'warn' ); return;
+			this.timed( 'Cranking', 6, 'reel', () => { stack.data.charge = Math.min( getItem( stack.id ).tool.battery, 2 ); this.radio( stack ); } );
+			return;
 		}
-		stack.data.charge = Math.max( 0, stack.data.charge - 0.1 );
+		this.drain( stack, 0.1 );
 		playItemSound( g, 'click', { vol: 0.4 } );
-		const walkie = getItem( stack.id ).id === 'walkie_talkie';
-		g.toast( walkie ? ( Math.random() < 0.8 ? 'Static on every channel.' : '"…anyone copy? This is unit four at Kalihi station, we need…" Static.' ) : RADIO[ Math.floor( Math.random() * RADIO.length ) ], 'info' );
+		const W = g.weather;
+		if ( ! W ) { g.toast( 'Static', 'info' ); return; }
+		const h = Math.max( 1, Math.round( W.nextChange || 1 ) );
+		g.toast( `Weather: ${W.state}. Change in ~${h} h`, 'info' );
 	}
 
-	phone( stack ) {
+	phoneTime( stack ) {
 		const g = this.game;
-		if ( ! ( stack.data.charge > 0 ) ) { g.toast( 'The phone is dead', 'warn' ); return; }
-		stack.data.charge = Math.max( 0, stack.data.charge - 0.05 );
-		g.toast( PHONE[ Math.floor( Math.random() * PHONE.length ) ], 'info' );
+		if ( ! ( stack.data.charge > 0 ) ) { g.toast( 'Battery dead', 'warn' ); return; }
+		this.drain( stack, 0.02 );
+		g.toast( `${fmtHour( g.hour )}, day ${g.day}`, 'info' );
 	}
 
 	rangefind( stack ) {
 		const g = this.game;
-		if ( ! ( stack.data.charge > 0 ) ) { g.toast( 'The rangefinder is dead', 'warn' ); return; }
-		stack.data.charge = Math.max( 0, stack.data.charge - 0.02 );
+		if ( ! ( stack.data.charge > 0 ) ) { g.toast( 'Batteries dead', 'warn' ); return; }
+		this.drain( stack, 0.02 );
 		const o = g.camera.position.clone(), dir = new THREE.Vector3( 0, 0, - 1 ).applyQuaternion( g.camera.quaternion );
 		const hs = g.physics.raycast( o, dir, 1500 );
 		const he = g.entities.raycast( o, dir, hs ? hs.t : 1500 );
 		const t = he ? he.t : hs?.t;
 		playItemSound( g, 'click', { vol: 0.3 } );
-		g.toast( t ? `Range: ${t < 100 ? t.toFixed( 1 ) : Math.round( t )} m${he ? ' (' + ( he.entity.type === 'zombie' ? 'infected' : he.entity.type ) + ')' : ''}` : 'No reading', 'info' );
+		g.toast( t ? `${t < 100 ? t.toFixed( 1 ) : Math.round( t )} m` : 'No reading', 'info' );
 	}
 
-	noiseMaker( stack, sound, radius, text ) {
+	noiseMaker( sound, radius ) {
 		const g = this.game, p = g.player;
 		playItemSound( g, sound, { vol: 0.9 } );
 		g.events.emit( 'noise', { pos: p.pos.clone(), radius, source: p, kind: sound } );
-		if ( text ) g.toast( text, 'info' );
 	}
 
 	sleep( quality ) {
 		const g = this.game, S = this.S;
 		if ( g.world.isIndoors?.( g.player.pos ) && quality < 1 ) quality = Math.min( 1, quality + 0.1 );
 		const hours = Math.max( 2, Math.min( 9, Math.round( ( 100 - S.energy ) / ( 12 * quality ) ) ) );
+		g.app?.ui?.closeScreen?.();
 		return g.sleep?.( hours, quality );
 	}
 
 	placeCampfire( stack ) {
 		const g = this.game;
 		const pos = g.crafting?.placePoint?.();
-		if ( ! pos ) { g.toast( 'No room for a fire here', 'warn' ); return; }
-		this.timed( 'Building a campfire', 5, 'hit_wood', () => {
+		if ( ! pos ) { g.toast( 'No room here', 'warn' ); return; }
+		g.app?.ui?.closeScreen?.();
+		this.timed( 'Building fire', 5, 'hit_wood', () => {
 			if ( ! this.exists( stack ) ) return;
 			this.consumeOne( stack );
 			const fire = g.crafting.placeFire( 'campfire', pos, { lit: false, fuel: 1.5 } );
-			const src = this.fireSource();
-			if ( src && fire ) { g.crafting.lightFire( fire ); } else g.toast( 'The fire is laid. Light it with a lighter or matches (F).', 'info' );
+			if ( fire && ( this.fireSource() || g.mode === 'creative' ) ) g.crafting.lightFire( fire );
+			else g.toast( 'Need a lighter or matches', 'info' );
 		} );
 	}
 
 	placeStove( stack ) {
-		const g = this.game, d = getItem( stack.id );
-		if ( this.usesLeft( stack ) <= 0 ) { g.toast( 'The canister is empty — fit a propane canister', 'warn' ); return; }
+		const g = this.game;
+		if ( this.usesLeft( stack ) <= 0 ) { g.toast( 'Canister empty', 'warn' ); return; }
 		const pos = g.crafting?.placePoint?.( 0.9 );
 		if ( ! pos ) { g.toast( 'No room here', 'warn' ); return; }
-		this.timed( 'Setting up the stove', 3, 'click', () => {
+		g.app?.ui?.closeScreen?.();
+		this.timed( 'Setting up stove', 3, 'click', () => {
 			if ( ! this.exists( stack ) ) return;
 			const uses = this.usesLeft( stack ) - 1;
 			this.discard( stack );
 			g.crafting.placeFire( 'stove', pos, { lit: true, fuel: 0.75, uses, cond: stack.cond } );
-			void d;
 		} );
 	}
 
 	refillStove( can, stove ) {
-		this.timed( 'Fitting the canister', 3, 'click', () => {
+		this.timed( 'Fitting canister', 3, 'click', () => {
 			if ( ! this.exists( can ) || ! this.exists( stove ) ) return;
 			stove.data.uses = getItem( stove.id ).tool.uses;
 			this.consumeOne( can );
-			this.game.toast( 'The stove is good for ten more meals', 'good' );
 		} );
 	}
 
@@ -858,16 +852,15 @@ export class ItemUse {
 	repair( tool, target ) {
 		const g = this.game;
 		if ( ! tool ) return;
-		if ( ! target ) { g.toast( 'Nothing needs repairing', 'info' ); return; }
+		if ( ! target ) { g.toast( 'Nothing to repair', 'info' ); return; }
 		const kind = getItem( tool.id ).tool.kind;
-		const gain = kind === 'sewing' ? 0.35 : kind === 'cleaning' ? 0.35 : 0.2;
-		const cap = kind === 'tape' ? 0.85 : 1;
+		const gain = kind === 'tape' ? 0.2 : 0.35;
+		const cap = kind === 'tape' ? 0.85 : 1; // tape never makes it good as new
 		const dt = getItem( target.id );
 		this.timed( `Repairing ${dt.name}`, kind === 'tape' ? 5 : 9, kind === 'tape' ? 'tear' : 'zipper', () => {
 			if ( ! this.exists( tool ) || ! this.exists( target ) ) return;
 			target.cond = Math.min( cap, target.cond + gain );
 			this.useUp( tool );
-			g.toast( `${dt.name} repaired`, 'good' );
 		} );
 	}
 
@@ -880,26 +873,24 @@ export class ItemUse {
 
 	rip( stack ) {
 		const g = this.game, d = getItem( stack.id );
-		if ( stack.data.items?.length ) { g.toast( 'Empty its pockets first', 'warn' ); return; }
+		if ( stack.data.items?.length ) { g.toast( 'Empty it first', 'warn' ); return; }
 		const n = Math.max( 1, Math.min( 6, Math.round( d.size * 1.2 * ( 0.4 + 0.6 * stack.cond ) ) ) );
-		const b = this.blade();
-		this.timed( `Ripping ${d.name} into rags`, b ? 3 : 5, 'tear', () => {
+		this.timed( `Ripping ${d.name}`, this.blade() ? 3 : 5, 'tear', () => {
 			if ( ! this.exists( stack ) ) return;
 			this.discard( stack );
 			this.give( 'rags', n );
-			g.toast( `${n} rags`, 'good' );
 		} );
 	}
 
+	// guides teach one thing each (knowledge flags other systems read); the book stays in your bag
 	read( stack ) {
 		const g = this.game, d = getItem( stack.id );
-		const pages = d.book?.pages || [ 'The last edition: "OUTBREAK SPREADS — Governor urges calm". The sports page is still about the Rainbow Warriors.' ];
-		this.timed( `Reading ${d.name}`, 3, null, () => {
-			pages.forEach( ( p, i ) => setTimeout( () => g.toast( p, 'info' ), i * 1400 ) );
-			if ( d.book?.skill && ! this.knowledge[ d.book.skill ] ) {
-				this.knowledge[ d.book.skill ] = true;
-				setTimeout( () => g.toast( `You learned something about ${d.book.skill}`, 'good' ), pages.length * 1400 );
-			}
+		const skill = d.book?.skill;
+		if ( ! skill ) return;
+		if ( this.knowledge[ skill ] ) { g.toast( 'Already read', 'info' ); return; }
+		this.timed( `Reading ${d.name}`, 8, null, () => {
+			this.knowledge[ skill ] = true;
+			g.toast( `Learned: ${SKILL_NAME[ skill ] || skill}`, 'good' );
 		}, { cancelOnMove: false } );
 	}
 
@@ -918,6 +909,7 @@ export class ItemUse {
 			this.tickT = 0;
 			dh = g.time.hours - this.lastHours;
 			this.lastHours = g.time.hours;
+			// a sleep or /time jump spoils food as it should; a clock set backwards does nothing
 			if ( dh < 0 || dh > 24 * 60 ) dh = 0;
 			if ( dh > 0 ) this._spoil( dh );
 		}

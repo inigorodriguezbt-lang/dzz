@@ -9,7 +9,7 @@ console.warn = ( ...a ) => { warnings.push( a.join( ' ' ) ); };
 await import( '../src/game/items/defs/index.js' );
 console.warn = warn0;
 const { ITEMS, getItem, makeStack, stackWeight, stackVolume, freshness } = await import( '../src/game/items/ItemDB.js' );
-const { LOOT_TABLES, rollLoot, tableIds } = await import( '../src/game/items/Loot.js' );
+const { LOOT_TABLES, rollLoot, tableIds, compileTable } = await import( '../src/game/items/Loot.js' );
 const { allRecipes } = await import( '../src/game/items/recipes.js' );
 
 let fails = 0, passes = 0;
@@ -90,7 +90,7 @@ for ( const d of ITEMS.values() ) {
 		case 'fuel': ok( d.fuel && num( d.fuel.litres ) && d.fuel.kind, `${id}: fuel` ); break;
 		case 'throwable': ok( d.throwable && typeof d.throwable.kind === 'string', `${id}: throwable kind` ); break;
 		case 'vehicle': ok( d.vehicle && typeof d.vehicle.part === 'string', `${id}: vehicle part` ); break;
-		case 'book': ok( Array.isArray( d.book?.pages ) && d.book.pages.length > 0, `${id}: book pages` ); break;
+		case 'book': ok( d.book && ( d.book.skill === undefined || typeof d.book.skill === 'string' ), `${id}: book block` ); break;
 	}
 	// makeStack + weight / volume
 	const s = makeStack( id, d.stack, { loot: true } );
@@ -174,6 +174,8 @@ for ( const [ name, t ] of Object.entries( LOOT_TABLES ) ) {
 const r1 = rollLoot( 'house_kitchen', () => 0.5, 3 );
 ok( r1.length >= 1 && r1.length <= 3, 'explicit roll count' );
 ok( rollLoot( 'no_such_table' ).length === 0, 'unknown table → nothing' );
+// every id any table can produce (tag entries resolved), not just what the random rolls happened to hit
+for ( const t of Object.values( LOOT_TABLES ) ) for ( const e of compileTable( t ).entries ) for ( const id of e.ids ) seen.add( id );
 const lootable = [ ...ITEMS.values() ].filter( d => ! d.tags.includes( 'crafted' ) && ! [ 'cooked' ].some( t => d.tags.includes( t ) ) );
 const never = lootable.filter( d => ! seen.has( d.id ) ).map( d => d.id );
 console.log( `   ${seen.size} of ${ITEMS.size} ids appear in loot; never looted (not crafted/cooked): ${never.length ? never.join( ' ' ) : 'none'}` );
@@ -220,9 +222,10 @@ console.log( 'item use' );
 
 	// cans need an opener or a blade; stacks split so one can is opened
 	const beans = put( 'canned_beans' );
-	ok( /needs a can opener/.test( U.actions( beans )[ 0 ].label ), 'beans: needs a tool without one' );
+	ok( U.actions( beans )[ 0 ].label === 'Open', 'beans: Open is the default' );
+	toasts.length = 0; U.use( beans ); finish();
+	ok( ! beans.data.open && toasts.some( t => /Need a can opener/.test( t ) ), 'beans: needs a tool without one' );
 	put( 'kitchen_knife' );
-	ok( /Open with Kitchen knife/.test( U.actions( beans )[ 0 ].label ), 'beans: a knife opens it' );
 	U.use( beans ); finish();
 	ok( beans.data.open && beans.data.spill > 0, 'beans: opened with a knife spills a little' );
 	ok( /^Eat/.test( U.actions( beans )[ 0 ].label ), 'beans: then it can be eaten' );
@@ -265,7 +268,7 @@ console.log( 'item use' );
 
 	// cooking raw meat at the fire
 	const boar = put( 'raw_boar' );
-	ok( /Cook on the fire/.test( U.actions( boar )[ 0 ].label ), 'raw meat: cooking is the default at a fire' );
+	ok( U.actions( boar )[ 0 ].label === 'Cook', 'raw meat: cooking is the default at a fire' );
 	U.use( boar ); finish();
 	ok( boar.id === 'cooked_boar', 'raw boar cooks' );
 	// the fire burns down in game hours
@@ -276,7 +279,7 @@ console.log( 'item use' );
 	// medicine
 	const band = put( 'bandage', 2 );
 	S.bleeding = 0; toasts.length = 0; U.use( band ); finish();
-	ok( band.qty === 2 && toasts.some( t => /not bleeding/.test( t ) ), 'bandage refused when not bleeding' );
+	ok( band.qty === 2 && toasts.some( t => /Not bleeding/.test( t ) ), 'bandage refused when not bleeding' );
 	S.bleeding = 1; U.use( band ); finish();
 	ok( S.bleeding === 0 && band.qty === 1, 'bandage stops a bleed' );
 	const kit = put( 'first_aid_kit' );
@@ -309,7 +312,7 @@ console.log( 'item use' );
 	U._updateLights( 20 );
 	ok( ! fl.data.on && fl.data.charge === 0, 'batteries run flat' );
 	put( 'batteries', 2 );
-	act( fl, /Replace the batteries/ ).run(); finish();
+	act( fl, /Replace batteries/ ).run(); finish();
 	ok( fl.data.charge === getItem( 'flashlight' ).tool.battery, 'fresh batteries' );
 
 	// food spoils with game time
@@ -325,6 +328,24 @@ console.log( 'item use' );
 	S.energy = 30;
 	U.use( put( 'sleeping_bag' ) );
 	ok( slept && slept[ 0 ] >= 2 && slept[ 1 ] > 0.5, 'sleeping bag sleeps ' + slept?.[ 0 ] + ' h' );
+
+	// guides teach a skill once
+	const guide = put( 'fishing_guide' );
+	act( guide, /^Read$/ ).run(); finish();
+	ok( U.knowledge.fishing && ! act( guide, /^Read$/ ), 'fishing guide teaches fishing once' );
+
+	// player-facing text: short, plain, no exclamation marks
+	const labels = new Set();
+	for ( const d of ITEMS.values() ) {
+		const st = makeStack( d.id, 1, { loot: true } );
+		for ( const a of U.actions( st ) ) labels.add( a.label );
+	}
+	const long = [ ...labels ].filter( l => l.length > 32 || /!/.test( l ) );
+	ok( ! long.length, 'action labels are short: ' + long.join( ' | ' ) );
+	const loud = toasts.filter( t => t.length > 40 || /!/.test( t ) );
+	ok( ! loud.length, 'toasts are short: ' + loud.join( ' | ' ) );
+	const descs = [ ...ITEMS.values() ].filter( d => ! d.firearm && ! d.melee && ! d.ammo && ! d.magazine && ! d.attachment && ( d.cat !== 'throwable' || d.id === 'road_flare' ) && ( d.desc.length > 40 || /!/.test( d.desc ) ) );
+	ok( ! descs.length, 'item descriptions are short: ' + descs.map( d => d.id ).join( ' ' ) );
 }
 
 console.log( `\n${passes} passed, ${fails} failed` );

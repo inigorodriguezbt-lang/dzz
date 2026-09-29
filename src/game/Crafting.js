@@ -19,7 +19,8 @@ import { raySphere } from './Entities.js';
 import { ensureItemSound } from './items/sounds.js';
 
 // game hours a fuel item keeps a campfire going
-const FUEL = { stick: 0.25, long_stick: 0.6, firewood: 1.5, planks: 1, charcoal: 2.5, newspaper: 0.1, rags: 0.08, animal_hide: 0.5, campfire_kit: 1.5, bone: 0.05 };
+const FUEL = { stick: 0.25, long_stick: 0.6, firewood: 1.5, planks: 1, charcoal: 2.5, newspaper: 0.1, rags: 0.08, animal_hide: 0.5, campfire_kit: 1.5,
+	comic_book: 0.1, bible: 0.15, phrasebook: 0.08, tiki: 0.8, ukulele: 0.3 };
 const MAX_FUEL = 8;
 
 export class Crafting {
@@ -78,13 +79,13 @@ export class Crafting {
 		const g = this.game, inv = this.inv;
 		if ( ! r ) return { ok: false, reason: 'Unknown recipe' };
 		for ( const [ id, q ] of r.in ) if ( inv.count( id ) < q ) return { ok: false, reason: `Need ${q}× ${getItem( id )?.name || id}` };
-		for ( const t of r.tools || [] ) if ( ! this.hasTool( t ) ) return { ok: false, reason: `Need a tool that can ${TOOL_VERB[ t ] || t}` };
-		if ( r.station === 'fire' && ! this.nearFire( g.player.pos ) ) return { ok: false, reason: 'Needs a lit fire or stove nearby' };
-		if ( r.liquid && this.liquidAvailable( r.liquid.kind ) < r.liquid.litres - 1e-6 ) return { ok: false, reason: r.liquid.kind === 'fuel' ? `Need ${r.liquid.litres} L of gasoline` : `Need ${r.liquid.litres} L of clean water` };
+		for ( const t of r.tools || [] ) if ( ! this.hasTool( t ) ) return { ok: false, reason: `Need ${TOOL_NEED[ t ] || t}` };
+		if ( r.station === 'fire' && ! this.nearFire( g.player.pos ) ) return { ok: false, reason: 'Need a fire' };
+		if ( r.liquid && this.liquidAvailable( r.liquid.kind ) < r.liquid.litres - 1e-6 ) return { ok: false, reason: r.liquid.kind === 'fuel' ? `Need ${r.liquid.litres} L gasoline` : `Need ${r.liquid.litres} L water` };
 		if ( r.special === 'boil' ) {
 			if ( ! this.boilable().length ) {
 				const any = inv.find( ( s, d ) => d?.tool?.liquid && ( s.data.liquid === 'dirty' || s.data.liquid === 'sea' ) );
-				return { ok: false, reason: any ? 'Pour it into a pot or canteen to boil (or carry a pot)' : 'You carry no dirty water or seawater' };
+				return { ok: false, reason: any ? 'Need a pot' : 'No water to boil' };
 			}
 		}
 		return { ok: true };
@@ -98,7 +99,7 @@ export class Crafting {
 		const sound = r.station === 'fire' ? 'sizzle' : 'craft';
 		ensureItemSound( g.audio, sound );
 		g.actions.start( {
-			label: r.special === 'boil' ? 'Boiling water' : r.station === 'fire' ? r.name : `Crafting ${r.name.toLowerCase()}`, time, sound, cancelOnMove: true,
+			label: r.special === 'boil' ? 'Boiling water' : r.station === 'fire' ? r.name : `Crafting ${r.name}`, time, sound, cancelOnMove: true,
 			onDone: () => {
 				const c2 = this.check( r );
 				if ( ! c2.ok ) { g.toast( c2.reason, 'warn' ); return; }
@@ -114,7 +115,7 @@ export class Crafting {
 					const q = Math.min( left, d.stack );
 					const s = makeStack( id, q );
 					left -= q;
-					if ( this.inv.add( s ) > 0 ) { g.dropStack( s ); g.toast( 'No room — it is on the ground', 'warn' ); }
+					if ( this.inv.add( s ) > 0 ) { g.dropStack( s ); g.toast( 'No room, dropped', 'warn' ); }
 				}
 				this.inv.changed();
 				g.events.emit( 'item:pick', { stack: { id, qty: n, data: {}, uid: 'craft' } } );
@@ -133,7 +134,7 @@ export class Crafting {
 			clean += s.data.amount;
 		}
 		this.inv.changed();
-		g.toast( `${clean.toFixed( 2 )} L of clean drinking water`, 'good' );
+		g.toast( `${clean.toFixed( 1 )} L clean water`, 'good' );
 	}
 
 	// ---- fires ------------------------------------------------------------------------------------------------
@@ -184,18 +185,17 @@ export class Crafting {
 
 	lightFire( f ) {
 		const g = this.game;
-		if ( f.fuel <= 0.01 ) { g.toast( 'There is nothing left to burn — add firewood or sticks', 'warn' ); return; }
+		if ( f.fuel <= 0.01 ) { g.toast( 'Needs fuel', 'warn' ); return; }
 		const src = g.mode === 'creative' ? null : this.fireSource();
-		if ( ! src && g.mode !== 'creative' ) { g.toast( 'You need a lighter or matches', 'warn' ); return; }
+		if ( ! src && g.mode !== 'creative' ) { g.toast( 'Need a lighter or matches', 'warn' ); return; }
 		ensureItemSound( g.audio, 'strike' );
 		g.actions.start( {
-			label: 'Lighting the fire', time: 2.5, sound: 'strike', cancelOnMove: true,
+			label: 'Lighting fire', time: 2.5, sound: 'strike', cancelOnMove: true,
 			onDone: () => {
 				if ( src ) g.itemUse ? g.itemUse.useUp( src ) : ( src.data.uses = ( src.data.uses ?? getItem( src.id ).tool.uses ) - 1 );
-				// wet weather: matches fail sometimes
-				if ( ( g.weather?.rain || 0 ) > 0.5 && ! g.world.isIndoors?.( f.pos ) && Math.random() < 0.35 ) { g.toast( 'The rain puts out the flame — try again', 'warn' ); return; }
+				// wet weather: the flame fails sometimes, unless you have read the survival manual
+				if ( ( g.weather?.rain || 0 ) > 0.5 && ! g.world.isIndoors?.( f.pos ) && ! g.itemUse?.knowledge?.survival && Math.random() < 0.35 ) { g.toast( 'Rain put it out', 'warn' ); return; }
 				f.light();
-				g.toast( 'The fire catches', 'good' );
 			},
 		} );
 	}
@@ -206,14 +206,13 @@ export class Crafting {
 		const v = this.fuelValue( stack.id );
 		if ( ! f || f.pos.distanceTo( g.player.pos ) > 3.5 || ! v ) { g.toast( 'No campfire here', 'warn' ); return; }
 		g.actions.start( {
-			label: 'Feeding the fire', time: 1.5, sound: 'hit_wood', cancelOnMove: true,
+			label: 'Adding fuel', time: 1.5, sound: 'hit_wood', cancelOnMove: true,
 			onDone: () => {
 				if ( stack.qty <= 0 ) return;
 				f.fuel = Math.min( MAX_FUEL, f.fuel + v );
 				stack.qty --;
 				if ( stack.qty <= 0 ) this.inv.remove( stack );
 				this.inv.changed();
-				if ( f.deadSince !== null && ! f.lit ) g.toast( 'Fuel added — light it again', 'info' );
 			},
 		} );
 	}
@@ -231,18 +230,18 @@ export class Crafting {
 		}
 		if ( ! best ) return null;
 		const f = best, inv = this.inv;
-		const hrs = ( h ) => h >= 1 ? `about ${Math.round( h )} h` : `${Math.max( 5, Math.round( h * 60 / 5 ) * 5 )} min`;
-		if ( f.kind === 'stove' ) {
-			return [ { t: bt, id: f.id, label: f.lit ? 'Turn off and pack up the stove' : 'Pack up the stove', sub: f.lit ? 'Cooking station' : null, hold: 0.6, action: () => this.packStove( f ) } ];
-		}
+		const hrs = ( h ) => h >= 1 ? `${Math.round( h )} h` : `${Math.max( 5, Math.round( h * 60 / 5 ) * 5 )} min`;
+		if ( f.kind === 'stove' ) return [ { t: bt, id: f.id, label: 'Pack up stove', hold: 0.6, action: () => this.packStove( f ) } ];
 		const fuelItem = inv.find( ( s ) => this.fuelValue( s.id ) > 0 && s.id !== 'campfire_kit' );
+		const addFuel = fuelItem ? { t: bt, id: f.id, label: `Add ${getItem( fuelItem.id ).name}`, sub: f.fuel > 0.01 ? `${hrs( f.fuel )} left` : null, action: () => this.addFuel( fuelItem ) } : null;
 		if ( ! f.lit ) {
-			if ( f.fuel > 0.01 ) return [ { t: bt, id: f.id, label: 'Light the fire', sub: this.fireSource() || g.mode === 'creative' ? `Burns for ${hrs( f.fuel )}` : 'Needs a lighter or matches', action: () => this.lightFire( f ) } ];
-			if ( fuelItem ) return [ { t: bt, id: f.id, label: `Add ${getItem( fuelItem.id ).name.toLowerCase()} to the fire`, sub: 'Burnt out', action: () => this.addFuel( fuelItem ) } ];
-			return [ { t: bt, id: f.id, label: 'Burnt-out campfire', sub: 'Add sticks or firewood to relight it', action: () => g.toast( 'You need sticks, firewood, planks or charcoal', 'info' ) } ];
+			if ( f.fuel > 0.01 ) return [ { t: bt, id: f.id, label: 'Light fire', sub: this.fireSource() || g.mode === 'creative' ? `${hrs( f.fuel )} of fuel` : 'Need a lighter or matches', action: () => this.lightFire( f ) } ];
+			if ( addFuel ) return [ addFuel ];
+			return [ { t: bt, id: f.id, label: 'Campfire', sub: 'Needs fuel', action: () => g.toast( 'Need sticks or firewood', 'info' ) } ];
 		}
-		if ( fuelItem && f.fuel < MAX_FUEL - 0.2 ) return [ { t: bt, id: f.id, label: `Add ${getItem( fuelItem.id ).name.toLowerCase()} to the fire`, sub: `Burns for ${hrs( f.fuel )} · hold to put out`, action: () => this.addFuel( fuelItem ) } ];
-		return [ { t: bt, id: f.id, label: 'Put out the fire', sub: `Burns for ${hrs( f.fuel )}`, hold: 1.2, action: () => { f.putOut(); g.audio?.play( 'splash', { pos: f.pos, vol: 0.3, rate: 1.6 } ); } } ];
+		// a fire running low takes fuel first; otherwise F (held) puts it out
+		if ( addFuel && f.fuel < 1.5 ) return [ addFuel ];
+		return [ { t: bt, id: f.id, label: 'Put out', sub: `${hrs( f.fuel )} left`, hold: 1.2, action: () => { f.putOut(); g.audio?.play( 'splash', { pos: f.pos, vol: 0.3, rate: 1.6 } ); } } ];
 	}
 
 	packStove( f ) {
@@ -292,4 +291,4 @@ export class Crafting {
 	}
 }
 
-const TOOL_VERB = { cut: 'cut (a knife, machete or multitool)', chop: 'chop (a hatchet, axe or machete)', saw: 'saw (a hand saw)', hammer: 'hammer', pot: 'hold water on a fire (a cooking pot)', toolbox: 'fix engines (a toolbox)' };
+const TOOL_NEED = { cut: 'a blade', chop: 'an axe or machete', saw: 'a saw', hammer: 'a hammer', pot: 'a cooking pot', toolbox: 'a toolbox', canopener: 'a can opener' };
