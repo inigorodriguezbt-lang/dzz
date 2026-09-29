@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<title>Deadtide — Hawaiian Islands</title>
+	<link rel="preconnect" href="https://fonts.googleapis.com" />
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+	<link rel="stylesheet" href="/src/ui/ui.css" />
+</head>
+<body>
+	<div id="app"><canvas id="view" tabindex="0"></canvas></div>
+	<div id="ui" class="tw-root"></div>
+	<div id="loader" role="status" aria-live="polite" aria-label="Loading Deadtide">
+		<div class="loader-art-fallback"></div>
+		<img class="loader-art" src="ui/keyart.jpg" alt="" decoding="async" fetchpriority="high" onload="this.classList.add('is-in')" onerror="this.remove()" />
+		<div class="loader-scrim"></div>
+		<div class="loader-inner">
+			<div class="loader-brand">
+				<p class="loader-kicker">A Hawaiian Islands survival game</p>
+				<h1 class="loader-title">DEADTIDE</h1>
+				<p class="loader-tagline">Eight islands, one week after the outbreak. Scavenge the towns, arm yourself, and stay alive from Kauaʻi to the Big Island.</p>
+			</div>
+			<div class="loader-panel">
+				<div class="loader-row">
+					<span class="loader-status">Starting…</span>
+					<span class="loader-meta"><span class="loader-pct">0%</span><span class="loader-time">0:00</span></span>
+				</div>
+				<div class="loader-bar"><div class="loader-fill"></div><div class="loader-glint"></div></div>
+				<div class="loader-tips">
+					<span class="loader-tip-label">Tip</span>
+					<div class="loader-tip-list">
+						<p class="loader-tip">Look at loot and press <kbd>F</kbd> to pick it up. Cabinets, fridges, lockers and car trunks can all be searched.</p>
+						<p class="loader-tip">Gunshots carry for hundreds of metres. A suppressor, or a machete, keeps the dead from following you home.</p>
+						<p class="loader-tip">Water first, then food. Rain barrels, taps and coconuts will keep you alive; seawater will not.</p>
+						<p class="loader-tip">Bleeding kills fast. Rip a shirt into rags with <kbd>Tab</kbd> and bandage up before you do anything else.</p>
+						<p class="loader-tip">Police stations, gun stores and the military bases hold the best weapons, and the most infected.</p>
+						<p class="loader-tip">Boats and the tour helicopters are the only way between the islands. Keep a jerrycan of fuel.</p>
+						<p class="loader-tip">Press <kbd>T</kbd> for chat and type <kbd>/help</kbd> for commands like /give, /tp, /time, /locate and /summon.</p>
+						<p class="loader-tip">The summits of Mauna Kea and Mauna Loa are freezing. Dress warm before you climb.</p>
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+	<script type="module" src="/src/main.js"></script>
+</body>
+</html>

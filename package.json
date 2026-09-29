@@ -1,0 +1,22 @@
+{
+  "name": "deadtide",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 5190",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 5191",
+    "bake": "node tools/bake/bake.mjs",
+    "test": "node test/logic.mjs"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "playwright": "1.56",
+    "pngjs": "^7.0.0",
+    "vite": "^8.3.1"
+  }
+}

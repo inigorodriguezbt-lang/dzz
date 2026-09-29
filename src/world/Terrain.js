@@ -1,0 +1,290 @@
+// Streaming terrain: a quadtree over the whole chain; every node is a 32x32 grid built by the world
+// workers from the baked heights. Near nodes are 64 m (2 m spacing); the whole archipelago stays
+// visible to the horizon through the coarse levels. Deep ocean nodes are skipped (the sea covers them).
+import * as THREE from 'three';
+import { patchMaterial, tex } from '../render/Materials.js';
+
+const GRID = 32;
+const LEAF = 64;
+const ROOT = 131072;
+
+class Node {
+	constructor( x0, z0, size, level, parent ) {
+		this.x0 = x0; this.z0 = z0; this.size = size; this.level = level; this.parent = parent;
+		this.children = null;
+		this.mesh = null;
+		this.state = 0; // 0 none, 1 requested, 2 ready, 3 empty (deep sea / outside)
+		this.job = null;
+		this.lastUsed = 0;
+		this.minY = 0; this.maxY = 0;
+	}
+}
+
+export class Terrain {
+	constructor( hf, pool, settings ) {
+		this.hf = hf;
+		this.pool = pool;
+		this.settings = settings;
+		this.group = new THREE.Group();
+		this.group.name = 'terrain';
+		this.root = new Node( - ROOT / 2, - ROOT / 2, ROOT, 0, null );
+		this.frame = 0;
+		this.loadedCount = 0;
+		this.pendingCount = 0;
+		this.index = buildIndex();
+		this.material = makeTerrainMaterial();
+		this._v = new THREE.Vector3();
+		this.drawn = [];
+	}
+
+	// how many nodes the current view still waits for (loading screen)
+	get pending() { return this.pendingCount; }
+
+	update( camPos, frustum ) {
+		this.frame ++;
+		const K = { low: 1.6, medium: 2.0, high: 2.5, ultra: 3.2 }[ this.settings.get( 'terrainDetail' ) ] || 2.0;
+		for ( const m of this.drawn ) m.visible = false;
+		this.drawn.length = 0;
+		this._select( this.root, camPos, K, frustum );
+		// evict meshes unused for a while
+		if ( this.frame % 60 === 0 ) this._evict( this.root );
+	}
+
+	_rangeOf( n ) {
+		if ( n.rangeKnown ) return;
+		const [ a, b ] = this.hf.rangeOver( n.x0, n.z0, n.size );
+		n.minY = a; n.maxY = b + 3; n.rangeKnown = true;
+	}
+
+	_empty( n ) {
+		const hx = this.hf.halfX, hz = this.hf.halfZ;
+		if ( n.x0 > hx + 2000 || n.z0 > hz + 2000 || n.x0 + n.size < - hx - 2000 || n.z0 + n.size < - hz - 2000 ) return true;
+		this._rangeOf( n );
+		return n.maxY < - 40;
+	}
+
+	_dist( n, p ) {
+		const dx = Math.max( n.x0 - p.x, 0, p.x - ( n.x0 + n.size ) );
+		const dz = Math.max( n.z0 - p.z, 0, p.z - ( n.z0 + n.size ) );
+		const dy = Math.max( n.minY - p.y, 0, p.y - n.maxY );
+		return Math.hypot( dx, dy, dz );
+	}
+
+	_wantSplit( n, p, K ) {
+		if ( n.size <= LEAF ) return false;
+		return this._dist( n, p ) < n.size * K;
+	}
+
+	_ready( n ) {
+		if ( n.state === 0 ) {
+			if ( this._empty( n ) ) n.state = 3;
+		}
+		return n.state === 2 || n.state === 3;
+	}
+
+	_request( n, p ) {
+		if ( n.state !== 0 ) return;
+		if ( this._empty( n ) ) { n.state = 3; return; }
+		n.state = 1;
+		this.pendingCount ++;
+		const pri = this._dist( n, p ) / n.size - n.level * 0.01;
+		n.job = this.pool.submit( { type: 'terrain', x0: n.x0, z0: n.z0, size: n.size, skirt: n.size / GRID * 1.5 + 0.5 }, pri );
+		n.job.promise.then( ( r ) => {
+			this.pendingCount --;
+			n.job = null;
+			if ( ! r ) { n.state = 0; return; }
+			if ( n.state !== 1 ) return; // evicted meanwhile
+			n.mesh = this._makeMesh( n, r );
+			n.minY = r.minY; n.maxY = r.maxY;
+			n.state = 2;
+			this.loadedCount ++;
+		} ).catch( () => { this.pendingCount --; n.state = 0; } );
+	}
+
+	_makeMesh( n, r ) {
+		const g = new THREE.BufferGeometry();
+		g.setAttribute( 'position', new THREE.BufferAttribute( r.pos, 3 ) );
+		const ib = new THREE.InterleavedBuffer( r.nor, 4 );
+		g.setAttribute( 'normal', new THREE.InterleavedBufferAttribute( ib, 3, 0, true ) );
+		g.setAttribute( 'surf', new THREE.BufferAttribute( r.surf, 4, true ) );
+		g.setAttribute( 'tmask', new THREE.BufferAttribute( r.mask, 4, true ) );
+		g.setIndex( this.index );
+		g.boundingBox = new THREE.Box3( new THREE.Vector3( 0, r.minY, 0 ), new THREE.Vector3( n.size, r.maxY, n.size ) );
+		g.boundingSphere = g.boundingBox.getBoundingSphere( new THREE.Sphere() );
+		const m = new THREE.Mesh( g, this.material );
+		m.position.set( n.x0, 0, n.z0 );
+		m.updateMatrix();
+		m.updateMatrixWorld();
+		m.matrixAutoUpdate = false;
+		m.receiveShadow = true;
+		m.castShadow = n.size <= 512;
+		m.visible = false;
+		m.userData.node = n;
+		this.group.add( m );
+		return m;
+	}
+
+	_select( n, p, K, frustum ) {
+		n.lastUsed = this.frame;
+		if ( this._wantSplit( n, p, K ) ) {
+			if ( ! n.children ) {
+				const h = n.size / 2;
+				n.children = [
+					new Node( n.x0, n.z0, h, n.level + 1, n ), new Node( n.x0 + h, n.z0, h, n.level + 1, n ),
+					new Node( n.x0, n.z0 + h, h, n.level + 1, n ), new Node( n.x0 + h, n.z0 + h, h, n.level + 1, n ),
+				];
+			}
+			let all = true;
+			for ( const c of n.children ) { if ( ! this._ready( c ) ) { this._request( c, p ); all = false; } }
+			if ( all ) {
+				for ( const c of n.children ) this._select( c, p, K, frustum );
+				return;
+			}
+		}
+		if ( ! this._ready( n ) ) { this._request( n, p ); return; }
+		if ( n.state === 2 ) {
+			n.mesh.visible = true;
+			this.drawn.push( n.mesh );
+		}
+	}
+
+	_evict( n ) {
+		if ( n.children ) for ( const c of n.children ) this._evict( c );
+		if ( n.level > 2 && this.frame - n.lastUsed > 240 ) {
+			if ( n.mesh ) { this.group.remove( n.mesh ); n.mesh.geometry.dispose(); n.mesh = null; this.loadedCount --; }
+			if ( n.job ) { n.job.cancelled = true; }
+			if ( n.state !== 3 ) n.state = 0;
+			if ( n.children && n.children.every( c => ! c.mesh && ! c.children && c.state !== 1 ) ) n.children = null;
+		}
+	}
+}
+
+function buildIndex() {
+	const V = GRID + 1, idx = [];
+	for ( let j = 0; j < GRID; j ++ ) for ( let i = 0; i < GRID; i ++ ) {
+		const a = j * V + i, b = a + 1, c = a + V, d = c + 1;
+		// alternate the diagonal for a less directional look
+		if ( ( i + j ) & 1 ) idx.push( a, c, b, b, c, d ); else idx.push( a, c, d, a, d, b );
+	}
+	// skirts: edges are listed clockwise from the north edge (see the worker)
+	const nMain = V * V, E = V * 4;
+	const edgeSrc = [];
+	for ( let i = 0; i < V; i ++ ) edgeSrc.push( i );
+	for ( let j = 0; j < V; j ++ ) edgeSrc.push( j * V + GRID );
+	for ( let i = GRID; i >= 0; i -- ) edgeSrc.push( GRID * V + i );
+	for ( let j = GRID; j >= 0; j -- ) edgeSrc.push( j * V );
+	for ( let e = 0; e < E - 1; e ++ ) {
+		if ( ( e + 1 ) % V === 0 ) continue; // corner seam between edges
+		const top0 = edgeSrc[ e ], top1 = edgeSrc[ e + 1 ], bot0 = nMain + e, bot1 = nMain + e + 1;
+		idx.push( top0, bot0, top1, top1, bot0, bot1 );
+	}
+	return new THREE.BufferAttribute( new Uint32Array( idx ), 1 );
+}
+
+export function makeTerrainMaterial() {
+	const m = new THREE.MeshStandardMaterial( { roughness: 0.95, metalness: 0, color: 0xffffff } );
+	const T = {
+		tSand: tex( 'sand_d' ), tGrass: tex( 'grass_d' ), tDry: tex( 'drygrass_d' ), tForest: tex( 'forest_d' ),
+		tRed: tex( 'reddirt_d' ), tDirt: tex( 'dirt_d' ), tRock: tex( 'rock_d' ), tCliff: tex( 'cliff_d' ),
+		tLava: tex( 'lava_d' ), tSnow: tex( 'snow_d' ), tFarm: tex( 'farm_d' ), tWalk: tex( 'sidewalk_d' ),
+		nGrass: tex( 'grass_n', { srgb: false } ), nRock: tex( 'rock_n', { srgb: false } ), nSand: tex( 'sand_n', { srgb: false } ),
+	};
+	const uniforms = {};
+	for ( const k in T ) uniforms[ k ] = { value: T[ k ] };
+	patchMaterial( m, 'terrain', ( shader ) => {
+		Object.assign( shader.uniforms, uniforms );
+		shader.vertexShader = shader.vertexShader
+			.replace( '#include <common>', '#include <common>\nattribute vec4 surf; attribute vec4 tmask; varying vec4 vSurf; varying vec4 vMask;' )
+			.replace( '#include <begin_vertex>', '#include <begin_vertex>\nvSurf = surf; vMask = tmask;' );
+		shader.fragmentShader = shader.fragmentShader
+			.replace( '#include <common>', '#include <common>\nvarying vec4 vSurf; varying vec4 vMask;\n' + Object.keys( T ).map( k => `uniform sampler2D ${k};` ).join( '\n' ) )
+			.replace( '#include <map_fragment>', TERRAIN_ALBEDO )
+			.replace( '#include <normal_fragment_maps>', TERRAIN_NORMAL )
+			.replace( '#include <roughnessmap_fragment>', 'float roughnessFactor = tRough;' );
+	} );
+	return m;
+}
+
+const TERRAIN_ALBEDO = /* glsl */`
+	vec3 wN = normalize( ( vec4( vNormal, 0.0 ) * viewMatrix ).xyz );
+	vec3 wp = vWorldPos;
+	vec2 xz = wp.xz;
+	float slope = 1.0 - wN.y;
+	float moist = vSurf.r, lava = vSurf.g, red = vSurf.b, field = vSurf.a;
+	float city = vMask.r, road = vMask.g, pasture = vMask.b, shore = vMask.a;
+	float n1 = vnoise2( xz / 41.0 ), n2 = vnoise2( xz / 13.0 + 7.3 ), n3 = vnoise2( xz / 97.0 - 3.1 ), n4 = vnoise2( xz / 5.3 + 1.7 );
+	float macro = fbm2( xz / 260.0 );
+	float dist = length( wp - uCamPos );
+
+	vec3 grass = texture2D( tGrass, xz / 3.2 ).rgb;
+	vec3 dry = texture2D( tDry, xz / 3.4 ).rgb;
+	vec3 forest = texture2D( tForest, xz / 4.1 ).rgb;
+	// the grass textures are temperate: push them towards the saturated tropical greens
+	grass *= vec3( 0.78, 1.0, 0.62 );
+	dry *= vec3( 1.02, 0.98, 0.78 );
+	float wet = clamp( moist + ( n1 - 0.5 ) * 0.35 + ( macro - 0.5 ) * 0.3, 0.0, 1.0 );
+	vec3 c = mix( dry, grass, smoothstep( 0.22, 0.55, wet ) );
+	c = mix( c, forest * vec3( 0.7, 0.95, 0.6 ), smoothstep( 0.6, 0.86, wet ) * ( 1.0 - pasture ) * 0.85 );
+	// pasture: short, even ranch grass
+	c = mix( c, grass * vec3( 1.05, 1.0, 0.75 ), pasture * 0.6 );
+	// bare dirt in dry country, red laterite on the old islands
+	vec3 dirt = texture2D( tDirt, xz / 4.0 ).rgb * vec3( 0.95, 0.85, 0.72 );
+	c = mix( c, dirt, smoothstep( 0.55, 0.85, ( 1.0 - wet ) * ( n2 * 0.6 + n3 * 0.6 ) ) * 0.8 );
+	vec3 redc = texture2D( tRed, xz / 4.3 ).rgb;
+	c = mix( c, redc, smoothstep( 0.3, 0.65, red + ( n1 - 0.5 ) * 0.5 + ( n4 - 0.5 ) * 0.15 ) );
+	// farm fields in rows: pineapple (red soil, grey-green plants) and cane (dense green)
+	if ( field > 0.1 ) {
+		float rows = smoothstep( 0.35, 0.5, abs( fract( dot( xz, vec2( 0.7071 ) ) / 1.6 ) - 0.5 ) );
+		vec3 soil = texture2D( tFarm, xz / 3.0 ).rgb * vec3( 1.1, 0.75, 0.6 );
+		vec3 crop = field < 0.5 ? vec3( 0.23, 0.3, 0.2 ) * ( 0.8 + n2 * 0.4 ) : vec3( 0.2, 0.33, 0.08 ) * ( 0.8 + n2 * 0.4 );
+		c = mix( c, mix( soil, crop, field < 0.5 ? rows : 0.85 + rows * 0.15 ), smoothstep( 0.1, 0.4, field ) );
+	}
+	// lava fields: black, glassy in places
+	vec3 lv = texture2D( tLava, xz / 5.0 ).rgb * vec3( 0.55, 0.52, 0.5 );
+	float lavaW = smoothstep( 0.25, 0.55, lava + ( n1 - 0.5 ) * 0.35 + ( n4 - 0.5 ) * 0.2 );
+	c = mix( c, lv, lavaW );
+	// rock where it is steep (triplanar on the side faces)
+	vec3 an = abs( wN );
+	vec3 tri = texture2D( tRock, wp.zy / 6.0 ).rgb * an.x + texture2D( tRock, wp.xy / 6.0 ).rgb * an.z + texture2D( tCliff, xz / 24.0 ).rgb * an.y;
+	tri /= ( an.x + an.y + an.z );
+	float rockW = smoothstep( 0.3, 0.52, slope + ( n2 - 0.5 ) * 0.18 + ( n3 - 0.5 ) * 0.12 );
+	c = mix( c, tri * vec3( 0.95, 0.92, 0.88 ), rockW );
+	// sand at the shore, wet and darker by the water line
+	vec3 sand = texture2D( tSand, xz / 3.6 ).rgb;
+	sand = mix( vec3( dot( sand, vec3( 0.3, 0.55, 0.15 ) ) ), sand, 0.55 ) * vec3( 1.62, 1.52, 1.34 );
+	float beachTop = 2.0 + n3 * 1.6;
+	float beach = ( 1.0 - smoothstep( beachTop - 0.9, beachTop, wp.y ) ) * smoothstep( 0.15, 0.6, shore + ( n2 - 0.5 ) * 0.3 ) * ( 1.0 - smoothstep( 0.2, 0.42, slope ) ) * ( 1.0 - city ) * ( 1.0 - lavaW * 0.7 );
+	float wetSand = 1.0 - smoothstep( 0.05, 0.7, wp.y );
+	sand = mix( sand, sand * vec3( 0.62, 0.6, 0.56 ), wetSand );
+	c = mix( c, sand, beach );
+	// seabed: pale sand in the shallows, darker rubble and reef deeper
+	if ( wp.y < 0.0 ) {
+		vec3 bed = mix( sand * vec3( 0.95, 1.0, 0.98 ), tri * vec3( 0.6, 0.62, 0.55 ), smoothstep( 0.45, 0.75, n1 * 0.7 + n2 * 0.3 ) );
+		c = mix( c, bed, smoothstep( 0.0, -0.6, wp.y ) );
+	}
+	// snow on the summits of Mauna Kea and Mauna Loa
+	vec3 snow = texture2D( tSnow, xz / 5.0 ).rgb;
+	c = mix( c, snow, smoothstep( 610.0, 680.0, wp.y + ( n1 - 0.5 ) * 60.0 ) * ( 1.0 - smoothstep( 0.3, 0.6, slope ) ) );
+	// towns: mown lawns and concrete lots; road shoulders are gravel
+	vec3 lawn = grass * vec3( 0.92, 1.08, 0.8 ) * ( 0.9 + n1 * 0.2 );
+	c = mix( c, lawn, smoothstep( 0.2, 0.8, city ) * 0.9 );
+	c = mix( c, dirt * vec3( 0.85, 0.82, 0.8 ), road * 0.85 );
+	// large scale variation breaks up the tiling
+	c *= 0.84 + macro * 0.32;
+	float tRough = 0.92 - 0.25 * wetSand * beach - 0.2 * lavaW * n4;
+	diffuseColor = vec4( c, 1.0 );
+`;
+
+const TERRAIN_NORMAL = /* glsl */`
+	{
+		vec3 ng = texture2D( nGrass, xz / 3.2 ).xyz * 2.0 - 1.0;
+		vec3 nr = texture2D( nRock, wp.zy / 6.0 ).xyz * 2.0 - 1.0;
+		vec3 ns = texture2D( nSand, xz / 3.6 ).xyz * 2.0 - 1.0;
+		vec3 nm = normalize( mix( mix( ng, nr, rockW ), ns, beach ) );
+		float fade = 1.0 - smoothstep( 60.0, 220.0, dist );
+		vec3 T = normalize( vec3( 1.0, 0.0, 0.0 ) - wN * wN.x );
+		vec3 B = normalize( vec3( 0.0, 0.0, 1.0 ) - wN * wN.z );
+		vec3 pn = normalize( T * nm.x * fade * 0.9 + B * -nm.y * fade * 0.9 + wN * nm.z );
+		normal = normalize( ( viewMatrix * vec4( pn, 0.0 ) ).xyz );
+	}
+`;
