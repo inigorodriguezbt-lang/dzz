@@ -224,7 +224,7 @@ const f1 = ( x ) => Number( x ).toFixed( 1 );
 
 const VERT_PARS = /* glsl */`
 	attribute vec4 iCell; attribute vec4 aSlot;
-	uniform vec3 uGroundOrigin; uniform vec2 uGroundCam; uniform vec2 uPebFade;
+	uniform vec3 uGroundOrigin; uniform vec2 uGroundCam; uniform vec2 uPebFade; uniform vec3 uCamPos;
 	${ GROUND_GLSL }
 	varying vec4 vPebble; // type, palette, seed, radius
 	varying vec4 vPebRel; // position relative to the ground origin, ground height under it
@@ -254,7 +254,10 @@ const VERT_PARS = /* glsl */`
 		// size: denser patches have more but slightly smaller stones
 		float r = ( isSmall ? mix( 0.007, 0.024, h2 * h2 ) : isCob ? mix( 0.03, 0.09, h2 * h2 ) : mix( 0.008, 0.022, h2 ) ) * ( 1.15 - dens * 0.3 );
 		vec3 sc = vec3( r * mix( 1.0, 1.55, h3 ), r * ( isChip ? 0.28 : mix( 0.42, 0.8, h4 ) ), r );
-		float k = present * fade;
+		// (ours) stones smaller than about a pixel shrink away: without temporal anti-aliasing they would
+		// flicker as single dark pixels (uPebFade.y: pixels per radian)
+		float px = r * uPebFade.y / max( distance( vec3( xz.x, uCamPos.y, xz.y ), uCamPos ), 0.1 );
+		float k = present * fade * smoothstep( 0.3, 0.9, px );
 		// tilt about the local x axis (the stones don't all lie flat), then yaw
 		float tilt = ( h5 - 0.5 ) * ( isChip ? 0.5 : 0.9 );
 		float ct = cos( tilt ), st = sin( tilt );
@@ -395,7 +398,7 @@ export class PebbleField {
 	setQuality( name ) {
 		this.k = PEBBLE_QUALITY[ name ] ?? 1;
 		this.mesh.visible = this.k > 0;
-		this.U.uPebFade.value.set( Math.max( this.k, 0.01 ), 0 );
+		this.U.uPebFade.value.x = Math.max( this.k, 0.01 );
 		this._last.fill( NaN );
 	}
 
@@ -404,6 +407,8 @@ export class PebbleField {
 	// recompute the visible cells (skipped when the camera and the ground data did not change)
 	update( camera, groundY ) {
 		const gd = this.ground;
+		// pixels per radian at the centre of the view (the stones' screen-size fade)
+		this.U.uPebFade.value.y = ( this.pixelHeight || 1080 ) / ( 2 * Math.tan( camera.fov * Math.PI / 360 ) );
 		const e = camera.matrixWorld.elements;
 		this.U.uGroundCam.value.set( e[ 12 ] - gd.origin.x, e[ 14 ] - gd.origin.z );
 		this.mesh.position.copy( gd.origin );

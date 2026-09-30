@@ -728,13 +728,14 @@ function groundData( ctx ) {
 			const swash = sstep( 0.3, 0.6, hb ) * sstep( 1.2, 0.95, hb ) * sandW;
 			const dry = sstep( 2.0, 2.6, hb ) * sandW * ( 1 - sstep( 6, 10, hb ) );
 			const shore = sstep( - 0.4, 0.1, hb ) * sstep( 3.5, 2.2, hb ) * sstep( 0.1, 0.4, shoreV );
-			const path = ( fl & FLAG.DIRT ) ? 1 : 0;
+			// dirt tracks (the terrain's worn road paint): a little gravel
+			const path = hf.flagAt( x, z, FLAG.DIRT ) * 0.5;
 			const town = cityV || e.u > 0.5 ? 0.35 : 1;
 			const peb = ( bandW * ( 0.25 + 0.45 * sstep( - 0.3, 0.5, n1 ) ) + swash * 0.12 + dry * 0.06 * sstep( 0.2, 0.7, n2 ) + shore * sstep( 0.25, 0.5, rockyK ) * 0.6 + path * 0.45 * sstep( 1.0, 2.0, hb ) ) * town;
 			const cob = ( shore * sstep( 0.3, 0.6, rockyK ) * ( 0.35 + 0.5 * sstep( - 0.4, 0.4, n1 ) ) + bandW * 0.06 + path * 0.08 * sstep( 1.5, 2.5, hb ) ) * town;
 			const grit = ( bandW * ( 0.35 + 0.5 * sstep( - 0.2, 0.6, n2 ) ) + swash * 0.25 + dry * 0.08 + shore * sstep( 0.25, 0.5, rockyK ) * 0.1 ) * town;
 			// palette: coral limestone on the white-sand beaches, basalt on the rocky and lava shores
-			const pal = Math.max( 0, Math.min( 1, 0.22 + sandW * 0.5 - rockyK * 0.35 - lava * 0.3 + n2 * 0.12 ) );
+			const pal = Math.max( 0, Math.min( 1, 0.22 + sandW * 0.5 - rockyK * 0.35 - lava * 0.3 + path * 0.5 + n2 * 0.12 ) );
 			pm[ o ] = Math.min( 255, peb * 255 );
 			pm[ o + 1 ] = Math.min( 255, cob * 255 );
 			pm[ o + 2 ] = Math.min( 255, grit * 255 );

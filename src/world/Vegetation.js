@@ -29,8 +29,7 @@ import { InstanceTarget } from './vegetation/InstanceTarget.js';
 import { GroundData } from './vegetation/GroundData.js';
 import { GrassField } from './vegetation/GrassField.js';
 import { PebbleField } from './vegetation/PebbleField.js';
-import { citiesNear, townAt } from './scatter.js';
-import { FLAG } from './HeightField.js';
+import { citiesNear } from './scatter.js';
 import { makeStack, getItem } from '../game/items/ItemDB.js';
 
 // ---- per species rendering setup ---------------------------------------------------------------------------
@@ -560,11 +559,12 @@ export class Vegetation {
 		// the terrain's travelling gusts: the grass bends and shows its sheen in the same waves
 		const go = this._terrain?.TerrainGust?.offset;
 		if ( go ) VG.uGustOff.value.set( fract( - go.x / 140 ), fract( - go.y / 140 ), fract( - go.x / 61 ), fract( - go.y / 61 ) );
-		// towns grow no grass clumps (their mown lawns are the terrain's): the shaded sward base the
-		// terrain draws under the grass field fades out while the camera is in town
+		// the shaded sward base the terrain draws under the grass field (it doesn't know our mask: towns,
+		// beaches and forests have no blades) follows the share of the ground around the camera that has
+		// grass (the ground data's 4 m squares within 40 m)
 		if ( now - this._townT > 250 ) {
 			this._townT = now;
-			this._town = ( this.hf.flagsNear( cam.x, cam.z ) & FLAG.CITY ) ? 1 : townAt( this.world.meta.cities, cam.x, cam.z );
+			this._town = 1 - this._grassShare( cam, 40 );
 		}
 		const sw = this._terrain?.TerrainGrass?.fade?.value;
 		if ( sw ) sw.z += ( this._sward * ( 1 - this._town ) - sw.z ) * Math.min( 1, dt * 1.5 );
@@ -574,8 +574,24 @@ export class Vegetation {
 		const camera = this.world.camera;
 		this.ground.update( cam );
 		if ( this.grassField.update( camera ) ) this.stats.grass = this.grassField.cellCounts.join( '/' );
+		this.pebbles.pixelHeight = this.game.renderer?.height || 1080;
 		if ( this.pebbles.update( camera, this.hf.heightAt( cam.x, cam.z ) ) ) this.stats.pebbles = this.pebbles.count;
 		this._colliders();
+	}
+
+	// share of the loaded 4 m ground squares within r of the camera that carry grass (0 when none loaded)
+	_grassShare( cam, r ) {
+		const gd = this.ground, C = gd.cells;
+		let n = 0, g = 0;
+		const i0 = Math.floor( ( cam.x - r ) / 4 ), i1 = Math.floor( ( cam.x + r ) / 4 ), j0 = Math.floor( ( cam.z - r ) / 4 ), j1 = Math.floor( ( cam.z + r ) / 4 );
+		for ( let j = j0; j <= j1; j += 2 ) for ( let i = i0; i <= i1; i += 2 ) {
+			if ( ( i * 4 + 2 - cam.x ) ** 2 + ( j * 4 + 2 - cam.z ) ** 2 > r * r ) continue;
+			const k = gd.cell4( i, j );
+			if ( k < 0 ) continue;
+			n ++;
+			if ( C[ k + 2 ] ) g ++;
+		}
+		return n ? Math.sqrt( g / n ) : 0;
 	}
 
 	// ---- queries and interactions ---------------------------------------------------------------------------------
