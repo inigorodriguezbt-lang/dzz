@@ -72,6 +72,10 @@ export const G = {
 	uCsmSoft: { value: 1 }, // 1: contact-hardening (PCSS) on the near cascade; 0: the 5-tap PCF there too (cheaper)
 	uCsmSlope: { value: 2 }, // the normal offset grows to ( 1 + uCsmSlope ) x toward grazing light
 	uCsmCount: { value: 0 },
+	// tap counts: PCSS blocker search, PCSS filter, PCF. (Uniform, not constant: loops with a constant count are
+	// unrolled by the shader compilers, and this code is in every lit material: unrolled over the three
+	// cascades it was most of each program's size, compile time and driver memory)
+	uCsmTaps: { value: new THREE.Vector3( 8, 12, 5 ) },
 	uCsmSize: { value: 2048 },
 	uCsmBias: { value: 0.00002 },
 	uCsmMat: { value: [ new THREE.Matrix4(), new THREE.Matrix4(), new THREE.Matrix4() ] },
@@ -100,7 +104,7 @@ export const COMMON_GLSL = /* glsl */`
 	uniform sampler2D uCloudShadow; uniform vec4 uCloudShadowRect; uniform float uCloudShadowOn;
 	uniform sampler2D uCloudPano; uniform float uCloudPanoOn;
 	uniform sampler2D uBounceMap; uniform vec4 uBounceRect; uniform float uBounceOn;
-	uniform float uCsmOn; uniform float uCsmSoft; uniform float uCsmSlope; uniform float uCsmCount; uniform float uCsmSize; uniform float uCsmBias;
+	uniform float uCsmOn; uniform float uCsmSoft; uniform float uCsmSlope; uniform float uCsmCount; uniform vec3 uCsmTaps; uniform float uCsmSize; uniform float uCsmBias;
 	uniform mat4 uCsmMat[ 3 ]; uniform vec4 uCsmInfo[ 3 ]; uniform vec4 uCsmBlend[ 3 ];
 	uniform sampler2D uCsm0; uniform sampler2DShadow uCsm1; uniform sampler2DShadow uCsm2;
 	float hash12( vec2 p ) { vec3 p3 = fract( vec3( p.xyx ) * 0.1031 ); p3 += dot( p3, p3.yzx + 33.33 ); return fract( ( p3.x + p3.y ) * p3.z ); }
@@ -251,6 +255,7 @@ export const COMMON_GLSL = /* glsl */`
 		if ( any( lessThan( uvz.xy, vec2( 0.0 ) ) ) || any( greaterThan( uvz.xy, vec2( 1.0 ) ) ) || uvz.z < 0.0 ) return 1.0;
 		float z = uvz.z + uCsmBias;
 		float texel = 1.0 / uCsmSize;
+		// (the tap loops run to uniform counts: see uCsmTaps)
 		if ( pcss && c == 0 && uCsmSoft > 0.5 ) {
 			float phi = noise * 6.283185307;
 			float width = info.y * uCsmSize; // cascade width (m)
@@ -261,8 +266,9 @@ export const COMMON_GLSL = /* glsl */`
 			float d0 = csmDepth0( uvz.xy );
 			float blockSum = d0 > z ? d0 : 0.0;
 			float blockCount = d0 > z ? 1.0 : 0.0;
-			for ( int i = 0; i < 8; i ++ ) {
-				float d = csmDepth0( uvz.xy + dtVogel( i, 8, phi ) * searchUV );
+			int nb = int( uCsmTaps.x ), nf = int( uCsmTaps.y );
+			for ( int i = 0; i < nb; i ++ ) {
+				float d = csmDepth0( uvz.xy + dtVogel( i, nb, phi ) * searchUV );
 				if ( d > z ) { blockSum += d; blockCount += 1.0; }
 			}
 			if ( blockCount < 0.5 ) return 1.0;
@@ -271,26 +277,29 @@ export const COMMON_GLSL = /* glsl */`
 			float penumbraUV = clamp( dz * SD / width, texel * 1.2, texel * 32.0 );
 			// 3. PCF over the penumbra
 			float sum = 0.0;
-			for ( int i = 0; i < 12; i ++ ) sum += z >= csmDepth0( uvz.xy + dtVogel( i, 12, phi + 1.7 ) * penumbraUV ) ? 1.0 : 0.0;
-			return sum / 12.0;
+			for ( int i = 0; i < nf; i ++ ) sum += z >= csmDepth0( uvz.xy + dtVogel( i, nf, phi + 1.7 ) * penumbraUV ) ? 1.0 : 0.0;
+			return sum / float( nf );
 		}
 		float phiP = pcfNoise * 6.283185307;
 		float sum = 0.0;
-		for ( int i = 0; i < 5; i ++ ) sum += csmTap( c, uvz.xy + dtVogel( i, 5, phiP ) * texel, z );
-		return sum / 5.0;
+		int np = int( uCsmTaps.z );
+		for ( int i = 0; i < np; i ++ ) sum += csmTap( c, uvz.xy + dtVogel( i, np, phiP ) * texel, z );
+		return sum / float( np );
 	}
 	// sun visibility at P (1 = lit), N the geometric world normal; the seams blended over a quarter of the
 	// break, the last cascade fading out over its final part. The cascades are spheres around the camera
-	// (render/Shadows.js): picked by the distance to the camera, not the view depth
+	// (render/Shadows.js): picked by the distance to the camera, not the view depth. (At most two cascades
+	// overlap at a point: the loop finds them, and one call below samples each, so csmCascade is compiled in
+	// once, not once per cascade)
 	float sunShadowCSM( vec3 P, vec3 N, bool pcss ) {
 		if ( uCsmOn < 0.5 ) return 1.0;
 		float dist = length( P - uCamPos );
 		float noise = dtIGN( gl_FragCoord.xy + mod( uFrame, 64.0 ) * 5.588238 );
 		float pcfNoise = dtIGN( gl_FragCoord.xy );
-		float ret = 1.0;
-		int last = int( uCsmCount ) - 1;
-		for ( int i = 0; i < 3; i ++ ) {
-			if ( i > last ) break;
+		int n = int( uCsmCount ), last = n - 1;
+		int ca = -1, cb = -1;
+		float ra = 0.0, rb = 0.0;
+		for ( int i = 0; i < n; i ++ ) {
 			vec4 b = uCsmBlend[ i ];
 			float center = ( b.x + b.y ) * 0.5;
 			float margin = max( dist < center ? b.z : b.w, 1e-5 );
@@ -299,8 +308,14 @@ export const COMMON_GLSL = /* glsl */`
 			if ( dist >= csmX && dist <= csmY ) {
 				float ratio = clamp( min( dist - csmX, csmY - dist ) / margin, 0.0, 1.0 );
 				if ( i == 0 && dist <= center ) ratio = 1.0;
-				ret -= ( 1.0 - csmCascade( P, N, i, noise, pcfNoise, pcss ) ) * ratio;
+				if ( ca < 0 ) { ca = i; ra = ratio; } else { cb = i; rb = ratio; }
 			}
+		}
+		float ret = 1.0;
+		int m = ca < 0 ? 0 : cb < 0 ? 1 : 2;
+		for ( int k = 0; k < m; k ++ ) {
+			int c = k == 0 ? ca : cb;
+			ret -= ( 1.0 - csmCascade( P, N, c, noise, pcfNoise, pcss ) ) * ( k == 0 ? ra : rb );
 		}
 		return max( ret, 0.0 );
 	}
