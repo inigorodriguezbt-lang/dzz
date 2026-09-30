@@ -28,6 +28,8 @@ export const LAYER_POST = 1;
 // scene depth, so they never smear through the history
 export const LAYER_OVERLAY = 2;
 
+// device pixel ratio cap for the 3D view (renderScale goes above it)
+const MAX_DPR = 1.5;
 // the scene-referred exposure before ACES (Tidewater App.js settings.exposure)
 const EXPOSURE = 0.55;
 const METER_TILES = 8;
@@ -227,20 +229,31 @@ export class Renderer {
 
 	get aa() { return this.settings.get( 'antialias' ); }
 
+	// With TAA a render scale below 1 renders the scene at that scale and the temporal resolve upsamples it to
+	// the display (FSR2-style: the jittered frames fill in the missing samples), so the post chain, the view
+	// model and the HUD stay sharp; without TAA the canvas itself shrinks and the browser stretches it
+	// (a scale above 1 supersamples: the targets are larger than the canvas and the grade filters them down)
 	resize( w, h ) {
-		const scale = this.settings.get( 'renderScale' );
-		const dpr = Math.min( window.devicePixelRatio || 1, 2 );
-		this.gl.setPixelRatio( dpr * Math.min( 1, scale ) );
+		const scale = this.settings.get( 'renderScale' ) || 1;
+		// (HiDPI screens: at most 1.5 device pixels per CSS pixel for the 3D view, the HUD is DOM and stays sharp;
+		// a laptop's 2x screen would otherwise render ~2.5x the pixels of 1080p by default)
+		const dpr = Math.min( window.devicePixelRatio || 1, MAX_DPR );
+		const up = scale < 1 && this.aa === 'taa' && ! this.logDepth;
+		this.gl.setPixelRatio( dpr * ( up ? 1 : Math.min( 1, scale ) ) );
 		this.gl.setSize( w, h );
 		const W = Math.max( 1, Math.round( w * dpr * scale ) ), H = Math.max( 1, Math.round( h * dpr * scale ) );
-		if ( this.targets && W === this.width && H === this.height && this.targets.aa === this.aa ) return;
+		const OW = up ? Math.max( 1, Math.round( w * dpr ) ) : W, OH = up ? Math.max( 1, Math.round( h * dpr ) ) : H;
+		if ( this.targets && W === this.width && H === this.height && OW === this.outWidth && OH === this.outHeight && this.targets.aa === this.aa ) return;
 		this.width = W; this.height = H;
+		this.outWidth = OW; this.outHeight = OH;
 		this._makeTargets();
 	}
 
 	_makeTargets() {
 		if ( this.targets ) for ( const t of this.targets.list ) t.dispose();
-		const W = this.width, H = this.height;
+		// W x H: the scene's render resolution; OW x OH: the display (larger with the TAA upsampling)
+		const W = this.width, H = this.height, OW = this.outWidth, OH = this.outHeight;
+		const up = OW !== W || OH !== H;
 		const samples = this.aa === 'msaa' ? Math.min( 4, this.maxSamples ) : 0;
 		const depthTex = new THREE.DepthTexture( W, H, THREE.FloatType );
 		depthTex.format = THREE.DepthFormat;
@@ -250,28 +263,41 @@ export class Renderer {
 		const mainDepth = new THREE.DepthTexture( W, H, THREE.FloatType );
 		mainDepth.format = THREE.DepthFormat;
 		const main = new THREE.WebGLRenderTarget( W, H, { type: THREE.HalfFloatType, samples, depthTexture: mainDepth, depthBuffer: true } );
-		const ldr = new THREE.WebGLRenderTarget( W, H, { type: THREE.UnsignedByteType } );
+		// (only the FXAA path grades into an LDR target first)
+		const ldr = this.aa === 'fxaa' ? new THREE.WebGLRenderTarget( OW, OH, { type: THREE.UnsignedByteType, depthBuffer: false } ) : null;
 		// the opaque scene with its ambient occlusion (what water refracts), then the hazed frame the view
 		// model is drawn over
 		const beauty = new THREE.WebGLRenderTarget( W, H, { type: THREE.HalfFloatType, samples, depthBuffer: true } );
 		beauty.texture.minFilter = beauty.texture.magFilter = THREE.LinearFilter;
 		beauty.texture.generateMipmaps = false;
+		// upsampling: the resolved frame at the display resolution with the scene depth scaled up under it (the
+		// overlay layer tests against it, the view model clears it)
+		let post = main;
+		if ( up ) {
+			const postDepth = new THREE.DepthTexture( OW, OH, THREE.FloatType );
+			postDepth.format = THREE.DepthFormat;
+			post = new THREE.WebGLRenderTarget( OW, OH, { type: THREE.HalfFloatType, depthTexture: postDepth, depthBuffer: true } );
+			post.texture.generateMipmaps = false;
+		}
 		this.gtao.setSize( W, H );
 		this.haze.setSize( W, H );
-		this.taa.setSize( W, H );
+		this.taa.setSize( W, H, OW, OH );
 		this.taa.reset();
-		this.mb.setSize( W, H );
+		this.mb.setSize( OW, OH );
 		this.mb.reset();
-		// 5 levels: 1/2 .. 1/32
+		// 5 levels: 1/2 .. 1/32 of the display
 		const bloom = [], bloomUp = [];
 		for ( let i = 0; i < 5; i ++ ) {
 			const s = Math.pow( 0.5, i + 1 );
-			const mk = () => new THREE.WebGLRenderTarget( Math.max( 1, Math.round( W * s ) ), Math.max( 1, Math.round( H * s ) ), { type: THREE.HalfFloatType, depthBuffer: false } );
+			const mk = () => new THREE.WebGLRenderTarget( Math.max( 1, Math.round( OW * s ) ), Math.max( 1, Math.round( OH * s ) ), { type: THREE.HalfFloatType, depthBuffer: false } );
 			bloom.push( mk() );
 			if ( i < 4 ) bloomUp.push( mk() );
 		}
-		this.targets = { scene, main, ldr, beauty, bloom, bloomUp, aa: this.aa, list: [ scene, main, ldr, beauty, ...bloom, ...bloomUp ] };
-		this.grade.uniforms.resolution.value.set( W, H );
+		const list = [ scene, main, beauty, ...bloom, ...bloomUp ];
+		if ( ldr ) list.push( ldr );
+		if ( post !== main ) list.push( post );
+		this.targets = { scene, main, ldr, beauty, post, bloom, bloomUp, aa: this.aa, list };
+		this.grade.uniforms.resolution.value.set( OW, OH );
 	}
 
 	// (GTAO reconstructs positions from reversed-Z depth: not with the logarithmic depth fallback)
@@ -349,18 +375,24 @@ export class Renderer {
 			const sh = !! this.shadows?.source;
 			if ( this.haze.render( gl, T.main.texture, T.main.depthTexture, cam, T.beauty, sh, shaftsOn ) ) out = T.beauty;
 		}
-		// TAA resolve after the water, transparents and haze; the resolved image goes back into mainRT, where the
-		// view model is drawn over it (never into the history)
+		// TAA resolve after the water, transparents and haze; the resolved image goes back into mainRT (or, when
+		// upsampling, the display-sized post target with the scene depth scaled up under it), where the view
+		// model is drawn over it (never into the history)
 		if ( taaOn ) {
 			this.taa.resolve( gl, cam, out.texture, T.main.depthTexture, T.scene.depthTexture, this.exposureRT[ this._exp ].texture );
-			this.taa.copyTo( gl, T.main );
+			if ( T.post !== T.main ) {
+				gl.setRenderTarget( T.post );
+				this.composite.material.uniforms.tColor.value = this.taa.texture;
+				this.composite.material.uniforms.tDepth.value = T.main.depthTexture;
+				this.composite.render( gl );
+			} else this.taa.copyTo( gl, T.main );
 			this.taa.end( cam );
-			out = T.main;
+			out = T.post;
 		}
-		// overlay layer (rain, sparks) over the scene depth: mainRT still holds it (the copy writes no depth);
-		// without TAA it was drawn with the transparents
+		// overlay layer (rain, sparks) over the scene depth: mainRT still holds it (the copy writes no depth), the
+		// upsampling copy wrote it scaled up; without TAA it was drawn with the transparents
 		if ( taaOn ) {
-			gl.setRenderTarget( T.main );
+			gl.setRenderTarget( T.post );
 			cam.layers.set( LAYER_OVERLAY );
 			gl.render( f.scene, cam );
 			cam.layers.set( LAYER_WORLD );
@@ -374,9 +406,9 @@ export class Renderer {
 			gl.clear( false, true, false );
 			gl.render( f.viewScene, f.viewCamera );
 		}
-		// (mainRT's depth now holds only the view model: its mask for the motion blur)
-		this.mb.uniforms.tMbVM.value = T.main.depthTexture;
-		this.mb.uniforms.uMbVMOn.value = f.viewScene && out === T.main ? 1 : 0;
+		// (the post target's depth now holds only the view model: its mask for the motion blur)
+		this.mb.uniforms.tMbVM.value = T.post.depthTexture;
+		this.mb.uniforms.uMbVMOn.value = f.viewScene && out === T.post ? 1 : 0;
 		this.mb.render( gl, this.taa.prevDepth.texture, mbOn );
 		if ( this.grade.defines.MOTION_BLUR !== ( mbOn ? 1 : 0 ) ) {
 			this.grade.defines.MOTION_BLUR = mbOn ? 1 : 0;
@@ -418,14 +450,14 @@ export class Renderer {
 		u.tFlareVis.value = this.flare.texture;
 		u.uFlareStrength.value = flareOn ? 1 : 0;
 		u.uFlareAspect.value = cam.aspect;
-		u.uFlareResY.value = this.height;
+		u.uFlareResY.value = this.outHeight;
 		if ( f.grade ) for ( const k in f.grade ) if ( u[ k ] && k !== 'bloom' && k !== 'exposureBias' ) u[ k ].value = f.grade[ k ];
 		if ( this.aa === 'fxaa' ) {
 			gl.setRenderTarget( T.ldr );
 			this.gradeQuad.render( gl );
 			gl.setRenderTarget( null );
 			this.fxaa.material.uniforms.tColor.value = T.ldr.texture;
-			this.fxaa.material.uniforms.texel.value.set( 1 / this.width, 1 / this.height );
+			this.fxaa.material.uniforms.texel.value.set( 1 / this.outWidth, 1 / this.outHeight );
 			this.fxaa.render( gl );
 		} else {
 			gl.setRenderTarget( null );

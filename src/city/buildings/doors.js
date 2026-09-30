@@ -18,7 +18,9 @@ const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _p = new THREE.Vect
 // here; each door's paint comes from its instance colour (one batch per leaf shape, not per colour).
 function leafGeo( kind, w, h, inside ) {
 	const g = new Geo( 256 );
-	const f = inside ? F_IN : 0;
+	// lit as the interiors are, both faces of outside doors too: each face gets the light of its side (per instance)
+	const f = F_IN;
+	void inside;
 	const t = kind === 'vault' ? 0.14 : kind === 'roll' ? 0.06 : kind === 'metal' ? 0.05 : 0.045;
 	const glassy = kind === 'glass' || kind === 'glass2' || kind === 'glassd' || kind === 'slider';
 	const handle = M( L.spandrel, [ 70, 70, 72 ], 1, f );
@@ -81,7 +83,13 @@ class LeafBatch {
 		m.frustumCulled = false;
 		m.castShadow = this.layer === 0; m.receiveShadow = true;
 		m.layers.set( this.layer );
-		if ( this.colours ) m.instanceColor = new THREE.InstancedBufferAttribute( new Float32Array( cap * 3 ).fill( 1 ), 3 );
+		if ( this.colours ) {
+			m.instanceColor = new THREE.InstancedBufferAttribute( new Float32Array( cap * 3 ).fill( 1 ), 3 );
+			// the light baked on each side of the doorway (light.js): daylight / 2 on the leaf's -z and +z faces
+			const lt = new THREE.InstancedBufferAttribute( new Uint8Array( cap * 2 ).fill( 100 ), 2, true );
+			if ( this.geo.attributes.aLt ) lt.array.set( this.geo.attributes.aLt.array );
+			this.geo.setAttribute( 'aLt', lt );
+		}
 		if ( old ) {
 			m.instanceMatrix.array.set( old.instanceMatrix.array );
 			if ( old.instanceColor ) m.instanceColor.array.set( old.instanceColor.array );
@@ -96,6 +104,7 @@ class LeafBatch {
 	give( i ) { this.mesh.setMatrixAt( i, _m.makeScale( 0, 0, 0 ) ); this.mesh.instanceMatrix.needsUpdate = true; this.free.push( i ); this.n --; }
 	set( i, m ) { this.mesh.setMatrixAt( i, m ); this.mesh.instanceMatrix.needsUpdate = true; }
 	colour( i, c ) { if ( this.mesh.instanceColor ) { this.mesh.setColorAt( i, c ); this.mesh.instanceColor.needsUpdate = true; } }
+	light( i, lo, hi ) { const a = this.geo.attributes.aLt; if ( a ) { a.array[ i * 2 ] = Math.min( 255, Math.round( lo * 127.5 ) ); a.array[ i * 2 + 1 ] = Math.min( 255, Math.round( hi * 127.5 ) ); a.needsUpdate = true; } }
 	dispose() { this.group.remove( this.mesh ); this.mesh.dispose(); this.geo.dispose(); }
 }
 
@@ -120,7 +129,7 @@ export class Doors {
 		if ( ! b ) {
 			const M_ = this.city.mats;
 			if ( pane ) b = new LeafBatch( this.group, paneGeo( q( w ), q( h ) ), M_.glass, 1 );
-			else { const L_ = leafGeo( kind, q( w ), q( h ), inside ); b = new LeafBatch( this.group, L_.geo, M_.interior, 0, true ); b.t = L_.t; b.glassy = L_.glassy; }
+			else { const L_ = leafGeo( kind, q( w ), q( h ), inside ); b = new LeafBatch( this.group, L_.geo, M_.door, 0, true ); b.t = L_.t; b.glassy = L_.glassy; }
 			this.batches.set( k, b );
 		}
 		return b;
@@ -164,6 +173,9 @@ export class Doors {
 			const batch = this._batch( kind, lw, rec.h, ! ext );
 			const leaf = { hx, hz, y: rec.y, yaw0: yawB + yc, openSign, batch, slot: batch.take(), pane: null, box: null };
 			batch.colour( leaf.slot, _c );
+			// which side of the doorway the leaf's +z face looks at (it turns with the leaf; near enough)
+			const lt = rec.lt || [ 0.8, 0.8 ], zs = rec.axis === 'x' ? Math.cos( yc ) : Math.sin( yc );
+			batch.light( leaf.slot, zs > 0 ? lt[ 0 ] : lt[ 1 ], zs > 0 ? lt[ 1 ] : lt[ 0 ] );
 			if ( batch.glassy ) { leaf.paneBatch = this._batch( kind, lw, rec.h, ! ext, true ); leaf.pane = leaf.paneBatch.take(); }
 			leaf.box = this.game.physics.add( { x: hx, y: rec.y + rec.h / 2, z: hz, hx: lw / 2, hy: rec.h / 2, hz: batch.t / 2 + 0.01, yaw: leaf.yaw0, mat: kind === 'metal' || kind === 'roll' || kind === 'vault' ? 'metal' : batch.glassy ? 'glass' : 'wood', kind: 'door', owner: d } );
 			d.leaves.push( leaf );

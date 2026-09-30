@@ -75,6 +75,7 @@ function roomsOf( P, st, barred ) {
 				// the curtains and blinds the facade shader shows (interior.js hangs the same)
 				const dress = ( winHash( w.seed, bi ) >>> 28 ) & 7;
 				if ( ( style === 1 || style === 2 || style === 5 ) && state !== 1 ) t *= dress === 0 ? 0.7 : dress === 1 ? 0.4 : dress === 2 ? 0.65 : 1;
+				else if ( ( style === 3 || style === 12 ) && state !== 1 && dress <= 2 ) t *= 0.7; // office blinds
 				const [ x, z ] = at( u ), [ bx, bz ] = base( u );
 				// boarded up from inside (furniture.js)
 				if ( barred && barred.has( winKey( bx, bz, st.y + w.sill + h / 2 ) ) ) t *= 0.15;
@@ -101,10 +102,16 @@ function direct( q, px, py, pz, nx, ny, nz ) {
 }
 const n3 = ( x, y, z ) => x !== 0 || y !== 0 || z !== 0;
 
-// daylight -> the sky-light multiplier the shader applies (0.1 deep inside .. ~1.6 at a window)
+// daylight -> the sky-light multiplier the shader applies (0.12 deep inside .. ~1.9 at a window), tabulated over
+// sqrt( D ) (the bake calls it for every vertex)
 export function lightCurve( D ) { return Math.min( 1.95, 0.12 + 3.1 * Math.pow( D, 0.65 ) ); }
+const CURVE = new Float32Array( 1025 );
+for ( let i = 0; i <= 1024; i ++ ) CURVE[ i ] = lightCurve( ( i / 512 ) ** 2 );
+const curve = ( D ) => { const f = Math.min( 1024, Math.sqrt( D ) * 512 ), i = f | 0; return i >= 1024 ? CURVE[ 1024 ] : CURVE[ i ] + ( CURVE[ i + 1 ] - CURVE[ i ] ) * ( f - i ); };
+// occlusion by one face of the room at distance d, facing along dot (1: the same way as the surface)
+const occ = ( d, dot, k ) => { const w = 1 - dot; return w > 0 && d < 1.4 ? 1 - k * ( w > 1 ? 1 : w ) * Math.exp( - ( d > 0 ? d : 0 ) / AO_R ) : 1; };
 
-export function bakeLight( P, st, geos, dec, barred = null ) {
+export function bakeLight( P, st, geos, dec, barred = null, doors = null ) {
 	const R = roomsOf( P, st, barred );
 	const rooms = R.list;
 	// each room's own light (averaged over its floor at table height), then what the rooms pass on to each other
@@ -158,16 +165,13 @@ export function bakeLight( P, st, geos, dec, barred = null ) {
 		if ( ! q ) { out[ 0 ] = 1.7; out[ 1 ] = 1; return out; }
 		if ( q.outside ) { out[ 0 ] = 1.5; out[ 1 ] = 1 - AO_FLOOR * 0.6 * ( 1 - Math.max( 0, ny ) ) * Math.exp( - Math.max( 0, py - y0 ) / AO_R ); return out; }
 		const D = direct( q, px, py, pz, nx, ny, nz ) + q.bounce;
-		out[ 0 ] = lightCurve( D );
+		out[ 0 ] = curve( D );
 		// occlusion from the room's six faces (a face doesn't occlude what lies on it or faces the same way)
-		let ao = 1;
-		const plane = ( d, dot, k ) => { const w = Math.min( 1, 1 - dot ); if ( w > 0 ) ao *= 1 - k * w * Math.exp( - Math.max( 0, d ) / AO_R ); };
-		if ( ! q.open[ 3 ] ) plane( px - q.x0, nx, AO_WALL );
-		if ( ! q.open[ 1 ] ) plane( q.x1 - px, - nx, AO_WALL );
-		if ( ! q.open[ 0 ] ) plane( pz - q.z0, nz, AO_WALL );
-		if ( ! q.open[ 2 ] ) plane( q.z1 - pz, - nz, AO_WALL );
-		plane( py - q.y0, ny, AO_FLOOR );
-		plane( q.y1 - py, - ny, AO_CEIL );
+		let ao = occ( py - q.y0, ny, AO_FLOOR ) * occ( q.y1 - py, - ny, AO_CEIL );
+		if ( ! q.open[ 3 ] ) ao *= occ( px - q.x0, nx, AO_WALL );
+		if ( ! q.open[ 1 ] ) ao *= occ( q.x1 - px, - nx, AO_WALL );
+		if ( ! q.open[ 0 ] ) ao *= occ( pz - q.z0, nz, AO_WALL );
+		if ( ! q.open[ 2 ] ) ao *= occ( q.z1 - pz, - nz, AO_WALL );
 		out[ 1 ] = ao;
 		return out;
 	};
@@ -181,13 +185,20 @@ export function bakeLight( P, st, geos, dec, barred = null ) {
 			lt[ i * 2 + 1 ] = Math.round( Math.max( 0, Math.min( 1, r[ 1 ] ) ) * 255 );
 		}
 	}
-	// decals are lit by the sky at full strength: darken them to match the surface they lie on
+	// door leaves are instanced (doors.js): the light on each side of the doorway, [ -normal, +normal ]
+	if ( doors ) for ( const d of doors ) {
+		const nx = d.axis === 'x' ? 0 : 0.45, nz = d.axis === 'x' ? 0.45 : 0;
+		d.lt = [ shade( d.x - nx, st.y + 1.1, d.z - nz, 0, 0, 0 )[ 0 ], shade( d.x + nx, st.y + 1.1, d.z + nz, 0, 0, 0 )[ 0 ] ];
+	}
+	// decals are lit by the sky at full strength: darken them to match the surface they lie on, and warm them as
+	// the interior shader warms the sky light indoors
 	if ( dec && ! dec.empty ) {
 		const pos = dec.pos, nor = dec.nor, col = dec.col;
+		const warm = [ 1.08, 1.0, 0.86 ];
 		for ( let i = 0; i < dec.n; i ++ ) {
 			const r = shade( pos[ i * 3 ], pos[ i * 3 + 1 ], pos[ i * 3 + 2 ], nor[ i * 3 ] / 127, nor[ i * 3 + 1 ] / 127, nor[ i * 3 + 2 ] / 127 );
-			const k = Math.min( 1, 0.55 * r[ 0 ] * r[ 1 ] );
-			for ( let c = 0; c < 3; c ++ ) col[ i * 3 + c ] = Math.round( col[ i * 3 + c ] * k );
+			const k = Math.min( 1, 0.62 * r[ 0 ] * r[ 1 ] );
+			for ( let c = 0; c < 3; c ++ ) col[ i * 3 + c ] = Math.min( 255, Math.round( col[ i * 3 + c ] * k * warm[ c ] ) );
 		}
 	}
 }

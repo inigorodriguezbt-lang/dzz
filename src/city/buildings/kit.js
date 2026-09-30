@@ -116,6 +116,14 @@ export function legs( F, x0, z0, x1, z1, h, m, t = 0.05 ) {
 	F.box( x0, 0, z0, x0 + t, h, z0 + t, m, 12 ).box( x1 - t, 0, z0, x1, h, z0 + t, m, 12 ).box( x0, 0, z1 - t, x0 + t, h, z1, m, 12 ).box( x1 - t, 0, z1 - t, x1, h, z1, m, 12 );
 }
 
+// a face of goods (the products or books layer: 4 rows of 0.4 m per repeat) from x0 to x1 and y0 to y1 at depth z,
+// one random row of the texture per shelf (the array layers keep the canvas rows as painted: v grows down)
+export function goods( F, x0, x1, y0, y1, z, layer = L.products, tint = [ 255, 255, 255 ] ) {
+	const R = F.O.R, r = ( R() * 4 ) | 0, u = R() * 4;
+	const m = M( layer, tint, 1, F_IN, { fit: [ u, ( r + 1 ) / 4 - 0.004, u + ( x1 - x0 ) / 1.2, r / 4 + ( 1 - Math.min( 1, ( y1 - y0 ) / 0.4 ) ) / 4 ] } );
+	F.box( x0, y0, z - 0.01, x1, y1, z, { pz: m }, 1 + 2 + 4 + 8 + 32 );
+}
+
 // ---- small things (drawn into the fine mesh by the callers) -------------------------------------------------------
 
 // a flat plate / bowl / mug / glass / can / bottle / box at (lx, ly, lz) of frame F (usually F.fine())

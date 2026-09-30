@@ -4,7 +4,7 @@
 import { L, DECAL } from './data.js';
 import { M } from './plan.js';
 import { F_IN } from './geo.js';
-import { paint, gloss, cloth, wood, metal, DARK, BLACK, CLOTHES, pickOf, frame } from './kit.js';
+import { paint, gloss, cloth, wood, metal, BLACK, CLOTHES, pickOf, frame } from './kit.js';
 
 const SKIN = [ [ 196, 160, 140 ], [ 150, 110, 86 ], [ 110, 80, 62 ], [ 214, 184, 160 ], [ 170, 130, 104 ] ];
 // the dead look grey: skin a little towards green-grey

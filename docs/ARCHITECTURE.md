@@ -82,8 +82,11 @@ evaluates JS in the page after boot (`window.__app`, `window.__app.game`).
 - Render layers: layer 0 = opaque world (drawn into the HDR scene target, casts/receives the sun shadow). Layer 1
   (`LAYER_POST`) = transparent things drawn after the water composite (glass, particles, water). Set `mesh.layers.set(1)`
   for transparent meshes. The first-person view model goes into `game.viewScene` (own camera `game.viewCamera`).
-- Shadows: one sun shadow map follows the camera (±85 m). Set `castShadow` / `receiveShadow` on your meshes. Alpha-tested
-  foliage: `material.alphaTest` + `side: DoubleSide` works in the shadow pass too.
+- Shadows: cascaded sun shadow maps, spheres around the camera (10 / 60 / 450 m on high; render/Shadows.js), one cascade
+  re-rendered per frame. Set `castShadow` / `receiveShadow` on your meshes; every caster is drawn into each cascade its
+  bounds touch, so keep casters cheap (a low LOD, no tiny props far out). Alpha-tested foliage: `material.alphaTest` +
+  `side: DoubleSide` works in the shadow pass too. `patchMaterial( m, key, extra, { pcf: true } )`: the 5-tap PCF instead
+  of the contact-hardening search on the near cascade (thin, many-layered surfaces such as grass blades).
 - Web Workers: `world.pool.submit({ type, ...args }, priority)` returns a job with `.promise`. Worker handlers live in
   `src/workers/world.worker.js`; the worker has `hf` (HeightField) and `world` (meta subset: cities, roads, streets, runways, buildings).
   To add a handler, put your function in your own module file and add ONE line to the handlers map in the worker
@@ -183,6 +186,9 @@ Each module file `src/.../<Module>.js` exports `install(game)` (listed in `src/g
 - Title vistas all use hour 18.25 and hold the clock, matching the loader key art (public/ui/keyart.jpg).
 - FX that must not ghost under TAA (tracers, sparks, muzzle flashes) go on `LAYER_OVERLAY` (Renderer.js), drawn after
   the TAA resolve.
+- `renderScale` < 1 with TAA renders the scene at that scale and the TAA resolve upsamples to the display (the low and medium
+  presets); `renderer.width/height` is the render resolution, `renderer.outWidth/outHeight` the display. Settings v3
+  moves players who kept the v2 low / medium values to the new ones.
 
 ## Shared item ids (so loot tables, NPCs and spawners agree)
 

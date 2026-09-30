@@ -5,12 +5,15 @@
 // never re-renders a cascade, and a camera-centred sphere is also smaller than one around a 90-degree-wide
 // frustum slice. The centre is snapped to the texel grid (no shimmer when moving), and the map is pulled back
 // 200 m toward the light for off-screen casters.
-// Updates are amortised: the near cascade renders every frame, the middle one every 2nd frame, and the last
-// (the widest, most casters) only when the camera has used up the slack its sphere was given, when the light
-// direction took a step, or every LAZY_REFRESH frames for moving casters, and never on the middle one's
-// frames. The light direction the maps use follows the sun in SUN_STEP steps (it moves ~0.1 degree/s at the
-// default day length: re-rendering every cascade whenever it moved made slow frames slower still), and a step
-// reaches each cascade at its own next turn. A jump (time set, sun to moon) re-renders them all at once.
+// Updates are amortised: one cascade a frame. The near one renders on even frames, the middle one on odd
+// frames (each at half the frame rate: a moving caster's shadow is at most a frame late), and the last one (the
+// widest, most casters) takes an odd frame from the middle one when the light direction took a step or every
+// LAZY_REFRESH frames for moving casters. Any cascade renders at once when the camera has used up the slack
+// its sphere was given. (It used to be up to all three a frame, and the widest every 4th: 2-3x spikes.)
+// The light direction the maps use follows the sun in SUN_STEP steps (it moves ~0.1 degree/s at the default day
+// length, and re-rendering every cascade whenever it had moved at all made slow frames slower still: below
+// ~22 fps that was every frame), and a step reaches each cascade at its own next turn. A jump (time set, sun
+// to moon) re-renders them all at once.
 // They are three hidden DirectionalLights whose maps three's WebGLShadowMap renders (the custom depth
 // materials keep working); the lighting samples them in COMMON_GLSL (sunShadowCSM): PCSS on the near cascade
 // (raw depth reads), 5-tap hardware PCF on the others, seams blended over bands that grow with the distance.
@@ -19,11 +22,13 @@ import * as THREE from 'three';
 import { G, CSM_FALLBACK } from './Materials.js';
 
 // splits: the far edge of each cascade (m from the camera)
+// soft: contact-hardening penumbrae (PCSS) on the near cascade, else the plain 5-tap PCF everywhere
 const QUALITY = {
 	off: null,
-	medium: { size: 1024, splits: [ 12, 150 ] },
-	high: { size: 2048, splits: [ 10, 60, 450 ] },
-	ultra: { size: 4096, splits: [ 10, 60, 450 ] },
+	low: { size: 1024, splits: [ 40 ], soft: false },
+	medium: { size: 1024, splits: [ 12, 150 ], soft: false },
+	high: { size: 2048, splits: [ 10, 60, 450 ], soft: true },
+	ultra: { size: 4096, splits: [ 10, 60, 450 ], soft: true },
 };
 const NORMAL_BIAS = [ 0.015, 0.06, 0.3 ];
 const LIGHT_MARGIN = 200;
@@ -67,7 +72,8 @@ export class SunShadows {
 	}
 
 	setQuality( q ) {
-		const cfg = QUALITY[ q ] ?? QUALITY.high;
+		// ('off' maps to null: a plain ?? fallback turned it into 'high', so shadows could never be switched off)
+		const cfg = q in QUALITY ? QUALITY[ q ] : QUALITY.high;
 		for ( const L of this.lights ) L.shadow.dispose();
 		this.lights = [];
 		this.cfg = cfg;
@@ -78,7 +84,6 @@ export class SunShadows {
 		G.uCsm1.value = G.uCsm2.value = CSM_FALLBACK.cmp;
 		if ( ! cfg ) return;
 		const n = cfg.splits.length;
-		this.periods = cfg.splits.map( ( _, i ) => i === 0 ? 1 : 2 );
 		for ( let i = 0; i < n; i ++ ) {
 			const L = new THREE.DirectionalLight( 0xffffff, 0 );
 			L.castShadow = true;
@@ -89,7 +94,7 @@ export class SunShadows {
 			// the sphere: the slice's far edge (with half its seam band) plus the slack
 			const x = i === 0 ? 0 : cfg.splits[ i - 1 ], y = cfg.splits[ i ];
 			const far = i === n - 1 ? y : y + this._margin( y ) * 0.5;
-			const slack = Math.max( 0.5, y * SLACK );
+			const slack = Math.max( 1.5, y * SLACK );
 			L.userData = { dirty: true, stale: false, last: - 1e9, centre: new THREE.Vector3( 1e9, 0, 0 ), slack, radius: Math.ceil( ( far + slack ) * 16 ) / 16, x, y, far };
 			// the near cascade is read raw (PCSS): a plain depth texture, nearest; the others compare in hardware
 			// (the colour attachment is never read: one byte per texel instead of four)
@@ -108,6 +113,7 @@ export class SunShadows {
 			this.lights.push( L );
 		}
 		G.uCsmCount.value = n;
+		G.uCsmSoft.value = cfg.soft ? 1 : 0;
 		G.uCsmSize.value = cfg.size;
 		G.uCsmBias.value = this.r.reversed ? BIAS : - BIAS;
 		G.uCsm0.value = this.lights[ 0 ].shadow.map.depthTexture;
@@ -179,16 +185,20 @@ export class SunShadows {
 			this.lightDir.copy( L );
 			for ( const light of this.lights ) light.userData.stale = true;
 		}
-		// the last cascade takes the frames the middle one skips (no frame renders both)
-		const midTurn = n > 2 && ( this.frame + 1 ) % this.periods[ 1 ] === 0;
+		// even frames: the near cascade; odd frames: the middle one, or the last one when it is due (the
+		// middle one then waits a turn): one cascade a frame, never two
+		const phase = this.frame % 2;
+		const lz = this.lights[ last ].userData;
+		const lazyDue = n > 1 && phase === 1 && ( lz.stale || this.frame - lz.last >= LAZY_REFRESH );
 		const todo = [];
 		for ( let i = 0; i < n; i ++ ) {
 			const light = this.lights[ i ], u = light.userData;
 			const moved = _center.distanceToSquared( u.centre ) > u.slack * u.slack;
 			let due = u.dirty || moved;
 			if ( ! due ) {
-				if ( i < last || n === 1 ) due = ( this.frame + i ) % this.periods[ i ] === 0;
-				else due = ! midTurn && ( u.stale || this.frame - u.last >= LAZY_REFRESH );
+				if ( i === 0 ) due = phase === 0;
+				else if ( i === last ) due = lazyDue;
+				else due = phase === 1 && ! lazyDue;
 			}
 			if ( ! due ) continue;
 			this._fit( i, _center, this.lightDir );

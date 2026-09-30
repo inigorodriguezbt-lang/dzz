@@ -136,6 +136,21 @@ window.__inside = ( i, fx = 0.5, fz = 0.5, si = 0, yawDeg = 0, pitch = 0 ) => {
 	const t = Math.PI - r.angle + yawDeg * Math.PI / 180;
 	window.__view( x, P.S.ys[ si ] + 1.6, z, t * 180 / Math.PI, pitch );
 };
+// stand in the k-th room of `kind` on storey si at room fractions from = [ fx, fz ], looking at to = [ tx, ty (m over the
+// floor), tz ]; shows the building's storey first when show is set
+window.__room = ( i, si, kind, k = 0, from = [ 0.5, 0.5 ], to = [ 0.5, 1.2, 1 ], show = true ) => {
+	const r = readBuilding( data, i );
+	const P = makePlan( r, W.cities ), st = P.storeys[ si ];
+	const rm = st.rooms.filter( x => x.k === kind )[ k ];
+	if ( ! rm ) return 'no ' + kind + ' in ' + st.rooms.map( x => x.k ).join( ',' );
+	if ( show ) window.__show( [ i ], { int: si ? [ 0, si ] : [ 0 ] } );
+	const w = ( a, b ) => [ r.x + a * r.c - b * r.s, r.z + a * r.s + b * r.c ];
+	const [ x, z ] = w( rm.x0 + ( rm.x1 - rm.x0 ) * from[ 0 ], rm.z0 + ( rm.z1 - rm.z0 ) * from[ 1 ] );
+	const [ tx, tz ] = w( rm.x0 + ( rm.x1 - rm.x0 ) * to[ 0 ], rm.z0 + ( rm.z1 - rm.z0 ) * to[ 2 ] );
+	cam.position.set( x, st.y + 1.62, z ); cam.lookAt( tx, st.y + to[ 1 ], tz ); cam.updateMatrixWorld();
+	return kind + ' ' + ( rm.x1 - rm.x0 ).toFixed( 1 ) + 'x' + ( rm.z1 - rm.z0 ).toFixed( 1 );
+};
+window.__fov = ( f ) => { cam.fov = f; cam.updateProjectionMatrix(); };
 const ids = ( q.get( 'ids' ) || '3221' ).split( ',' ).map( Number );
 window.__show( ids, { lod: + ( q.get( 'lod' ) || 0 ), int: q.get( 'int' ) ? [ 0 ] : [] } );
 window.__front( ids[ 0 ], 18 );

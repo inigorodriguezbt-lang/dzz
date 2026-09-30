@@ -68,7 +68,12 @@ export const HIDE_GLSL = /* glsl */`
 const VERT = /* glsl */`#include <begin_vertex>
 	vTUv = aUv; vTint = pow( aCol, vec3( 2.2 ) ); vMat = aMat;
 	#ifdef INTERIOR
-		vLt = aLt;
+		#ifdef DOOR
+			// door leaves (instanced): the light of the side each face looks at, no corner occlusion
+			vLt = vec2( objectNormal.z > 0.0 ? aLt.y : aLt.x, 1.0 );
+		#else
+			vLt = aLt;
+		#endif
 	#endif
 	#ifdef FACADE
 		vWinUV = aWin.xy / 32.0;
@@ -407,7 +412,7 @@ function makeLit( key, defines, T, state ) {
 					// (tuning views: 1 the baked daylight, 2 the occlusion)
 					if ( uInDebug > 0.5 ) { reflectedLight.directDiffuse = vec3( 0.0 ); reflectedLight.directSpecular = vec3( 0.0 ); reflectedLight.indirectSpecular = vec3( 0.0 ); reflectedLight.indirectDiffuse = vec3( uInDebug < 1.5 ? bLm * 0.5 : bAo ); }
 				}` );
-	} );
+	}, { noWet: !! defines.INTERIOR } ); // (rain doesn't wet the floors indoors)
 	return mat;
 }
 
@@ -426,6 +431,8 @@ function makeDepth( key, far, state ) {
 }
 
 let _mats = null;
+const beamU = { uBeamK: { value: 0.012 } };
+const glassU = { uGlassRefl: { value: 1 } };
 export function buildingMaterials( nBuildings ) {
 	if ( _mats ) return _mats;
 	const T = buildingTextures();
@@ -440,18 +447,73 @@ export function buildingMaterials( nBuildings ) {
 		color: 0x9fb4b4, roughness: 0.04, metalness: 0.0, transparent: true, opacity: 0.22, depthWrite: false, side: THREE.DoubleSide,
 	} ), 'bld-glass', ( sh ) => {
 		// dusty, smudged panes: a little more opaque in patches
+		sh.uniforms.uGlassRefl = glassU.uGlassRefl;
 		sh.fragmentShader = sh.fragmentShader.replace( '#include <alphamap_fragment>', /* glsl */`#include <alphamap_fragment>
-			diffuseColor.a *= 0.8 + 0.5 * vnoise2( vWorldPos.xz * 2.3 + vWorldPos.y * 3.1 );` );
+			diffuseColor.a *= 0.8 + 0.5 * vnoise2( vWorldPos.xz * 2.3 + vWorldPos.y * 3.1 );` )
+			// seen from indoors the panes mirror the dim room, not the bright sky (display cases read as solid blue)
+			.replace( 'void main() {', 'uniform float uGlassRefl;\nvoid main() {' )
+			.replace( '#include <lights_fragment_end>', '#include <lights_fragment_end>\nreflectedLight.indirectSpecular *= uGlassRefl;' );
 	} );
 	const decal = patchMaterial( new THREE.MeshStandardMaterial( {
 		map: T.decals, roughness: 0.75, metalness: 0, transparent: true, depthWrite: false, vertexColors: true,
 		polygonOffset: true, polygonOffsetFactor: - 2, polygonOffsetUnits: - 4,
-	} ), 'bld-decal' );
+	} ), 'bld-decal', ( sh ) => {
+		// indoors, like the interior shader: greyer sky light and next to no sky reflection (a blue sheen on
+		// dark blood reads purple)
+		sh.fragmentShader = sh.fragmentShader.replace( '#include <lights_fragment_end>', /* glsl */`#include <lights_fragment_end>
+			reflectedLight.indirectDiffuse = mix( vec3( dot( reflectedLight.indirectDiffuse, vec3( 0.2126, 0.7152, 0.0722 ) ) ), reflectedLight.indirectDiffuse, 0.3 ) * vec3( 1.06, 1.0, 0.9 );
+			reflectedLight.indirectSpecular *= 0.12;` );
+	}, { noWet: true } );
+	// sunbeams in the rooms: the view ray through each beam box (interior.js beamsOf) is marched against the
+	// nearest sun shadow cascade; dusty air scatters what gets in through the windows, most when you look
+	// towards the sun. Additive, in the transparent pass; only while the building's interior casts the shadows
+	const beam = patchMaterial( new THREE.MeshBasicMaterial( { transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false } ), 'bld-beam', ( sh ) => {
+		sh.uniforms.uBeamK = beamU.uBeamK;
+		sh.vertexShader = sh.vertexShader
+			.replace( '#include <common>', '#include <common>\nattribute vec3 aBMin; attribute vec3 aBMax; varying vec3 vBMin; varying vec3 vBMax; varying vec3 vLoc; varying vec3 vCamL; flat varying mat4 vModel;' )
+			.replace( '#include <begin_vertex>', '#include <begin_vertex>\nvBMin = aBMin; vBMax = aBMax; vLoc = position; vCamL = ( inverse( modelMatrix ) * vec4( cameraPosition, 1.0 ) ).xyz; vModel = modelMatrix;' );
+		sh.fragmentShader = sh.fragmentShader
+			.replace( 'void main() {', /* glsl */`uniform float uBeamK;
+				// modelMatrix is a vertex-stage uniform only
+				varying vec3 vBMin; varying vec3 vBMax; varying vec3 vLoc; varying vec3 vCamL; flat varying mat4 vModel;
+				float bSunAt( vec3 P ) {
+					if ( uCsmOn < 0.5 ) return 0.0;
+					vec4 sc = uCsmMat[ 0 ] * vec4( P, 1.0 );
+					if ( any( lessThan( sc.xyz, vec3( 0.0 ) ) ) || any( greaterThan( sc.xy, vec2( 1.0 ) ) ) ) return 0.0;
+					return csmTap( 0, sc.xy, sc.z + uCsmBias );
+				}
+				void main() {` )
+			.replace( '#include <opaque_fragment>', /* glsl */`
+				if ( uSunDir.y < 0.03 ) discard;
+				vec3 ro = vCamL, rd = vLoc - vCamL;
+				float len = length( rd ); rd /= len;
+				vec3 inv = 1.0 / ( abs( rd ) + 1e-6 ) * sign( rd + 1e-7 );
+				vec3 t0 = ( vBMin - ro ) * inv, t1 = ( vBMax - ro ) * inv;
+				vec3 tmn = min( t0, t1 ), tmx = max( t0, t1 );
+				float tn = max( max( tmn.x, tmn.y ), max( tmn.z, 0.0 ) ), tf = min( min( tmx.x, tmx.y ), tmx.z );
+				// seen from outside the box: march from this front face through it; from inside: from the eye to the back face
+				if ( gl_FrontFacing ) tn = len; else { if ( tn > 0.01 ) discard; tf = len; }
+				if ( tf <= tn + 0.01 ) discard;
+				float jit = dtIGN( gl_FragCoord.xy + mod( uFrame, 64.0 ) * 5.588238 );
+				float acc = 0.0;
+				const int NB = 12;
+				float dt = ( tf - tn ) / float( NB );
+				for ( int i = 0; i < NB; i ++ ) {
+					vec3 pw = ( vModel * vec4( ro + rd * ( tn + ( float( i ) + jit ) * dt ), 1.0 ) ).xyz;
+					float dust = 0.55 + 0.9 * vnoise2( pw.xz * 2.7 + pw.y * 1.9 + uTime * 0.03 );
+					acc += bSunAt( pw ) * dust;
+				}
+				vec3 rdw = normalize( mat3( vModel ) * rd );
+				float ph = 0.3 + 1.0 * pow( max( dot( rdw, uSunDir ), 0.0 ), 8.0 );
+				gl_FragColor = vec4( uSunColor * ( acc * dt * ph * uBeamK * smoothstep( 0.03, 0.2, uSunDir.y ) ), 1.0 );` );
+	}, { noWet: true } );
+	beam.defines = { NO_ATMOS_FOG: '' };
 	_mats = {
-		T, state, stateData: data, rows,
+		T, state, stateData: data, rows, beam, beamU, glassU,
 		near: makeLit( 'bld-near', { FACADE: '' }, T, state ),
 		far: makeLit( 'bld-far', { FACADE: '', LOD_FAR: '' }, T, state ),
 		interior: makeLit( 'bld-int', { INTERIOR: '' }, T, state ),
+		door: makeLit( 'bld-door', { INTERIOR: '', DOOR: '' }, T, state ),
 		depthNear: makeDepth( 'bld-depth-near', false, state ),
 		depthFar: makeDepth( 'bld-depth-far', true, state ),
 		glass, decal,
@@ -476,7 +538,7 @@ export function commitState( M ) {
 
 // interior light when the sun can't be shadowed (shadows off): keep the sun off interior floors
 export function setShadowsEnabled( M, on ) {
-	for ( const m of [ M.near, M.far, M.interior ] ) m.userData.u.uInSun.value = on ? 1 : 0.2;
+	for ( const m of [ M.near, M.far, M.interior, M.door ] ) m.userData.u.uInSun.value = on ? 1 : 0.2;
 }
 
 // once on the GPU the CPU copies are dead weight (bounds are set up front, nothing raycasts these meshes)
@@ -519,6 +581,16 @@ export function decalToBuffer( g ) {
 	const bb = g.bounds;
 	b.boundingBox = new THREE.Box3( new THREE.Vector3( bb[ 0 ], bb[ 1 ], bb[ 2 ] ), new THREE.Vector3( bb[ 3 ], bb[ 4 ], bb[ 5 ] ) );
 	b.boundingSphere = b.boundingBox.getBoundingSphere( new THREE.Sphere() );
+	return b;
+}
+
+export function beamToBuffer( g ) {
+	const b = new THREE.BufferGeometry();
+	b.setAttribute( 'position', new THREE.BufferAttribute( g.pos, 3 ) );
+	b.setAttribute( 'aBMin', new THREE.BufferAttribute( g.bmin, 3 ) );
+	b.setAttribute( 'aBMax', new THREE.BufferAttribute( g.bmax, 3 ) );
+	b.setIndex( new THREE.BufferAttribute( g.idx, 1 ) );
+	b.computeBoundingSphere();
 	return b;
 }
 

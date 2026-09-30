@@ -5,9 +5,11 @@ import { L } from './data.js';
 import { M } from './plan.js';
 import { F_IN } from './geo.js';
 import {
-	paint, gloss, wood, metal, cloth, chrome, card, art, DARK, WHITE, BLACK, STEEL, CHROME, PORCELAIN, SCREEN, PLASTIC,
-	SOFA, BLANKET, WOODS, CLOTHES, pickOf, legs, plate, bowl, mug, glassCup, can, bottle, carton, book, scatter, SMALL,
+	paint, gloss, wood, metal, cloth, card, art, DARK, WHITE, BLACK, STEEL, CHROME, PORCELAIN, SCREEN, PLASTIC,
+	SOFA, BLANKET, WOODS, CLOTHES, pickOf, legs, plate, bowl, mug, glassCup, book, scatter, SMALL, goods,
 } from './kit.js';
+
+const MIRROR = gloss( [ 170, 184, 190 ] );
 
 // ---- kitchens ---------------------------------------------------------------------------------------------------------
 
@@ -84,18 +86,23 @@ export function kitchenRun( F, len, o = {} ) {
 		if ( i !== si ) F.container( a, 0.1, 0, b, 0.88, 0.58, 'Cabinet', loot, 20, { empty: looted ? 0.5 : 0.22 } );
 	}
 	if ( o.upper !== false ) {
-		// wall cabinets, a hood over the stove
+		// wall cabinets (not in front of a window), a hood over the stove
+		const ok = o.upperAt || ( () => true );
+		let any = false;
 		for ( let i = 0; i < n; i ++ ) {
 			const a = - len / 2 + i * cw, b = a + cw;
+			if ( ! ok( a, b ) ) continue;
+			any = true;
 			if ( i === so ) {
 				F.box( a + 0.02, 1.62, 0, b - 0.02, 1.72, 0.48, steel ? STEEL : gloss( [ 60, 60, 62 ] ) ).box( a + 0.12, 1.72, 0, b - 0.12, 2.15, 0.28, steel ? STEEL : gloss( [ 60, 60, 62 ] ) );
 				continue;
 			}
 			F.box( a, 1.45, 0, b, 2.15, 0.33, body, 0 );
 			front( F, a, b, 1.46, 2.14, 0.33, door, 'knob', looted && R() < 0.2 ? 0.8 + R() : 0 );
-			if ( i % 2 === 0 ) F.container( a, 1.45, 0, Math.min( len / 2, b + cw ), 2.15, 0.35, 'Cabinet', loot, 10, { n: 1, empty: looted ? 0.55 : 0.3 } );
+			if ( i % 2 === 0 ) F.container( a, 1.45, 0, b, 2.15, 0.35, 'Cabinet', loot, 10, { n: 1, empty: looted ? 0.55 : 0.3 } );
+			F.col( a, 1.45, 0, b, 2.15, 0.34, 1, 2 );
 		}
-		F.col( - len / 2, 1.45, 0, len / 2, 2.15, 0.34, 1, 2 );
+		void any;
 	}
 	// on the worktop: an appliance or two, bottles, a dish rack, a knife block, a fruit bowl
 	const f = F.fine();
@@ -277,8 +284,7 @@ export function bookcase( F, w, h = 1.9, o = {} ) {
 	const n = Math.max( 3, Math.round( h / 0.38 ) );
 	F.box( - w / 2, 0, 0, w / 2, h, 0.02, m ).box( - w / 2, 0, 0, - w / 2 + 0.025, h, d, m ).box( w / 2 - 0.025, 0, 0, w / 2, h, d, m );
 	for ( let k = 0; k <= n; k ++ ) F.box( - w / 2 + 0.025, k * ( h - 0.02 ) / n, 0, w / 2 - 0.025, k * ( h - 0.02 ) / n + 0.02, d, m );
-	const bm = M( L.books, [ 255, 255, 255 ], 1, F_IN, { fit: [ 0, 0, w / 1.2, h / 1.6 ] } );
-	F.box( - w / 2 + 0.03, 0.02, 0.03, w / 2 - 0.03, h - 0.04, d - 0.07, { pz: bm }, 1 + 2 + 4 + 8 + 32 );
+	for ( let k = 0; k < n; k ++ ) goods( F, - w / 2 + 0.03, w / 2 - 0.03, k * ( h - 0.02 ) / n + 0.02, ( k + 1 ) * ( h - 0.02 ) / n - 0.02, d - 0.07, L.books );
 	const f = F.fine();
 	for ( let k = 1; k < n; k ++ ) if ( R() < 0.4 ) { const y = k * ( h - 0.02 ) / n + 0.02; const x = ( R() - 0.5 ) * ( w - 0.3 ); R() < 0.5 ? f.cyl( x, y, d - 0.05, 0.04, 0.18, 8, gloss( pickOf( R, [ [ 60, 110, 150 ], [ 200, 190, 170 ], [ 150, 60, 40 ] ] ) ), 3, 0.025 ) : f.box( x - 0.08, y, d - 0.07, x + 0.08, y + 0.12, d - 0.06, art( pickOf( R, [ 6, 7, 0 ] ) ) ); }
 	// books pulled out onto the floor
@@ -375,15 +381,24 @@ export function bed( F, w, len, o = {} ) {
 	F.box( - w / 2, 0.12, 0.06, w / 2, 0.3, len, frameM );
 	for ( const s of [ - 1, 1 ] ) F.box( s * ( w / 2 - 0.03 ) - 0.03, 0, len - 0.06, s * ( w / 2 - 0.03 ) + 0.03, 0.12, len, frameM );
 	F.box( - w / 2 + 0.02, 0.3, 0.07, w / 2 - 0.02, 0.5, len - 0.02, sheet );
-	// the duvet: turned back, rumpled, hanging over the sides
-	const t = 0.35 + R() * 0.45, messy = o.messy ?? R() < 0.6;
-	F.rbox( 0, 0.53, ( t + len ) / 2, w / 2 + 0.03, 0.035, ( len - t ) / 2 + 0.02, cover, messy ? R() * 0.08 - 0.04 : 0 );
-	F.box( - w / 2 - 0.035, 0.28, t, - w / 2 - 0.005, 0.56, len + 0.02, cover ).box( w / 2 + 0.005, 0.28, t, w / 2 + 0.035, 0.56, len + 0.02, cover ).box( - w / 2 - 0.035, 0.28, len - 0.005, w / 2 + 0.035, 0.56, len + 0.03, cover );
-	if ( messy ) { F.rbox( ( R() - 0.5 ) * w * 0.4, 0.59, t + 0.35, w * 0.3, 0.05, 0.18, cover, R() * 0.8 - 0.4, 0, 0.1 ); F.rbox( ( R() - 0.5 ) * w * 0.4, 0.58, len - 0.5, w * 0.25, 0.04, 0.2, cover, R() * 0.8 - 0.4 ); }
+	// the duvet: turned back over itself, thick with rounded edges, hanging over the sides; rumpled when slept in
+	const t = 0.4 + R() * 0.4, messy = o.messy ?? R() < 0.6;
+	const top = 0.6;
+	F.box( - w / 2 - 0.02, 0.5, t, w / 2 + 0.02, top - 0.02, len + 0.01, cover );
+	F.box( - w / 2 + 0.02, top - 0.02, t + 0.03, w / 2 - 0.02, top, len - 0.02, cover, 8 );
+	F.box( - w / 2 - 0.045, 0.24, t + 0.02, - w / 2 - 0.02, 0.56, len - 0.02, cover ).box( w / 2 + 0.02, 0.24, t + 0.02, w / 2 + 0.045, 0.56, len - 0.02, cover );
+	F.box( - w / 2 - 0.02, 0.24, len + 0.01, w / 2 + 0.02, 0.56, len + 0.04, cover );
+	// the turned-back fold
+	F.box( - w / 2 - 0.02, top - 0.01, t - 0.02, w / 2 + 0.02, top + 0.05, t + 0.22, cover ).box( - w / 2, top + 0.05, t + 0.01, w / 2, top + 0.065, t + 0.19, cover, 8 );
+	if ( messy ) {
+		// low bulges, mostly sunk into the duvet (tall slabs read as planks)
+		for ( let k = 0; k < 3; k ++ ) F.rbox( ( R() - 0.5 ) * w * 0.5, top + 0.005, t + 0.45 + R() * ( len - t - 0.8 ), w * ( 0.12 + R() * 0.1 ), 0.025, 0.1 + R() * 0.1, cover, ( R() - 0.5 ) * 0.8, 0, ( R() - 0.5 ) * 0.1 );
+	}
 	const np = w > 1.2 ? 2 : 1;
 	for ( let i = 0; i < np; i ++ ) {
-		const cx = np === 1 ? 0 : ( i ? w / 4 : - w / 4 );
-		F.rbox( cx + ( R() - 0.5 ) * 0.06, 0.58, 0.28, Math.min( 0.3, w / np / 2 - 0.04 ), 0.07, 0.17, sheet, R() * 0.2 - 0.1, 0.15 );
+		const cx = np === 1 ? 0 : ( i ? w / 4 : - w / 4 ), pw = Math.min( 0.32, w / np / 2 - 0.03 );
+		const a = R() * 0.24 - 0.12, P = F.at( cx + ( R() - 0.5 ) * 0.06, 0.52, 0.3, a );
+		P.rbox( 0, 0.06, 0, pw, 0.06, 0.2, sheet, 0, 0.18 ).rbox( 0, 0.11, 0.01, pw - 0.04, 0.035, 0.16, sheet, 0, 0.18 );
 	}
 	F.col( - w / 2, 0, 0, w / 2, 0.56, len, 1, 2 );
 	F.bed( - w / 2, 0, 0, w / 2, 0.6, len, o.q ?? 1, 'Sleep' );
@@ -451,7 +466,7 @@ export function dresser( F, w = 1.1, loot = 'house_bedroom', o = {} ) {
 		} else front( F, - w / 2 + 0.01, w / 2 - 0.01, y0, y1, 0.46, m, 'bar' );
 	}
 	if ( o.mirror ?? R() < 0.6 ) {
-		F.box( - w * 0.35, 0.88, 0.02, w * 0.35, 1.7, 0.05, m ).box( - w * 0.35 + 0.04, 0.92, 0.05, w * 0.35 - 0.04, 1.66, 0.052, chrome( [ 180, 190, 194 ] ) );
+		F.box( - w * 0.35, 0.88, 0.02, w * 0.35, 1.7, 0.05, m ).box( - w * 0.35 + 0.04, 0.92, 0.05, w * 0.35 - 0.04, 1.66, 0.052, MIRROR );
 	}
 	F.col( - w / 2, 0, 0, w / 2, 0.88, 0.48, 1, 2 );
 	F.container( - w / 2, 0, 0, w / 2, 0.88, 0.48, 'Drawers', loot, 16, { empty: looted ? 0.45 : 0.22 } );
@@ -565,10 +580,11 @@ export function bathtub( F, len = 1.6, o = {} ) {
 	F.box( - len / 2 + 0.1, 0.62, 0.02, - len / 2 + 0.2, 0.66, 0.1, CHROME ).cyl( - len / 2 + 0.15, 0.66, 0.06, 0.012, 1.3, 6, CHROME ).cyl( - len / 2 + 0.15, 1.96, 0.14, 0.06, 0.03, 10, CHROME );
 	F.tap( - len / 2 + 0.15, 0.66, 0.18 );
 	if ( o.shower !== false ) {
-		// curtain rail along the open side and the curtain bunched at one end
+		// curtain rail along the open side, the curtain drawn part way: pleats hanging from the rings
 		F.box( - len / 2, 2.0, d - 0.02, len / 2, 2.02, d, CHROME );
-		const cw = 0.3 + R() * ( len - 0.4 ), cm = cloth( pickOf( R, [ [ 236, 236, 230 ], [ 150, 190, 210 ], [ 200, 220, 200 ], [ 240, 200, 200 ] ] ) );
-		for ( let k = 0; k < Math.ceil( cw / 0.12 ); k ++ ) F.box( len / 2 - cw + k * 0.12, 0.58, d - 0.04 + ( k % 2 ) * 0.03, len / 2 - cw + k * 0.12 + 0.12, 1.99, d - 0.035 + ( k % 2 ) * 0.03, cm );
+		const cw = 0.35 + R() * ( len - 0.5 ), cm = cloth( pickOf( R, [ [ 236, 236, 230 ], [ 150, 190, 210 ], [ 200, 220, 200 ], [ 240, 200, 200 ] ] ) );
+		const np = Math.ceil( cw / 0.09 );
+		for ( let k = 0; k < np; k ++ ) { const x = len / 2 - cw + k * cw / np; F.rbox( x + cw / np / 2, 1.28, d - 0.03 + ( k % 2 ) * 0.035, cw / np / 2 + 0.012, 0.71, 0.006, cm, ( k % 2 ? 0.6 : - 0.6 ) ); }
 	}
 	scatter( F, - len / 2 + 0.2, 0.01, len / 2 - 0.1, 0.06, 0.56, 1 + ( R() * 3 | 0 ), [ SMALL.bottle, SMALL.pills, ( f, x, y, z, R ) => f.cyl( x, y, z, 0.03, 0.18, 8, gloss( pickOf( R, [ [ 240, 240, 236 ], [ 60, 150, 200 ], [ 240, 150, 60 ] ] ) ) ) ] );
 	if ( R() < 0.12 ) F.O.decalAt( F, 0, d / 2, Math.min( 1.2, len - 0.3 ), 'blood', 0.135 );
@@ -603,8 +619,8 @@ export function vanity( F, w = 0.7, loot = 'medicine_cabinet', o = {} ) {
 	if ( o.mirror !== false ) {
 		const open = R() < 0.25;
 		F.box( - 0.3, 1.15, 0, 0.3, 1.8, 0.12, gloss( [ 236, 236, 232 ] ) );
-		if ( open ) { F.box( - 0.28, 1.17, 0.11, 0.28, 1.78, 0.115, DARK ); F.rbox( - 0.3 + Math.cos( 1.4 ) * 0.29, 1.475, 0.12 + Math.sin( 1.4 ) * 0.29, 0.29, 0.32, 0.01, chrome( [ 200, 210, 214 ] ), - 1.4 ); }
-		else F.box( - 0.28, 1.17, 0.12, 0.28, 1.78, 0.125, chrome( [ 200, 210, 214 ] ) );
+		if ( open ) { F.box( - 0.28, 1.17, 0.11, 0.28, 1.78, 0.115, DARK ); F.rbox( - 0.3 + Math.cos( 1.4 ) * 0.29, 1.475, 0.12 + Math.sin( 1.4 ) * 0.29, 0.29, 0.32, 0.01, MIRROR, - 1.4 ); }
+		else F.box( - 0.28, 1.17, 0.12, 0.28, 1.78, 0.125, MIRROR );
 		if ( loot ) F.container( - 0.3, 1.15, 0, 0.3, 1.8, 0.14, 'Medicine cabinet', loot, 6, { empty: open ? 0.55 : 0.25 } );
 	}
 	scatter( F, - w / 2 + 0.06, 0.03, - 0.18, 0.2, 0.86, 1 + ( R() * 2 | 0 ), [ SMALL.pills, ( f, x, y, z ) => f.cyl( x, y, z, 0.035, 0.1, 8, gloss( [ 200, 220, 230 ] ) ).box( x - 0.004, y + 0.1, z - 0.004, x + 0.004, y + 0.18, z + 0.004, paint( [ 60, 140, 200 ] ) ), SMALL.bottle ] );
@@ -768,7 +784,7 @@ export function jerryCan( F, lx, lz, a = 0 ) {
 export function bicycle( F, lx, lz, a = 0 ) {
 	const f = F.fine(), R = F.O.R, m = paint( pickOf( R, [ [ 190, 30, 30 ], [ 30, 90, 160 ], [ 40, 40, 44 ], [ 230, 230, 230 ] ] ) );
 	const B = f.at( lx, 0, lz, a );
-	for ( const x of [ - 0.52, 0.52 ] ) B.cylH( x, 0.34, 0, 0.34, 0.035, 14, BLACK, 'z', 0 );
+	for ( const x of [ - 0.52, 0.52 ] ) B.cylH( x, 0.34, 0, 0.34, 0.035, 16, paint( [ 30, 30, 32 ] ), 'z' ).cylH( x, 0.34, 0, 0.05, 0.06, 8, CHROME, 'z' );
 	B.rbox( - 0.2, 0.52, 0, 0.3, 0.018, 0.018, m, 0, 0, 0.35 ).rbox( 0.15, 0.62, 0, 0.3, 0.018, 0.018, m ).rbox( 0.3, 0.5, 0, 0.018, 0.2, 0.018, m, 0, 0, 0.4 );
 	B.box( - 0.3, 0.75, - 0.08, - 0.12, 0.79, 0.08, BLACK ).box( 0.38, 0.86, - 0.25, 0.42, 0.89, 0.25, BLACK );
 }

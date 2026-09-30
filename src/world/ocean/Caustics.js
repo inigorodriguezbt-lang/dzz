@@ -119,11 +119,12 @@ export class Caustics {
 
 	get texture() { return this.rt.texture; }
 
-	// every frame; on a machine running below ~22 fps (the splatting is ~1M tiny triangles) every 4th, and not
-	// for the near-zero steps of a load (the pattern would not change)
+	// every 2nd frame (perf: the splatting is ~1M tiny triangles; the light on the seabed drifts slowly, 30 Hz
+	// is plenty); on a machine running below ~22 fps every 4th, and not for the near-zero steps of a load (the
+	// pattern would not change)
 	update( deriv, sunDir, dt = 1 / 60 ) {
 		this._n = ( this._n || 0 ) + 1;
-		if ( this._done && ( dt < 0.004 || ( dt > 0.045 && this._n % 4 !== 0 ) ) ) return;
+		if ( this._done && ( dt < 0.004 || this._n % ( dt > 0.045 ? 4 : 2 ) !== 0 ) ) return;
 		this._done = true;
 		const gl = this.renderer;
 		this.uniforms.uOceanDeriv.value = deriv;

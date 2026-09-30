@@ -45,23 +45,37 @@ export const DEFAULTS = {
 	showInteractHints: true, compass: true, minimap: true, units: 'metric', tutorial: true,
 };
 
-// the heavy passes (GTAO, the shaft march, TAA) are off on low; medium keeps the half resolution AO
+// low: integrated GPUs; medium: integrated / entry-level; high: mid-range at 1080p; ultra: high-end.
+// Most of a frame is per-pixel work, so low and medium render at a lower scale and the TAA resolve upsamples
+// it to the display (render/Renderer.js): far better looking than a stretched canvas at the same cost. Low
+// keeps one near shadow cascade (PCF) instead of none, drops the heavy passes (GTAO, the shaft march, the
+// clouds); medium keeps the half-resolution AO and two cascades (PCF).
 export const QUALITY_PRESETS = {
-	low: { shadows: 'off', terrainDetail: 'low', vegetation: 'low', clouds: 'off', antialias: 'fxaa', bloom: false, water: 'low', grass: false, renderScale: 0.75, renderDistance: 800, ao: false, shafts: false, lensFlare: false },
-	medium: { shadows: 'medium', terrainDetail: 'medium', vegetation: 'medium', clouds: 'low', antialias: 'fxaa', bloom: true, water: 'medium', grass: true, renderScale: 1, renderDistance: 1100, ao: true, shafts: false, lensFlare: true },
+	low: { shadows: 'low', terrainDetail: 'low', vegetation: 'low', clouds: 'off', antialias: 'taa', bloom: false, water: 'low', grass: false, renderScale: 0.67, renderDistance: 800, ao: false, shafts: false, lensFlare: false },
+	medium: { shadows: 'medium', terrainDetail: 'medium', vegetation: 'medium', clouds: 'low', antialias: 'taa', bloom: true, water: 'medium', grass: true, renderScale: 0.75, renderDistance: 1100, ao: true, shafts: false, lensFlare: true },
 	high: { shadows: 'high', terrainDetail: 'high', vegetation: 'high', clouds: 'high', antialias: 'taa', bloom: true, water: 'high', grass: true, renderScale: 1, renderDistance: 1400, ao: true, shafts: true, lensFlare: true },
 	ultra: { shadows: 'ultra', terrainDetail: 'ultra', vegetation: 'ultra', clouds: 'high', antialias: 'taa', bloom: true, water: 'high', grass: true, renderScale: 1, renderDistance: 2200, ao: true, shafts: true, lensFlare: true },
 };
+// the v2 presets: v3 moves keys a player never changed from them to the new values
+const PRESETS_V2 = {
+	low: { shadows: 'off', antialias: 'fxaa', renderScale: 0.75 },
+	medium: { antialias: 'fxaa', renderScale: 1 },
+};
 
 // settings saved before the rendering port: the old default FOV (80) becomes 62, the high / ultra presets'
-// MSAA becomes TAA, and keys new to a saved preset take that preset's value (so it isn't shown as custom)
-const VERSION = 2;
+// MSAA becomes TAA, and keys new to a saved preset take that preset's value (so it isn't shown as custom).
+// v3: the retuned low / medium presets (TAA upsampling, a near shadow cascade on low) replace the v2 values
+// the player kept
+const VERSION = 3;
 function migrate( s ) {
-	if ( ( s.version ?? 1 ) >= VERSION ) return;
-	if ( s.fov === 80 ) s.fov = 62;
+	const v = s.version ?? 1;
+	if ( v >= VERSION ) return;
+	if ( v < 2 && s.fov === 80 ) s.fov = 62;
 	const p = QUALITY_PRESETS[ s.quality ];
 	if ( p ) {
-		if ( p.antialias === 'taa' && s.antialias === 'msaa' ) s.antialias = 'taa';
+		if ( v < 2 && p.antialias === 'taa' && s.antialias === 'msaa' ) s.antialias = 'taa';
+		const old = PRESETS_V2[ s.quality ];
+		if ( old ) for ( const k in old ) if ( s[ k ] === old[ k ] ) s[ k ] = p[ k ];
 		for ( const k in p ) if ( ! ( k in s ) ) s[ k ] = p[ k ];
 	}
 	s.version = VERSION;

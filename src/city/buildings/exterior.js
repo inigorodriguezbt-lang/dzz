@@ -1,7 +1,7 @@
 // Exterior shells: facades (windows drawn by the facade shader), roofs, plinths, porches, galleries,
 // awnings, signs, canopies and rooftop clutter. Everything a storey owns is tagged with that storey so
 // the shell can hide it while the real interior of that storey is loaded (the interior rebuilds it).
-import { L, hash32, rng, pick, pumpsOf } from './data.js';
+import { L, hash32, rng, pumpsOf } from './data.js';
 import { M, slabT, SIDE_N, extOf } from './plan.js';
 import { signFor, signUV, signIndex, SIGNS } from './names.js';
 

@@ -4,8 +4,8 @@ import { L } from './data.js';
 import { M } from './plan.js';
 import { F_IN } from './geo.js';
 import {
-	paint, gloss, wood, metal, cloth, chrome, card, art, DARK, WHITE, BLACK, STEEL, CHROME, PORCELAIN, SCREEN, PLASTIC,
-	SOFA, BLANKET, WOODS, CLOTHES, pickOf, legs, plate, mug, can, bottle, carton, scatter, SMALL,
+	paint, gloss, wood, metal, cloth, chrome, card, art, DARK, WHITE, BLACK, STEEL, CHROME, SCREEN, PLASTIC,
+	WOODS, CLOTHES, pickOf, legs, plate, mug, can, bottle, carton, scatter, SMALL, goods,
 } from './kit.js';
 import { officeChair, chair } from './home.js';
 
@@ -29,9 +29,8 @@ export function shelves( F, w, h = 1.9, d = 0.45, face = 'products', loot = null
 		if ( k < n && face !== 'books' ) F.box( - w / 2 + 0.03, y - 0.05, d - 0.005, w / 2 - 0.03, y - 0.01, d + 0.005, rail, 8 );
 	}
 	if ( face ) {
-		const L2 = face === 'books' ? L.books : face === 'rx' ? L.products : L.products;
-		const tm = M( L2, o.tint || [ 255, 255, 255 ], 1, F_IN, { fit: [ R() * 3, 0, R() * 3 + w / 1.2, h / 1.6 ], uo: 0 } );
-		F.box( - w / 2 + 0.04, 0.1, 0.03, w / 2 - 0.04, h - 0.04, d - 0.08, { pz: tm }, 1 + 2 + 4 + 8 + 32 );
+		// the goods on each shelf, set back a little from the edge
+		for ( let k = 0; k < n; k ++ ) goods( F, - w / 2 + 0.04, w / 2 - 0.04, ( k ? k * h / n : 0.1 ) + 0.01, ( k + 1 ) * h / n - 0.035, d - 0.08, face === 'books' ? L.books : L.products, o.tint );
 		// a few loose goods sitting forward on the shelves, and some on the floor in front
 		const f = F.fine();
 		for ( let k = 0; k < Math.round( w * 1.2 ); k ++ ) {
@@ -73,8 +72,8 @@ export function coolers( F, w, loot = 'fridge' ) {
 	const R = F.O.R;
 	const n = Math.max( 1, Math.round( w / 0.8 ) ), cw = w / n;
 	F.box( - w / 2, 0, 0, w / 2, 2.2, 0.75, metal( [ 200, 200, 202 ] ), 8 );
-	const drinks = M( L.products, [ 255, 255, 255 ], 1, F_IN, { fit: [ 0.5, 0, 0.5 + cw / 1.2 * n, 1.8 / 1.6 ] } );
-	F.box( - w / 2 + 0.03, 0.1, 0.2, w / 2 - 0.03, 1.95, 0.7, { pz: drinks }, 1 + 2 + 4 + 8 + 32 );
+	for ( let k = 0; k < 5; k ++ ) { F.box( - w / 2 + 0.03, 0.12 + k * 0.37 - 0.015, 0.2, w / 2 - 0.03, 0.12 + k * 0.37, 0.7, metal( [ 180, 182, 186 ] ) ); goods( F, - w / 2 + 0.03, w / 2 - 0.03, 0.12 + k * 0.37, 0.12 + k * 0.37 + 0.34, 0.66 ); }
+	F.box( - w / 2 + 0.03, 0.1, 0.2, w / 2 - 0.03, 1.95, 0.21, gloss( [ 200, 206, 210 ] ) );
 	F.box( - w / 2, 2.0, 0.72, w / 2, 2.2, 0.8, gloss( pickOf( R, [ [ 30, 90, 170 ], [ 200, 30, 30 ], [ 40, 40, 44 ] ] ) ) );
 	for ( let i = 0; i < n; i ++ ) {
 		const a = - w / 2 + i * cw;
@@ -107,7 +106,7 @@ export function chestFreezer( F, w = 2.0, loot = 'grocery' ) {
 // a checkout: a counter with a belt, the register and a card reader, a rack of sweets at the end
 export function checkout( F, len = 2.4, loot = 'convenience' ) {
 	const R = F.O.R;
-	const body = gloss( pickOf( R, [ [ 70, 76, 86 ], [ 200, 196, 186 ], [ 120, 40, 36 ] ] ) );
+	const body = gloss( pickOf( R, [ [ 150, 156, 166 ], [ 220, 216, 206 ], [ 170, 60, 50 ], [ 60, 110, 90 ] ] ) );
 	F.box( - len / 2, 0, 0, len / 2, 0.86, 0.62, body, 8 ).box( - len / 2, 0.86, 0.02, len / 2 - 0.5, 0.88, 0.5, BLACK ).box( len / 2 - 0.5, 0.86, 0, len / 2, 0.9, 0.62, STEEL );
 	F.box( - len / 2, 0.86, 0.5, len / 2 - 0.5, 0.92, 0.62, STEEL );
 	// register on a post, the card reader, a bagging carousel
@@ -116,11 +115,36 @@ export function checkout( F, len = 2.4, loot = 'convenience' ) {
 	F.cyl( len / 2 - 0.2, 0, - 0.2, 0.025, 1.6, 6, CHROME ).box( len / 2 - 0.3, 1.6, - 0.24, len / 2 - 0.1, 1.8, - 0.16, gloss( [ 30, 30, 34 ] ) );
 	// sweets rack facing the queue
 	const S = F.at( - len / 2 + 0.3, 0, - 0.1, Math.PI );
-	S.box( - 0.3, 0, 0, 0.3, 1.3, 0.25, metal( [ 200, 200, 204 ] ) ).box( - 0.28, 0.1, 0.25, 0.28, 1.25, 0.251, M( L.products, [ 255, 255, 255 ], 1, F_IN, { fit: [ 1, 0, 1.5, 0.8 ] } ) );
+	S.box( - 0.3, 0, 0, 0.3, 1.3, 0.02, metal( [ 200, 200, 204 ] ) ).box( - 0.3, 0, 0, - 0.28, 1.3, 0.25, metal( [ 200, 200, 204 ] ) ).box( 0.28, 0, 0, 0.3, 1.3, 0.25, metal( [ 200, 200, 204 ] ) );
+	for ( let k = 0; k < 5; k ++ ) S.box( - 0.28, k * 0.3 + 0.08, 0, 0.28, k * 0.3 + 0.1, 0.25, metal( [ 200, 200, 204 ] ) );
+	for ( let k = 0; k < 4; k ++ ) goods( S, - 0.28, 0.28, 0.1 + k * 0.3, 0.36 + k * 0.3, 0.26 );
 	F.col( - len / 2, 0, 0, len / 2, 0.92, 0.62, 1 );
 	F.container( len / 2 - 0.4, 0.86, 0.3, len / 2 - 0.1, 1.0, 0.55, 'Register', loot, 4, { n: 1, empty: 0.5 } );
 	F.spot( 0, 0.88, 0.3, loot, 0.4 );
 	F.shadow( - len / 2, 0, len / 2, 0.62, 0.6 );
+	return F;
+}
+
+// a produce stand: tilted crates of fruit and vegetables on a low table, a scale
+export function produceStand( F, w = 2.4, loot = 'grocery' ) {
+	const R = F.O.R;
+	const tm = wood( [ 150, 110, 70 ] );
+	F.box( - w / 2, 0.6, - 0.5, w / 2, 0.66, 0.5, tm ); legs( F, - w / 2 + 0.04, - 0.46, w / 2 - 0.04, 0.46, 0.6, tm, 0.06 );
+	const PRODUCE = [ [ 90, 150, 50 ], [ 200, 40, 30 ], [ 240, 200, 50 ], [ 240, 140, 30 ], [ 120, 60, 110 ], [ 160, 110, 60 ], [ 60, 110, 40 ] ];
+	const n = Math.max( 2, Math.floor( w / 0.55 ) );
+	const f = F.fine();
+	for ( const row of [ - 0.24, 0.24 ] ) for ( let i = 0; i < n; i ++ ) {
+		const x = - w / 2 + ( i + 0.5 ) * w / n;
+		const C2 = F.at( x, 0.66, row, 0 );
+		C2.rbox( 0, 0.1, 0, w / n / 2 - 0.02, 0.1, 0.22, M( L.oldplanks, [ 200, 170, 130 ], 1.2, F_IN ), 0, row < 0 ? 0.18 : - 0.18 );
+		if ( R() < 0.2 ) continue; // sold out
+		const c = pickOf( R, PRODUCE );
+		// a mound of round things: a few overlapping squat cylinders
+		for ( let k = 0; k < 6; k ++ ) f.at( x, 0.66, row, 0 ).cyl( ( R() - 0.5 ) * ( w / n - 0.12 ), 0.14 + R() * 0.04 + ( row < 0 ? - 0.02 : 0.02 ), ( R() - 0.5 ) * 0.3, 0.05 + R() * 0.03, 0.06, 7, gloss( c.map( v => v * ( 0.85 + R() * 0.3 ) ) ), 1, 0.03 );
+	}
+	F.col( - w / 2, 0, - 0.5, w / 2, 0.9, 0.5, 1, 2 );
+	F.container( - w / 2, 0.6, - 0.5, w / 2, 0.9, 0.5, 'Produce', loot, 16, { empty: 0.4 } );
+	F.shadow( - w / 2, - 0.5, w / 2, 0.5, 0.6 );
 	return F;
 }
 
@@ -221,8 +245,13 @@ export function ammoShelf( F, w, loot ) {
 		while ( x < w / 2 - 0.15 ) {
 			if ( R() < 0.3 ) { x += 0.2; continue; }
 			const c = pickOf( R, [ [ 200, 60, 30 ], [ 40, 90, 60 ], [ 220, 200, 60 ], [ 40, 40, 44 ], [ 90, 100, 60 ] ] );
-			const bh = 0.06 + R() * 0.06;
-			for ( let j = 0; j < 1 + ( R() * 3 | 0 ); j ++ ) carton( f, x + 0.06, k * 0.45 + 0.01 + j * bh, 0.2, 0.12, bh, 0.08, c );
+			const bh = 0.06 + R() * 0.06, lab = paint( pickOf( R, [ [ 236, 232, 220 ], [ 240, 210, 60 ], [ 250, 250, 250 ] ] ) );
+			for ( let j = 0; j < 1 + ( R() * 3 | 0 ); j ++ ) {
+				const y = k * 0.45 + 0.01 + j * bh;
+				carton( f, x + 0.06, y, 0.2, 0.12, bh, 0.08, c );
+				// the printed label on the front
+				f.box( x + 0.015, y + bh * 0.3, 0.24, x + 0.105, y + bh * 0.7, 0.242, lab );
+			}
 			x += 0.14;
 		}
 	}
@@ -351,7 +380,7 @@ export function sodaFountain( F ) {
 // a cubicle: two fabric partitions and the desk inside (opening towards local +z)
 export function cubicle( F, w = 2.4, d = 2.2, deskFn ) {
 	const R = F.O.R;
-	const pm = cloth( pickOf( R, [ [ 120, 124, 130 ], [ 110, 120, 110 ], [ 140, 130, 120 ], [ 90, 100, 120 ] ] ) ), trim = paint( [ 70, 72, 76 ] );
+	const pm = cloth( pickOf( R, [ [ 176, 178, 180 ], [ 170, 178, 168 ], [ 186, 176, 160 ], [ 150, 164, 186 ] ] ) ), trim = paint( [ 110, 112, 116 ] );
 	F.box( - w / 2, 0, 0, w / 2, 1.4, 0.05, pm ).box( - w / 2, 0, 0.05, - w / 2 + 0.05, 1.4, d, pm );
 	F.box( - w / 2, 1.4, - 0.005, w / 2, 1.43, 0.055, trim ).box( - w / 2 - 0.005, 1.4, 0.05, - w / 2 + 0.055, 1.43, d, trim );
 	// pinned papers, a calendar
@@ -423,7 +452,7 @@ export function vending( F, loot = 'convenience' ) {
 	const c = pickOf( R, [ [ 190, 30, 30 ], [ 30, 70, 150 ], [ 40, 40, 44 ] ] );
 	const smashed = R() < 0.35;
 	F.box( - 0.45, 0, 0, 0.45, 1.85, 0.8, gloss( c ) );
-	F.box( - 0.4, 0.5, 0.8, 0.18, 1.75, 0.805, M( L.products, [ 255, 255, 255 ], 1, F_IN, { fit: [ 2, 0, 2.5, 1.2 ] } ) );
+	for ( let k = 0; k < 4; k ++ ) goods( F, - 0.4, 0.18, 0.52 + k * 0.31, 0.8 + k * 0.31, 0.79 );
 	F.box( 0.22, 1.1, 0.8, 0.4, 1.5, 0.81, BLACK ).box( - 0.4, 0.15, 0.8, 0.18, 0.4, 0.81, BLACK );
 	if ( ! smashed ) { const p = ( lx, ly ) => { const [ gx, gz ] = F.T( lx, 0.83 ); return [ gx, F.y + ly, gz ]; }; F.O.glass.quad( p( - 0.42, 0.48 ), p( 0.2, 0.48 ), p( 0.2, 1.77 ), p( - 0.42, 1.77 ), [ Math.sin( F.rot ), 0, Math.cos( F.rot ) ] ); }
 	else F.O.decalAt( F, 0, 1.1, 1.2, 'glass' );
@@ -665,4 +694,3 @@ export function sconce( F, y = 1.8 ) {
 	return F;
 }
 
-export function unused() { return [ SOFA, BLANKET, card, PORCELAIN, legs, bottle, STEEL ]; }

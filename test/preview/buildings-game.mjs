@@ -96,8 +96,11 @@ for ( const s of steps ) {
 		const perf = T.length ? { frames: n, cityMean: +( T.reduce( ( p, q ) => p + q, 0 ) / T.length ).toFixed( 2 ), cityMax: +Math.max( ...T ).toFixed( 2 ) } : null;
 		let url = null, info = null;
 		if ( s.shot ) {
-			a.world.update( 0.001 );
-			a.renderer.render( { scene: a.world.scene, camera: a.world.camera, viewScene: g.player.vehicle ? null : g.viewScene, viewCamera: g.viewCamera, grade: g.grade() } );
+			// a few frames, so the TAA history settles the dithered shadows (s.taa: how many; default 6)
+			for ( let f = 0; f < ( s.taa ?? 6 ); f ++ ) {
+				a.world.update( 0.001 );
+				a.renderer.render( { scene: a.world.scene, camera: a.world.camera, viewScene: g.player.vehicle ? null : g.viewScene, viewCamera: g.viewCamera, grade: g.grade() } );
+			}
 			url = a.canvas.toDataURL( 'image/jpeg', 0.85 );
 			const ri = a.renderer.gl.info.render;
 			info = { heap: Math.round( ( performance.memory?.usedJSHeapSize || 0 ) / 1e6 ) + 'MB', calls: ri.calls, tris: Math.round( ri.triangles / 1000 ) + 'k', far: C?.far.size, near: C?.near.size, int: C?.interiors.size, q: C?.queue.length, busy: a.world.pool.busy };

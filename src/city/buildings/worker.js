@@ -42,6 +42,7 @@ export function buildingJob( hf, world, msg ) {
 		const o = buildStorey( P, msg.si, gh );
 		const transfer = [ ...transferOf( o.geo ), ...transferOf( o.fine ), ...transferOf( o.dec ), o.boxes.buffer ];
 		if ( o.glass ) transfer.push( o.glass.pos.buffer, o.glass.nor.buffer, o.glass.idx.buffer );
+		if ( o.beam ) transfer.push( o.beam.pos.buffer, o.beam.bmin.buffer, o.beam.bmax.buffer, o.beam.idx.buffer );
 		return { result: o, transfer };
 	}
 	// shells

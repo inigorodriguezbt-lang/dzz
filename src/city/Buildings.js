@@ -18,14 +18,14 @@
 // containers / looted. The bake's empty city lots are filled at start (buildings/infill.js).
 import * as THREE from 'three';
 import { NF, BT, readBuilding, fitToGround, shapeOf, rectOf, effectiveType, pumpsOf, LABEL, LOCATE, NEAR_CELL, FAR_CELL, cellKey, hash32, strHash, rng, BOX_STRIDE, PMAT, PK } from './buildings/data.js';
-import { buildingMaterials, setBuildingState, commitState, setShadowsEnabled, geoToBuffer, decalToBuffer, glassToBuffer } from './buildings/materials.js';
+import { buildingMaterials, setBuildingState, commitState, setShadowsEnabled, geoToBuffer, decalToBuffer, glassToBuffer, beamToBuffer } from './buildings/materials.js';
 import { Doors } from './buildings/doors.js';
 import { terminalCanopyOf, portalOf } from './buildings/exterior.js';
 import { rollLoot } from '../game/items/Loot.js';
 import { augmentBuildings } from './buildings/infill.js';
 
 const IN_LOAD = 90, IN_DROP = 130; // interior hysteresis (m from the built rect)
-const MAX_INTERIORS = 30;
+const MAX_INTERIORS = { low: 14, medium: 22, high: 30, ultra: 36 }; // by the quality setting
 const SHADOW_D = 18; // interiors closer than this cast the sun's shadows themselves
 const FINE_D = 30; // the small things in rooms show within this
 const NEAR_R = 330, NEAR_OUT = 450; // near shells
@@ -133,6 +133,9 @@ class City {
 		this.doors.update( dt );
 		this.lightT += dt;
 		if ( this.lightT > 0.5 ) { this.lightT = 0; this._lights(); }
+		// the interior glass mirrors the sky less while the player is indoors (eased, like the exposure)
+		const gr = this.mats.glassU.uGlassRefl, want = this.isIndoors( g.player.pos ) ? 0.25 : 1;
+		gr.value += ( want - gr.value ) * Math.min( 1, dt * 4 );
 		for ( const bi of this.stateTouched ) this._state( bi );
 		this.stateTouched.clear();
 		commitState( this.mats );
@@ -260,7 +263,7 @@ class City {
 		want.sort( ( a, b ) => a[ 0 ] - b[ 0 ] );
 		// a few new ones per pass (each seats its building on the ground: dozens of height samples)
 		let added = 0;
-		for ( const [ d, bi ] of want.slice( 0, MAX_INTERIORS ) ) {
+		for ( const [ d, bi ] of want.slice( 0, MAX_INTERIORS[ this.game.settings.get( 'quality' ) ] || 30 ) ) {
 			if ( this.interiors.has( bi ) ) continue;
 			if ( ++ added > 6 ) break;
 			this.interiors.set( bi, { bi, r: this.rec( bi ), storeys: new Map(), groundReady: false, coarse: [], d } );
@@ -439,6 +442,8 @@ class City {
 		if ( res.fine ) { const m = place( new THREE.Mesh( geoToBuffer( res.fine ), this.mats.interior ) ); m.userData.fine = true; m.receiveShadow = true; }
 		if ( res.dec ) { const m = place( new THREE.Mesh( decalToBuffer( res.dec ), this.mats.decal ) ); m.receiveShadow = true; m.renderOrder = 1; }
 		if ( res.glass ) { const m = place( new THREE.Mesh( glassToBuffer( res.glass ), this.mats.glass ) ); m.layers.set( 1 ); }
+		// sunbeams through the windows (drawn after the glass)
+		if ( res.beam ) { const m = place( new THREE.Mesh( beamToBuffer( res.beam ), this.mats.beam ) ); m.layers.set( 1 ); m.renderOrder = 2; }
 		yield;
 		// colliders
 		const B = res.boxes, P = this.physics;
@@ -463,7 +468,7 @@ class City {
 		const night = this._night();
 		for ( const l of res.lights ) {
 			const [ x, z ] = this.toWorld( r, l.x, l.z );
-			l.src = { pos: new THREE.Vector3( x, l.y, z ), color: 0xff9a48, intensity: l.kind === 'lantern' ? 3.2 : 1.8, range: l.kind === 'lantern' ? 9 : 6, flicker: true, on: night, priority: 0.8 };
+			l.src = { pos: new THREE.Vector3( x, l.y, z ), color: 0xff9a48, intensity: l.kind === 'lantern' ? 2.4 : 1.5, range: l.kind === 'lantern' ? 7 : 5, flicker: true, on: night, priority: 0.8 };
 			st.lights.push( l );
 			g.itemLights?.add?.( l.src );
 		}
@@ -480,6 +485,8 @@ class City {
 	// decals, glass panes and clutter only matter up close (each is a draw call per storey)
 	_meshVisible( I, m ) {
 		if ( m.userData.fine ) return I.d < FINE_D;
+		// (the beams need the interior's own shadows in the sun's shadow map)
+		if ( m.material === this.mats.beam ) return !! I.shadows && this.game.settings.get( 'shadows' ) !== 'off';
 		if ( m.material === this.mats.decal ) return I.d < 35;
 		if ( m.material === this.mats.glass ) return I.d < 60;
 		return true;

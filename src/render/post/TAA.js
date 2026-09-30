@@ -361,6 +361,8 @@ export class TAA {
 		const hist = () => {
 			const t = new THREE.WebGLRenderTarget( 1, 1, { count: 3, type: THREE.HalfFloatType, depthBuffer: false } );
 			for ( const x of t.textures ) { x.minFilter = x.magFilter = THREE.LinearFilter; x.generateMipmaps = false; }
+			// (the luma history holds four lumas already quantised to 1/255: 8 bits each)
+			t.textures[ 2 ].type = THREE.UnsignedByteType;
 			return t;
 		};
 		this.history = [ hist(), hist() ];
@@ -402,11 +404,17 @@ export class TAA {
 		this.needsRestart = true;
 	}
 
-	setSize( w, h ) {
-		for ( const t of this.history ) t.setSize( w, h );
+	// w x h: the input (render) resolution; ow x oh: the output, larger when upsampling (the history lives
+	// there, the depth copy at the input's). The jitter cycle grows with the upsampling (FSR2: 8 x the area
+	// ratio; ours 4 at native) so every output pixel gets samples near its centre
+	setSize( w, h, ow = w, oh = h ) {
+		for ( const t of this.history ) t.setSize( ow, oh );
 		this.prevDepth.setSize( w, h );
 		this.needsRestart = true;
 		this._w = w; this._h = h;
+		this.jitterPhases = Math.min( 16, Math.max( 4, Math.round( 4 * ( ow * oh ) / ( w * h ) ) ) );
+		// (upsampling needs the jitter over the whole input pixel; at native half of it keeps the image crisper)
+		this.jitterScale = ow > w ? 1 : 0.5;
 	}
 
 	get texture() { return this.history[ this._cur ].textures[ 0 ]; }

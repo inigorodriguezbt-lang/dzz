@@ -4,7 +4,7 @@
 // the top storey, and everything the runtime needs: colliders, doors, containers, loot spots, beds, taps and
 // candles. All in building-local metres (x across the front, z from the front to the back, y world height).
 import { Geo, GlassGeo, F_IN } from './geo.js';
-import { L, hash32, rng, winState, winHash, DECAL, decalUV, pumpsOf } from './data.js';
+import { L, hash32, rng, winState, winHash, winKey, DECAL, decalUV, pumpsOf } from './data.js';
 import { M, slabT, extOf } from './plan.js';
 import { storeyOutside, frontSteps, stepBoxes, groundAt, bulkhead, hoseTower, terminalCanopyOf, towerCatwalkOf, penthouseOf, portalOf } from './exterior.js';
 import { furnishRoom } from './furniture.js';
@@ -19,60 +19,103 @@ const WALLS_RGB = [ [ 230, 224, 212 ], [ 222, 222, 218 ], [ 206, 216, 208 ], [ 2
 
 const T = 0.25; // exterior wall thickness (inward from the facade line)
 
-// floor, wall and ceiling finishes by room kind
+// floor, wall and ceiling finishes by room kind, and the trim on the walls: tiles (wain), a baseboard, a painted
+// lower panel under a chair rail. Homes pick a household style (old plantation houses: wallpaper, wood panelling and
+// ceilings; newer ones: plain paint with an accent wall); offices, hotels, hospitals and stations their own.
 const HOME = { living: 1, bedroom: 1, hall: 1, kitchen: 1, bath: 1, dining: 1, hotelroom: 1, hbath: 1, entry: 1 };
+const PAINT_HOME = [ [ 238, 232, 218 ], [ 232, 226, 204 ], [ 206, 218, 196 ], [ 196, 214, 222 ], [ 240, 226, 176 ], [ 236, 208, 196 ], [ 214, 206, 226 ], [ 206, 226, 214 ], [ 226, 226, 222 ], [ 222, 196, 168 ] ];
+const ACCENT = [ [ 120, 150, 170 ], [ 170, 110, 90 ], [ 110, 140, 110 ], [ 70, 90, 120 ], [ 190, 150, 90 ], [ 150, 110, 130 ] ];
+const PAPER = [ [ 230, 214, 190 ], [ 200, 214, 200 ], [ 214, 200, 214 ], [ 236, 226, 200 ], [ 190, 206, 222 ], [ 226, 200, 190 ] ];
+const INST = { police: [ [ 110, 130, 160 ], [ 236, 234, 226 ] ], school: [ [ 150, 170, 140 ], [ 238, 234, 220 ] ], hospital: [ [ 150, 190, 180 ], [ 230, 238, 234 ] ], clinic: [ [ 160, 196, 210 ], [ 236, 240, 238 ] ], fire: [ [ 170, 60, 50 ], [ 232, 228, 218 ] ], barracks: [ [ 120, 130, 100 ], [ 226, 222, 206 ] ], mil_hq: [ [ 120, 130, 100 ], [ 226, 222, 206 ] ] };
 function finishes( P, rm, R ) {
-	const k = rm.k, home = P.S.arch === 'house' || P.S.arch === 'walkup' || ( P.S.arch === 'tower' && P.S.variant !== 'office' && P.storeys.length && rm.unit !== undefined );
-	const wallC = WALLS_RGB[ ( hash32( P.bid, rm.id, 0x3a1 ) >>> 8 ) % WALLS_RGB.length ];
+	const k = rm.k, S = P.S, t = S.type;
+	const home = S.arch === 'house' || S.arch === 'walkup' || ( S.arch === 'tower' && S.variant !== 'office' && P.storeys.length && rm.unit !== undefined );
+	// the household's style, the same in every room of the building
+	const H = rng( hash32( P.bid, 0x5717 ) );
+	const old = S.arch === 'house' && S.variant?.startsWith( 'plantation' ), hs = H();
+	const wallC = home ? PAINT_HOME[ ( hash32( P.bid, rm.id, 0x3a1 ) >>> 8 ) % PAINT_HOME.length ] : WALLS_RGB[ ( hash32( P.bid, rm.id, 0x3a1 ) >>> 8 ) % WALLS_RGB.length ];
 	let floor = M( L.lino, [ 226, 224, 216 ], 1.2, F_IN ), wall = M( L.plaster, wallC, 3, F_IN ), ceil = M( L.plaster, [ 240, 240, 236 ], 3, F_IN ), wain = null;
+	let base = M( L.gloss, [ 236, 234, 228 ], 1, F_IN ), panel = null, rail = null;
+	const inst = INST[ t ];
 	switch ( k ) {
-		case 'living': case 'bedroom': case 'hall': case 'dining': case 'entry':
-			floor = k === 'bedroom' && R() < 0.5 ? M( L.carpet, [ 200, 190, 170 ], 2, F_IN ) : M( L.woodfloor, [ 255, 244, 232 ], 1.6, F_IN, { r: 1 } );
-			if ( k === 'dining' && ! home ) { floor = M( L.terrazzo, [ 255, 255, 255 ], 2, F_IN ); ceil = M( L.ceiltile, [ 250, 250, 248 ], 1.2, F_IN ); }
+		case 'living': case 'bedroom': case 'hall': case 'dining': case 'entry': {
+			floor = k === 'bedroom' && R() < ( old ? 0.2 : 0.5 ) ? M( L.carpet, pick3( R, [ [ 200, 190, 170 ], [ 170, 180, 190 ], [ 190, 170, 170 ], [ 150, 160, 150 ] ] ), 2, F_IN ) : M( L.woodfloor, old ? [ 230, 200, 170 ] : [ 255, 244, 232 ], 1.6, F_IN, { r: 1 } );
+			if ( k === 'dining' && ! home ) { floor = M( L.terrazzo, [ 255, 255, 255 ], 2, F_IN ); ceil = M( L.ceiltile, [ 250, 250, 248 ], 1.2, F_IN ); break; }
+			if ( ! home ) break;
+			// wallpaper in the old houses' living and bedrooms; an accent wall in the new
+			if ( old && ( k === 'living' || k === 'bedroom' || k === 'dining' ) && R() < 0.55 ) wall = M( R() < 0.5 ? L.wallpaper : L.wallstripe, pick3( R, PAPER ), 0.6, F_IN );
+			else if ( ! old && hs < 0.35 && k === 'bedroom' ) wall = M( L.plaster, pick3( R, ACCENT ).map( v => v + 50 ), 3, F_IN );
+			// panelling under a chair rail
+			if ( old && k !== 'bedroom' && hs < 0.6 ) { panel = M( L.wood, [ 200, 170, 130 ], 1, F_IN ); rail = M( L.wood, [ 170, 130, 90 ], 1, F_IN ); }
+			else if ( hs > 0.75 && k !== 'hall' ) { panel = M( L.gloss, [ 236, 234, 226 ], 1, F_IN ); rail = M( L.gloss, [ 240, 238, 232 ], 1, F_IN ); }
+			if ( old && hs < 0.5 && k !== 'hall' ) ceil = M( L.wood, [ 226, 210, 186 ], 1.2, F_IN );
+			if ( old ) base = M( L.wood, [ 150, 110, 76 ], 1, F_IN );
 			break;
-		case 'hotelroom': floor = M( L.carpet, [ 180, 160, 150 ], 2, F_IN ); break;
-		case 'kitchen': floor = M( R() < 0.5 ? L.lino : L.tiles, [ 236, 232, 222 ], 1.2, F_IN ); wain = M( L.tilewall, [ 236, 236, 232 ], 0.6, F_IN ); break;
+		}
+		case 'hotelroom': floor = M( L.carpet, pick3( R, [ [ 180, 160, 150 ], [ 150, 160, 170 ], [ 170, 160, 130 ] ] ), 2, F_IN ); wall = M( R() < 0.4 ? L.wallstripe : L.plaster, pick3( R, [ [ 236, 226, 206 ], [ 220, 222, 214 ], [ 214, 206, 196 ] ] ), R() < 0.4 ? 0.6 : 3, F_IN ); base = M( L.wood, [ 110, 80, 56 ], 1, F_IN ); break;
+		case 'kitchen': floor = M( R() < 0.5 ? L.lino : L.tiles, pick3( R, [ [ 236, 232, 222 ], [ 220, 214, 200 ], [ 200, 210, 214 ] ] ), 1.2, F_IN ); wain = M( L.tilewall, pick3( R, [ [ 236, 236, 232 ], [ 210, 226, 230 ], [ 236, 226, 206 ], [ 200, 220, 200 ] ] ), 0.6, F_IN ); break;
 		case 'bath': case 'hbath': case 'restroom': case 'latrine':
-			floor = M( L.tiles, [ 220, 222, 222 ], 1.2, F_IN ); wain = M( L.tilewall, pick3( R, [ [ 236, 236, 232 ], [ 200, 222, 226 ], [ 226, 214, 200 ] ] ), 0.6, F_IN ); break;
+			floor = M( L.tiles, pick3( R, [ [ 220, 222, 222 ], [ 200, 206, 214 ], [ 226, 214, 200 ] ] ), 1.2, F_IN ); wain = M( L.tilewall, pick3( R, [ [ 236, 236, 232 ], [ 200, 222, 226 ], [ 226, 214, 200 ], [ 190, 210, 190 ], [ 230, 200, 200 ] ] ), 0.6, F_IN ); base = null; break;
 		case 'garage': case 'workshop': case 'storage': case 'utility': case 'bay': case 'hallbig': case 'sorting': case 'vault': case 'armory': case 'cells': case 'lockers':
 			floor = M( L.concrete, [ 190, 188, 182 ], 3, F_IN );
-			wall = M( k === 'hallbig' && ( P.S.arch === 'warehouse' || P.S.arch === 'hangar' ) ? L.tinroof : L.cmu, k === 'cells' || k === 'armory' || k === 'vault' ? [ 214, 214, 206 ] : [ 226, 224, 216 ], 2.4, F_IN );
+			wall = M( k === 'hallbig' && ( S.arch === 'warehouse' || S.arch === 'hangar' ) ? L.tinroof : L.cmu, k === 'cells' || k === 'armory' || k === 'vault' ? [ 214, 214, 206 ] : [ 226, 224, 216 ], 2.4, F_IN );
 			ceil = M( L.concrete, [ 200, 198, 192 ], 3, F_IN );
+			base = null;
+			if ( inst && ( k === 'cells' || k === 'lockers' || k === 'armory' ) ) { panel = M( L.cmu, inst[ 0 ], 2.4, F_IN ); }
 			break;
 		case 'sales': case 'lobby': case 'waiting': case 'teller': case 'corridor': case 'rx':
 			floor = M( k === 'lobby' || k === 'teller' ? L.terrazzo : L.lino, [ 240, 238, 232 ], 2, F_IN );
 			ceil = M( L.ceiltile, [ 250, 250, 248 ], 1.2, F_IN );
-			wall = M( L.plaster, P.S.arch === 'tower' && k === 'lobby' ? [ 214, 200, 180 ] : [ 232, 230, 224 ], 3, F_IN );
+			wall = M( L.plaster, S.arch === 'tower' && k === 'lobby' ? [ 214, 200, 180 ] : [ 232, 230, 224 ], 3, F_IN );
 			if ( home && k === 'corridor' ) floor = M( L.carpet, [ 150, 130, 120 ], 2, F_IN );
+			if ( t === 'hotel' && ( k === 'corridor' || k === 'lobby' ) ) {
+				floor = k === 'corridor' ? M( L.hcarpet, pick3( R, [ [ 150, 60, 60 ], [ 60, 80, 130 ], [ 70, 110, 90 ], [ 140, 110, 70 ] ] ), 1.2, F_IN ) : M( L.terrazzo, [ 236, 226, 210 ], 2.5, F_IN );
+				wall = M( L.wallstripe, pick3( R, [ [ 232, 222, 200 ], [ 214, 220, 214 ], [ 226, 210, 200 ] ] ), 0.6, F_IN );
+				panel = M( L.wood, [ 140, 100, 70 ], 1, F_IN ); rail = M( L.wood, [ 110, 76, 50 ], 1, F_IN ); base = M( L.wood, [ 100, 70, 46 ], 1, F_IN );
+			} else if ( inst ) {
+				wall = M( L.plaster, inst[ 1 ], 3, F_IN ); panel = M( L.gloss, inst[ 0 ], 1, F_IN ); rail = M( L.gloss, inst[ 0 ].map( v => v * 0.8 ), 1, F_IN );
+				floor = M( L.lino, pick3( R, [ [ 214, 220, 214 ], [ 226, 222, 210 ], [ 200, 206, 214 ] ] ), 1.2, F_IN );
+			} else if ( k === 'sales' ) {
+				const shop = rm.shop || S.shop || t;
+				if ( shop === 'restaurant' || shop === 'bar' || shop === 'fastfood' || shop === 'takeout' || shop === 'bakery' ) { floor = M( L.tiles, pick3( R, [ [ 170, 90, 70 ], [ 220, 214, 200 ], [ 90, 90, 94 ] ] ), 1.2, F_IN ); wall = M( L.plaster, pick3( R, [ [ 200, 80, 60 ], [ 230, 190, 110 ], [ 90, 140, 130 ], [ 236, 232, 222 ] ] ), 3, F_IN ); panel = M( L.wood, [ 140, 100, 70 ], 1, F_IN ); rail = M( L.wood, [ 110, 76, 50 ], 1, F_IN ); }
+				else if ( shop === 'gunstore' || shop === 'pawn' ) { floor = M( L.woodfloor, [ 220, 190, 160 ], 1.6, F_IN, { r: 1 } ); wall = M( L.plaster, [ 170, 150, 120 ], 3, F_IN ); panel = M( L.wood, [ 110, 80, 56 ], 1, F_IN ); rail = M( L.wood, [ 90, 60, 40 ], 1, F_IN ); }
+				else if ( shop === 'clothing' || shop === 'surf' || shop === 'sports' ) { floor = M( L.woodfloor, [ 255, 244, 232 ], 1.6, F_IN, { r: 1 } ); wall = M( L.plaster, pick3( R, [ [ 236, 234, 228 ], [ 200, 222, 230 ], [ 240, 220, 200 ] ] ), 3, F_IN ); }
+			}
 			break;
 		case 'office': case 'openoffice': case 'meeting': case 'breakroom': case 'briefing':
-			floor = M( L.carpet, pick3( R, [ [ 130, 136, 146 ], [ 150, 140, 130 ], [ 120, 130, 120 ] ] ), 2, F_IN );
+			floor = M( L.carpet, pick3( R, [ [ 150, 156, 166 ], [ 170, 160, 148 ], [ 140, 150, 140 ], [ 138, 138, 146 ] ] ), 2, F_IN );
 			ceil = M( L.ceiltile, [ 250, 250, 248 ], 1.2, F_IN );
-			wall = M( L.plaster, [ 232, 230, 224 ], 3, F_IN );
+			wall = M( L.plaster, k === 'meeting' && R() < 0.5 ? pick3( R, ACCENT ).map( v => v + 40 ) : [ 232, 230, 224 ], 3, F_IN );
+			base = M( L.gloss, [ 60, 62, 66 ], 1, F_IN );
+			if ( inst ) { wall = M( L.plaster, inst[ 1 ], 3, F_IN ); panel = M( L.gloss, inst[ 0 ], 1, F_IN ); rail = M( L.gloss, inst[ 0 ].map( v => v * 0.8 ), 1, F_IN ); if ( t === 'police' || t === 'fire' ) floor = M( L.lino, [ 214, 214, 206 ], 1.2, F_IN ); }
 			break;
 		case 'classroom': case 'ward': case 'exam': case 'dorm': case 'bunk': case 'dayroom':
 			floor = M( L.lino, pick3( R, [ [ 232, 230, 220 ], [ 214, 226, 220 ], [ 226, 220, 206 ] ] ), 1.2, F_IN );
 			ceil = M( L.ceiltile, [ 250, 250, 248 ], 1.2, F_IN );
 			if ( k === 'ward' || k === 'exam' ) wall = M( L.plaster, [ 214, 228, 222 ], 3, F_IN );
+			if ( inst ) { wall = M( L.plaster, inst[ 1 ], 3, F_IN ); panel = M( L.gloss, inst[ 0 ], 1, F_IN ); rail = M( L.gloss, inst[ 0 ].map( v => v * 0.8 ), 1, F_IN ); }
 			break;
 		case 'nave': case 'vestry':
-			floor = M( L.woodfloor, [ 236, 214, 190 ], 1.6, F_IN, { r: 1 } ); wall = M( L.plaster, [ 244, 242, 236 ], 3, F_IN ); ceil = M( L.wood, [ 190, 160, 130 ], 1, F_IN ); break;
-		case 'rkitchen': floor = M( L.tiles, [ 170, 90, 70 ], 1.2, F_IN ); wain = M( L.tilewall, [ 240, 240, 236 ], 0.6, F_IN ); ceil = M( L.ceiltile, [ 240, 240, 238 ], 1.2, F_IN ); break;
-		case 'bar': floor = M( L.woodfloor, [ 180, 140, 110 ], 1.6, F_IN, { r: 1 } ); wall = M( L.plaster, [ 120, 60, 40 ], 3, F_IN ); break;
-		case 'elevator': floor = M( L.metal, [ 150, 150, 150 ], 1, F_IN ); wall = M( L.spandrel, [ 170, 170, 168 ], 1.5, F_IN ); break;
+			floor = M( L.woodfloor, [ 236, 214, 190 ], 1.6, F_IN, { r: 1 } ); wall = M( L.plaster, [ 244, 242, 236 ], 3, F_IN ); ceil = M( L.wood, [ 190, 160, 130 ], 1, F_IN ); base = M( L.wood, [ 120, 84, 56 ], 1, F_IN ); break;
+		case 'rkitchen': floor = M( L.tiles, [ 170, 90, 70 ], 1.2, F_IN ); wain = M( L.tilewall, [ 240, 240, 236 ], 0.6, F_IN ); ceil = M( L.ceiltile, [ 240, 240, 238 ], 1.2, F_IN ); base = null; break;
+		case 'bar': floor = M( L.woodfloor, [ 180, 140, 110 ], 1.6, F_IN, { r: 1 } ); wall = M( L.plaster, pick3( R, [ [ 120, 60, 40 ], [ 50, 80, 60 ], [ 60, 50, 70 ] ] ), 3, F_IN ); panel = M( L.wood, [ 90, 60, 40 ], 1, F_IN ); rail = M( L.wood, [ 70, 44, 28 ], 1, F_IN ); base = M( L.wood, [ 60, 40, 26 ], 1, F_IN ); break;
+		case 'elevator': floor = M( L.metal, [ 150, 150, 150 ], 1, F_IN ); wall = M( L.spandrel, [ 170, 170, 168 ], 1.5, F_IN ); base = null; break;
 		case 'stair': floor = M( L.concrete, [ 200, 198, 192 ], 3, F_IN ); wall = M( L.plaster, [ 226, 226, 220 ], 3, F_IN ); break;
 		case 'checkin': case 'gate': case 'claim':
 			floor = M( L.terrazzo, [ 236, 234, 228 ], 2.5, F_IN ); ceil = M( L.ceiltile, [ 250, 250, 248 ], 1.2, F_IN );
 			wall = M( L.plaster, [ 232, 232, 228 ], 3, F_IN );
 			break;
 		case 'cab': floor = M( L.carpet, [ 90, 96, 110 ], 2, F_IN ); ceil = M( L.ceiltile, [ 240, 240, 238 ], 1.2, F_IN ); break;
-		case 'tent': floor = M( L.fabric, [ 70, 70, 52 ], 1.5, F_IN ); break;
+		case 'tent': floor = M( L.fabric, [ 70, 70, 52 ], 1.5, F_IN ); base = null; break;
 		case 'observatory': floor = M( L.concrete, [ 170, 170, 172 ], 3, F_IN ); wall = M( L.plaster, [ 236, 236, 234 ], 3, F_IN ); break;
 	}
-	if ( P.S.arch === 'house' && ( k === 'hall' || k === 'stair' ) ) floor = M( L.woodfloor, [ 255, 244, 232 ], 1.6, F_IN, { r: 1 } );
+	if ( S.arch === 'house' && ( k === 'hall' || k === 'stair' ) ) floor = M( L.woodfloor, old ? [ 230, 200, 170 ] : [ 255, 244, 232 ], 1.6, F_IN, { r: 1 } );
+	// a cornice under the ceiling of the older houses, the hotels and some newer homes
+	const crown = ( home && ( old || hs > 0.5 ) && k !== 'kitchen' && k !== 'bath' ) || ( t === 'hotel' && ( k === 'hotelroom' || k === 'corridor' || k === 'lobby' ) ) ? M( L.gloss, [ 240, 238, 232 ], 1, F_IN ) : null;
+	if ( rm.open ) { base = null; panel = null; rail = null; }
 	// big surfaces are cut into a grid for the baked light (light.js)
-	for ( const m of [ floor, wall, ceil, wain ] ) if ( m ) m.sub = 0.9;
-	return { floor, wall, ceil, wain };
+	for ( const m of [ floor, wall, ceil, wain, panel ] ) if ( m ) m.sub = 0.9;
+	return { floor, wall, ceil, wain, base, panel, rail, crown: rm.open ? null : crown };
 }
 const pick3 = ( R, a ) => a[ Math.floor( R() * a.length ) % a.length ];
 
@@ -121,6 +164,8 @@ class Out {
 		this.dec.quadUV( p( - 1, - 1 ), p( 1, - 1 ), p( 1, 1 ), p( - 1, 1 ), [ uv[ 0 ], uv[ 1 ], uv[ 2 ], uv[ 1 ], uv[ 2 ], uv[ 3 ], uv[ 0 ], uv[ 3 ] ], { l: 0, c: tint, s: 1 }, [ nx, 0, nz ] );
 	}
 }
+
+const LID = M( L.concrete, [ 128, 128, 128 ], 3, F_IN ); // (not subdivided: never seen)
 
 // ---- walls with openings -----------------------------------------------------------------------------------
 
@@ -178,8 +223,13 @@ export function buildStorey( P, si, gh ) {
 		const fy = st.y + ( si === 0 ? 0.004 : 0 );
 		for ( const r of subtract( rm, holes ) ) O.g.quad( [ r.x0, fy, r.z1 ], [ r.x1, fy, r.z1 ], [ r.x1, fy, r.z0 ], [ r.x0, fy, r.z0 ], f.floor );
 		if ( S.arch !== 'tent' && ! P.feats.round ) {
-			const cy = top - sT;
-			for ( const r of subtract( rm, holesAbove ) ) O.g.quad( [ r.x0, cy, r.z0 ], [ r.x1, cy, r.z0 ], [ r.x1, cy, r.z1 ], [ r.x0, cy, r.z1 ], f.ceil );
+			const cy = top - sT, sy = top - 0.03;
+			for ( const r of subtract( rm, holesAbove ) ) {
+				O.g.quad( [ r.x0, cy, r.z0 ], [ r.x1, cy, r.z0 ], [ r.x1, cy, r.z1 ], [ r.x0, cy, r.z1 ], f.ceil );
+				// the slab's top, seen only by the sun: it keeps the slab's thickness between the shadow map's
+				// occluder and the walls under it (else the sun leaks in along the wall-ceiling joints)
+				O.g.quad( [ r.x0, sy, r.z0 ], [ r.x1, sy, r.z0 ], [ r.x1, sy, r.z1 ], [ r.x0, sy, r.z1 ], LID );
+			}
 		}
 	}
 	if ( si > 0 ) {
@@ -220,12 +270,58 @@ export function buildStorey( P, si, gh ) {
 	// ---- furniture, loot, outbreak dressing ----
 	for ( const rm of st.rooms ) furnishRoom( O, P, st, rm, fin.get( rm ) );
 
-	bakeLight( P, st, [ O.g, O.gd ], O.dec, O.barred );
+	bakeLight( P, st, [ O.g, O.gd ], O.dec, O.barred, O.doors );
+	const beam = beamsOf( O, P, st );
 	const glass = O.glass.finish();
 	return {
 		geo: O.g.empty ? null : O.g.finish( false, true ), fine: O.gd.empty ? null : O.gd.finish( false, true ), dec: O.dec.empty ? null : O.dec.finish( false ), glass,
-		boxes: new Float32Array( O.boxes ), doors: O.doors, containers: O.containers, spots: O.spots, beds: O.beds, taps: O.taps, lights: O.lights,
+		beam, boxes: new Float32Array( O.boxes ), doors: O.doors, containers: O.containers, spots: O.spots, beds: O.beds, taps: O.taps, lights: O.lights,
 	};
+}
+
+// Sunbeams: a box of air in front of each room's glazed side, from the floor to the top of its windows and up to
+// 6 m in. The beam shader (materials.js) marches the view ray through it against the sun's shadow map, so only
+// the light that really comes in through the panes shows. { pos, bmin, bmax, idx } in building-local metres
+const CLEAR = { 1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 12: 1 };
+function beamsOf( O, P, st ) {
+	const sides = new Map();
+	for ( const f of st.facades ) {
+		const rm = f.inside;
+		if ( ! rm || rm.open || rm.k === 'stair' ) continue;
+		const tx = ( f.bx - f.ax ) / f.len, tz = ( f.bz - f.az ) / f.len;
+		for ( const p of f.pieces ) {
+			const w = p.win;
+			if ( ! w || ! CLEAR[ w.style & 31 ] ) continue;
+			const n = Math.max( 1, Math.round( ( p.a1 - p.a0 ) / w.bay ) );
+			const h = Math.min( w.h, st.h - 0.12 - w.sill );
+			for ( let bi = 0; bi < n; bi ++ ) {
+				if ( winState( w.seed, bi ) === 1 ) continue;
+				const u = p.a0 + ( bi + 0.5 ) * w.bay;
+				const cx = f.ax + tx * u, cz = f.az + tz * u;
+				if ( O.barred.has( winKey( cx, cz, st.y + w.sill + h / 2 ) ) ) continue;
+				const key = rm.id * 4 + f.side;
+				const along = Math.abs( tx ) > 0.5 ? cx : cz;
+				const e = sides.get( key ) || sides.set( key, { rm, side: f.side, a0: Infinity, a1: - Infinity, top: 0 } ).get( key );
+				e.a0 = Math.min( e.a0, along - w.w / 2 - 1.2 ); e.a1 = Math.max( e.a1, along + w.w / 2 + 1.2 );
+				e.top = Math.max( e.top, st.y + w.sill + h );
+			}
+		}
+	}
+	if ( ! sides.size ) return null;
+	const pos = [], bmin = [], bmax = [], idx = [];
+	for ( const e of sides.values() ) {
+		const q = e.rm, i0 = T + 0.01;
+		let x0 = q.x0 + ( e.side === 3 ? i0 : 0.05 ), x1 = q.x1 - ( e.side === 1 ? i0 : 0.05 ), z0 = q.z0 + ( e.side === 0 ? i0 : 0.05 ), z1 = q.z1 - ( e.side === 2 ? i0 : 0.05 );
+		if ( e.side === 0 || e.side === 2 ) { x0 = Math.max( x0, e.a0 ); x1 = Math.min( x1, e.a1 ); if ( e.side === 0 ) z1 = Math.min( z1, z0 + 6 ); else z0 = Math.max( z0, z1 - 6 ); }
+		else { z0 = Math.max( z0, e.a0 ); z1 = Math.min( z1, e.a1 ); if ( e.side === 3 ) x1 = Math.min( x1, x0 + 6 ); else x0 = Math.max( x0, x1 - 6 ); }
+		const y0 = st.y + 0.02, y1 = Math.min( e.top, st.y + st.h - 0.35 );
+		if ( x1 - x0 < 0.3 || z1 - z0 < 0.3 || y1 - y0 < 0.5 ) continue;
+		const b = pos.length / 3;
+		for ( let k = 0; k < 8; k ++ ) { pos.push( k & 1 ? x1 : x0, k & 2 ? y1 : y0, k & 4 ? z1 : z0 ); bmin.push( x0, y0, z0 ); bmax.push( x1, y1, z1 ); }
+		for ( const [ a, c, d, f ] of [ [ 0, 1, 3, 2 ], [ 4, 6, 7, 5 ], [ 0, 4, 5, 1 ], [ 2, 3, 7, 6 ], [ 0, 2, 6, 4 ], [ 1, 5, 7, 3 ] ] ) idx.push( b + a, b + c, b + d, b + a, b + d, b + f );
+	}
+	if ( ! idx.length ) return null;
+	return { pos: new Float32Array( pos ), bmin: new Float32Array( bmin ), bmax: new Float32Array( bmax ), idx: new Uint16Array( idx ) };
 }
 
 function holeOf( s ) {
@@ -292,6 +388,8 @@ function facadeWall( O, P, st, f, walls ) {
 	const a0 = Math.min( along( 0 ), along( f.len ) ), a1 = Math.max( along( 0 ), along( f.len ) );
 	// ground storey walls of a raised house start at the joists, not at the ground
 	wallRun( O, axis, line, o0, o1, a0, a1, y0, y1, mN, mP, jamb, ops, P.S.arch === 'house' && mat.ext.l === L.planks ? PM.wood : PM.concrete );
+	// tiles, panels and baseboards on the inner face
+	if ( ! f.inside.open ) wallTrim( O, axis, nOut > 0 ? line + o0 : line + o1, - nOut, a0, a1, y0, inner, ops, y1 - slabT( P ) );
 	// window and door dressing
 	const mid = line + ( o0 + o1 ) / 2;
 	const inSide = - nOut; // direction (along the wall normal axis) into the building
@@ -359,19 +457,33 @@ function windowDressing( O, P, axis, line, mid, inSide, op, frameC, y0 ) {
 	const dress = ( W.h >>> 28 ) & 7;
 	const homey = s === 1 || s === 2 || s === 5;
 	if ( homey && W.state !== 1 && ( dress <= 2 ) ) {
-		const o = across + inSide * ( T / 2 + 0.06 );
+		const o = across + inSide * ( T / 2 + 0.07 );
 		const wc = WALLS_RGB[ ( W.h >>> 14 ) & 7 ];
 		const cm = M( L.fabric, [ wc[ 0 ] * 0.9, wc[ 1 ] * 0.85, wc[ 2 ] * 0.8 ], 1.2, F_IN );
 		if ( dress <= 1 ) {
+			// two curtains in soft pleats, drawn back (dress 0) or nearly shut
 			const open = dress === 0 ? 0.3 : 0.05;
-			const cw = ( w / 2 ) * ( 1 - open ) + 0.1;
-			B( l - 0.1, oy0 - 0.15, Math.min( o, o + inSide * 0.03 ), l - 0.1 + cw, oy1 + 0.15, Math.max( o, o + inSide * 0.03 ), cm );
-			B( r + 0.1 - cw, oy0 - 0.15, Math.min( o, o + inSide * 0.03 ), r + 0.1, oy1 + 0.15, Math.max( o, o + inSide * 0.03 ), cm );
-			B( l - 0.15, oy1 + 0.12, Math.min( o, o + inSide * 0.05 ), r + 0.15, oy1 + 0.16, Math.max( o, o + inSide * 0.05 ), M( L.spandrel, [ 150, 150, 150 ], 1, F_IN ) );
+			const cw = ( w / 2 ) * ( 1 - open ) + 0.12;
+			const np = Math.max( 3, Math.round( cw / 0.1 ) );
+			for ( const [ e, dir ] of [ [ l - 0.12, 1 ], [ r + 0.12, - 1 ] ] ) for ( let k = 0; k < np; k ++ ) {
+				const a0 = e + dir * k * cw / np, a1 = e + dir * ( k + 1 ) * cw / np;
+				const dd = ( k % 2 ? 0.045 : 0.012 );
+				B( Math.min( a0, a1 ), oy0 - 0.2, Math.min( o + inSide * dd, o + inSide * ( dd + 0.02 ) ), Math.max( a0, a1 ), oy1 + 0.15, Math.max( o + inSide * dd, o + inSide * ( dd + 0.02 ) ), cm );
+			}
+			B( l - 0.18, oy1 + 0.15, Math.min( o, o + inSide * 0.07 ), r + 0.18, oy1 + 0.19, Math.max( o, o + inSide * 0.07 ), M( L.spandrel, [ 150, 150, 150 ], 1, F_IN ) );
 		} else {
 			const down = ( oy1 - oy0 ) * ( 0.3 + 0.6 * ( ( W.h >>> 25 ) & 3 ) / 3 );
 			B( l, oy1 - down, Math.min( o, o + inSide * 0.02 ), r, oy1, Math.max( o, o + inSide * 0.02 ), M( L.fabric, [ 214, 210, 196 ], 0.5, F_IN ) );
+			B( l - 0.01, oy1 - down - 0.03, Math.min( o, o + inSide * 0.025 ), r + 0.01, oy1 - down, Math.max( o, o + inSide * 0.025 ), M( L.spandrel, [ 180, 180, 180 ], 1, F_IN ) );
 		}
+	} else if ( ( s === 3 || s === 12 ) && W.state !== 1 && dress <= 2 && P.S.arch !== 'bigbox' ) {
+		// office venetian blinds, part way down (horizontal slats: the stripe paper turned)
+		const o = across + inSide * ( T / 2 + 0.04 );
+		const down = ( oy1 - oy0 ) * ( 0.25 + 0.7 * ( ( W.h >>> 25 ) & 3 ) / 3 );
+		const slat = M( L.wallstripe, [ 236, 236, 232 ], 0.3, F_IN, { r: 1 } );
+		B( l + 0.02, oy1 - down, Math.min( o, o + inSide * 0.015 ), r - 0.02, oy1, Math.max( o, o + inSide * 0.015 ), slat );
+		B( l, oy1 - down - 0.03, Math.min( o, o + inSide * 0.03 ), r, oy1 - down, Math.max( o, o + inSide * 0.03 ), M( L.spandrel, [ 200, 200, 200 ], 1, F_IN ) );
+		B( l - 0.02, oy1 - 0.02, Math.min( o, o + inSide * 0.05 ), r + 0.02, oy1 + 0.05, Math.max( o, o + inSide * 0.05 ), M( L.spandrel, [ 200, 200, 200 ], 1, F_IN ) );
 	}
 }
 
@@ -390,6 +502,32 @@ function doorCasing( O, axis, mid, t, op, trimOut, wallIn ) {
 		B( c - w / 2 - 0.07, y0, c - w / 2, y1 );
 		B( c + w / 2, y0, c + w / 2 + 0.07, y1 );
 	}
+}
+
+// ---- trim on a wall face: tiles, a baseboard, a panel under a chair rail -------------------------------------------
+
+// a skin on a wall face: axis 'x' face at z = f (facing sign s), axis 'z' face at x = f; from a0 to a1 between y0 and
+// y1, d thick, broken where an opening reaches below y1
+function skin( O, axis, f, s, a0, a1, y0, y1, m, ops, d = 0.006 ) {
+	const n0 = f, n1 = f + s * d;
+	const lo = Math.min( n0, n1 ), hi = Math.max( n0, n1 );
+	const back = axis === 'x' ? ( s > 0 ? 32 : 16 ) : ( s > 0 ? 2 : 1 );
+	const piece = ( p, q ) => {
+		if ( q - p < 0.02 ) return;
+		if ( axis === 'x' ) O.g.box( p, y0, lo, q, y1, hi, m, back | 8 );
+		else O.g.box( lo, y0, p, hi, y1, q, m, back | 8 );
+	};
+	let prev = a0;
+	for ( const op of ops.filter( o => o.y0 < y1 - 0.01 ).sort( ( p, q ) => p.c - q.c ) ) { piece( prev, Math.min( a1, op.c - op.w / 2 - ( op.trim || 0 ) ) ); prev = Math.max( prev, op.c + op.w / 2 + ( op.trim || 0 ) ); }
+	piece( prev, a1 );
+}
+// all the trim of a room's finish on one wall face
+function wallTrim( O, axis, f, s, a0, a1, y0, fin, ops, ceil = 0 ) {
+	// a cornice under the ceiling (homes and hotels)
+	if ( fin.crown && ceil > y0 + 2 ) skin( O, axis, f, s, a0, a1, ceil - 0.075, ceil, fin.crown, ops.filter( o => o.y1 > ceil - 0.08 ), 0.03 );
+	if ( fin.wain ) { skin( O, axis, f, s, a0, a1, y0, y0 + 1.45, fin.wain, ops ); return; }
+	if ( fin.panel ) { skin( O, axis, f, s, a0, a1, y0, y0 + 0.9, fin.panel, ops, 0.008 ); if ( fin.rail ) skin( O, axis, f, s, a0, a1, y0 + 0.88, y0 + 0.94, fin.rail, ops, 0.022 ); }
+	if ( fin.base ) skin( O, axis, f, s, a0, a1, y0, y0 + 0.095, fin.base, ops.map( o => ( { ...o, trim: 0.07 } ) ), 0.014 );
 }
 
 // ---- interior walls ---------------------------------------------------------------------------------------------
@@ -417,21 +555,8 @@ function interiorWall( O, P, st, w, fin ) {
 	}
 	const mat = P.S.arch === 'house' ? PM.wood : PM.concrete;
 	wallRun( O, axis, line, - t / 2, t / 2, a0, a1, y0, y1, fa.wall, fb.wall, jamb, ops, mat );
-	// tiled wainscot in kitchens and bathrooms (a skin on the wall face)
-	for ( const [ f, side ] of [ [ fa, - 1 ], [ fb, 1 ] ] ) {
-		if ( ! f.wain ) continue;
-		const n = side * ( t / 2 + 0.006 );
-		const wh = 1.45;
-		let prev = a0;
-		const sorted = ops.slice().sort( ( p, q ) => p.c - q.c );
-		const piece = ( s0, s1 ) => {
-			if ( s1 - s0 < 0.02 ) return;
-			if ( axis === 'x' ) O.g.box( s0, y0, line + Math.min( n, n - side * 0.006 ), s1, y0 + wh, line + Math.max( n, n - side * 0.006 ), f.wain, side > 0 ? 32 : 16 );
-			else O.g.box( line + Math.min( n, n - side * 0.006 ), y0, s0, line + Math.max( n, n - side * 0.006 ), y0 + wh, s1, f.wain, side > 0 ? 2 : 1 );
-		};
-		for ( const op of sorted ) { piece( prev, op.c - op.w / 2 ); prev = op.c + op.w / 2; }
-		piece( prev, a1 );
-	}
+	// tiles, panels and baseboards on both faces
+	for ( const [ f, side ] of [ [ fa, - 1 ], [ fb, 1 ] ] ) wallTrim( O, axis, line + side * t / 2, side, a0, a1, y0, f, ops, st.y + st.h - sT );
 	for ( const op of ops ) if ( op.kind !== 'arch' ) doorCasing( O, axis, line, t, op );
 }
 

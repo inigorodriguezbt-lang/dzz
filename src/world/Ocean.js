@@ -39,6 +39,8 @@ const QUALITY = {
 const SEA_STEP = 0.02;
 // m: lattice of the per-frame height cache (heightAt): bilinear between exact heights 0.5 m apart
 const HEIGHT_STEP = 0.5;
+// m: the caustics render only with open sea this close to the camera
+const CAUSTICS_R = 320;
 
 export class Ocean {
 	constructor( renderer, hf, quality = 'high' ) {
@@ -121,7 +123,9 @@ export class Ocean {
 				const u = this.mat.uniforms;
 				u.uProj.value.copy( camera.projectionMatrix );
 				u.uCamWorld.value.copy( camera.matrixWorld );
+				this._occBegin( gl );
 			};
+			this.mesh.onAfterRender = ( gl ) => this._occEnd( gl );
 		}
 		if ( this.breakers && this.breakers.mesh.parent !== this.mesh ) this.mesh.add( this.breakers.mesh );
 		this.mat = mat;
@@ -270,11 +274,44 @@ export class Ocean {
 		F.foamDecay = 0.6 - 0.35 * p.whitecaps;
 	}
 
+	// (perf) an occlusion query on the main view's water draw: while no water pixel has passed the depth test
+	// for a few frames (city streets, forests, indoors) the spectrum, caustics and breakers, which only feed the
+	// drawn surface (the physics reads the CPU twin), stop updating
+	_occBegin( gl ) {
+		const o = this._occ || ( this._occ = { pool: [], pending: [], active: null, hidden: 0 } );
+		const ctx = gl.getContext();
+		if ( o.active || ! ctx.ANY_SAMPLES_PASSED_CONSERVATIVE || gl.getRenderTarget() !== this.r.targets?.main || o.pending.length > 3 ) return;
+		o.active = o.pool.pop() || ctx.createQuery();
+		ctx.beginQuery( ctx.ANY_SAMPLES_PASSED_CONSERVATIVE, o.active );
+	}
+	_occEnd( gl ) {
+		const o = this._occ;
+		if ( ! o?.active ) return;
+		gl.getContext().endQuery( gl.getContext().ANY_SAMPLES_PASSED_CONSERVATIVE );
+		o.pending.push( o.active );
+		o.active = null;
+	}
+	// whether the surface was seen lately (true until the queries say otherwise)
+	_occSeen() {
+		const o = this._occ;
+		if ( ! o ) return true;
+		const ctx = this.r.gl.getContext();
+		while ( o.pending.length && ctx.getQueryParameter( o.pending[ 0 ], ctx.QUERY_RESULT_AVAILABLE ) ) {
+			const q = o.pending.shift();
+			o.hidden = ctx.getQueryParameter( q, ctx.QUERY_RESULT ) ? 0 : o.hidden + 1;
+			o.pool.push( q );
+		}
+		return o.hidden < 3 || G.uUnderwater.value > 0.5;
+	}
+
 	update( dt, camera, sceneColor, sceneDepth, viewport ) {
 		this.time += dt;
 		this._applySea();
 		const p = this.sea;
-		this.fft.update( this.time, dt );
+		const seen = this._occSeen();
+		// (the foam decays over the frames skipped too)
+		this._fftDt = ( this._fftDt || 0 ) + dt;
+		if ( seen ) { this.fft.update( this.time, Math.min( this._fftDt, 1 ) ); this._fftDt = 0; }
 		this.twin.request( this.time, p.chop );
 		this.tile.update( camera.position );
 		this.shore.update( dt );
@@ -290,8 +327,10 @@ export class Ocean {
 			U.uShoreSim.value = this.sim.texture;
 			U.uShoreSimRect.value.copy( this.sim.rect );
 		}
-		if ( this.caustics ) this.caustics.update( this.fft.deriv, G.uSunDir.value, dt );
-		if ( this.breakers ) this.breakers.update( this.fft.disp );
+		// (perf) the caustics (~1M splatted triangles) only show on a seabed seen close by: skip them while no sea
+		// is within CAUSTICS_R of the camera (inland, city streets)
+		if ( this.caustics && seen && this._seaNear( camera.position ) ) this.caustics.update( this.fft.deriv, G.uSunDir.value, dt );
+		if ( this.breakers && seen ) this.breakers.update( this.fft.disp );
 		const u = this.mat.uniforms;
 		u.uOceanDisp.value = this.fft.disp;
 		u.uOceanDeriv.value = this.fft.deriv;
@@ -309,6 +348,24 @@ export class Ocean {
 		const wh = this.heightAt( camera.position.x, camera.position.z );
 		u.uCamWaterH.value = wh;
 		G.uUnderwater.value = camera.position.y < wh ? 1 : 0;
+	}
+
+	// whether open sea lies within CAUSTICS_R of p (a ring of sea-mask probes, re-checked every 0.5 s or 40 m)
+	_seaNear( p ) {
+		const c = this._near || ( this._near = { x: 1e9, z: 0, t: 0, v: true } );
+		const now = performance.now();
+		if ( now - c.t < 500 && ( p.x - c.x ) ** 2 + ( p.z - c.z ) ** 2 < 1600 ) return c.v;
+		c.x = p.x; c.z = p.z; c.t = now;
+		let v = p.y < G.uWaterLevel.value + 1 || seaMaskAt( this.hf, this.seaMask, p.x, p.z ) > 0;
+		for ( let r = 64; ! v && r <= CAUSTICS_R; r += 64 ) {
+			const n = Math.ceil( r / 24 );
+			for ( let k = 0; k < n && ! v; k ++ ) {
+				const a = k / n * Math.PI * 2;
+				v = seaMaskAt( this.hf, this.seaMask, p.x + Math.cos( a ) * r, p.z + Math.sin( a ) * r ) > 0;
+			}
+		}
+		c.v = v;
+		return v;
 	}
 
 	// the ground under the sea (the fine tile, else the coarse bathymetry), as the shaders see it

@@ -6,8 +6,7 @@ import { L, DECAL, winKey, winState } from './data.js';
 import { M, slabT } from './plan.js';
 import { F_IN } from './geo.js';
 import {
-	frame, paint, gloss, wood, metal, cloth, card, art, DARK, WHITE, BLACK, STEEL, CHROME, PLASTIC,
-	SOFA, BLANKET, WOODS, CLOTHES, pickOf, legs, scatter, SMALL, plate, mug, book,
+	frame, paint, gloss, wood, metal, cloth, card, art, DARK, WHITE, BLACK, STEEL, CHROME, 	SOFA, BLANKET, WOODS, CLOTHES, pickOf, legs, scatter, SMALL, book,
 } from './kit.js';
 import * as H from './home.js';
 import * as T from './trade.js';
@@ -68,7 +67,8 @@ function roomCtx( O, P, st, rm ) {
 		const alongX = Math.abs( tx ) > 0.5;
 		const along = ( u ) => alongX ? f.ax + tx * u : f.az + tz * u;
 		for ( const p of f.pieces ) {
-			if ( p.door ) { const a = along( p.door.u - p.door.w / 2 ), b = along( p.door.u + p.door.w / 2 ); addOpening( f.side, Math.min( a, b ), Math.max( a, b ), Math.min( 1.6, p.door.w + 0.4 ), { ext: true, kind: p.door.kind } ); continue; }
+			// (a garage's roll-up door only needs its sill kept clear: the car parks right behind it)
+			if ( p.door ) { const a = along( p.door.u - p.door.w / 2 ), b = along( p.door.u + p.door.w / 2 ); addOpening( f.side, Math.min( a, b ), Math.max( a, b ), p.door.kind === 'roll' || p.door.kind === 'hangar' ? 0.35 : Math.min( 1.6, p.door.w + 0.4 ), { ext: true, kind: p.door.kind } ); continue; }
 			const w = p.win;
 			if ( ! w ) continue;
 			const n = Math.max( 1, Math.round( ( p.a1 - p.a0 ) / w.bay ) );
@@ -113,7 +113,6 @@ function wallRect( C, side, a, w, d ) {
 function onWall( C, w, d, h, sides = [ 0, 1, 2, 3 ], at = 'any' ) {
 	const R = C.O.R;
 	for ( const side of sides ) {
-		if ( C.open[ side ] ) continue;
 		const lo = side === 0 || side === 2 ? C.x0 : C.z0, hi = side === 0 || side === 2 ? C.x1 : C.z1;
 		const depthMax = side === 0 || side === 2 ? C.d : C.w;
 		if ( d > depthMax - 0.6 || w > hi - lo ) continue;
@@ -128,6 +127,7 @@ function onWall( C, w, d, h, sides = [ 0, 1, 2, 3 ], at = 'any' ) {
 			if ( C.blocked[ side ].some( b => b[ 0 ] < a1 && b[ 1 ] > a0 && ( b[ 2 ] < 0 || h > b[ 2 ] ) ) ) continue;
 			const r = wallRect( C, side, a, w, d );
 			if ( C.used.some( u => overlaps( u, r ) ) || C.clear.some( u => overlaps( u, r ) ) ) continue;
+			r[ 4 ] = h; // (pictures go above it, not behind it)
 			C.used.push( r );
 			return frameOnWall( C, side, a );
 		}
@@ -185,7 +185,7 @@ const opposite = ( s ) => ( s + 2 ) % 4;
 function sidesByLength( C ) {
 	const len = ( s ) => {
 		const L0 = s === 0 || s === 2 ? C.w : C.d;
-		return C.open[ s ] ? - 1 : L0 - C.blocked[ s ].reduce( ( t, b ) => t + ( b[ 2 ] < 0 ? b[ 1 ] - b[ 0 ] : ( b[ 1 ] - b[ 0 ] ) * 0.5 ), 0 );
+		return L0 - C.blocked[ s ].reduce( ( t, b ) => t + ( b[ 2 ] < 0 ? b[ 1 ] - b[ 0 ] : ( b[ 1 ] - b[ 0 ] ) * 0.5 ), 0 );
 	};
 	return [ 0, 1, 2, 3 ].sort( ( a, b ) => len( b ) - len( a ) );
 }
@@ -374,7 +374,8 @@ export function furnishRoom( O, P, st, rm, fin ) {
 	const t = P.S.type, arch = P.S.arch;
 	const shop = rm.shop || P.S.shop || t;
 	const mil = t === 'barracks' || t === 'mil_hq' || t === 'armory' || t === 'mil_tent';
-	const home = !! HOMEY[ arch ] || rm.unit !== undefined;
+	// (shop units carry a unit number too: only flats and hotel rooms in towers are homes)
+	const home = !! HOMEY[ arch ] || ( arch === 'tower' && P.S.variant !== 'office' && rm.unit !== undefined );
 	C.home = home; C.mil = mil;
 	// a house someone held out in: windows boarded from inside, the back door blocked, a camp in the living room
 	const fort = home && P.boarded > 0.2 && ! rm.open;
@@ -421,6 +422,11 @@ export function furnishRoom( O, P, st, rm, fin ) {
 		case 'porch': { if ( R() < 0.6 ) { const f = inRoom( C, 0.7, 0.7, 0.3 ); if ( f ) H.chair( f, wood( [ 120, 90, 60 ] ), R() < 0.2 ); } if ( R() < 0.4 ) { const p = inRoom( C, 0.5, 0.5, 0.2 ); if ( p ) H.pottedPlant( p.at( 0, 0, 0 ), { big: false } ); } break; }
 		case 'loggia': loggia( C ); break;
 	}
+	// sandbags stacked beside the doors of the bases and of a police station that made a stand
+	if ( ( mil || ( t === 'police' && P.boarded > 0 ) ) && ! rm.open ) for ( const d of C.doors ) {
+		if ( ! d.ext || R() < 0.3 ) continue;
+		for ( const s of [ - 1, 1 ] ) { const a = s < 0 ? d.a0 - 0.95 : d.a1 + 0.95; const lo = d.side === 0 || d.side === 2 ? C.x0 : C.z0, hi = d.side === 0 || d.side === 2 ? C.x1 : C.z1; if ( a - 0.8 < lo || a + 0.8 > hi ) continue; const r = wallRect( C, d.side, a, 1.5, 0.5 ); if ( ! free( C, r ) ) continue; C.used.push( r ); T.sandbags( frameOnWall( C, d.side, a ), 1.5, 1.05 ); }
+	}
 	if ( ! rm.open ) {
 		X.dressRoom( C, rm.k, { violence } );
 		X.deadOf( C, { p: deadP * ( fort ? 1.5 : 1 ), sheet: t === 'hospital' || t === 'clinic', bag: t === 'hospital' } );
@@ -439,8 +445,8 @@ function living( C, loot, fort ) {
 	const long = Math.max( C.w, C.d );
 	const sw = Math.min( 2.3, long - 1.4 );
 	const c = pickOf( R, SOFA );
-	let sf = sw > 1.3 ? onWall( C, sw, 0.95, 0.9, sidesByLength( C ), 'centre' ) : null;
-	if ( ! sf && sw > 1.3 ) sf = onWall( C, 1.6, 0.95, 0.9, [ 0, 1, 2, 3 ] );
+	let sf = sw > 1.3 ? onWall( C, sw, 0.95, 0.8, sidesByLength( C ), 'centre' ) : null;
+	if ( ! sf && sw > 1.3 ) sf = onWall( C, 1.6, 0.95, 0.8, [ 0, 1, 2, 3 ] );
 	let tvF = null;
 	if ( sf ) {
 		const w = C.used[ C.used.length - 1 ];
@@ -540,25 +546,44 @@ function kitchen( C, loot ) {
 	const O = C.O, R = O.R;
 	const sides = sidesByLength( C );
 	const len = Math.min( 4.2, Math.max( C.w, C.d ) - 0.9 );
-	let kl = Math.round( len / 0.6 ) * 0.6, upper = true;
-	let k = null;
-	for ( const s of sides ) { const l = Math.min( kl, ( s === 0 || s === 2 ? C.w : C.d ) - 0.9 ); if ( l < 1.2 ) continue; k = onWall( C, l, 0.62, 2.2, [ s ], 'corner' ); if ( k ) { kl = l; break; } }
-	if ( ! k ) { kl = Math.min( len, 1.8 ); upper = false; k = onWall( C, kl, 0.62, 0.93, sides ); }
+	let k = null, kl = 0;
+	for ( const s of sides ) {
+		const l = Math.floor( Math.min( len, ( s === 0 || s === 2 ? C.w : C.d ) - 0.9 ) / 0.6 ) * 0.6;
+		if ( l < 1.2 ) continue;
+		k = onWall( C, l, 0.62, 0.93, [ s ], 'corner' );
+		if ( k ) { kl = l; break; }
+	}
+	if ( ! k ) { kl = 1.8; k = onWall( C, kl, 0.62, 0.93, [ 0, 1, 2, 3 ] ); }
 	const body = pickOf( R, [ [ 238, 236, 228 ], [ 150, 110, 76 ], [ 90, 110, 100 ], [ 200, 190, 170 ], [ 120, 140, 160 ], [ 70, 60, 54 ] ] );
 	if ( k ) {
-		H.kitchenRun( k, kl, { loot, upper, body } );
+		H.kitchenRun( k, kl, { loot, body, upperAt: upperFree( C, k ) } );
 		// an L round the corner in a big kitchen
-		const side2 = [ ( k.side + 1 ) % 4, ( k.side + 3 ) % 4 ].find( s => ! C.open[ s ] );
-		if ( side2 !== undefined && Math.min( C.w, C.d ) > 2.8 && R() < 0.6 ) { const k2 = onWall( C, 1.8, 0.62, 2.2, [ side2 ], 'corner' ); if ( k2 ) H.kitchenRun( k2, 1.8, { loot, upper: R() < 0.5, body } ); }
+		for ( const side2 of [ ( k.side + 1 ) % 4, ( k.side + 3 ) % 4 ] ) {
+			if ( Math.min( C.w, C.d ) < 2.8 || R() > 0.6 ) break;
+			const k2 = onWall( C, 1.8, 0.62, 0.93, [ side2 ], 'corner' );
+			if ( k2 ) { H.kitchenRun( k2, 1.8, { loot, body, upperAt: upperFree( C, k2 ) } ); break; }
+		}
 	}
 	const f = onWall( C, 0.78, 0.74, 1.8, [ 1, 3, 2, 0 ], 'corner' );
 	if ( f ) H.fridge( f, 'fridge' );
-	const tw = Math.min( 1.4, C.w - 1.8, C.d - 1.8 );
-	if ( tw >= 0.8 ) { const tb = centre( C, tw + 0.9, 1.7 ) || inRoom( C, tw + 0.9, 1.7, 0.2 ); if ( tb ) H.diningSet( tb.at( 0, 0, 0 ), tw, 0.8, { loot } ); }
-	// a bin, a mop and bucket, a broom against the wall
+	for ( const [ tw, td ] of [ [ 1.4, 0.85 ], [ 1.1, 0.8 ], [ 0.8, 0.8 ] ] ) {
+		if ( tw > C.w - 1.6 || td > C.d - 2.2 ) continue;
+		let tb = null;
+		for ( const [ dx, dz ] of [ [ 0, 0 ], [ 0, 0.4 ], [ 0, - 0.4 ], [ 0.6, 0 ], [ - 0.6, 0 ], [ 1.2, 0 ], [ - 1.2, 0 ], [ 0.6, 0.4 ], [ - 0.6, - 0.4 ], [ 1.2, 0.4 ], [ - 1.2, 0.4 ] ] ) if ( ( tb = centre( C, tw + 0.3, td + 1.0, 0, dx, dz ) ) ) break;
+		if ( ! tb ) tb = inRoom( C, tw + 0.3, td + 1.0, 0.05, 40, true );
+		if ( tb ) { H.diningSet( tb, tw, td, { loot } ); break; }
+	}
+	// a bin, a mop and bucket
 	const bn = onWall( C, 0.35, 0.35, 0.6, [ 0, 1, 2, 3 ] );
 	if ( bn ) { bn.cyl( 0, 0, 0.18, 0.15, 0.55, 10, gloss( pickOf( R, [ [ 200, 200, 204 ], [ 40, 40, 42 ], [ 240, 240, 236 ] ] ) ) ); bn.col( - 0.16, 0, 0.02, 0.16, 0.55, 0.34, 2, 2 ); if ( R() < 0.5 ) bn.fine().rbox( 0.3, 0.14, 0.3, 0.15, 0.14, 0.12, gloss( [ 30, 30, 32 ] ), R() ); }
 	floorClutter( C, R() * 3 | 0, [ SMALL.can, SMALL.tin, SMALL.box, SMALL.bottle, SMALL.plate ] );
+}
+
+// which stretches of a counter run (local x of frame F) have wall above them for cabinets: not under windows
+function upperFree( C, F ) {
+	const sgn = F.side === 0 || F.side === 1 ? 1 : - 1;
+	const spans = C.blocked[ F.side ].filter( b => b[ 2 ] >= 0 && b[ 2 ] < 2.1 || b[ 2 ] < 0 ).map( b => [ ( b[ 0 ] - F.a ) * sgn, ( b[ 1 ] - F.a ) * sgn ].sort( ( p, q ) => p - q ) );
+	return ( a0, a1 ) => ! spans.some( ( [ p, q ] ) => p < a1 - 0.05 && q > a0 + 0.05 );
 }
 
 function breakroom( C, loot ) {
@@ -647,6 +672,12 @@ function floorClutter( C, n, makers ) {
 
 // ---- garages and workshops ---------------------------------------------------------------------------------------------------
 
+// the frame for H.car() with the car's centre at (x, z) and its nose along the world direction d = [ dx, dz ]
+function carFrame( O, x, y, z, d ) {
+	const th = Math.atan2( - d[ 1 ], d[ 0 ] );
+	return frame( O, x - Math.sin( th ) * 1.19, y, z - Math.cos( th ) * 1.19, th );
+}
+
 function workshop( C, t, arch ) {
 	const O = C.O, R = O.R;
 	const shopFloor = t === 'garage' || t === 'hangar' || arch === 'hangar';
@@ -667,10 +698,25 @@ function workshop( C, t, arch ) {
 			else if ( R() < 0.7 ) H.car( F, { hood: R() < 0.6 } );
 			O.decalAt( F, ( R() - 0.5 ) * 2, 1.2, 1.4, 'oil' );
 		}
-	} else if ( C.w > 3.2 && C.d > 5.2 && R() < 0.5 ) {
-		const F = C.d > C.w ? frame( O, ( C.x0 + C.x1 ) / 2 + 1.19, C.st.y, ( C.z0 + C.z1 ) / 2, - Math.PI / 2 ) : frame( O, ( C.x0 + C.x1 ) / 2, C.st.y, ( C.z0 + C.z1 ) / 2 - 1.19, 0 );
-		const r = C.d > C.w ? [ ( C.x0 + C.x1 ) / 2 - 1.3, ( C.z0 + C.z1 ) / 2 - 2.4, ( C.x0 + C.x1 ) / 2 + 1.3, ( C.z0 + C.z1 ) / 2 + 2.4 ] : [ ( C.x0 + C.x1 ) / 2 - 2.4, ( C.z0 + C.z1 ) / 2 - 1.3, ( C.x0 + C.x1 ) / 2 + 2.4, ( C.z0 + C.z1 ) / 2 + 1.3 ];
-		if ( free( C, r ) ) { C.used.push( r ); H.car( F, { hood: R() < 0.3 } ); }
+	} else if ( Math.min( C.w, C.d ) > 3.2 && Math.max( C.w, C.d ) > 4.5 && R() < 0.65 ) {
+		// the family car, driven in nose first
+		const roll = C.doors.find( d => d.ext && d.kind === 'roll' );
+		const side = roll ? roll.side : C.d > C.w ? 0 : 3;
+		const alongZ = side === 0 || side === 2;
+		const len = Math.min( 4.4, ( alongZ ? C.d : C.w ) - 0.3 );
+		// up against the garage door or shifted aside, clear of the door into the house
+		const room = ( alongZ ? C.d : C.w ) - len;
+		for ( const [ da, db ] of [ [ 0, 0 ], [ - 1, 0 ], [ 0, - 0.4 ], [ 0, 0.4 ], [ - 1, - 0.4 ], [ - 1, 0.4 ], [ 1, 0 ] ] ) {
+			// da: along the car (-1 = right behind the garage door), db: sideways
+			const off = da * ( room / 2 - 0.35 ) * ( side === 0 || side === 3 ? 1 : - 1 );
+			const mx = ( C.x0 + C.x1 ) / 2 + ( alongZ ? db : off ), mz = ( C.z0 + C.z1 ) / 2 + ( alongZ ? off : db );
+			const r = alongZ ? [ mx - 1.0, mz - len / 2, mx + 1.0, mz + len / 2 ] : [ mx - len / 2, mz - 1.0, mx + len / 2, mz + 1.0 ];
+			if ( ! free( C, r ) || len < 3.8 ) continue;
+			C.used.push( r );
+			const F = carFrame( O, mx, C.st.y, mz, [ [ 0, 1 ], [ - 1, 0 ], [ 0, - 1 ], [ 1, 0 ] ][ side ] );
+			H.car( F, { hood: R() < 0.3, len } ); O.decalAt( F, 0, 1.19, 1.4, 'oil' );
+			break;
+		}
 	}
 	const nb = shopFloor ? 3 : 1;
 	for ( let i = 0; i < nb; i ++ ) { const wb = onWall( C, 1.8, 0.72, 1.95, [ 2, 1, 3 ] ); if ( wb ) H.workbench( wb, 1.8, 'toolbox', loot ); }
@@ -687,6 +733,13 @@ function workshop( C, t, arch ) {
 
 function dining( C, shop ) {
 	const R = C.O.R;
+	if ( C.home ) {
+		// a family dining room: the table, a sideboard with the good plates, pictures
+		for ( const [ tw, td ] of [ [ 1.8, 0.95 ], [ 1.4, 0.85 ], [ 1.0, 0.8 ] ] ) { const tb = centre( C, tw + 0.3, td + 1.0 ); if ( tb ) { H.diningSet( tb, tw, td, { loot: 'house_kitchen' } ); break; } }
+		const sb = onWall( C, 1.4, 0.46, 0.9, [ 0, 1, 2, 3 ] ); if ( sb ) H.dresser( sb, 1.4, 'house_kitchen', { mirror: false } );
+		const p = onWall( C, 0.45, 0.45, 1.0, [ 0, 1, 2, 3 ], 'corner' ); if ( p ) H.pottedPlant( p.at( 0, 0, 0.24 ) );
+		return;
+	}
 	const food = shop === 'bar' ? 'bar' : SHOP_TABLE[ shop ] || 'restaurant';
 	const ctw = Math.min( 4, C.w - 1.5 );
 	const ct = ctw > 1.5 ? onWall( C, ctw, 0.64, 2.2, [ 2, 1, 3 ] ) : null;
@@ -773,7 +826,7 @@ function salesFloor( C, shop ) {
 			return;
 		}
 		case 'nails': case 'barber': {
-			for ( let i = 0; i < 4; i ++ ) { const f = onWall( C, 0.95, 0.9, 1.9, [ 2, 1, 3 ] ); if ( f ) { H.sofa( f, 0.8, [ 60, 60, 64 ], { loot: 'trash' } ); f.box( - 0.45, 1.05, 0, 0.45, 1.9, 0.03, gloss( [ 160, 176, 184 ] ) ).box( - 0.45, 0.9, 0, 0.45, 0.95, 0.25, gloss( [ 236, 236, 232 ] ) ); } }
+			for ( let i = 0; i < 4; i ++ ) { const f = onWall( C, 0.95, 0.9, 1.9, [ 2, 1, 3 ] ); if ( f ) { H.sofa( f, 0.8, [ 60, 60, 64 ], { loot: 'trash' } ); f.box( - 0.45, 1.05, 0, 0.45, 1.9, 0.03, gloss( [ 170, 184, 190 ] ) ).box( - 0.45, 0.9, 0, 0.45, 0.95, 0.25, gloss( [ 236, 236, 232 ] ) ); } }
 			const co = onWall( C, 1.4, 0.6, 1.1, tillSides, 'corner' ); if ( co ) { counter( co, 1.4, 0.6, 1.0 ); register( co, 0.3, 1.0, 0.3, 'convenience' ); }
 			return;
 		}
@@ -785,7 +838,8 @@ function salesFloor( C, shop ) {
 			const s = onWall( C, 1.8, 0.55, 0.9, [ 0, 1, 3 ] ); if ( s ) T.seats( s, 3, [ 60, 80, 110 ] );
 			return;
 		}
-		case 'restaurant': case 'fastfood': case 'takeout': case 'bakery': case 'bar': {
+		case 'bar': return barRoom( C );
+		case 'restaurant': case 'fastfood': case 'takeout': case 'bakery': {
 			const cw = Math.min( 4.4, C.w - 1.5 );
 			const ct = cw > 1.5 ? onWall( C, cw, 0.64, 2.3, [ 2 ] ) : null;
 			if ( ct ) {
@@ -844,10 +898,14 @@ function salesFloor( C, shop ) {
 			T.gondola( F, len, h, loot, shop === 'pharmacy' ? { small: [ 'box', 'pills' ], tint: [ 240, 250, 255 ] } : shop === 'hardware' ? { small: [ 'box', 'tin' ] } : {} );
 			// a hanging aisle sign
 			const sg = F.fine();
-			sg.cyl( - len / 4, 2.6, 0, 0.006, C.ceil - 2.6, 4, CHROME ).cyl( len / 4, 2.6, 0, 0.006, C.ceil - 2.6, 4, CHROME ).box( - len / 4 - 0.3, 2.3, - 0.02, len / 4 + 0.3, 2.6, 0.02, gloss( pickOf( R, [ [ 30, 90, 170 ], [ 200, 40, 30 ], [ 40, 120, 70 ] ] ) ) );
+			const sw = Math.min( 0.8, len * 0.15 ), sy = Math.min( 2.5, C.ceil - 0.5 );
+			sg.cyl( - sw * 0.8, sy + 0.3, 0, 0.005, C.ceil - sy - 0.3, 4, CHROME ).cyl( sw * 0.8, sy + 0.3, 0, 0.005, C.ceil - sy - 0.3, 4, CHROME );
+			sg.box( - sw, sy, - 0.015, sw, sy + 0.3, 0.015, gloss( pickOf( R, [ [ 30, 90, 170 ], [ 200, 40, 30 ], [ 40, 120, 70 ] ] ) ) ).box( - sw * 0.7, sy + 0.08, - 0.02, sw * 0.7, sy + 0.22, 0.02, WHITE );
 		}
 	}
 	if ( ( shop === 'grocery' || shop === 'market' ) && C.w > 12 ) { for ( let i = 0; i < 2; i ++ ) { const fz = inRoom( C, 2.0, 0.9, 1.4 ); if ( fz ) T.chestFreezer( fz, 2.0, 'grocery' ); } }
+	// fruit and vegetables near the door
+	if ( shop === 'grocery' || shop === 'market' ) for ( let i = 0; i < ( shop === 'market' ? 5 : 3 ); i ++ ) { const ps = inRoom( C, 2.4, 1.0, 1.2 ); if ( ps ) T.produceStand( ps, 2.4, shop === 'market' ? 'market' : 'grocery' ); }
 	if ( shop === 'pharmacy' ) { const f = onWall( C, 2.6, 0.72, 1.2, [ 2, 1 ] ); if ( f ) { counter( f, 2.6, 0.7, 1.05, gloss( [ 236, 236, 232 ] ) ); f.container( - 1.3, 0, 0, 1.3, 1.05, 0.7, 'Cabinet', 'pharmacy', 12, { locked: 1 } ); register( f, 0.8, 1.05, 0.35, 'pharmacy' ); scatter( f, - 1.1, 0.1, 0.4, 0.6, 1.05, 3, [ SMALL.pills, SMALL.paper ] ); } }
 	if ( ! big ) { const v = onWall( C, 0.9, 0.82, 1.9, [ 0, 1, 3 ] ); if ( v && R() < 0.5 ) T.vending( v, loot ); }
 	if ( R() < 0.5 ) { const c = inRoom( C, 0.6, 1.0, 1.0, 8 ); if ( c && big ) T.cart( c, true ); }
@@ -855,32 +913,51 @@ function salesFloor( C, shop ) {
 
 function gunShop( C, shop, loot ) {
 	const O = C.O, R = O.R;
-	// racks of long guns on the walls behind a U of glass counters
-	for ( const s of [ 2, 1, 3 ] ) { const w = Math.min( 3.4, ( s === 2 ? C.w : C.d ) - 2 ); if ( w > 1 ) { const f = onWall( C, w, 0.3, 2.3, [ s ] ); if ( f ) T.rifleRack( f, w, loot ); } }
-	const cw = Math.min( 3.2, C.w - 3.2 );
+	// racks of long guns on the walls, a counter of glass cases before the back wall, cases and ammunition in
+	// the middle, the till by the door
+	for ( const s of [ 2, 1, 3 ] ) for ( let k = 0; k < 2; k ++ ) { const w = Math.min( 3.4, ( s === 2 ? C.w : C.d ) / 2 - 0.6 ); if ( w > 1 ) { const f = onWall( C, w, 0.3, 2.3, [ s ] ); if ( f ) T.rifleRack( f, w, loot ); } }
+	const cw = Math.min( 4.2, C.w - 3.2 );
 	if ( cw > 1.2 ) {
-		const cz = C.z1 - 1.6;
+		const cz = C.z1 - 1.5;
 		const F = frame( O, ( C.x0 + C.x1 ) / 2, C.st.y, cz, Math.PI );
-		const r = [ ( C.x0 + C.x1 ) / 2 - cw / 2 - 0.7, cz - 0.7, ( C.x0 + C.x1 ) / 2 + cw / 2 + 0.7, cz + 0.2 ];
+		const r = [ ( C.x0 + C.x1 ) / 2 - cw / 2, cz - 0.7, ( C.x0 + C.x1 ) / 2 + cw / 2, cz + 0.05 ];
 		if ( free( C, r ) ) {
 			C.used.push( r );
-			T.gunCase( F.at( 0, 0, 0 ), cw, loot );
-			for ( const s of [ - 1, 1 ] ) if ( C.d > 7 ) { const G = F.at( s * ( cw / 2 + 0.31 ), 0, - 0.9, s * Math.PI / 2 ); T.gunCase( G, 1.6, loot ); C.used.push( [ ...( ( () => { const [ gx, gz ] = G.T( 0, 0.31 ); return [ gx - 0.9, gz - 0.9, gx + 0.9, gz + 0.9 ]; } )() ) ] ); }
-			register( F, - cw / 2 + 0.3, 1.0, 0.3, loot );
+			T.gunCase( F, cw, loot );
+			register( F, - cw / 2 + 0.35, 1.0, 0.3, loot );
+			// the staff side behind the counter stays clear
+			C.used.push( [ r[ 0 ] - 0.3, cz, r[ 2 ] + 0.3, C.z1 - 0.3 ] );
 		}
 	}
+	// island cases back to back, an ammunition gondola
+	const iz = ( C.z0 + C.z1 ) / 2 + 0.3;
+	for ( const dx of C.w > 8 ? [ - 1.8, 1.8 ] : [ 0 ] ) {
+		const x = ( C.x0 + C.x1 ) / 2 + dx;
+		const r = [ x - 1.0, iz - 0.66, x + 1.0, iz + 0.66 ];
+		if ( ! free( C, r ) ) continue;
+		C.used.push( r );
+		T.gunCase( frame( O, x, C.st.y, iz, 0 ), 2.0, loot );
+		T.gunCase( frame( O, x, C.st.y, iz, Math.PI ), 2.0, loot );
+	}
+	if ( C.d > 9 ) {
+		const gz = C.z0 + 3.2, len = Math.min( 3.6, C.w - 4 );
+		const r = [ ( C.x0 + C.x1 ) / 2 - len / 2 - 0.3, gz - 0.5, ( C.x0 + C.x1 ) / 2 + len / 2 + 0.3, gz + 0.5 ];
+		if ( len > 1.2 && free( C, r ) ) { C.used.push( r ); const G = frame( O, ( C.x0 + C.x1 ) / 2, C.st.y, gz, 0 ); T.ammoShelf( G.at( 0, 0, 0 ), len, loot ); T.ammoShelf( G.at( 0, 0, 0, Math.PI ), len, loot ); }
+	}
 	for ( let i = 0; i < 2; i ++ ) { const a = onWall( C, 1.6, 0.42, 1.8, [ 0, 1, 3 ] ); if ( a ) T.ammoShelf( a, 1.6, shop === 'gunstore' ? 'gunstore' : loot ); }
+	const co = onWall( C, 1.6, 0.7, 1.1, [ 3, 1 ], 'corner' );
+	if ( co ) { counter( co, 1.6, 0.7, 1.0, wood( [ 90, 64, 44 ] ) ); register( co, 0.3, 1.0, 0.35, loot ); }
 	if ( shop === 'gunstore' ) {
 		const s = onWall( C, 0.8, 0.62, 1.55, [ 1, 3, 0 ], 'corner' ); if ( s ) T.gunSafe( s, 'gun_safe' );
-		const fl = onWall( C, 0.4, 0.5, 2.4, [ 0, 1, 3 ], 'corner' ); if ( fl ) T.flag( fl.at( 0, 0, 0 ) );
+		const fl = onWall( C, 0.4, 0.5, 2.4, [ 0, 1, 3 ], 'corner' ); if ( fl ) T.flag( fl );
 		const m = inRoom( C, 0.5, 0.4, 0.8, 8 ); if ( m ) T.mannequin( m );
 		const cr = onWall( C, 1.4, 0.45, 1.5, [ 0, 1, 3 ] ); if ( cr ) T.clothesRail( cr, 1.4, 'sports' );
 	} else {
 		for ( let i = 0; i < 2; i ++ ) { const w = onWall( C, 1.8, 0.45, 1.9, [ 0, 1, 3 ] ); if ( w ) T.shelves( w, 1.8, 1.9, 0.45, 'products', 'pawn', 'Shelf', true, 0.3 ); }
-		const d = inRoom( C, 2.0, 0.62, 1.0 ); if ( d ) T.gunCase( d.at( 0, 0, - 0.31 ), 2.0, 'pawn' );
 	}
-	// spent cases on the floor where someone held the shop
-	if ( R() < 0.5 ) { const f = O.gd; for ( let k = 0; k < 14; k ++ ) { const x = C.x0 + 1 + R() * Math.max( 0, C.w - 2 ), z = C.z0 + 1 + R() * Math.max( 0, C.d - 2 ); frame( O, x, C.st.y, z, R() * 3, f ).cylH( 0, 0.006, 0, 0.006, 0.03, 5, gloss( [ 200, 160, 70 ] ), 'x' ); } }
+	// spent cases on the floor where someone held the shop, a body behind the counter sometimes
+	if ( R() < 0.6 ) { for ( let k = 0; k < 18; k ++ ) { const x = C.x0 + 1 + R() * Math.max( 0, C.w - 2 ), z = C.z0 + 1 + R() * Math.max( 0, C.d - 2 ); frame( O, x, C.st.y, z, R() * 3, O.gd ).cylH( 0, 0.006, 0, 0.006, 0.03, 5, gloss( [ 200, 160, 70 ] ), 'x' ); } }
+	if ( R() < 0.35 ) { const F = frame( O, ( C.x0 + C.x1 ) / 2 + ( R() - 0.5 ) * 2, C.st.y, C.z1 - 0.9, R() * 0.6 - 0.3 ); X.body( F, ( R() * 2 ) | 0, { table: 'zombie_civilian', clothes: [ [ 60, 70, 50 ], [ 50, 50, 44 ] ] } ); }
 }
 
 function clothesShop( C, shop, loot, tillSides ) {
@@ -1055,26 +1132,39 @@ function corridor( C, t ) {
 
 function cells( C ) {
 	const O = C.O, R = O.R, st = C.st;
-	// cells along the back with bars facing the room
-	const n = Math.max( 1, Math.min( 3, Math.floor( C.w / 2.2 ) ) );
-	const cd = Math.min( 2.4, C.d - 1.4 );
+	// cells along the long back wall, barred fronts facing the room, a walkway in front
+	const deep = C.d > C.w * 1.3;
+	const L0 = deep ? C.d : C.w, D0 = deep ? C.w : C.d;
+	const n = Math.max( 1, Math.min( 5, Math.floor( L0 / 2.4 ) ) );
+	const cd = Math.min( 2.4, D0 - 1.3 );
+	if ( cd < 1.6 ) return;
+	const bars = metal( [ 120, 124, 128 ] );
 	for ( let i = 0; i < n; i ++ ) {
-		const x0 = C.x0 + C.w * i / n, x1 = C.x0 + C.w * ( i + 1 ) / n;
-		const zb = C.z1 - cd;
-		// a barred front with its door ajar in some
+		const a0 = ( deep ? C.z0 : C.x0 ) + L0 * i / n, a1 = ( deep ? C.z0 : C.x0 ) + L0 * ( i + 1 ) / n;
+		// the cell's own frame: x along the bars, +z from the bars into the cell
+		const F = deep ? frame( O, C.x1 - cd, st.y, ( a0 + a1 ) / 2, - Math.PI / 2 ) : frame( O, ( a0 + a1 ) / 2, st.y, C.z1 - cd, 0 );
+		const cw = a1 - a0;
 		const open = R() < 0.4;
-		cellBars( C, x0, zb, open ? ( x0 + x1 ) / 2 - 0.1 : x1 - 0.05, zb, st.y );
-		if ( open ) { const F = frame( O, ( x0 + x1 ) / 2 + 0.35, st.y, zb, - 0.9 ); F.box( 0, 0, - 0.015, x1 - ( x0 + x1 ) / 2 - 0.05, 2.3, 0.015, metal( [ 120, 124, 128 ] ), 0 ); }
-		if ( i < n - 1 ) { O.g.box( x1 - 0.06, st.y, zb, x1, st.y + 2.4, C.z1, paint( [ 200, 200, 196 ] ) ); O.col( x1 - 0.06, st.y, zb, x1, st.y + 2.4, C.z1, 0 ); }
-		const b = frame( O, x0 + 0.5, st.y, C.z1, Math.PI );
-		b.box( - 0.4, 0.4, 0, 0.4, 0.5, 1.9, metal( [ 120, 124, 128 ] ) ).box( - 0.38, 0.5, 0.05, 0.38, 0.6, 1.85, cloth( [ 90, 110, 100 ] ) ).box( - 0.4, 0, 0.1, - 0.36, 0.4, 0.14, metal( [ 120, 124, 128 ] ) ).box( 0.36, 0, 1.76, 0.4, 0.4, 1.8, metal( [ 120, 124, 128 ] ) );
+		const nb = Math.floor( ( cw - 0.1 ) / 0.14 );
+		const gate = open ? [ - cw / 2 + 0.3, - cw / 2 + 1.1 ] : [ 99, 99 ];
+		for ( let k = 0; k <= nb; k ++ ) { const x = - cw / 2 + 0.05 + k * ( cw - 0.1 ) / nb; if ( x > gate[ 0 ] && x < gate[ 1 ] ) continue; F.box( x - 0.015, 0, - 0.015, x + 0.015, 2.3, 0.015, bars, 12 ); }
+		for ( const hy of [ 0.1, 1.05, 2.25 ] ) F.box( - cw / 2 + 0.05, hy, - 0.02, cw / 2 - 0.05, hy + 0.05, 0.02, bars );
+		if ( open ) { const G = F.at( gate[ 0 ], 0, 0, 1.1 ); for ( let k = 0; k < 6; k ++ ) G.box( k * 0.14 - 0.015, 0, - 0.015, k * 0.14 + 0.015, 2.3, 0.015, bars, 12 ); for ( const hy of [ 0.1, 1.05, 2.25 ] ) G.box( 0, hy, - 0.02, 0.75, hy + 0.05, 0.02, bars ); }
+		F.col( - cw / 2, 0, - 0.03, open ? gate[ 0 ] : cw / 2, 2.3, 0.03, 2, 2 );
+		if ( open ) F.col( gate[ 1 ], 0, - 0.03, cw / 2, 2.3, 0.03, 2, 2 );
+		if ( i < n - 1 ) { F.box( cw / 2 - 0.03, 0, 0, cw / 2 + 0.03, 2.4, cd, paint( [ 200, 200, 196 ] ) ); F.col( cw / 2 - 0.03, 0, 0, cw / 2 + 0.03, 2.4, cd, 0 ); }
+		// a bunk along the back, a steel toilet in the corner
+		const b = F.at( - cw / 2 + 0.45, 0, cd, Math.PI );
+		b.box( - 0.4, 0.4, 0, 0.4, 0.5, 1.9, bars ).box( - 0.38, 0.5, 0.05, 0.38, 0.6, 1.85, cloth( [ 90, 110, 100 ] ) ).box( - 0.4, 0, 0.1, - 0.36, 0.4, 0.14, bars ).box( 0.36, 0, 1.76, 0.4, 0.4, 1.8, bars );
 		b.col( - 0.4, 0, 0, 0.4, 0.6, 1.9, 2, 2 ).bed( - 0.4, 0, 0, 0.4, 0.6, 1.9, 0.6 );
 		if ( R() < 0.5 ) b.rbox( 0, 0.63, 1.1, 0.35, 0.03, 0.5, cloth( [ 140, 130, 110 ] ), R() * 0.3 );
-		H.toilet( frame( O, x1 - 0.5, st.y, C.z1, Math.PI ), { roll: false } );
-		if ( R() < 0.4 ) O.decalFloor( ( x0 + x1 ) / 2, st.y + 0.007, C.z1 - cd / 2, 1.4, DECAL.blood[ ( R() * 4 ) | 0 ], R() * 6 );
+		if ( cw > 1.9 ) H.toilet( F.at( cw / 2 - 0.4, 0, cd, Math.PI ), { roll: false } );
+		if ( R() < 0.45 ) O.decalAt( F, 0, cd / 2, 1.3, 'blood' );
+		if ( R() < 0.3 ) X.body( F.at( 0.2, 0, cd * 0.55, R() * 6 ), ( R() * 3 ) | 0, { table: 'zombie_civilian', clothes: [ [ 230, 120, 40 ], [ 230, 120, 40 ] ] } );
 	}
-	C.used.push( [ C.x0, C.z1 - cd, C.x1, C.z1 ] );
-	for ( let i = 0; i < 2; i ++ ) { const bn = onWall( C, 1.8, 0.36, 0.5, [ 0, 1, 3 ] ); if ( bn ) T.bench( bn, 1.8, wood( WOODS[ 2 ] ) ); }
+	C.used.push( deep ? [ C.x1 - cd - 0.2, C.z0, C.x1, C.z1 ] : [ C.x0, C.z1 - cd - 0.2, C.x1, C.z1 ] );
+	for ( let i = 0; i < 2; i ++ ) { const bn = onWall( C, 1.8, 0.36, 0.5, [ 0, 1, 3, 2 ] ); if ( bn ) T.bench( bn, 1.8, wood( WOODS[ 2 ] ) ); }
+	const dk = onWall( C, 1.3, 0.72, 0.8, [ 0, 3, 1 ] ); if ( dk ) H.desk( dk, 1.3, 'police', { pc: true } );
 }
 
 function armory( C, mil ) {
@@ -1396,7 +1486,6 @@ function wallArt( C, n, set, home ) {
 	const frameM = paint( home ? pickOf( R, WOODS ) : [ 40, 40, 42 ] );
 	for ( let k = 0, tries = 0; k < n && tries < 16; tries ++ ) {
 		const side = ( R() * 4 ) | 0;
-		if ( C.open[ side ] ) continue;
 		const lo = side === 0 || side === 2 ? C.x0 : C.z0, hi = side === 0 || side === 2 ? C.x1 : C.z1;
 		const cell = pickOf( R, set );
 		const poster = cell >= 8;
@@ -1404,8 +1493,12 @@ function wallArt( C, n, set, home ) {
 		if ( hi - lo < w + 0.7 ) continue;
 		const a = lo + 0.35 + w / 2 + R() * ( hi - lo - w - 0.7 );
 		if ( C.blocked[ side ].some( b => b[ 0 ] < a + w / 2 + 0.15 && b[ 1 ] > a - w / 2 - 0.15 ) ) continue;
-		const F = frameOnWall( C, side, a );
 		const y0 = Math.min( C.ceil - h - 0.25, 1.3 + R() * 0.25 );
+		// not behind tall furniture, not over another picture
+		const wr = wallRect( C, side, a, w + 0.1, 0.3 );
+		if ( C.used.some( u => ( u[ 4 ] ?? 0 ) > y0 - 0.05 && overlaps( u, wr ) ) ) continue;
+		C.blocked[ side ].push( [ a - w / 2 - 0.1, a + w / 2 + 0.1, - 1 ] );
+		const F = frameOnWall( C, side, a );
 		const img = art( cell );
 		if ( R() < 0.1 && ! poster ) {
 			// knocked off the wall, face down
@@ -1481,4 +1574,3 @@ function rows( C, w, d, gapX, gapZ, fn ) {
 	}
 }
 
-export const _unused = [ DARK, PLASTIC, cloth, plate, mug, scatter, CLOTHES ];

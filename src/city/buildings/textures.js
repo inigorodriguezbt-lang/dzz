@@ -70,25 +70,53 @@ function procedural( layer ) {
 			break;
 		}
 		case L.products: {
-			// a shelf face packed with boxes, cans and bottles: 1 repeat = 1.2 m wide, 0.4 m tall (one shelf bay)
-			x.fillStyle = '#2a2a2a'; x.fillRect( 0, 0, N, N );
-			const cols = [ '#c8302a', '#e8c040', '#2e6fb4', '#f2f2ea', '#3a9a4a', '#e07a2a', '#7a3a8a', '#d0d0c8', '#8a5a30', '#20a0b0', '#f4a0b0', '#303030' ];
+			// a shelf face packed with goods: 1 repeat = 1.2 m wide, 4 shelves of 0.4 m. Runs of identical facings
+			// (cereal boxes, cans two high, bottles, jars, bags of chips), gaps where it was raided, price tags
+			x.fillStyle = '#26282a'; x.fillRect( 0, 0, N, N );
+			const cols = [ '#c8302a', '#e8c040', '#2e6fb4', '#f2f2ea', '#3a9a4a', '#e07a2a', '#7a3a8a', '#d0d0c8', '#8a5a30', '#20a0b0', '#f4a0b0', '#303030', '#6a8a2a', '#b02050' ];
+			const rh = N / 4;
 			for ( let row = 0; row < 4; row ++ ) {
-				let px = 0;
-				const y0 = row * N / 4, rh = N / 4;
+				const y1 = row * rh + rh - 6; // the shelf line (bottom of the row)
+				let px = 2;
 				while ( px < N ) {
-					const w = 10 + R() * 34, hh = rh * ( 0.45 + R() * 0.45 );
-					const col = cols[ ( R() * cols.length ) | 0 ];
+					if ( R() < 0.12 ) { px += 30 + R() * 70; continue; }
+					const kind = ( R() * 5 ) | 0, col = cols[ ( R() * cols.length ) | 0 ], col2 = cols[ ( R() * cols.length ) | 0 ];
+					// (1 px = 2.3 mm across, 3.1 mm up: a cereal box 20-25 cm wide, a can 7 cm, a bottle 8 cm)
 					const n = 1 + ( ( R() * 4 ) | 0 );
-					for ( let k = 0; k < n && px < N; k ++ ) {
-						x.fillStyle = col; x.fillRect( px + 1, y0 + rh - hh - 4, w - 2, hh );
-						x.fillStyle = 'rgba(255,255,255,0.35)'; x.fillRect( px + 3, y0 + rh - hh * 0.7 - 4, w - 6, hh * 0.25 );
-						x.fillStyle = 'rgba(0,0,0,0.25)'; x.fillRect( px + w - 4, y0 + rh - hh - 4, 3, hh );
-						px += w;
+					const iw = [ 80 + R() * 30, 30 + R() * 4, 32 + R() * 8, 38 + R() * 6, 70 + R() * 20 ][ kind ];
+					const ih = [ 96 + R() * 20, 40 + R() * 4, 90 + R() * 24, 52 + R() * 12, 84 + R() * 22 ][ kind ];
+					for ( let k = 0; k < n && px + iw < N; k ++ ) {
+						const x0 = px, top = y1 - ih;
+						if ( kind === 0 ) { // box: brand band, a label panel
+							x.fillStyle = col; x.fillRect( x0, top, iw - 2, ih );
+							x.fillStyle = col2; x.fillRect( x0 + 3, top + 6, iw - 8, ih * 0.22 );
+							x.fillStyle = 'rgba(255,255,255,0.75)'; x.fillRect( x0 + 5, top + ih * 0.45, iw - 12, ih * 0.3 );
+							x.fillStyle = 'rgba(0,0,0,0.25)'; x.fillRect( x0 + iw - 5, top, 3, ih );
+						} else if ( kind === 1 ) { // cans, two high
+							for ( const t of [ 0, 1 ] ) { const cy = y1 - ( t + 1 ) * ih; x.fillStyle = col; x.fillRect( x0, cy + 3, iw - 2, ih - 4 ); x.fillStyle = '#c8c8c8'; x.fillRect( x0, cy, iw - 2, 4 ); x.fillStyle = 'rgba(255,255,255,0.6)'; x.fillRect( x0 + 3, cy + ih * 0.35, iw - 8, ih * 0.25 ); x.fillStyle = 'rgba(0,0,0,0.2)'; x.fillRect( x0 + iw - 6, cy + 3, 4, ih - 4 ); }
+						} else if ( kind === 2 ) { // bottles: body, shoulder, neck, cap, label
+							x.fillStyle = col; x.fillRect( x0 + 1, top + ih * 0.32, iw - 3, ih * 0.68 );
+							x.fillRect( x0 + iw * 0.3, top + ih * 0.12, iw * 0.35, ih * 0.22 );
+							x.fillStyle = col2; x.fillRect( x0 + iw * 0.28, top + ih * 0.04, iw * 0.4, ih * 0.09 );
+							x.fillStyle = 'rgba(255,255,255,0.7)'; x.fillRect( x0 + 2, top + ih * 0.55, iw - 5, ih * 0.2 );
+							x.fillStyle = 'rgba(255,255,255,0.3)'; x.fillRect( x0 + 3, top + ih * 0.34, 2, ih * 0.6 );
+						} else if ( kind === 3 ) { // jars
+							x.fillStyle = col; x.fillRect( x0, top + 8, iw - 2, ih - 8 ); x.fillStyle = col2; x.fillRect( x0 + 1, top, iw - 4, 9 );
+							x.fillStyle = 'rgba(255,255,255,0.7)'; x.fillRect( x0 + 3, top + ih * 0.4, iw - 8, ih * 0.3 );
+						} else { // bags: a rounded top, a window
+							x.fillStyle = col; x.beginPath(); x.moveTo( x0, y1 ); x.lineTo( x0 + 2, top + 8 ); x.quadraticCurveTo( x0 + iw / 2, top - 4, x0 + iw - 4, top + 8 ); x.lineTo( x0 + iw - 2, y1 ); x.fill();
+							x.fillStyle = 'rgba(255,255,255,0.35)'; x.fillRect( x0 + 6, top + ih * 0.3, iw - 14, ih * 0.25 );
+							x.fillStyle = col2; x.fillRect( x0 + 4, top + ih * 0.65, iw - 10, 8 );
+						}
+						px += iw;
 					}
-					if ( R() < 0.12 ) px += 20 + R() * 40; // gaps: the shelves were raided
+					px += 2 + R() * 4;
 				}
-				x.fillStyle = '#9a9a96'; x.fillRect( 0, y0 + rh - 5, N, 5 );
+				// shade under the shelf above, the shelf edge and its price tags
+				const g = x.createLinearGradient( 0, row * rh, 0, row * rh + 30 ); g.addColorStop( 0, 'rgba(0,0,0,0.55)' ); g.addColorStop( 1, 'rgba(0,0,0,0)' );
+				x.fillStyle = g; x.fillRect( 0, row * rh, N, 30 );
+				x.fillStyle = '#9a9a96'; x.fillRect( 0, y1, N, 6 );
+				for ( let tx = 10 + R() * 30; tx < N; tx += 50 + R() * 40 ) { x.fillStyle = R() < 0.3 ? '#f0d040' : '#f4f4f0'; x.fillRect( tx, y1, 18, 6 ); }
 			}
 			break;
 		}
@@ -393,7 +421,7 @@ function decalAtlas() {
 	x.clearRect( 0, 0, S * 4, S * 8 );
 	const R = rngOf( 991 );
 	const cell = ( k, fn ) => { x.save(); x.translate( ( k % 4 ) * S, ( ( k / 4 ) | 0 ) * S ); x.beginPath(); x.rect( 0, 0, S, S ); x.clip(); fn(); x.restore(); };
-	const blood = ( a ) => `rgba(${70 + R() * 30},${6 + R() * 8},${6 + R() * 6},${a})`;
+	const blood = ( a ) => `rgba(${105 + R() * 35},${12 + R() * 10},${10 + R() * 8},${a})`;
 	for ( let k = 0; k < 4; k ++ ) cell( k, () => {
 		// a pool with satellite drops (dried dark at the rim)
 		const cx = S / 2, cy = S / 2;
@@ -407,24 +435,29 @@ function decalAtlas() {
 		}
 	} );
 	for ( let k = 4; k < 7; k ++ ) cell( k, () => {
-		// smear / drag trail across the cell
-		for ( let i = 0; i < 26; i ++ ) {
-			const t = i / 26, y = S / 2 + Math.sin( t * 5 + k ) * 20;
-			x.fillStyle = blood( 0.25 + R() * 0.4 );
-			x.fillRect( t * S, y - 30 + R() * 10, S / 20 + 6, 40 + R() * 24 );
+		// a smear across the cell: overlapping strokes that thin and fade, a few spatters
+		const y0 = S / 2 + ( R() - 0.5 ) * 30;
+		for ( let i = 0; i < 90; i ++ ) {
+			const t = i / 90;
+			const y = y0 + Math.sin( t * 5 + k ) * 18 + ( R() - 0.5 ) * 10;
+			x.fillStyle = blood( ( 0.08 + 0.3 * ( 1 - t ) ) * ( 0.4 + R() * 0.8 ) );
+			x.beginPath(); x.ellipse( t * S, y, 6 + R() * 10, 18 + ( 1 - t ) * 22 + R() * 10, ( R() - 0.5 ) * 0.6, 0, Math.PI * 2 ); x.fill();
 		}
-		x.globalCompositeOperation = 'destination-out';
-		for ( let i = 0; i < 60; i ++ ) { x.fillStyle = 'rgba(0,0,0,0.5)'; x.fillRect( R() * S, S / 2 - 40 + R() * 80, 20 + R() * 40, 2 ); }
-		x.globalCompositeOperation = 'source-over';
+		for ( let i = 0; i < 25; i ++ ) { x.fillStyle = blood( 0.7 ); x.beginPath(); x.arc( R() * S, y0 + ( R() - 0.5 ) * 100, 1 + R() * 4, 0, Math.PI * 2 ); x.fill(); }
 	} );
 	cell( 7, () => {
-		for ( let i = 0; i < 4; i ++ ) {
-			const hx = 40 + i * 50, hy = 60 + R() * 120;
-			x.fillStyle = blood( 0.7 );
-			x.beginPath(); x.ellipse( hx, hy, 18, 22, 0, 0, Math.PI * 2 ); x.fill();
-			for ( let f = 0; f < 4; f ++ ) { x.fillRect( hx - 16 + f * 9, hy - 50, 6, 30 ); }
-			x.fillRect( hx + 14, hy - 10, 16, 6 );
-			x.fillStyle = blood( 0.4 ); x.fillRect( hx - 10, hy + 20, 6, 40 + R() * 60 );
+		// bloody hands dragged down a wall: palms, fingers smeared downwards, runs
+		for ( let i = 0; i < 3; i ++ ) {
+			const hx = 50 + i * 72 + R() * 16, hy = 70 + R() * 70, a = ( R() - 0.5 ) * 0.5;
+			x.save(); x.translate( hx, hy ); x.rotate( a );
+			x.fillStyle = blood( 0.75 );
+			x.beginPath(); x.ellipse( 0, 0, 17, 21, 0, 0, Math.PI * 2 ); x.fill();
+			for ( let f = 0; f < 4; f ++ ) { x.beginPath(); x.ellipse( - 13 + f * 8.5, - 30 - ( f === 1 || f === 2 ? 5 : 0 ), 3.6, 11, ( f - 1.5 ) * 0.12, 0, Math.PI * 2 ); x.fill(); }
+			x.beginPath(); x.ellipse( 20, - 4, 4, 10, 0.9, 0, Math.PI * 2 ); x.fill();
+			// smeared down as the hand slid
+			for ( let k = 0; k < 14; k ++ ) { x.fillStyle = blood( 0.22 * ( 1 - k / 14 ) ); x.beginPath(); x.ellipse( ( R() - 0.5 ) * 6, 10 + k * 7, 16, 9, 0, 0, Math.PI * 2 ); x.fill(); }
+			for ( let k = 0; k < 3; k ++ ) { x.fillStyle = blood( 0.6 ); x.fillRect( - 10 + R() * 20, 18, 2.5, 30 + R() * 70 ); }
+			x.restore();
 		}
 	} );
 	for ( let k = 8; k < 12; k ++ ) cell( k, () => {
@@ -515,12 +548,17 @@ function decalAtlas() {
 		x.fillStyle = 'rgba(230,140,40,0.9)'; x.fillRect( S / 2 - 14, S / 2 - 30, 28, 60 );
 	} );
 	cell( 25, () => {
-		// a body dragged across the floor: two smudged bands and drips
-		for ( let i = 0; i < 40; i ++ ) {
-			const t = i / 40;
-			for ( const o of [ - 26, 26 ] ) { x.fillStyle = blood( 0.12 + 0.35 * ( 1 - t ) * R() ); x.fillRect( t * S, S / 2 + o - 16 + R() * 8, S / 40 + 8, 22 + R() * 10 ); }
+		// a body dragged across the floor: a wide smeared band that thins and breaks up, drips and finger marks
+		for ( let i = 0; i < 140; i ++ ) {
+			const t = i / 140, y = S / 2 + Math.sin( t * 4.2 ) * 12 + ( R() - 0.5 ) * 16;
+			const w = 26 * ( 1 - t * 0.6 ) + R() * 14;
+			x.fillStyle = blood( ( 0.06 + 0.22 * ( 1 - t ) ) * ( 0.5 + R() ) );
+			x.beginPath(); x.ellipse( t * S, y, 5 + R() * 8, w, ( R() - 0.5 ) * 0.4, 0, Math.PI * 2 ); x.fill();
 		}
-		for ( let i = 0; i < 30; i ++ ) { x.fillStyle = blood( 0.8 ); x.beginPath(); x.arc( R() * S, S / 2 + ( R() - 0.5 ) * 110, 1 + R() * 4, 0, Math.PI * 2 ); x.fill(); }
+		x.strokeStyle = blood( 0.35 ); x.lineWidth = 2;
+		for ( let k = 0; k < 7; k ++ ) { const y = S / 2 - 18 + k * 6 + ( R() - 0.5 ) * 4; x.beginPath(); x.moveTo( R() * 40, y ); for ( let px = 0; px < S; px += 16 ) x.lineTo( px, y + Math.sin( px * 0.05 + k ) * 3 ); x.globalAlpha = 0.5 * ( 1 - k / 7 ); x.stroke(); }
+		x.globalAlpha = 1;
+		for ( let i = 0; i < 40; i ++ ) { x.fillStyle = blood( 0.7 ); x.beginPath(); x.arc( R() * S, S / 2 + ( R() - 0.5 ) * 90, 1 + R() * 3.5, 0, Math.PI * 2 ); x.fill(); }
 	} );
 	const t = new THREE.CanvasTexture( c );
 	t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;

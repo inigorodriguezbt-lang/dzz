@@ -28,7 +28,7 @@ const HAND_VIS_FRAG = /* glsl */`
 		gl_FragColor = vec4( v, 0.0, 0.0, 1.0 );
 	}`;
 
-const _fwd = new THREE.Vector3(), _up = new THREE.Vector3();
+const _fwd = new THREE.Vector3(), _up = new THREE.Vector3(), _view = new THREE.Vector2();
 
 export const TEXTURES = [
 	'sand', 'grass', 'drygrass', 'forest', 'reddirt', 'dirt', 'rock', 'cliff', 'lava', 'snow', 'farm', 'asphalt', 'sidewalk',
@@ -140,7 +140,7 @@ export class World {
 		this.sun.intensity = 1;
 		for ( const sys of this.systems ) sys.update && sys.update( dt );
 		const r = this.renderer;
-		this.ocean.update( dt, this.camera, r.sceneColor, r.sceneDepth, new THREE.Vector2( r.width, r.height ) );
+		this.ocean.update( dt, this.camera, r.sceneColor, r.sceneDepth, _view.set( r.width, r.height ) );
 		// cascaded shadows of the key light, fitted to this frame's camera
 		this.csm.update( this.camera, L, this.scene );
 		this._updateHandVis( dt );

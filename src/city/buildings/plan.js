@@ -472,7 +472,10 @@ const LAYOUT = {
 				const lw = Math.min( W - 2.7, Math.max( kw + 1.2, W * 0.56 ) );
 				const zh0 = zc0 + fdep, zh1 = zh0 + hallD;
 				const living = room( st0, 'living', x0, zc0, x0 + lw, zh0 );
-				const bed1 = room( st0, 'bedroom', x0 + lw, zc0, x1, zh0 );
+				// the newer houses often have a garage at the front instead of the front bedroom
+				const garage = ! S.variant.startsWith( 'plantation' ) && W - lw >= 3.4 && fdep >= 4.5 && hash32( P.bid, 0x6a4a ) % 100 < 55;
+				const bed1 = room( st0, garage ? 'garage' : 'bedroom', x0 + lw, zc0, x1, zh0 );
+				if ( garage ) extDoor( st0, bed1, 0, { kind: 'roll', w: Math.min( 2.8, W - lw - 0.8 ), h: 2.2, at: 0.5 } );
 				const kitchen = room( st0, 'kitchen', x0, zh0, x0 + kw, z1 );
 				const hall = room( st0, 'hall', x0 + kw, zh0, x1, zh1 );
 				const bathW = W - kw >= 5.3 ? 2.2 : W - kw;
