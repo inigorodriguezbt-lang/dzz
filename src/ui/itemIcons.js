@@ -29,7 +29,11 @@ export function glyphFor( id ) {
 
 function pending( id ) {
 	let p = waiting.get( id );
-	if ( ! p ) { p = Icons.iconFor( id ).catch( () => null ); waiting.set( id, p ); }
+	if ( ! p ) {
+		// a failed or blank render resolves to null: forget it so the next request tries again
+		p = Icons.iconFor( id ).catch( () => null ).then( r => { if ( ! r ) waiting.delete( id ); return r; } );
+		waiting.set( id, p );
+	}
 	return p;
 }
 

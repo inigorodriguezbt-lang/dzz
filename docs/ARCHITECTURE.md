@@ -138,6 +138,12 @@ Each module file `src/.../<Module>.js` exports `install(game)` (listed in `src/g
   Saves kill counts per cell in `save.world.killed`.
   Summon names: zombie, zombie_runner, zombie_police, zombie_military, zombie_crawler, zombie_brute, zombie_civilian, zombie_tourist, zombie_medic, zombie_firefighter, zombie_horde, boar, chicken, goat, deer, cow, nene, shark, turtle, bandit, bandit_group. `game.zombies`: list, count, spawn( type, pos, opts ), horde( pos, n ). Closed doors are physics boxes with kind 'door'; `game.city.doorAt( pos, r )` returns a door with `bash( amount, { source, kind } )` — the AI routes through closed doors and pounds on them.
 - Buildings (`game.city`): besides the baked `meta.buildings`, `src/city/buildings/infill.js` deterministically appends street-facing infill lots (towers downtown and in Waikīkī, shops and houses elsewhere) at startup, identically on the main thread and in workers. `game.city.relocate( pos )` must be called after teleporting (it streams the storey in before collisions apply). Doors: `doorAt( pos, r )` → door with `bash( amount, { source, kind } )`.
+- Items (`game.items3d`, `game.itemUse`): `itemUse.actions( stack )` returns `{ verb, note, label, run }` (label keeps the
+  bracket form 'Eat (3/3)' that the inventory splits; verb/note are the parts). `items3d.remove( item, { taken, stack } )`
+  (stack = what was actually taken, for partial pickups); `items3d.claim( item )` marks a loot spot looted when an item on
+  the ground is changed in place (eaten, opened, cooked) and swaps building loot for a saved twin. Items draw out to
+  10–55 m by size (`drawRange`). recipes.js exports `POT_COOKED`; Loot.js `PERISHABLE_H` (food keeping ≤ 72 h rolls rotten).
+  `ItemDB.canMerge` refuses opened cans, part-eaten food and lit chemlights.
 - Vehicles (`game.vehicles`): drivable entities (type 'vehicle'), `enter(v)`, `exit()`, `seatInteraction()`, camera while driving
   (sets game.camera), fuel / damage / lights / horn, trunk container, `damage(amount, info)`. /summon names: sedan, pickup, jeep, suv,
   police_car, van, sports_car, bus?, motorbike?, boat, speedboat, fishing_boat, jetski, helicopter, plane?. Spawns parked / abandoned
