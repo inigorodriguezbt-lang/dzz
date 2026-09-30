@@ -136,6 +136,7 @@ Each module file `src/.../<Module>.js` exports `install(game)` (listed in `src/g
   (`game.city?.doorAt?.(pos)` → `door.bash(amount)`). Corpses are lootable (a container interaction). Registers /summon names: zombie,
   zombie_runner, zombie_police, zombie_military, zombie_crawler, zombie_brute, boar, chicken, goat, deer, shark, nene, bandit.
   Saves kill counts per cell in `save.world.killed`.
+  Summon names: zombie, zombie_runner, zombie_police, zombie_military, zombie_crawler, zombie_brute, zombie_civilian, zombie_tourist, zombie_medic, zombie_firefighter, zombie_horde, boar, chicken, goat, deer, cow, nene, shark, turtle, bandit, bandit_group. `game.zombies`: list, count, spawn( type, pos, opts ), horde( pos, n ). Closed doors are physics boxes with kind 'door'; `game.city.doorAt( pos, r )` returns a door with `bash( amount, { source, kind } )` — the AI routes through closed doors and pounds on them.
 - Vehicles (`game.vehicles`): drivable entities (type 'vehicle'), `enter(v)`, `exit()`, `seatInteraction()`, camera while driving
   (sets game.camera), fuel / damage / lights / horn, trunk container, `damage(amount, info)`. /summon names: sedan, pickup, jeep, suv,
   police_car, van, sports_car, bus?, motorbike?, boat, speedboat, fishing_boat, jetski, helicopter, plane?. Spawns parked / abandoned

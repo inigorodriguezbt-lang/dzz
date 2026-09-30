@@ -1,6 +1,8 @@
 // The running game: owns the world, the player and every gameplay system, and the frame loop.
 // Subsystems are optional at runtime (each is null-checked) so the game runs while pieces load.
 import * as THREE from 'three';
+
+const _q = new THREE.Quaternion();
 import { Events } from '../core/Events.js';
 import { Physics } from './Physics.js';
 import { EntityManager } from './Entities.js';
@@ -157,7 +159,8 @@ export class Game {
 		this.entities.update( dt );
 		if ( ! this.dead ) this.interact.update( dt );
 		// the sun for the view model
-		this.viewSun.position.copy( this.world.sky.sunDir ).multiplyScalar( 5 );
+		// the view model is drawn with an identity view, so its light must be in camera space to follow the sun
+		this.viewSun.position.copy( this.world.sky.sunDir ).applyQuaternion( _q.copy( this.camera.quaternion ).invert() ).multiplyScalar( 5 );
 		this.viewSun.color.copy( this.world.sky.night > 0.8 ? this.world.sky.moonColor : this.world.sky.sunColor ).multiplyScalar( 0.55 );
 		this.viewCamera.aspect = this.camera.aspect;
 		this.viewCamera.fov = Math.min( 70, this.settings.get( 'fov' ) * 0.72 ) * ( this.hands?.viewFov?.() ?? 1 );

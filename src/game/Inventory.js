@@ -148,7 +148,7 @@ export class PlayerInventory {
 	}
 
 	hasTool( kind ) {
-		return this.find( ( s, d ) => ( d?.tool?.kind === kind || d?.melee?.tools?.includes( kind ) ) && s.cond > 0 );
+		return this.find( ( s, d ) => ( d?.tool?.kind === kind || d?.tool?.provides?.includes( kind ) || d?.melee?.tools?.includes( kind ) ) && s.cond > 0 );
 	}
 
 	// pick a free slot for an item picked up: weapons to weapon slots, clothes to empty slots, else containers
