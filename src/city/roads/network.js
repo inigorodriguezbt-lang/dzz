@@ -15,7 +15,7 @@ export const MILE = 1609.34 / 8; // one real mile at the world's 1:8 horizontal 
 export const FLAG_CITY = 32;
 
 // road surface classes (shader: rd.z)
-export const RC = { FREEWAY: 0, HIGHWAY: 1, DIRT: 2, STREET: 3, INTER: 4, RUNWAY: 5, TAXIWAY: 6, WALK: 7, APRON: 8 };
+export const RC = { FREEWAY: 0, HIGHWAY: 1, DIRT: 2, STREET: 3, INTER: 4, RUNWAY: 5, TAXIWAY: 6, WALK: 7, APRON: 8, LOT: 9 };
 // street kinds (shader: rd2.z for streets)
 export const SK = { METRO: 0, TOWN: 1, VILLAGE: 2, BASE: 3 };
 
@@ -590,14 +590,16 @@ const LOT_ZONES = {
 // the ground a building keeps round its footprint (local frame, the front is -z): yards, forecourts, walks
 const CLAIM = { side: 2.5, back: 3, front: 8, gas: 16 };
 
+const CG = 64;
+const cgk = ( i, j ) => ( i + 2048 ) * 4096 + ( j + 2048 );
 function buildLots( net, meta, hf ) {
 	const D = meta.buildings.data, NB = Math.floor( D.length / 11 );
-	const G = 64, claims = new Map();
-	const gk = ( i, j ) => ( i + 2048 ) * 4096 + ( j + 2048 );
+	const G = CG, claims = new Map(), gk = cgk;
+	net.claims = claims;
 	for ( let i = 0; i < NB; i ++ ) {
 		const k = i * 11, x = D[ k ], z = D[ k + 1 ], w = D[ k + 2 ], d = D[ k + 3 ], a = D[ k + 4 ];
 		const front = TYPE_OF[ D[ k + 7 ] ] === 'gas' ? CLAIM.gas : CLAIM.front;
-		const o = { x, z, c: Math.cos( a ), s: Math.sin( a ), x0: - w / 2 - CLAIM.side, x1: w / 2 + CLAIM.side, z0: - d / 2 - front, z1: d / 2 + CLAIM.back };
+		const o = { x, z, c: Math.cos( a ), s: Math.sin( a ), x0: - w / 2 - CLAIM.side, x1: w / 2 + CLAIM.side, z0: - d / 2 - front, z1: d / 2 + CLAIM.back, hw: w / 2, hd: d / 2 };
 		const r = Math.hypot( w / 2 + CLAIM.side, d / 2 + front );
 		for ( let gi = Math.floor( ( x - r ) / G ); gi <= Math.floor( ( x + r ) / G ); gi ++ ) for ( let gj = Math.floor( ( z - r ) / G ); gj <= Math.floor( ( z + r ) / G ); gj ++ ) {
 			const key = gk( gi, gj );
@@ -697,8 +699,7 @@ function buildLots( net, meta, hf ) {
 					for ( let a = a0 - 1; a <= a1; a ++ ) for ( let b = s0 - 1; b <= s1 + 1; b ++ ) if ( a >= 0 && a < nu && b >= 0 && b < nv ) free[ a * nv + b ] = 0;
 				}
 				if ( ! st ) continue;
-				dA = [ st.dx, st.dz ]; dB = [ st.dz * sgn, - st.dx * sgn ]; // b: from the street into the block
-				dB = [ - dB[ 0 ], - dB[ 1 ] ];
+				dA = [ st.dx, st.dz ]; dB = [ - st.dz * sgn, st.dx * sgn ]; // b: from the street into the block (its right is +1)
 				const [ cx, cz ] = F.toW( ( g0[ 0 ] + g1[ 0 ] ) / 2, ( g0[ 1 ] + g1[ 1 ] ) / 2 );
 				const L = side <= 1 ? g1[ 0 ] - g0[ 0 ] : g1[ 1 ] - g0[ 1 ], Dp = side <= 1 ? g1[ 1 ] - g0[ 1 ] : g1[ 0 ] - g0[ 0 ];
 				// the cross aisle (and the driveway) at the end away from the nearer corner... either end: flip a
@@ -766,6 +767,16 @@ function bestLot( free, nu, nv, hs ) {
 		}
 	}
 	return best;
+}
+
+// inside a building's footprint (the record's rectangle, grown by pad)?
+export function inBuilding( net, x, z, pad = 0 ) {
+	const l = net.claims?.get( cgk( Math.floor( x / CG ), Math.floor( z / CG ) ) );
+	if ( l ) for ( const o of l ) {
+		const dx = x - o.x, dz = z - o.z, lx = dx * o.c + dz * o.s, lz = - dx * o.s + dz * o.c;
+		if ( Math.abs( lx ) < o.hw + pad && Math.abs( lz ) < o.hd + pad ) return true;
+	}
+	return false;
 }
 
 // the parking lot at a point, or null
