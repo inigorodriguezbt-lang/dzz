@@ -70,6 +70,7 @@ export const G = {
 	// texel (m) / normal bias (m) / depth range (m), seam blend ranges, cascade 0 raw depth, 1-2 compare mode
 	uCsmOn: { value: 0 },
 	uCsmSoft: { value: 1 }, // 1: contact-hardening (PCSS) on the near cascade; 0: the 5-tap PCF there too (cheaper)
+	uCsmSlope: { value: 2 }, // the normal offset grows to ( 1 + uCsmSlope ) x toward grazing light
 	uCsmCount: { value: 0 },
 	uCsmSize: { value: 2048 },
 	uCsmBias: { value: 0.00002 },
@@ -99,7 +100,7 @@ export const COMMON_GLSL = /* glsl */`
 	uniform sampler2D uCloudShadow; uniform vec4 uCloudShadowRect; uniform float uCloudShadowOn;
 	uniform sampler2D uCloudPano; uniform float uCloudPanoOn;
 	uniform sampler2D uBounceMap; uniform vec4 uBounceRect; uniform float uBounceOn;
-	uniform float uCsmOn; uniform float uCsmSoft; uniform float uCsmCount; uniform float uCsmSize; uniform float uCsmBias;
+	uniform float uCsmOn; uniform float uCsmSoft; uniform float uCsmSlope; uniform float uCsmCount; uniform float uCsmSize; uniform float uCsmBias;
 	uniform mat4 uCsmMat[ 3 ]; uniform vec4 uCsmInfo[ 3 ]; uniform vec4 uCsmBlend[ 3 ];
 	uniform sampler2D uCsm0; uniform sampler2DShadow uCsm1; uniform sampler2DShadow uCsm2;
 	float hash12( vec2 p ) { vec3 p3 = fract( vec3( p.xyx ) * 0.1031 ); p3 += dot( p3, p3.yzx + 33.33 ); return fract( ( p3.x + p3.y ) * p3.z ); }
@@ -242,7 +243,10 @@ export const COMMON_GLSL = /* glsl */`
 	}
 	float csmCascade( vec3 P, vec3 N, int c, float noise, float pcfNoise, bool pcss ) {
 		vec4 info = uCsmInfo[ c ];
-		vec4 sc = uCsmMat[ c ] * vec4( P + N * info.z, 1.0 );
+		// normal offset, slope-scaled: up to ( 1 + uCsmSlope ) x where the light grazes the surface (floors and
+		// trims beside thin walls leaked light along the junction, and grazing faces are where acne starts)
+		float nb = info.z * ( 1.0 + uCsmSlope * ( 1.0 - abs( dot( N, uSunDir ) ) ) );
+		vec4 sc = uCsmMat[ c ] * vec4( P + N * nb, 1.0 );
 		vec3 uvz = sc.xyz;
 		if ( any( lessThan( uvz.xy, vec2( 0.0 ) ) ) || any( greaterThan( uvz.xy, vec2( 1.0 ) ) ) || uvz.z < 0.0 ) return 1.0;
 		float z = uvz.z + uCsmBias;

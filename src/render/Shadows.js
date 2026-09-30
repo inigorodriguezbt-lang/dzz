@@ -25,12 +25,14 @@ import { G, CSM_FALLBACK } from './Materials.js';
 // soft: contact-hardening penumbrae (PCSS) on the near cascade, else the plain 5-tap PCF everywhere
 const QUALITY = {
 	off: null,
-	low: { size: 1024, splits: [ 40 ], soft: false },
+	low: { size: 1024, splits: [ 70 ], soft: false },
 	medium: { size: 1024, splits: [ 12, 150 ], soft: false },
 	high: { size: 2048, splits: [ 10, 60, 450 ], soft: true },
 	ultra: { size: 4096, splits: [ 10, 60, 450 ], soft: true },
 };
-const NORMAL_BIAS = [ 0.015, 0.06, 0.3 ];
+// normal offset per cascade in texels (at high: 1.5 cm, 8.8 cm, 31 cm; the middle one used to be 0.85 texel,
+// less than the PCF kernel's reach, and thin walls leaked there)
+const NORMAL_BIAS = [ 1.3, 1.25, 0.65 ];
 const LIGHT_MARGIN = 200;
 const BIAS = 0.00002;
 // camera travel a cascade's sphere allows before its map must follow, as a share of its split
@@ -162,7 +164,7 @@ export class SunShadows {
 		light.shadow.updateMatrices( light );
 		G.uCsmMat.value[ i ].copy( light.shadow.matrix );
 		// far edge (m from the camera), texel (m), normal bias (m), depth range (m)
-		G.uCsmInfo.value[ i ].set( u.far, texel, NORMAL_BIAS[ i ] ?? 0.05, cam.far - cam.near );
+		G.uCsmInfo.value[ i ].set( u.far, texel, ( NORMAL_BIAS[ i ] ?? 1.25 ) * texel, cam.far - cam.near );
 	}
 
 	// fit and render the cascades due this frame (before the main render)
