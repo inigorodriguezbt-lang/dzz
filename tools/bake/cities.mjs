@@ -41,7 +41,11 @@ const WANT = {
 
 export function layoutCities( fine, claim ) {
 	const out = { cities: [], streets: [], blocks: [], lots: [], runways: [] };
-	CITIES.forEach( ( c, cityIndex ) => {
+	// airports, bases and observatories claim their ground before the towns around them: laid out in list order,
+	// Honolulu's metro swallowed the whole of Honolulu International Airport (and Kalihi) and they were dropped
+	const FIRST = new Set( [ 'airport', 'military', 'observatory' ] );
+	const order = CITIES.map( ( c, i ) => [ c, i ] ).sort( ( a, b ) => ( FIRST.has( b[ 0 ].kind ) - FIRST.has( a[ 0 ].kind ) ) || a[ 1 ] - b[ 1 ] );
+	order.forEach( ( [ c, cityIndex ] ) => {
 		const [ cx, cz ] = lonLatToWorld( c.lon, c.lat );
 		const K = KIND[ c.kind ];
 		const rnd = mulberry32( hashStr( c.id ) );

@@ -218,17 +218,19 @@ log( 'terrain.bin', ( raw.length / 1e6 ).toFixed( 1 ), 'MB raw,', ( gz.length / 
 // ---- write world.json -------------------------------------------------------------------------
 const r1 = v => Math.round( v * 10 ) / 10;
 const r2 = v => Math.round( v * 100 ) / 100;
+// angles to 1e-5 rad: at 0.01 rad a city grid 1 km across drifts metres off its own streets
+const r5 = v => Math.round( v * 1e5 ) / 1e5;
 const world = {
 	version: 1,
 	bounds: BOUNDS, hScale: H_SCALE, vScale: V_SCALE, halfX: WORLD_HALF_X, halfZ: WORLD_HALF_Z,
 	islands: ISLANDS.map( i => { const [ x, z ] = lonLatToWorld( i.lon, i.lat ); return { id: i.id, name: i.name, x: r1( x ), z: r1( z ) }; } ),
-	cities: lay.cities.map( c => ( { name: c.name, id: c.id, kind: c.kind, island: c.island, x: r1( c.x ), z: r1( c.z ), angle: r2( c.angle ), pu: c.pu, pv: c.pv, street: c.street, walk: c.walk, radius: c.radius } ) ),
+	cities: lay.cities.map( c => ( { name: c.name, id: c.id, kind: c.kind, island: c.island, x: r1( c.x ), z: r1( c.z ), angle: r5( c.angle ), pu: c.pu, pv: c.pv, street: c.street, walk: c.walk, radius: c.radius } ) ),
 	roads: roads.map( r => ( { lanes: r.lanes, w: r.w, name: r.from + '-' + r.to, pts: r.pts.flatMap( ( p, i ) => [ r1( p[ 0 ] ), r1( p[ 1 ] ), r2( r.hs[ i ] ) ] ) } ) ),
 	streets: lay.streets.map( s => [ s.city, r1( s.a[ 0 ] ), r1( s.a[ 1 ] ), r2( fine.sample( ...s.a ) ), r1( s.b[ 0 ] ), r1( s.b[ 1 ] ), r2( fine.sample( ...s.b ) ), s.w, s.walk ] ),
-	runways: lay.runways.map( rw => ( { x: r1( rw.x ), z: r1( rw.z ), angle: r2( rw.angle ), len: rw.len, w: rw.w, y: r2( rw.hs.reduce( ( s, v ) => s + v, 0 ) / rw.hs.length ) } ) ),
+	runways: lay.runways.map( rw => ( { x: r1( rw.x ), z: r1( rw.z ), angle: r5( rw.angle ), len: rw.len, w: rw.w, y: r2( rw.hs.reduce( ( s, v ) => s + v, 0 ) / rw.hs.length ) } ) ),
 	buildings: {
 		fields: [ 'x', 'z', 'w', 'd', 'angle', 'base', 'lo', 'type', 'floors', 'city', 'style' ],
-		data: buildings.flatMap( b => [ r1( b.x ), r1( b.z ), r1( b.w ), r1( b.d ), Math.round( b.angle * 1000 ) / 1000, r2( b.base ), r2( b.lo ), b.type, b.floors, b.city, b.style ] ),
+		data: buildings.flatMap( b => [ r1( b.x ), r1( b.z ), r1( b.w ), r1( b.d ), r5( b.angle ), r2( b.base ), r2( b.lo ), b.type, b.floors, b.city, b.style ] ),
 	},
 	labels: LABELS.map( l => { const [ x, z ] = lonLatToWorld( l.lon, l.lat ); return { name: l.name, kind: l.kind, x: r1( x ), z: r1( z ) }; } ),
 };
