@@ -56,8 +56,9 @@ export class Game {
 		this.timeFrozen = false;
 		this.viewScene = new THREE.Scene();
 		this.viewCamera = new THREE.PerspectiveCamera( 55, 1, 0.01, 10 );
-		this.viewScene.add( new THREE.HemisphereLight( 0xcfe6ff, 0x3a3326, 1.2 ) );
-		this.viewSun = new THREE.DirectionalLight( 0xffffff, 1.5 );
+		// lit like the world: its key light (sun or moon, with the shadow at the hands) and its environment map
+		// (the sky), both turned into camera space since the view model is drawn with an identity view
+		this.viewSun = new THREE.DirectionalLight( 0xffffff, 1 );
 		this.viewScene.add( this.viewSun, this.viewSun.target );
 	}
 
@@ -159,10 +160,16 @@ export class Game {
 		for ( const sys of this.systems ) { try { sys.update && sys.update( dt ); } catch ( e ) { console.error( e ); sys._errors = ( sys._errors || 0 ) + 1; if ( sys._errors > 20 ) sys.update = null; } }
 		this.entities.update( dt );
 		if ( ! this.dead ) this.interact.update( dt );
-		// the sun for the view model
-		// the view model is drawn with an identity view, so its light must be in camera space to follow the sun
-		this.viewSun.position.copy( this.world.sky.sunDir ).applyQuaternion( _q.copy( this.camera.quaternion ).invert() ).multiplyScalar( 5 );
-		this.viewSun.color.copy( this.world.sky.night > 0.8 ? this.world.sky.moonColor : this.world.sky.sunColor ).multiplyScalar( 0.55 );
+		// the view model's lighting: the world's key light at full strength, dimmed by the shadow at the hands,
+		// and the world's environment, in camera space (the view model is drawn with an identity view)
+		const sky = this.world.sky;
+		_q.copy( this.camera.quaternion ).invert();
+		this.viewSun.position.copy( sky.keyDir ).applyQuaternion( _q ).multiplyScalar( 5 );
+		this.viewSun.color.copy( sky.keyColor ).multiplyScalar( this.world.handVis ?? 1 );
+		this.viewScene.environment = this.world.scene.environment;
+		this.viewScene.environmentRotation.setFromQuaternion( _q );
+		// (indoors the sky reaches the hands only through doors and windows)
+		this.viewScene.environmentIntensity = this.world.isIndoors?.( this.player.pos ) ? 0.4 : 1;
 		this.viewCamera.aspect = this.camera.aspect;
 		this.viewCamera.fov = Math.min( 70, this.settings.get( 'fov' ) * 0.72 ) * ( this.hands?.viewFov?.() ?? 1 );
 		this.viewCamera.updateProjectionMatrix();

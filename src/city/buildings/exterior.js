@@ -210,7 +210,7 @@ function shellStorey( g, P, st, lod ) {
 		const cx = ( P.rect.x0 + P.rect.x1 ) / 2, cz = ( P.rect.z0 + P.rect.z1 ) / 2, rr = S.bw / 2;
 		g.cyl( cx, y0, cz, rr, st.h, 28, mat.ext, 0 );
 		// door slab
-		g.box( cx - 0.55, y0, cz - rr - 0.06, cx + 0.55, y0 + 2.1, cz - rr + 0.1, M( L.metal, [ 150, 150, 150 ], 1 ) );
+		g.box( cx - 0.55, y0, cz - rr - 0.06, cx + 0.55, y0 + 2.1, cz - rr + 0.1, M( L.spandrel, [ 150, 150, 150 ], 1 ) );
 		return;
 	}
 	for ( const f of st.facades ) {
@@ -349,11 +349,11 @@ function flatRoof( g, P, x0, z0, x1, z1, top, lod ) {
 		g.box( pr.x0, top, pr.z0, pr.x1, top + 3.6, pr.z1, { px: band, nx: band, pz: band, nz: band, py: deck } );
 		if ( lod === 0 ) {
 			// louvres, cooling towers, an antenna mast
-			const lv = M( L.metal, [ 150, 150, 150 ], 1 );
+			const lv = M( L.spandrel, [ 150, 150, 150 ], 1 );
 			const cz = ( pr.z0 + pr.z1 ) / 2, cx = ( pr.x0 + pr.x1 ) / 2;
 			g.box( pr.x0 - 0.05, top + 1.2, cz - 1.5, pr.x0, top + 3.0, cz + 1.5, lv );
 			g.box( pr.x1, top + 1.2, cz - 1.5, pr.x1 + 0.05, top + 3.0, cz + 1.5, lv );
-			const ct = M( L.metal, [ 196, 198, 196 ], 1.5 ), fan = M( L.plain, [ 50, 52, 54 ], 1 );
+			const ct = M( L.spandrel, [ 196, 198, 196 ], 1.5 ), fan = M( L.plain, [ 50, 52, 54 ], 1 );
 			for ( let k = 0; k < 2; k ++ ) {
 				const fx = cx + ( k - 0.5 ) * Math.min( 3.2, ( pr.x1 - pr.x0 ) * 0.45 );
 				g.box( fx - 1.2, top + 3.6, cz - 1.2, fx + 1.2, top + 5.0, cz + 1.2, ct );
@@ -368,7 +368,7 @@ function flatRoof( g, P, x0, z0, x1, z1, top, lod ) {
 	// rooftop clutter: AC condensers, vents, a water tank on older buildings
 	const n = Math.floor( ( x1 - x0 ) * ( z1 - z0 ) / 90 );
 	const ac = M( L.plain, [ 200, 200, 196 ], 1 );
-	const vent = M( L.metal, [ 170, 170, 170 ], 1 );
+	const vent = M( L.spandrel, [ 170, 170, 170 ], 1 );
 	for ( let i = 0; i < Math.min( 8, n ); i ++ ) {
 		const px = x0 + 1.2 + R() * ( x1 - x0 - 2.4 ), pz = z0 + 1.2 + R() * ( z1 - z0 - 2.4 );
 		if ( P.stair && px > P.stair.x0 - 1 && px < P.stair.x1 + 1 && pz > P.stair.z0 - 1 && pz < P.stair.z1 + 1 ) continue;
@@ -438,7 +438,7 @@ function towerDress( g, P, lod ) {
 	const { S, rect } = P;
 	const look = P.look;
 	const acc = look.accent || P.mat.ext;
-	const soffit = M( L.plain, [ 232, 230, 224 ], 1 ), top = M( L.metal, [ 170, 172, 174 ], 2 );
+	const soffit = M( L.plain, [ 232, 230, 224 ], 1 ), top = M( L.spandrel, [ 170, 172, 174 ], 2 );
 	if ( look.canopy ) {
 		// cantilevered over the pavement above the shop windows; civic buildings only over the entrance
 		const y = S.fy + Math.min( 3.3, S.Hs[ 0 ] - 0.9 );
@@ -726,7 +726,7 @@ function archRoof( g, P, x0, z0, x1, z1, top, lod ) {
 		const [ ax, ay ] = pts[ i ], [ bx, by ] = pts[ i + 1 ];
 		g.quad( [ ax, ay, z0 - o ], [ ax, ay, z1 + o ], [ bx, by, z1 + o ], [ bx, by, z0 - o ], mat.roof );
 		// underside
-		g.quad( [ bx, by - 0.05, z0 - o ], [ bx, by - 0.05, z1 + o ], [ ax, ay - 0.05, z1 + o ], [ ax, ay - 0.05, z0 - o ], M( L.metal, [ 120, 120, 118 ], 2 ) );
+		g.quad( [ bx, by - 0.05, z0 - o ], [ bx, by - 0.05, z1 + o ], [ ax, ay - 0.05, z1 + o ], [ ax, ay - 0.05, z0 - o ], M( L.tinroof, [ 150, 152, 150 ], 1.6, 0, { r: 1 } ) );
 		// end walls (fan to the wall top)
 		g.tri( [ ax, ay, z0 ], [ bx, by, z0 ], [ cx, top, z0 ], mat.ext );
 		g.tri( [ bx, by, z1 ], [ ax, ay, z1 ], [ cx, top, z1 ], mat.ext );
@@ -753,7 +753,7 @@ function domeRoof( g, P, top, lod ) {
 		}
 		g.pop();
 		// ring beam
-		g.cyl( cx, top - 0.3, cz, rr + 0.25, 0.3, 32, M( L.metal, [ 200, 200, 200 ], 2 ), 0 );
+		g.cyl( cx, top - 0.3, cz, rr + 0.25, 0.3, 32, M( L.spandrel, [ 200, 200, 200 ], 2 ), 0 );
 	}
 }
 
@@ -939,9 +939,9 @@ export function terminalCanopyOf( P ) {
 
 function terminalCanopy( g, P, lod, gh ) {
 	const c = terminalCanopyOf( P );
-	const white = M( L.metal, [ 236, 236, 232 ], 2 ), under = M( L.plain, [ 226, 226, 222 ], 1 );
+	const white = M( L.spandrel, [ 236, 236, 232 ], 2 ), under = M( L.plain, [ 226, 226, 222 ], 1 );
 	g.box( c.x0, c.y, c.z0, c.x1, c.y + 0.55, c.z1, { px: white, nx: white, nz: white, py: M( L.bitumen, [ 176, 176, 176 ], 4 ), ny: under } );
-	const colM = M( L.metal, [ 200, 202, 206 ], 1 );
+	const colM = M( L.spandrel, [ 200, 202, 206 ], 1 );
 	for ( const [ x, z ] of c.cols ) {
 		const y = gh ? groundAt( P, gh, x, z ) : P.S.fy;
 		g.cyl( x, y - 0.3, z, 0.18, c.y - y + 0.3, lod > 0 ? 6 : 12, colM, 0 );
@@ -989,7 +989,7 @@ function towerCab( g, P, lod ) {
 	const roofM = { py: M( L.bitumen, [ 176, 176, 176 ], 4 ), ny: under, px: mat.ext, nx: mat.ext, pz: mat.ext, nz: mat.ext };
 	g.box( rect.x0 - 1.3, top - 0.05, rect.z0 - 1.3, rect.x1 + 1.3, top + 0.5, rect.z1 + 1.3, roofM );
 	const R = rng( hash32( P.bid, 0x70e ) );
-	const mast = M( L.metal, [ 190, 190, 190 ], 1 ), red = M( L.plain, [ 190, 40, 32 ], 1 );
+	const mast = M( L.spandrel, [ 190, 190, 190 ], 1 ), red = M( L.plain, [ 190, 40, 32 ], 1 );
 	const cx = ( rect.x0 + rect.x1 ) / 2, cz = ( rect.z0 + rect.z1 ) / 2;
 	g.cyl( cx + 2.2, top + 0.5, cz - 2.2, 0.08, 6.5, 6, mast, 1 );
 	g.cyl( cx + 2.2, top + 7.0, cz - 2.2, 0.14, 0.3, 8, red, 1 );
@@ -1041,7 +1041,7 @@ function storefronts( g, P, lod ) {
 		g.box( po.x0, S.fy - 0.3, po.z0, po.x0 + po.pw, po.y1, po.z1, pm );
 		g.box( po.x1 - po.pw, S.fy - 0.3, po.z0, po.x1, po.y1, po.z1, pm );
 		g.box( po.x0 + po.pw, S.fy + 4.2, po.z0, po.x1 - po.pw, po.y1, po.z1, pm );
-		const cy = S.fy + 3.4, top = M( L.metal, [ 176, 178, 180 ], 2 ), soffit = M( L.plain, [ 232, 230, 224 ], 1 );
+		const cy = S.fy + 3.4, top = M( L.spandrel, [ 176, 178, 180 ], 2 ), soffit = M( L.plain, [ 232, 230, 224 ], 1 );
 		for ( const [ a, b ] of [ [ rect.x0 + 0.3, po.x0 ], [ po.x1, rect.x1 - 0.3 ] ] ) if ( b - a > 1.5 ) g.box( a, cy, rect.z0 - 2.4, b, cy + 0.3, rect.z0, { px: am, nx: am, nz: am, py: top, ny: soffit } );
 	}
 	for ( let u = 0; u < units.length; u ++ ) {
@@ -1157,7 +1157,7 @@ function gasCanopy( g, P, lod, gh ) {
 	}
 	// price sign by the street
 	const sx = r.w / 2 - 2, sz = - r.d / 2 + 2, sy = gy( sx, sz );
-	g.box( sx - 0.12, sy - 0.5, sz - 0.12, sx + 0.12, sy + 5.5, sz + 0.12, M( L.metal, [ 180, 180, 180 ], 1 ) );
+	g.box( sx - 0.12, sy - 0.5, sz - 0.12, sx + 0.12, sy + 5.5, sz + 0.12, M( L.spandrel, [ 180, 180, 180 ], 1 ) );
 	g.box( sx - 1.2, sy + 5.5, sz - 0.2, sx + 1.2, sy + 7.5, sz + 0.2, { px: fm, nx: fm, py: fm, ny: fm, pz: white, nz: white } );
 	if ( sg ) signBoard( g, x0 + 1, x1 - 1, h + 0.1, h + 0.8, z0 - 0.02, sg );
 	void lod;

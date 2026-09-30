@@ -220,6 +220,8 @@ export class Commands {
 		p.vel.set( 0, 0, 0 );
 		p.fallStart = null;
 		g.world.terrain.update( p.pos );
+		// a storey that hasn't streamed in yet would otherwise push the player out of the building
+		g.city?.relocate?.( p.pos );
 	}
 
 	resolveItem( q ) {

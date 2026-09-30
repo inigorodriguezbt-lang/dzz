@@ -163,7 +163,6 @@ export function waterSurfaceGLSL( opts ) {
 	const rot = ( v, a ) => `vec2( ${ v }.x * ${ f( Math.cos( a ) ) } - ${ v }.y * ${ f( Math.sin( a ) ) }, ${ v }.x * ${ f( Math.sin( a ) ) } + ${ v }.y * ${ f( Math.cos( a ) ) } )`;
 
 	const fragment = common + /* glsl */`
-	uniform sampler2D uFoamTex;
 	struct WaterSurfaceFrag { vec3 normal; float foam; float coverage; vec2 slopes; float jacobian; float rough; float aeration; float gust; float slick;
 		${ SF ? 'SurfFoamInfo foamInfo;' : '' } };
 	// extraFoam: foam carried by the water (ShoreSim); simState: its sample here; surfMask (clear face of a
@@ -231,10 +230,10 @@ ${ cascadesF }
 		// foam pattern: an irregular bubbly mat thresholded by coverage, so foam grows, tears into lace and
 		// dissolves naturally
 		vec2 fuv = lagXZ * uFoamScale;
-		vec4 p1 = texture( uFoamTex, fuv );
+		vec4 p1 = texture( uPatterns, vec3( fuv, 0.0 ) );
 		// second layer at another scale, rotated, to break repetition
 		vec2 r2 = vec2( fuv.x * 0.8 - fuv.y * 0.6, fuv.x * 0.6 + fuv.y * 0.8 );
-		vec4 p2 = texture( uFoamTex, r2 * 2.37 + vec2( 0.31, 0.77 ) );
+		vec4 p2 = texture( uPatterns, vec3( r2 * 2.37 + vec2( 0.31, 0.77 ), 0.0 ) );
 		float pattern = p1.x * 0.62 + p2.x * 0.38;
 		float thresh = 1.05 - coverage * 1.1;
 		float soft = 0.06 + footprint * 0.1;

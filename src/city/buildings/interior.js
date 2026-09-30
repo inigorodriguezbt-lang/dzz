@@ -35,7 +35,7 @@ function finishes( P, rm, R ) {
 			floor = M( L.tiles, [ 220, 222, 222 ], 1.2, F_IN ); wain = M( L.tilewall, pick3( R, [ [ 236, 236, 232 ], [ 200, 222, 226 ], [ 226, 214, 200 ] ] ), 0.6, F_IN ); break;
 		case 'garage': case 'workshop': case 'storage': case 'utility': case 'bay': case 'hallbig': case 'sorting': case 'vault': case 'armory': case 'cells': case 'lockers':
 			floor = M( L.concrete, [ 190, 188, 182 ], 3, F_IN );
-			wall = M( k === 'hallbig' && ( P.S.arch === 'warehouse' || P.S.arch === 'hangar' ) ? L.metal : L.cmu, k === 'cells' || k === 'armory' || k === 'vault' ? [ 214, 214, 206 ] : [ 226, 224, 216 ], 2.4, F_IN );
+			wall = M( k === 'hallbig' && ( P.S.arch === 'warehouse' || P.S.arch === 'hangar' ) ? L.tinroof : L.cmu, k === 'cells' || k === 'armory' || k === 'vault' ? [ 214, 214, 206 ] : [ 226, 224, 216 ], 2.4, F_IN );
 			ceil = M( L.concrete, [ 200, 198, 192 ], 3, F_IN );
 			break;
 		case 'sales': case 'lobby': case 'waiting': case 'teller': case 'corridor': case 'rx':
@@ -58,7 +58,7 @@ function finishes( P, rm, R ) {
 			floor = M( L.woodfloor, [ 236, 214, 190 ], 1.6, F_IN, { r: 1 } ); wall = M( L.plaster, [ 244, 242, 236 ], 3, F_IN ); ceil = M( L.wood, [ 190, 160, 130 ], 1, F_IN ); break;
 		case 'rkitchen': floor = M( L.tiles, [ 170, 90, 70 ], 1.2, F_IN ); wain = M( L.tilewall, [ 240, 240, 236 ], 0.6, F_IN ); ceil = M( L.ceiltile, [ 240, 240, 238 ], 1.2, F_IN ); break;
 		case 'bar': floor = M( L.woodfloor, [ 180, 140, 110 ], 1.6, F_IN, { r: 1 } ); wall = M( L.plaster, [ 120, 60, 40 ], 3, F_IN ); break;
-		case 'elevator': floor = M( L.metal, [ 150, 150, 150 ], 1, F_IN ); wall = M( L.metal, [ 170, 170, 168 ], 1.5, F_IN ); break;
+		case 'elevator': floor = M( L.metal, [ 150, 150, 150 ], 1, F_IN ); wall = M( L.spandrel, [ 170, 170, 168 ], 1.5, F_IN ); break;
 		case 'stair': floor = M( L.concrete, [ 200, 198, 192 ], 3, F_IN ); wall = M( L.plaster, [ 226, 226, 220 ], 3, F_IN ); break;
 		case 'checkin': case 'gate': case 'claim':
 			floor = M( L.terrazzo, [ 236, 234, 228 ], 2.5, F_IN ); ceil = M( L.ceiltile, [ 250, 250, 248 ], 1.2, F_IN );
@@ -350,7 +350,7 @@ function windowDressing( O, P, axis, line, mid, inSide, op, frameC, y0 ) {
 			const cw = ( w / 2 ) * ( 1 - open ) + 0.1;
 			B( l - 0.1, oy0 - 0.15, Math.min( o, o + inSide * 0.03 ), l - 0.1 + cw, oy1 + 0.15, Math.max( o, o + inSide * 0.03 ), cm );
 			B( r + 0.1 - cw, oy0 - 0.15, Math.min( o, o + inSide * 0.03 ), r + 0.1, oy1 + 0.15, Math.max( o, o + inSide * 0.03 ), cm );
-			B( l - 0.15, oy1 + 0.12, Math.min( o, o + inSide * 0.05 ), r + 0.15, oy1 + 0.16, Math.max( o, o + inSide * 0.05 ), M( L.metal, [ 150, 150, 150 ], 1, F_IN ) );
+			B( l - 0.15, oy1 + 0.12, Math.min( o, o + inSide * 0.05 ), r + 0.15, oy1 + 0.16, Math.max( o, o + inSide * 0.05 ), M( L.spandrel, [ 150, 150, 150 ], 1, F_IN ) );
 		} else {
 			const down = ( oy1 - oy0 ) * ( 0.3 + 0.6 * ( ( W.h >>> 25 ) & 3 ) / 3 );
 			B( l, oy1 - down, Math.min( o, o + inSide * 0.02 ), r, oy1, Math.max( o, o + inSide * 0.02 ), M( L.fabric, [ 214, 210, 196 ], 0.5, F_IN ) );
@@ -442,7 +442,7 @@ function stairFlights( O, P, st, rm, s, H ) {
 	const house = P.S.arch === 'house';
 	const tread = M( house ? L.woodfloor : L.concrete, house ? [ 236, 220, 200 ] : [ 196, 194, 188 ], house ? 1.6 : 2, F_IN );
 	const side = M( house ? L.wood : L.plaster, house ? [ 220, 210, 196 ] : [ 214, 212, 206 ], 2, F_IN );
-	const nosing = M( L.metal, [ 90, 90, 90 ], 1, F_IN );
+	const nosing = M( L.spandrel, [ 90, 90, 90 ], 1, F_IN );
 	const y0 = st.y;
 	const run = Math.max( 0.6, F.len - 1.2 - 1.0 );
 	let nR = Math.ceil( ( H / 2 ) / 0.19 );
@@ -500,7 +500,7 @@ function stairFlights( O, P, st, rm, s, H ) {
 		O.g.box( x0, y0, z0, x1, y0 + H, z1, wm );
 		O.col( x0, y0, z0, x1, y0 + H, z1, PM.concrete );
 		// handrails on the wall
-		const hm = M( L.metal, [ 120, 120, 118 ], 1, F_IN );
+		const hm = M( L.spandrel, [ 120, 120, 118 ], 1, F_IN );
 		const [ hx0, hz0, hx1, hz1 ] = F.rect( 1.2, 1.2 + run, wA1 - 0.06, wB0 + 0.06 );
 		void hx0; void hz0; void hx1; void hz1;
 		for ( const [ b0, b1, flightA ] of [ [ wA1 - 0.06, wA1, true ], [ wB0, wB0 + 0.06, false ] ] ) {
@@ -517,7 +517,7 @@ function stairFlights( O, P, st, rm, s, H ) {
 // the top storey's stairwell with no flight up: a railing round the opening
 function stairGuard( O, P, st, rm, s ) {
 	const F = stairFrame( s );
-	const rmat = house( P ) ? M( L.wood, [ 190, 160, 120 ], 1, F_IN ) : M( L.metal, [ 110, 110, 108 ], 1, F_IN );
+	const rmat = house( P ) ? M( L.wood, [ 190, 160, 120 ], 1, F_IN ) : M( L.spandrel, [ 110, 110, 108 ], 1, F_IN );
 	const y = st.y;
 	// along the edge of the landing strip, except where flight B arrives
 	const [ x0, z0, x1, z1 ] = F.rect( 1.18, 1.24, 0, F.sw / 2 );
@@ -704,8 +704,8 @@ function roundWalls( O, P, st ) {
 	const top = S.top, rr = S.bw / 2 + 0.15;
 	const prof = [];
 	for ( let i = 12; i >= 0; i -- ) { const a = i / 12 * Math.PI / 2 * 0.98; prof.push( [ Math.cos( a ) * ( rr - 0.12 ), top + Math.sin( a ) * ( rr - 0.12 ) ] ); }
-	O.g.lathe( cx, cz, prof, 32, M( L.metal, [ 200, 200, 200 ], 3, F_IN ) );
-	O.g.cyl( cx, top - 0.3, cz, rr - 0.1, 0.3, 32, M( L.metal, [ 150, 150, 150 ], 2, F_IN ), 0 );
+	O.g.lathe( cx, cz, prof, 32, M( L.spandrel, [ 200, 200, 200 ], 3, F_IN ) );
+	O.g.cyl( cx, top - 0.3, cz, rr - 0.1, 0.3, 32, M( L.spandrel, [ 150, 150, 150 ], 2, F_IN ), 0 );
 }
 
 // ---- doors ---------------------------------------------------------------------------------------------------------
@@ -716,7 +716,7 @@ function doorRecord( O, P, st, d ) {
 	if ( k === 'hangar' || k === 'flap' ) return;
 	if ( STATIC_DOOR[ k ] ) {
 		// closed elevator doors: brushed steel panels in the opening, a collider
-		const mm = M( L.metal, [ 190, 190, 190 ], 1, F_IN );
+		const mm = M( L.spandrel, [ 190, 190, 190 ], 1, F_IN );
 		const hw = d.w / 2, t = 0.03;
 		if ( d.axis === 'x' ) { O.g.box( d.x - hw, st.y, d.z - t, d.x + hw, st.y + d.h, d.z + t, mm ); O.col( d.x - hw, st.y, d.z - t, d.x + hw, st.y + d.h, d.z + t, PM.metal ); O.g.box( d.x - 0.004, st.y, d.z - t - 0.004, d.x + 0.004, st.y + d.h, d.z + t + 0.004, M( L.plain, [ 30, 30, 30 ], 1, F_IN ) ); }
 		else { O.g.box( d.x - t, st.y, d.z - hw, d.x + t, st.y + d.h, d.z + hw, mm ); O.col( d.x - t, st.y, d.z - hw, d.x + t, st.y + d.h, d.z + hw, PM.metal ); O.g.box( d.x - t - 0.004, st.y, d.z - 0.004, d.x + t + 0.004, st.y + d.h, d.z + 0.004, M( L.plain, [ 30, 30, 30 ], 1, F_IN ) ); }

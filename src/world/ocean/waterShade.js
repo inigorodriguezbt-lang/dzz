@@ -163,8 +163,10 @@ export const WATER_HELPERS_GLSL = /* glsl */`
 
 // The shading (WaterMaterial.js _shadeWGSL 212-588). Expects in scope: pos (world), lagXZ, vDepth, vHeight,
 // footprint, vFoam, vShoreN, vShoreFoam, vSurfMask, groundH (seabed height under the pixel); defines
-// outCol and seenFromBelow. Flags: SH (shore waves), SIM (shore simulation), SF (surf foam), SSR.
-export function waterShadeGLSL( { SH = false, SIM = false, SF = false, SSR = true } = {} ) {
+// outCol and seenFromBelow. Flags: SH (shore waves), SIM (shore simulation), SF (surf foam), SSR, CAU (caustics
+// and Tidewater's underwater lighting of the refracted seabed; needs wdx / wdy = dFdx / dFdy( pos.xz ) and the
+// long-wave slope function waterLongSlope( lagXZ, shoreN ))
+export function waterShadeGLSL( { SH = false, SIM = false, SF = false, SSR = true, CAU = false } = {} ) {
 	const hasClip = SH;
 	return /* glsl */`
 	vec2 screenUV = gl_FragCoord.xy / uViewport;
@@ -319,6 +321,27 @@ export function waterShadeGLSL( { SH = false, SIM = false, SF = false, SSR = tru
 		// objects in front of the sea floor (piles, rocks, reef) shorten the path
 		vec3 qView = waterViewPos( uvF, - waterViewDepth( dR ) );
 		float qDist = length( qView - posV );
+		${ CAU ? /* glsl */`
+		// (ours) Tidewater lights everything under the water with its UnderwaterLighting hooks (the sun attenuated
+		// along the refracted sun path x caustics, the ambient attenuated and tinted with depth) and draws the
+		// refraction source with them; our opaque pass lights the seabed as if in air. The same factors on the
+		// refracted sample, split between sun and sky by their irradiance on the (roughly level) floor.
+		if ( ! thruCrest ) {
+			vec3 Q = ( uCamWorld * vec4( qView, 1.0 ) ).xyz;
+			float dQ = max( pos.y - Q.y, 0.0 );
+			if ( dQ > 0.0 ) {
+				vec3 sigTU = uWaterAbsorption + uWaterScattering;
+				vec3 LsU = refract( - L, vec3( 0.0, 1.0, 0.0 ), 1.0 / WATER_IOR );
+				float muD = max( - LsU.y, 0.15 );
+				vec3 caust = causticsSampleMono( Q, dQ, waterLongSlope( lagXZ, vShoreN ), wSat( foam ), wdx, wdy );
+				vec3 dirK = mix( vec3( 1.0 ), exp( - sigTU * dQ / muD ) * caust, smoothstep( 0.0, 0.08, dQ ) );
+				// diffuse downwelling light: effective path ~1.2x depth, plus a little in-scattered blue
+				vec3 ambK = mix( vec3( 1.0 ), exp( - sigTU * dQ * 1.2 ) * 0.85 + vec3( 0.0, 0.02, 0.04 ) * exp( dQ * -0.1 ), smoothstep( 0.0, 0.1, dQ ) );
+				float eSun = dtLum( sunLight ) * max( L.y, 0.0 );
+				float fSun = eSun / ( eSun + dtLum( uSkyIrr ) * W_PI + 1e-6 );
+				sceneCol *= dirK * fSun + ambK * ( 1.0 - fSun );
+			}
+		}` : '' }
 		float pathLen = clamp( min( Lter, qDist ), 0.0, 400.0 );
 		pathLen = min( pathLen, crestT );
 

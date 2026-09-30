@@ -67,7 +67,8 @@ export class OceanFFT {
 				wrapS: THREE.RepeatWrapping, wrapT: THREE.RepeatWrapping,
 				minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter, generateMipmaps: false,
 			} );
-			for ( const t of rt.textures ) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.minFilter = THREE.LinearMipmapLinearFilter; t.magFilter = THREE.LinearFilter; t.anisotropy = 4; t.generateMipmaps = false; }
+			// (the second attachment is a plain Texture: without wrapR three sets TEXTURE_WRAP_R to an invalid enum)
+			for ( const t of rt.textures ) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.wrapR = THREE.ClampToEdgeWrapping; t.minFilter = THREE.LinearMipmapLinearFilter; t.magFilter = THREE.LinearFilter; t.anisotropy = 4; t.generateMipmaps = false; }
 			return rt;
 		};
 		this.out = [ arr(), arr() ];

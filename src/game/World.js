@@ -5,8 +5,30 @@ import { WorkerPool } from '../core/WorkerPool.js';
 import { Terrain } from '../world/Terrain.js';
 import { Sky } from '../world/Sky.js';
 import { Ocean } from '../world/Ocean.js';
-import { G, preloadTextures, setMaxAnisotropy } from '../render/Materials.js';
+import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
+import { G, COMMON_GLSL, SHARED_PARS, preloadTextures, setMaxAnisotropy } from '../render/Materials.js';
 import { SunShadows } from '../render/Shadows.js';
+import { FS_VERT } from '../render/Renderer.js';
+
+// the key light's visibility around a point (cascades, cloud and hill shadow), averaged over a small cross
+const HAND_VIS_FRAG = /* glsl */`
+	${SHARED_PARS}
+	uniform vec3 uP;
+	${COMMON_GLSL}
+	void main() {
+		vec3 L = normalize( uSunDir );
+		float v = 0.0;
+		// (the hands are always inside the near cascade: sample it directly, the cascade selection by view
+		// distance needs the world camera's view matrix)
+		for ( int i = 0; i < 5; i ++ ) {
+			vec3 o = i == 0 ? vec3( 0.0 ) : vec3( i == 1 ? 0.18 : i == 2 ? -0.18 : 0.0, 0.0, i == 3 ? 0.18 : i == 4 ? -0.18 : 0.0 );
+			v += ( uCsmOn > 0.5 ? csmCascade( uP + o, L, 0, 0.0, 0.0, false ) : 1.0 ) * 0.2;
+		}
+		v *= cloudShadowAt( uP ) * terrainSunShadowAt( uP );
+		gl_FragColor = vec4( v, 0.0, 0.0, 1.0 );
+	}`;
+
+const _fwd = new THREE.Vector3(), _up = new THREE.Vector3();
 
 export const TEXTURES = [
 	'sand', 'grass', 'drygrass', 'forest', 'reddirt', 'dirt', 'rock', 'cliff', 'lava', 'snow', 'farm', 'asphalt', 'sidewalk',
@@ -24,6 +46,17 @@ export class World {
 		this.camera.position.set( 0, 50, 0 );
 		this.clock = 0;
 		this.systems = [];
+		// the key light's visibility at the player's hands, for the view model (its own scene: no shadow maps
+		// there): a 1x1 pass read back asynchronously, eased
+		this.handVis = 1;
+		this._handTarget = 1;
+		this._handRT = new THREE.WebGLRenderTarget( 1, 1 );
+		this._handQuad = new FullScreenQuad( new THREE.ShaderMaterial( {
+			name: 'HandSunVis', uniforms: Object.assign( { uP: { value: new THREE.Vector3() } }, G ),
+			vertexShader: FS_VERT, fragmentShader: HAND_VIS_FRAG, depthTest: false, depthWrite: false,
+		} ) );
+		this._handBuf = new Uint8Array( 4 );
+		this._handPending = false;
 	}
 
 	async load( onStatus ) {
@@ -110,5 +143,27 @@ export class World {
 		this.ocean.update( dt, this.camera, r.sceneColor, r.sceneDepth, new THREE.Vector2( r.width, r.height ) );
 		// cascaded shadows of the key light, fitted to this frame's camera
 		this.csm.update( this.camera, L, this.scene );
+		this._updateHandVis( dt );
+	}
+
+	// the key light's visibility where the first-person hands are (a little ahead of and below the eye)
+	_updateHandVis( dt ) {
+		const gl = this.renderer.gl;
+		if ( ! this._handPending && gl.readRenderTargetPixelsAsync ) {
+			const cam = this.camera;
+			const e = cam.matrixWorld.elements;
+			this._handQuad.material.uniforms.uP.value.copy( cam.position ).addScaledVector( _fwd.set( - e[ 8 ], - e[ 9 ], - e[ 10 ] ), 0.35 ).addScaledVector( _up.set( e[ 4 ], e[ 5 ], e[ 6 ] ), - 0.25 );
+			const prev = gl.getRenderTarget();
+			gl.setRenderTarget( this._handRT );
+			this._handQuad.render( gl );
+			gl.setRenderTarget( prev );
+			this._handPending = true;
+			gl.readRenderTargetPixelsAsync( this._handRT, 0, 0, 1, 1, this._handBuf ).then( () => {
+				this._handTarget = this._handBuf[ 0 ] / 255;
+				this._handPending = false;
+			} ).catch( () => { this._handPending = false; } );
+		}
+		// eased over ~0.15 s: walking into shade dims the hands with the world, without flicker
+		this.handVis += ( this._handTarget - this.handVis ) * Math.min( 1, dt * 7 );
 	}
 }

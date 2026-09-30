@@ -2,9 +2,12 @@
 // (ocean/OceanFFT.js) on a CDLOD grid (ocean/CDLOD.js), composed like Tidewater's WaterSurface
 // (ocean/waterSurface.js: depth attenuation per cascade, Jacobian whitecaps, the procedural foam mat,
 // gusts / slicks / windrows) and shaded with Tidewater's water model (ocean/waterShade.js). Only sea
-// connected to the open ocean is drawn (ocean/seaMask.js). The fine ground under the sea comes from a 2 km
-// tile around the camera (ocean/LocalTile.js). The CPU twin of the surface (ocean/OceanTwin.js: the same
-// spectrum through small FFTs in a worker) answers heightAt() for swimming, boats and splashes.
+// connected to the open ocean is drawn (ocean/seaMask.js). The fine ground under the sea and the shoreline
+// waves' travel-time field come from a 2 km tile around the camera (ocean/LocalTile.js, ocean/ShoreField.js);
+// the shoreline waves shoal, plunge, run on as bores and swash up the sand (ocean/ShoreWaves.js); the foam
+// they make is carried by the water and left on the sand (ocean/ShoreSim.js, ocean/SurfFoam.js). The CPU
+// twin of the surface (ocean/OceanTwin.js: the same spectrum through small FFTs in a worker, plus the shore
+// waves) answers heightAt() for swimming, boats and splashes.
 import * as THREE from 'three';
 import { G, COMMON_GLSL } from '../render/Materials.js';
 import { LAYER_POST } from '../render/Renderer.js';
@@ -13,19 +16,23 @@ import { waterShadeUniforms, WATER_HELPERS_GLSL, waterShadeGLSL } from './ocean/
 import { OceanFFT } from './ocean/OceanFFT.js';
 import { OceanTwin } from './ocean/OceanTwin.js';
 import { CDLOD } from './ocean/CDLOD.js';
-import { createFoamTexture } from './ocean/FoamTexture.js';
+import { createPatternTexture, writePatternLayer, PATTERN_LACE, PATTERN_DETAIL } from './ocean/FoamTexture.js';
 import { SeaDetail, SEA_DETAIL_GLSL } from './ocean/SeaDetail.js';
-import { LocalTile, GROUND_GLSL } from './ocean/LocalTile.js';
+import { LocalTile, groundGLSL } from './ocean/LocalTile.js';
 import { waterSurfaceGLSL, cascadeAttenuationParams, cascadeAttenuation } from './ocean/waterSurface.js';
 import { CASCADE_SIZES, defaultSystems, spectrumParams, seaPreset } from './ocean/oceanSpectrum.js';
+import { ShoreWaves, SHORE_GLSL, PERLIN_GLSL } from './ocean/ShoreWaves.js';
+import { ShoreSim, SHORE_SIM_GLSL } from './ocean/ShoreSim.js';
+import { SURF_FOAM_GLSL } from './ocean/SurfFoam.js';
+import { Caustics } from './ocean/Caustics.js';
 
 // water quality: CDLOD grid (quads per node side), FFT resolution, fragment cascades, screen-space
-// reflections, near-field ripples. 'low' runs the same spectrum through a 128^2 FFT (every mode of the
-// three large cascades, the finest down to ~11 cm waves)
+// reflections, near-field ripples, the shore simulation + surf foam, caustics. 'low' runs the same spectrum
+// through a 128^2 FFT (every mode of the three large cascades, the finest down to ~11 cm waves)
 const QUALITY = {
-	low: { grid: 16, fft: 128, fragCascades: 3, ssr: false, nearRipples: false },
-	medium: { grid: 24, fft: 256, fragCascades: 4, ssr: true, nearRipples: true },
-	high: { grid: 32, fft: 256, fragCascades: 4, ssr: true, nearRipples: true },
+	low: { grid: 16, fft: 128, fragCascades: 3, ssr: false, nearRipples: false, sim: false, caustics: false },
+	medium: { grid: 24, fft: 256, fragCascades: 4, ssr: true, nearRipples: true, sim: true, caustics: true },
+	high: { grid: 32, fft: 256, fragCascades: 4, ssr: true, nearRipples: true, sim: true, caustics: true },
 };
 // the sea state that last rebuilt the spectrum: small drifts of the weather don't
 const SEA_STEP = 0.02;
@@ -42,10 +49,26 @@ export class Ocean {
 		this._att = [ 0, 0, 0, 0 ];
 		this._d = [ 0, 0, 0 ];
 		this.seaMask = buildSeaMask( hf );
+		this.bathy = makeBathyTexture( hf, this.seaMask );
 		this.tile = new LocalTile( hf );
+		this.shore = new ShoreWaves();
 		this.twin = new OceanTwin();
 		this.detail = new SeaDetail();
-		this.foamTex = createFoamTexture( renderer.gl );
+		this.patterns = createPatternTexture( renderer.gl );
+		writePatternLayer( renderer.gl, this.patterns, PATTERN_DETAIL, this.detail.data, this.detail.size );
+		this.tile.listeners.push( ( t ) => {
+			this.shore.setField( t.field );
+			// the surf lace once the first tile is in (the worker is free then)
+			if ( ! this._lace ) this._lace = this.tile.lace( 512 ).then( ( l ) => { if ( l ) writePatternLayer( renderer.gl, this.patterns, PATTERN_LACE, l.data, l.size ); } );
+		} );
+		// uniforms shared by the water material and the shore simulation (the same { value } objects)
+		this.U = Object.assign( {
+			uLocalH: { value: this.tile.texture }, uLocalRect: { value: this.tile.rect }, uLocalOn: { value: 0 },
+			uBathy: { value: this.bathy }, uBathyRect: { value: new THREE.Vector4( hf.x0 - hf.CS / 2, hf.z0 - hf.CS / 2, hf.CS * hf.cnx, hf.CS * hf.cnz ) },
+			uPatterns: { value: this.patterns.texture },
+			uShoreSim: { value: null }, uShoreSimRect: { value: new THREE.Vector4( 0, 0, 1, 1 ) },
+			uWaterLevel: G.uWaterLevel,
+		}, this.shore.uniforms() );
 		this.systems = defaultSystems();
 		// Tidewater's local sea runs 20 degrees off its swell; ours blows with the trades (G.uWind)
 		const wd = G.uWind.value;
@@ -54,8 +77,6 @@ export class Ocean {
 		this.systems.swell.windDirection = this.windDeg - 20;
 		this.sea = null; // the applied sea preset
 		this._build();
-		this.bathy = makeBathyTexture( hf, this.seaMask );
-		this.bathyRect = new THREE.Vector4( hf.x0 - hf.CS / 2, hf.z0 - hf.CS / 2, hf.CS * hf.cnx, hf.CS * hf.cnz );
 		this._applySea( true );
 	}
 
@@ -65,6 +86,11 @@ export class Ocean {
 		this.fft = new OceanFFT( this.r.gl, this.sizes, Q.fft );
 		if ( this.sea ) { this.fft.setSpectrum( this.P ); this._setFoam(); }
 		this.cdlod = new CDLOD( { gridSize: Q.grid, leafSize: 8, levels: 14, minY: - 25, maxY: 25 } );
+		// the shore simulation (medium and up)
+		if ( Q.sim && ! this.sim ) this.sim = new ShoreSim( this.r.gl, 'uniform float uWaterLevel; uniform highp sampler2DArray uPatterns;' + groundGLSL( false ) + PERLIN_GLSL + SHORE_GLSL, this.U );
+		else if ( ! Q.sim && this.sim ) { this.sim.dispose(); this.sim = null; }
+		if ( Q.caustics && ! this.caustics ) this.caustics = new Caustics( this.r.gl, this.sizes );
+		else if ( ! Q.caustics && this.caustics ) { this.caustics.dispose(); this.caustics = null; }
 		const mat = this._material( Q );
 		if ( this.mesh ) {
 			this.mesh.geometry.dispose();
@@ -89,26 +115,29 @@ export class Ocean {
 	}
 
 	_material( Q ) {
-		const S = waterSurfaceGLSL( { sizes: this.sizes, fftSize: Q.fft, fragCascades: Q.fragCascades, detail: true, nearRipples: Q.nearRipples } );
+		const SIM = Q.sim, CAU = !! this.caustics;
+		const S = waterSurfaceGLSL( { sizes: this.sizes, fftSize: Q.fft, fragCascades: Q.fragCascades, detail: true, nearRipples: Q.nearRipples, shore: true, sim: SIM, surfFoam: SIM } );
 		const mat = new THREE.ShaderMaterial( {
 			name: 'Ocean',
 			uniforms: Object.assign( waterShadeUniforms( THREE ), {
 				uOceanDisp: { value: null }, uOceanDeriv: { value: null }, uOceanFoamBias: { value: 0.58 },
-				uWaterAmp: { value: 1 }, uFoamCoverage: { value: 1 }, uFoamScale: { value: 0.09 }, uFoamTex: { value: this.foamTex },
+				uWaterAmp: { value: 1 }, uFoamCoverage: { value: 1 }, uFoamScale: { value: 0.09 },
 				uCdlodMorph: { value: this.cdlod.morph },
-				uLocalH: { value: this.tile.texture }, uLocalRect: { value: this.tile.rect }, uLocalOn: { value: 0 },
-				uBathy: { value: this.bathy || null }, uBathyRect: { value: this.bathyRect || new THREE.Vector4() },
-				uSeaDetail: { value: this.detail.texture }, uSeaDetailOffset: { value: this.detail.offset }, uSeaDetailAmt: { value: this.detail.amount },
+				uSeaDetailOffset: { value: this.detail.offset }, uSeaDetailAmt: { value: this.detail.amount },
 				uSeaWindDir: { value: new THREE.Vector2( 1, 0 ) }, uSeaWindSpeed: { value: 7 },
-			}, G ),
+				uWaterDebug: { value: 0 },
+			}, CAU ? this.caustics.uniformsForMaterial() : {}, this.U, G ),
 			defines: { REVERSED: this.r.reversed ? 1 : 0, LOGDEPTH: this.r.logDepth ? 1 : 0 },
 			vertexShader: /* glsl */`
 				uniform float uWaterLevel;
+				uniform highp sampler2DArray uPatterns;
 				attribute vec4 nodeData;
 				varying vec3 vWorld; varying vec2 vLagXZ; varying float vWaveH; varying float vSeaDepth; varying float vFoamV;
-				varying vec3 vShoreNv; varying float vShoreFoamV; varying vec2 vSurfMaskV;
+				varying vec3 vShoreNv; varying float vShoreFoamV; varying vec2 vSurfMaskV; varying float vSeaMask;
 				${ this.cdlod.glsl }
-				${ GROUND_GLSL }
+				${ groundGLSL( false ) }
+				${ PERLIN_GLSL }
+				${ SHORE_GLSL }
 				${ S.vertex }
 				void main() {
 					WaterSurfaceVertex r = waterSurfaceVertex( nodeData, position.xz );
@@ -120,6 +149,8 @@ export class Ocean {
 					vShoreNv = r.shoreN;
 					vShoreFoamV = r.shoreFoam;
 					vSurfMaskV = r.surfMask;
+					// only sea connected to the open ocean (per vertex: the fragment shader has no sampler to spare)
+					vSeaMask = textureLod( uBathy, ( r.lagXZ - uBathyRect.xy ) / uBathyRect.zw, 0.0 ).g;
 					gl_Position = projectionMatrix * viewMatrix * vec4( r.position, 1.0 );
 				}`,
 			fragmentShader: /* glsl */`
@@ -127,13 +158,30 @@ export class Ocean {
 				uniform sampler2D uSkyLUT; uniform float uFogDensity; uniform float uFogFalloff; uniform float uFogBoost;
 				uniform float uWet; uniform float uCloudCover; uniform vec2 uCloudOffset; uniform float uCloudShadowK;
 				uniform vec2 uWind; uniform float uNight; uniform float uUnderwater; uniform float uWaterLevel;
+				uniform highp sampler2DArray uPatterns;
 				varying vec3 vWorld; varying vec2 vLagXZ; varying float vWaveH; varying float vSeaDepth; varying float vFoamV;
-				varying vec3 vShoreNv; varying float vShoreFoamV; varying vec2 vSurfMaskV;
+				varying vec3 vShoreNv; varying float vShoreFoamV; varying vec2 vSurfMaskV; varying float vSeaMask;
+				uniform int uWaterDebug;
 				${ COMMON_GLSL }
-				${ GROUND_GLSL }
+				${ groundGLSL( true ) }
+				${ PERLIN_GLSL }
+				${ SHORE_GLSL }
+				${ SIM ? SHORE_SIM_GLSL + SURF_FOAM_GLSL : '' }
 				${ WATER_HELPERS_GLSL }
 				${ SEA_DETAIL_GLSL }
+				${ CAU ? this.caustics.glsl() : '' }
 				${ S.fragment }
+				// slope of the long waves (the two largest cascades, level 2, and the shore waves' normal): what
+				// tilts the caustic network (Tidewater UnderwaterLighting underwaterLongWaves)
+				vec2 waterLongSlope( vec2 xz, vec3 shoreN ) {
+					vec2 slope = vec2( 0.0 );
+					for ( int c = 0; c < 2; c ++ ) {
+						float L = c == 0 ? ${ this.sizes[ 0 ].toFixed( 3 ) } : ${ this.sizes[ 1 ].toFixed( 3 ) };
+						slope += textureLod( uOceanDeriv, vec3( xz / L, float( c ) ), 2.0 ).xy * waterSurfaceCascadeAttenuation( c, vSeaDepth );
+					}
+					vec3 n = normalize( shoreN + vec3( 0.0, 1e-4, 0.0 ) );
+					return slope - n.xz / max( n.y, 0.25 );
+				}
 				void main() {
 					vec3 pos = vWorld;
 					vec2 lagXZ = vLagXZ;
@@ -145,6 +193,7 @@ export class Ocean {
 					vec2 vSurfMask = vSurfMaskV;
 					// footprint of this pixel on the surface (m), for filtering / roughness (uniform control flow)
 					float footprint = max( length( fwidth( lagXZ ) ), 1e-4 );
+					vec2 wdx = dFdx( pos.xz ), wdy = dFdy( pos.xz );
 					// seabed height under this pixel: the fine tile, else the opaque scene seen through it
 					float groundH;
 					if ( waterOnTile( pos.xz ) ) groundH = waterGroundAt( pos.xz );
@@ -155,10 +204,17 @@ export class Ocean {
 					}
 					vec3 outCol = vec3( 0.0 );
 					float seenFromBelow = 0.0;
-					${ waterShadeGLSL( { SSR: Q.ssr } ) }
-					// only sea connected to the open ocean (no pools in dips behind the dunes)
-					if ( textureLod( uBathy, ( pos.xz - uBathyRect.xy ) / uBathyRect.zw, 0.0 ).g < 0.5 ) discard;
+					${ waterShadeGLSL( { SSR: Q.ssr, SH: true, SIM, SF: SIM, CAU } ) }
+					if ( vSeaMask < 0.5 ) discard;
 					if ( seenFromBelow < 0.5 ) outCol = atmosphereFog( outCol, pos );
+					// debug views (__world.ocean.mat.uniforms.uWaterDebug): 1 shore foam / plunging face / roller,
+					// 2 foam, 3 normal, 4 depth, 5 film thickness, 6 shore simulation (foam, wetness, residue)
+					if ( uWaterDebug == 1 ) outCol = vec3( vShoreFoam, vSurfMask.x, vSurfMask.y ) * 4.0;
+					else if ( uWaterDebug == 2 ) outCol = vec3( surf.foam ) * 4.0;
+					else if ( uWaterDebug == 3 ) outCol = ( surf.normal * 0.5 + 0.5 ) * 2.0;
+					else if ( uWaterDebug == 4 ) outCol = vec3( fract( vDepth ), clamp( vDepth / 10.0, 0.0, 1.0 ), 0.0 ) * 3.0;
+					else if ( uWaterDebug == 5 ) outCol = vec3( clamp( thickness, 0.0, 1.0 ), clamp( thickness * 10.0, 0.0, 1.0 ), 0.0 ) * 3.0;
+					else if ( uWaterDebug == 6 ) outCol = simState.xyz * 4.0;
 					gl_FragColor = vec4( outCol, 1.0 );
 				}`,
 			side: THREE.DoubleSide, depthWrite: true,
@@ -173,7 +229,8 @@ export class Ocean {
 		this._build();
 	}
 
-	// weather sea state -> Tidewater's sea presets (wind, fetch, choppiness, swell, whitecaps)
+	// weather sea state -> Tidewater's sea presets (wind, fetch, choppiness, swell, whitecaps, surf height and
+	// period)
 	_applySea( force = false ) {
 		const s = Math.round( this.seaState / SEA_STEP ) * SEA_STEP;
 		if ( ! force && this._seaQ === s ) return;
@@ -188,6 +245,8 @@ export class Ocean {
 		this.fft.setSpectrum( this.P );
 		this.twin.setSpectrum( this.P );
 		this._setFoam();
+		this.shore.P.amplitude = p.surf;
+		this.shore.P.period = p.period;
 	}
 
 	// Tidewater ui/AppUI.js whitecaps(): foam starts at less compression in fresh wind, lasts longer
@@ -205,17 +264,24 @@ export class Ocean {
 		this.fft.update( this.time, dt );
 		this.twin.request( this.time, p.chop );
 		this.tile.update( camera.position );
+		this.shore.update( dt );
 		this.cdlod.update( camera );
 		const wd = G.uWind.value;
 		this.detail.update( dt, wd, p.wind );
+		const U = this.U;
+		U.uLocalH.value = this.tile.texture;
+		U.uLocalOn.value = this.tile.on;
+		this.shore.applyTo( U, this.time );
+		if ( this.sim ) {
+			this.sim.update( dt, camera.position, this.time );
+			U.uShoreSim.value = this.sim.texture;
+			U.uShoreSimRect.value.copy( this.sim.rect );
+		}
+		if ( this.caustics ) this.caustics.update( this.fft.deriv, G.uSunDir.value );
 		const u = this.mat.uniforms;
 		u.uOceanDisp.value = this.fft.disp;
 		u.uOceanDeriv.value = this.fft.deriv;
 		u.uOceanFoamBias.value = this.fft.params.foamBias;
-		u.uLocalH.value = this.tile.texture;
-		u.uLocalOn.value = this.tile.on;
-		u.uBathy.value = this.bathy;
-		u.uBathyRect.value = this.bathyRect;
 		u.uSeaWindDir.value.copy( wd ).normalize();
 		u.uSeaWindSpeed.value = p.wind;
 		// wind speed at 10 m (m/s) for the Cox-Munk slope variance
@@ -234,7 +300,7 @@ export class Ocean {
 	// the ground under the sea (the fine tile, else the coarse bathymetry), as the shaders see it
 	groundAt( x, z ) { return this.tile.groundAt( x, z ); }
 
-	// CPU twin of the rendered surface (Tidewater WaterQuery.waterQueryHeightAtXZ): the FFT displacement is
+	// CPU twin of the rendered surface (Tidewater WaterQuery.waterQueryHeightAtXZ): the displacement is
 	// Lagrangian (x0 -> x0 + D( x0 )), so solve x0 + D( x0 ) = xz with two fixed-point steps. -1000 where
 	// there is no sea (inland dips).
 	heightAt( x, z, t = this.time ) {
@@ -242,25 +308,42 @@ export class Ocean {
 		const ground = this.tile.groundAt( x, z );
 		const depth = - ground;
 		const att = cascadeAttenuation( this.attParams, depth, this._att );
+		const fft = att[ 0 ] > 0 || att[ 1 ] > 0 || att[ 2 ] > 0;
+		const shore = this.shore.enabled > 0 && depth < 26 && depth > - 0.25;
 		let y = 0;
-		if ( att[ 0 ] > 0 || att[ 1 ] > 0 || att[ 2 ] > 0 ) {
-			const N = QUALITY[ this.quality ].fft;
+		if ( fft || shore ) {
 			let x0 = x, z0 = z;
-			for ( let i = 0; i < 2; i ++ ) {
-				const d = this.twin.disp( x0, z0, t, att, this.sizes, N, this._d );
+			for ( let i = 0; i < 3; i ++ ) {
+				const d = this._disp( x0, z0, depth, t, fft, shore );
+				if ( i === 2 ) { y = d[ 1 ]; break; }
 				x0 = x - d[ 0 ]; z0 = z - d[ 2 ];
 			}
-			y = this.twin.disp( x0, z0, t, att, this.sizes, N, this._d )[ 1 ];
 		}
 		// hide the water sheet below dry land (as the vertex shader does)
 		if ( y < ground ) y = Math.min( y, depth < - 3 ? Math.min( ground - 2, - 1 ) : ground - 0.06 );
 		return y;
 	}
 
+	// displacement of the whole surface at Lagrangian point x0 (Tidewater WaterQuery.waterQueryDispAt): the FFT
+	// cascades (CPU twin) + the shore waves; depth is the query point's
+	_disp( x0, z0, depth, t, fft, shore ) {
+		const d = this._d;
+		if ( fft ) this.twin.disp( x0, z0, t, this._att, this.sizes, QUALITY[ this.quality ].fft, d );
+		else d[ 0 ] = d[ 1 ] = d[ 2 ] = 0;
+		if ( shore ) {
+			const s = this.shore.disp( x0, z0, depth, this._groundFn ??= ( x, z ) => this.tile.groundAt( x, z ), t, this._s ??= [ 0, 0, 0 ] );
+			d[ 0 ] += s[ 0 ]; d[ 1 ] += s[ 1 ]; d[ 2 ] += s[ 2 ];
+		}
+		return d;
+	}
+
 	dispose() {
 		this.fft.dispose();
 		this.twin.dispose();
 		this.tile.dispose();
+		if ( this.sim ) this.sim.dispose();
+		if ( this.caustics ) this.caustics.dispose();
+		this.patterns.dispose();
 		this.mesh.geometry.dispose();
 		this.mesh.material.dispose();
 	}

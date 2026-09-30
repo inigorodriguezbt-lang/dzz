@@ -23,7 +23,7 @@ const PI = Math.PI;
 const V = ( x = 0, y = 0, z = 0 ) => new THREE.Vector3( x, y, z );
 const E = ( x, y, z ) => new THREE.Quaternion().setFromEuler( new THREE.Euler( x, y, z, 'YXZ' ) );
 const GUN_Q = new THREE.Quaternion().setFromAxisAngle( V( 0, 1, 0 ), PI / 2 ); // gun +X -> view -Z
-const AX_X = V( 1, 0, 0 );
+const AX_X = V( 1, 0, 0 ), AX_Z = V( 0, 0, 1 );
 const clamp = THREE.MathUtils.clamp;
 const smooth = ( t ) => t <= 0 ? 0 : t >= 1 ? 1 : t * t * ( 3 - 2 * t );
 const seg = ( t, a, b ) => smooth( ( t - a ) / ( b - a ) ); // 0 before a, 1 after b
@@ -53,37 +53,39 @@ const grip = ( p, a, n, r, extra = null ) => ( { p: p.clone ? p.clone() : V( ...
 // the right hand holding a grenade / tool / item: wrist position in view space, the knuckle line (x) and the back
 // of the hand (y)
 const HAND_HOLD = {
-	throw: { at: [ 0.12, - 0.15, - 0.35 ], x: [ - 0.4, 0.6, 0.7 ], y: [ 0.6, - 0.3, 0.75 ] },
+	throw: { at: [ 0.16, - 0.12, - 0.36 ], x: [ - 0.4, 0.6, 0.7 ], y: [ 0.6, - 0.3, 0.75 ] },
 	item: { at: [ 0.13, - 0.16, - 0.32 ], x: [ - 0.2, 0.5, 0.85 ], y: [ 0.75, - 0.55, 0.3 ] },
 	// torches and other long things point forward, held overhand
 	long: { at: [ 0.2, - 0.17, - 0.32 ], x: [ - 0.1, 0.2, - 1 ], y: [ - 0.3, - 0.95, 0 ] },
 };
 // gun holds at the hip: the gun frame's origin (trigger, on the bore line) in view space, its turn (pitch, yaw, roll;
 // yaw + points the muzzle in towards the crosshair, roll + leans the top in to show its right side) and where the
-// elbows hang. Long guns sit low and right, pointing into the scene just under the crosshair; pistols are out in front
-// in both hands. The screen's bottom-right corner is the HUD's weapon panel: the hands stay left of it.
+// elbows hang. Long guns sit low and right, the barrel running in towards the crosshair and the stock off the bottom
+// right; the elbows are out, so both forearms come into the frame (right from the bottom-right corner, left from the
+// bottom-left). Pistols are out in front in both hands.
 const GUN_HOLD = {
-	rifle: { p: [ 0.1, - 0.092, - 0.52 ], r: [ 0.015, 0.045, 0.12 ], eR: [ 0.3, - 0.42, - 0.1 ], eL: [ - 0.2, - 0.45, - 0.32 ] },
-	heavy: { p: [ 0.105, - 0.097, - 0.53 ], r: [ 0.015, 0.04, 0.1 ], eR: [ 0.3, - 0.42, - 0.1 ], eL: [ - 0.2, - 0.45, - 0.32 ] },
-	stock: { p: [ 0.105, - 0.087, - 0.51 ], r: [ 0.015, 0.045, 0.12 ], eR: [ 0.3, - 0.4, - 0.1 ], eL: [ - 0.2, - 0.45, - 0.32 ] },
+	rifle: { p: [ 0.245, - 0.138, - 0.66 ], r: [ - 0.03, 0.16, 0.2 ], eR: [ 0.45, - 0.3, - 0.4 ], eL: [ - 0.1, - 0.42, - 0.5 ] },
+	heavy: { p: [ 0.25, - 0.145, - 0.67 ], r: [ - 0.03, 0.15, 0.17 ], eR: [ 0.45, - 0.3, - 0.4 ], eL: [ - 0.1, - 0.42, - 0.5 ] },
+	stock: { p: [ 0.245, - 0.128, - 0.65 ], r: [ - 0.03, 0.16, 0.2 ], eR: [ 0.45, - 0.28, - 0.4 ], eL: [ - 0.1, - 0.42, - 0.5 ] },
 	pistol: { p: [ 0.06, - 0.075, - 0.46 ], r: [ 0.03, 0.15, 0.1 ], eR: [ 0.22, - 0.42, - 0.2 ], eL: [ - 0.1, - 0.44, - 0.22 ] },
 	bow: { p: [ 0.0, - 0.1, - 0.5 ], r: [ 0.02, 0.12, - 0.4 ], eR: [ 0.3, - 0.4, 0.0 ], eL: [ - 0.2, - 0.4, - 0.3 ] },
 };
-// a bolt handle's knob, in the handle's frame: the firing hand closes on it from behind and below
+// a bolt handle's knob, in the gun frame at rest: the firing hand closes on it from behind and below
 const BOLT_KNOB = grip( [ - 0.09, - 0.034, 0.054 ], [ 0.35, 0.93, 0 ], [ 0.1, 0.2, 1 ], 0.012 );
 // elbows for anything held that isn't a gun
-const ITEM_ELBOW_R = V( 0.24, - 0.44, - 0.14 ), ITEM_ELBOW_L = V( - 0.16, - 0.46, - 0.2 );
-// sprinting: where the gun frame goes (view space) and its turn
+// (out to the side and not far below the hand: the forearm comes into the frame from the bottom corner)
+const ITEM_ELBOW_R = V( 0.42, - 0.3, - 0.12 ), ITEM_ELBOW_L = V( - 0.3, - 0.3, - 0.15 );
+// sprinting: where the gun frame goes (view space) and its turn (a pistol at a low ready: muzzle down, barely canted)
 const SPRINT = {
 	rifleP: V( 0.1, - 0.18, - 0.41 ), rifleQ: E( 0.25, 0.6, 0.45 ),
-	pistolP: V( 0.07, - 0.13, - 0.38 ), pistolQ: E( - 0.45, 0.35, 0.3 ),
+	pistolP: V( 0.1, - 0.14, - 0.38 ), pistolQ: E( - 0.55, 0.3, 0.05 ),
 	itemQ: E( - 0.2, 0.1, 0 ),
 };
 // melee holds: where the right hand's grip sits in view space and how the item points
 const MELEE_HOLD = {
-	knife: { at: [ 0.13, - 0.14, - 0.36 ], x: [ - 0.38, 0.3, - 0.88 ], y: [ 0.9, 0.42, 0 ] },
-	one: { at: [ 0.14, - 0.15, - 0.4 ], x: [ - 0.3, 0.45, - 0.85 ], y: [ 1, 0.25, 0.2 ] },
-	two: { at: [ 0.12, - 0.15, - 0.45 ], x: [ 0.45, 0.75, - 0.45 ], y: [ - 0.3, 0.1, - 1 ] },
+	knife: { at: [ 0.15, - 0.11, - 0.37 ], x: [ - 0.38, 0.3, - 0.88 ], y: [ 0.9, 0.42, 0 ] },
+	one: { at: [ 0.18, - 0.12, - 0.42 ], x: [ - 0.3, 0.45, - 0.85 ], y: [ 1, 0.25, 0.2 ] },
+	two: { at: [ 0.14, - 0.12, - 0.46 ], x: [ 0.45, 0.75, - 0.45 ], y: [ - 0.3, 0.1, - 1 ] },
 	spear: { at: [ 0.14, - 0.17, - 0.32 ], x: [ - 0.1, 0.15, - 1 ], y: [ 0, 1, 0 ] },
 };
 // the bow's drawing hand: three fingers hooked on the string
@@ -358,8 +360,15 @@ export class ViewModel {
 		// a bow is aimed past the right of its riser, looking down the arrow
 		if ( info.bow ) return V( info.rearX - info.eyeBack - 0.08, info.sightH * 0.9, 0.018 );
 		// (a bolt gun's irons sit out on the barrel: the eye stays behind the bolt shroud)
-		const x = info.rearX - info.eyeBack - extra;
-		return V( info.boltHandle ? Math.min( x, - 0.3 ) : x, info.sightH, 0 );
+		let x = info.eyeX ?? info.rearX - info.eyeBack - extra;
+		if ( info.boltHandle ) x = Math.min( x, - 0.3 );
+		// a bead gun: the eye over the rib, the muzzle tipped up until the bead sits on the crosshair
+		if ( info.eyeUp ) {
+			const t = Math.atan2( info.eyeUp, ( info.frontX ?? info.muzzle[ 0 ] ) - x );
+			it.adsQ = GUN_Q.clone().multiply( new THREE.Quaternion().setFromAxisAngle( AX_Z, t ) );
+			return V( x, info.sightH + info.eyeUp, 0 );
+		}
+		return V( x, info.sightH, 0 );
 	}
 
 	_buildMelee( def ) {
@@ -616,11 +625,12 @@ export class ViewModel {
 		// aimed down the sights: the eye point sits on the view axis
 		if ( gun && s.ads > 0 ) {
 			const eye = it.eye;
-			const adsP = _adsP.copy( eye ).applyQuaternion( GUN_Q ).negate();
+			const aq = it.adsQ || GUN_Q;
+			const adsP = _adsP.copy( eye ).applyQuaternion( aq ).negate();
 			const k = smooth( s.ads );
 			// dip slightly under the line mid-way so the sight comes up into the eye
 			P.lerp( adsP, k ); P.y -= Math.sin( k * PI ) * 0.012;
-			Q.slerp( GUN_Q, k );
+			Q.slerp( aq, k );
 		}
 		// sprint: long guns swing across the chest muzzle-up and canted, pistols point at the ground
 		if ( s.sprint > 0 ) {
@@ -671,11 +681,14 @@ export class ViewModel {
 		};
 		const bell = ( a, b, c, d ) => seg( t, a, b ) * ( 1 - seg( t, c, d ) );
 		const pistol = it.cls === 'pistol';
+		// a long gun comes in from its hip spot at the right towards the middle and the body to be worked on
+		const inward = ( k, f = 1 ) => { if ( ! pistol ) off( - 0.1 * f, 0.01 * f, 0.05 * f, 0, 0, 0, k ); };
 		switch ( act.type ) {
 			case 'reload_mag': case 'reload_belt': {
 				const k = bell( 0, 0.14, 0.86, 1 );
 				if ( pistol ) off( - 0.04, 0.05, 0.04, 0.3, 0.4, 0.5, k );
 				else off( - 0.06, 0.085, 0.0, 0.1, 0.5, 0.6, k );
+				inward( k );
 				// the seat: a push up when the magazine clicks in
 				const bump = bell( act.p.magIn - 0.04, act.p.magIn, act.p.magIn, act.p.magIn + 0.06 );
 				off( 0, 0.012, 0, 0.04, 0, 0, bump );
@@ -685,6 +698,7 @@ export class ViewModel {
 				const k = act.type === 'shells_open' ? seg( t, 0, 1 ) : act.type === 'shells_close' ? 1 - seg( t, 0.3, 1 ) : 1;
 				if ( it.info.pump || act.p.port === 'bottom' ) off( - 0.04, 0.06, 0.0, 0.15, 0.45, 0.9, k );
 				else off( - 0.04, 0.05, 0.0, 0.1, 0.4, - 0.45, k );
+				inward( k, 0.5 );
 				if ( act.type === 'shells_insert' ) off( 0, 0.006, 0, 0.02, 0, 0, bell( 0.35, 0.5, 0.5, 0.65 ) );
 				break;
 			}
@@ -698,6 +712,7 @@ export class ViewModel {
 			case 'break_open': case 'break_insert': case 'break_close': {
 				const k = act.type === 'break_open' ? seg( t, 0, 0.6 ) : act.type === 'break_close' ? 1 - seg( t, 0.4, 1 ) : 1;
 				off( - 0.05, 0.04, 0.06, 0.25, 0.3, - 0.3, k );
+				inward( k );
 				if ( act.type === 'break_close' ) off( 0, 0.02, 0, 0.12, 0, 0, bell( 0.2, 0.35, 0.35, 0.55 ) );
 				break;
 			}
@@ -705,13 +720,14 @@ export class ViewModel {
 				const k = bell( 0, 0.2, 0.8, 1 );
 				if ( pistol ) off( - 0.04, 0.04, 0.05, 0.1, 0.35, - 0.3, k );
 				else off( - 0.04, 0.04, 0.02, 0.05, 0.35, - 0.35, k );
+				inward( k, 0.7 );
 				break;
 			}
 			case 'cycle': {
 				// bolt / lever: the gun dips and cants while the hand works it; pumps barely move
 				const k = bell( 0, 0.2, 0.75, 1 );
 				// bolt guns come up and turn their right side in so the hand on the bolt stays in view
-				if ( it.info.boltHandle ) off( - 0.03, 0.02, 0.0, 0.04, 0.22, - 0.22, k * ( s.ads > 0.5 ? 0.35 : 1 ) );
+				if ( it.info.boltHandle ) { off( - 0.03, 0.02, 0.0, 0.04, 0.22, - 0.22, k * ( s.ads > 0.5 ? 0.35 : 1 ) ); inward( k * ( 1 - s.ads ), 0.6 ); }
 				else if ( it.info.lever ) off( 0, - 0.01, 0.01, - 0.05, 0, - 0.08, k );
 				else off( 0, 0, 0.01, 0.03, 0, 0, k );
 				break;
@@ -1113,7 +1129,8 @@ export class ViewModel {
 					// the hand closes on the knob wherever the handle has taken it (it turns up and slides back), held
 					// the way it came up from the grip
 					const hb = it.parts.boltHandle;
-					_v.copy( BOLT_KNOB.p ).applyMatrix4( hb.matrixWorld ).applyMatrix4( _M3.copy( O ).invert() );
+					// (the handle's geometry is in the gun frame, its group sits at the pivot: the knob is at p - pivot in it)
+					_v.copy( BOLT_KNOB.p ).sub( hb.userData.rest ).applyMatrix4( hb.matrixWorld ).applyMatrix4( _M3.copy( O ).invert() );
 					const kg = gs( 0, _v.x, _v.y, _v.z, BOLT_KNOB.a.x, BOLT_KNOB.a.y, BOLT_KNOB.a.z, BOLT_KNOB.n.x, BOLT_KNOB.n.y, BOLT_KNOB.n.z, BOLT_KNOB.r );
 					const Mk = wristMatrix( kg, 1, M1 ).premultiply( O );
 					const k = seg( t, 0.0, 0.16 ) * ( 1 - seg( t, 0.84, 1 ) );
@@ -1302,3 +1319,5 @@ function viewCopy( m ) {
 	VIEW_MATS.set( m.uuid, c );
 	return c;
 }
+// TEMP-TUNE
+if ( typeof window !== 'undefined' ) window.__vmTune = { GUN_HOLD, SPRINT, MELEE_HOLD, HAND_HOLD, ITEM_ELBOW_R, ITEM_ELBOW_L, GUN_THUMB };

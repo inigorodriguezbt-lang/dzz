@@ -146,7 +146,7 @@ function palette( P ) {
 		case 'terminal':
 			mat.ext = M( L.panels, pick( R, [ [ 226, 226, 220 ], [ 214, 218, 222 ], [ 232, 226, 212 ] ] ), 3 );
 			mat.roof = M( L.bitumen, [ 176, 176, 176 ], 4 );
-			mat.awning = M( L.metal, [ 236, 236, 232 ], 2 );
+			mat.awning = M( L.spandrel, [ 236, 236, 232 ], 2 );
 			P.winStyle = 3; P.frame = 2;
 			break;
 		case 'ctower':
@@ -212,7 +212,7 @@ function towerLook( P ) {
 			P.frame = pk( [ 1, 2, 3, 2, 6 ] );
 			mat.ext = M( L.spandrel, SPANDREL[ P.frame ] || SPANDREL[ 2 ], 1.5 );
 			look.fins = V() < 0.6 ? 2 : 0;
-			look.finM = M( L.metal, P.frame === 1 ? [ 150, 128, 100 ] : P.frame === 3 ? [ 60, 62, 66 ] : [ 200, 204, 208 ], 1 );
+			look.finM = M( L.spandrel, P.frame === 1 ? [ 150, 128, 100 ] : P.frame === 3 ? [ 60, 62, 66 ] : [ 200, 204, 208 ], 1 );
 			look.crown = V() < 0.55 ? 'glass' : 'band';
 		} else {
 			// precast concrete with ribbon windows (the 1970s Bishop Street look)
@@ -223,7 +223,7 @@ function towerLook( P ) {
 			look.crown = 'band';
 		}
 		mat.base = M( L.panels, stone, 1.6 );
-		look.accent = M( L.metal, P.frame === 1 ? [ 120, 100, 80 ] : [ 70, 72, 76 ], 1 );
+		look.accent = M( L.spandrel, P.frame === 1 ? [ 120, 100, 80 ] : [ 70, 72, 76 ], 1 );
 	} else {
 		// hotels and condos: pastel stucco, a stone or darker base, accent bands and balcony fronts
 		const body = pk( RES_BODY );

@@ -337,6 +337,23 @@ ok( [ k - 1, k, k + 1 ].every( s => TI.storeys.get( s )?.ready ), `storeys aroun
 const coarseHit = TI.coarse.some( b => b.minY < g.player.pos.y + 1.7 && b.maxY > g.player.pos.y );
 ok( ! coarseHit, 'no coarse box where the player stands' );
 ok( C2.buildingAt( g.player.pos )?.storey === k, 'buildingAt reports the storey' );
+// a save loaded (or a teleport) straight onto a high floor: the player stays on it while its storey streams in
+g.player.pos.set( tx + 700, hf.heightAt( tx + 700, tz ), tz );
+await run( g, 30 ); await settle( g, 300 );
+const kk = Math.min( tS.n - 2, 9 );
+g.player.pos.set( tx, tS.ys[ kk ] + 0.01, tz );
+for ( let f = 0; f < 400; f ++ ) {
+	await run( g, 1 );
+	// gravity and the collision resolve, as the player does (from when the building's shell is in: the game
+	// holds the curtain while the surroundings stream after a load)
+	if ( ! C2.nearReady[ ti ] ) continue;
+	const gr = g.physics.ground( g.player.pos.x, g.player.pos.z, g.player.pos.y + 0.45, 0.45, 0.3 );
+	g.player.pos.y = Math.max( gr.y, g.player.pos.y - 9.8 / 30 / 3 );
+	g.physics.resolveCylinder( g.player.pos, 0.3, 1.75, 0.45 );
+	if ( C2.interiors.get( ti )?.storeys.get( kk )?.ready && f > 60 ) break;
+	if ( g.world.pool.busy ) await new Promise( r => setTimeout( r, 2 ) );
+}
+ok( Math.abs( g.player.pos.y - tS.ys[ kk ] ) < 0.5 && Math.hypot( g.player.pos.x - tx, g.player.pos.z - tz ) < 1, `teleported onto floor ${kk}: still there (y ${( g.player.pos.y - tS.ys[ kk ] ).toFixed( 2 )}, moved ${Math.hypot( g.player.pos.x - tx, g.player.pos.z - tz ).toFixed( 2 )} m)` );
 // walk away: everything unloads
 g.player.pos.set( tx + 600, hf.heightAt( tx + 600, tz ), tz );
 await run( g, 30 );

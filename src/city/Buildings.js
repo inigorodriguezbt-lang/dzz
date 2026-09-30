@@ -12,9 +12,10 @@
 // containers (loot rolled deterministically on first search, saved), loose loot on tables and shelves, beds and
 // couches to sleep on, taps (only some buildings still have water) and a few candles left burning.
 //
-// API: types(), locate(type, pos) -> { name, x, z }, doorAt(pos, r) -> door with bash(amount), isIndoors(pos),
-// buildingAt(pos) -> { i, type, label, city, x, z, storey } | null, gasPumps() -> [ { x, y, z, name } ],
-// update(dt), serialize(save), load(save), dispose(). State: save.world.doors / containers / looted.
+// API: types(), locate(type, pos) -> { name, x, z }, doorAt(pos, r) -> door with bash(amount, { source, kind }),
+// isIndoors(pos), buildingAt(pos) -> { i, type, label, city, x, z, storey } | null, gasPumps() -> [ { x, y, z, name } ],
+// relocate(pos) after a teleport, update(dt), serialize(save), load(save), dispose(). State: save.world.doors /
+// containers / looted. The bake's empty city lots are filled at start (buildings/infill.js).
 import * as THREE from 'three';
 import { NF, BT, readBuilding, fitToGround, shapeOf, rectOf, effectiveType, pumpsOf, LABEL, LOCATE, NEAR_CELL, FAR_CELL, cellKey, hash32, strHash, rng, BOX_STRIDE, PMAT, PK } from './buildings/data.js';
 import { buildingMaterials, setBuildingState, commitState, setShadowsEnabled, geoToBuffer, decalToBuffer, glassToBuffer } from './buildings/materials.js';
@@ -151,7 +152,8 @@ class City {
 			const i = Math.floor( key / 8192 ) - 4096, j = ( key % 8192 ) - 4096;
 			const d = cellDist( i, j, FAR_CELL );
 			const c = this.far.get( key );
-			if ( d < farR && ! c ) this._request( this.far, key, i, j, FAR_CELL, 1, ids, 0.8 + d / 2000 );
+			// (priorities against the other modules' jobs: the city's skyline ahead of distant trees)
+			if ( d < farR && ! c ) this._request( this.far, key, i, j, FAR_CELL, 1, ids, 0.4 + d / 3000 );
 			else if ( c && d > farR + 600 ) this._drop( this.far, c );
 		}
 		const i0 = Math.floor( ( cam.x - nearOut ) / NEAR_CELL ), i1 = Math.floor( ( cam.x + nearOut ) / NEAR_CELL );
@@ -161,7 +163,7 @@ class City {
 			const ids = this.nearIdx.get( key );
 			if ( ! ids || this.near.has( key ) ) continue;
 			const d = cellDist( i, j, NEAR_CELL );
-			if ( d < nearR ) this._request( this.near, key, i, j, NEAR_CELL, 0, ids, 0.3 + d / 900 );
+			if ( d < nearR ) this._request( this.near, key, i, j, NEAR_CELL, 0, ids, 0.1 + d / 900 );
 		}
 		for ( const c of [ ...this.near.values() ] ) if ( cellDist( c.i, c.j, NEAR_CELL ) > nearOut ) this._drop( this.near, c );
 	}
@@ -204,16 +206,22 @@ class City {
 		if ( old ) { for ( const b of old ) P.remove( b ); this.shellBoxes.delete( bi ); }
 		if ( ! on ) return;
 		const r = this.rec( bi ), { S, rect } = this.shape( bi );
-		// never box in the player (a save made indoors, a teleport): the interior is coming anyway
-		const pp = this.game.player.pos;
-		const [ px, pz ] = this.toLocal( r, pp.x, pp.z );
-		if ( px > rect.x0 - 1 && px < rect.x1 + 1 && pz > rect.z0 - 1 && pz < rect.z1 + 1 && pp.y < S.top + 2 ) return;
 		const list = [];
 		const add = ( lx0, y0, lz0, lx1, y1, lz1, mat = 'concrete' ) => {
 			const [ x, z ] = this.toWorld( r, ( lx0 + lx1 ) / 2, ( lz0 + lz1 ) / 2 );
 			list.push( P.add( { x, y: ( y0 + y1 ) / 2, z, hx: ( lx1 - lx0 ) / 2, hy: ( y1 - y0 ) / 2, hz: ( lz1 - lz0 ) / 2, yaw: - r.angle, mat, owner: this } ) );
 		};
 		const top = S.arch === 'tent' ? S.fy + 2.2 : S.top + ( S.roof === 'flat' ? 0.08 : 0 );
+		// never box in the player (a save made indoors, a teleport): only fill up to the floor they stand on
+		// (so they don't fall down a tower before its storeys are in), the interior is coming anyway
+		const pp = this.game.player.pos;
+		const [ px, pz ] = this.toLocal( r, pp.x, pp.z );
+		if ( px > rect.x0 - 1 && px < rect.x1 + 1 && pz > rect.z0 - 1 && pz < rect.z1 + 1 && pp.y < S.top + 2 ) {
+			const k = this._storeyAt( S, pp.y );
+			if ( k > 0 ) add( rect.x0, r.lo - 0.8, rect.z0, rect.x1, S.ys[ k ] - 0.3, rect.z1 );
+			this.shellBoxes.set( bi, list );
+			return;
+		}
 		add( rect.x0, r.lo - 0.8, rect.z0, rect.x1, top, rect.z1, S.arch === 'tent' ? 'foliage' : 'concrete' );
 		for ( const [ px, pz ] of pumpsOf( r, S ) ) { const y = this.game.hf.heightAt( ...this.toWorld( r, px, pz ) ); add( px - 0.7, y - 0.5, pz - 1.3, px + 0.7, y + 1.7, pz + 1.3, 'metal' ); }
 		if ( S.arch === 'fire' ) add( rect.x1 - 3.2, r.lo - 0.5, rect.z1, rect.x1, S.top + 5.2, rect.z1 + 3.2 );
@@ -260,6 +268,9 @@ class City {
 			I.d = this.rectDist( I.bi, p.x, p.z );
 			if ( I.d > IN_DROP ) { this._dropInterior( I ); continue; }
 			this._storeys( I, p );
+			// inside, on another storey than the coarse fill was made for (a teleport, a save loaded upstairs):
+			// make it again, or the player would be standing in it
+			if ( I.groundReady && ( I.d < 0.5 ? this._storeyAt( this.shape( I.bi ).S, p.y ) : - 1 ) !== ( I.coarseK ?? - 1 ) ) this._coarse( I );
 			for ( const st of I.storeys.values() ) if ( st.ready ) for ( const m of st.meshes ) m.visible = this._meshVisible( I, m );
 			// only the interiors around you cast sun shadows (the shell casts for the rest)
 			const sh = I.d < SHADOW_D;
@@ -339,6 +350,7 @@ class City {
 		const pp = this.game.player.pos;
 		const [ px, pz ] = this.toLocal( r, pp.x, pp.z );
 		const inRect = px > rect.x0 - 0.5 && px < rect.x1 + 0.5 && pz > rect.z0 - 0.5 && pz < rect.z1 + 0.5;
+		I.coarseK = inRect ? this._storeyAt( S, pp.y ) : - 1;
 		const flush = ( s0, s1 ) => {
 			const y0 = S.ys[ s0 ] - sT, y1 = s1 === S.n - 1 ? S.top + ( S.roof === 'flat' ? 0.08 : 0 ) : S.ys[ s1 + 1 ] - sT;
 			// leave out the stretch the player stands in until its storey is in
@@ -467,6 +479,13 @@ class City {
 		if ( m.material === this.mats.decal ) return I.d < 35;
 		if ( m.material === this.mats.glass ) return I.d < 60;
 		return true;
+	}
+
+	// the storey whose floor is under height y
+	_storeyAt( S, y ) {
+		let k = 0;
+		for ( let i = 0; i < S.n; i ++ ) if ( y >= S.ys[ i ] - 0.6 ) k = i;
+		return k;
 	}
 
 	_hasWater( bi, si ) {
@@ -639,6 +658,16 @@ class City {
 	}
 
 	doorAt( pos, r = 1.5 ) { return this.doors.near( pos, r ); }
+
+	// after the player is moved without walking (a teleport): refit the stand-in colliders of the building they
+	// landed in, so they stand on its floor instead of being pushed out of its unloaded storeys
+	relocate( pos = this.game.player.pos ) {
+		const b = this.buildingAt( pos );
+		if ( ! b ) return;
+		const I = this.interiors.get( b.i );
+		if ( I?.groundReady ) this._coarse( I );
+		else if ( this.shellBoxes.has( b.i ) ) this._shellBoxes( b.i, true );
+	}
 
 	buildingAt( pos, margin = 0 ) {
 		const ci = Math.floor( pos.x / NEAR_CELL ), cj = Math.floor( pos.z / NEAR_CELL );

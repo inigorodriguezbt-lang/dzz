@@ -19,42 +19,44 @@ const PI = Math.PI;
 const V3 = ( x = 0, y = 0, z = 0 ) => new THREE.Vector3( x, y, z );
 
 // ---- materials ------------------------------------------------------------------------------------------------
-
+// fin: the surface finish the shader adds (weaponShader): 'metal' wears through to `bare` metal on edges, 'poly' scuffs
+// lighter, 'wood' gets a grain along the gun, 'matte' only a faint mottle. Colours are a little lighter than the real
+// finishes: a black gun must still show its shapes in the view's light.
 const MAT = {
-	blk: { color: 0x222326, metalness: 0.62, roughness: 0.46, wear: 1 }, // parkerised steel
-	blued: { color: 0x1d2024, metalness: 0.88, roughness: 0.3, wear: 1 },
-	alu: { color: 0x27292c, metalness: 0.5, roughness: 0.5, wear: 1 }, // anodised aluminium
-	poly: { color: 0x1a1a1c, metalness: 0.0, roughness: 0.74, grip: 1 },
-	polyS: { color: 0x1c1c1e, metalness: 0.0, roughness: 0.62 },
-	tan: { color: 0x9a8461, metalness: 0.0, roughness: 0.7, grip: 1 },
-	tanM: { color: 0x8c7856, metalness: 0.35, roughness: 0.55, wear: 1 }, // FDE cerakote metal
-	od: { color: 0x4b5137, metalness: 0.0, roughness: 0.72, grip: 1 },
-	green: { color: 0x3d4631, metalness: 0.0, roughness: 0.66 },
-	gray: { color: 0x3a3d40, metalness: 0.05, roughness: 0.66, grip: 1 },
-	wood: { color: 0x8a5130, metalness: 0.0, roughness: 0.52, wood: 1 },
-	walnut: { color: 0x5a321b, metalness: 0.0, roughness: 0.45, wood: 1 },
-	lam: { color: 0x7a3219, metalness: 0.0, roughness: 0.48, wood: 1 },
-	koa: { color: 0x9a5a2a, metalness: 0.0, roughness: 0.42, wood: 1 },
-	steel: { color: 0xa7abb0, metalness: 1.0, roughness: 0.3, wear: 1 },
+	blk: { color: 0x38393a, metalness: 0.5, roughness: 0.52, fin: 'metal', bare: 0x8c9095 }, // parkerised steel
+	blued: { color: 0x2c3138, metalness: 0.78, roughness: 0.3, fin: 'metal', bare: 0xa3a8ae },
+	alu: { color: 0x3b3e42, metalness: 0.3, roughness: 0.4, fin: 'metal', bare: 0xb9bdc2 }, // anodised aluminium
+	poly: { color: 0x2e2f31, metalness: 0.0, roughness: 0.66, grip: 1, fin: 'poly' },
+	polyS: { color: 0x323335, metalness: 0.0, roughness: 0.52, fin: 'poly' },
+	tan: { color: 0x9a8461, metalness: 0.0, roughness: 0.7, grip: 1, fin: 'poly' },
+	tanM: { color: 0x8c7856, metalness: 0.3, roughness: 0.55, fin: 'metal', bare: 0x9b9c9c }, // FDE cerakote metal
+	od: { color: 0x4b5137, metalness: 0.0, roughness: 0.72, grip: 1, fin: 'poly' },
+	green: { color: 0x3d4631, metalness: 0.0, roughness: 0.66, fin: 'poly' },
+	gray: { color: 0x3a3d40, metalness: 0.05, roughness: 0.66, grip: 1, fin: 'poly' },
+	wood: { color: 0x9a5c36, metalness: 0.0, roughness: 0.5, fin: 'wood' },
+	walnut: { color: 0x5a3721, metalness: 0.0, roughness: 0.42, fin: 'wood' },
+	lam: { color: 0x74361e, metalness: 0.0, roughness: 0.45, fin: 'wood' },
+	koa: { color: 0xa8652f, metalness: 0.0, roughness: 0.4, fin: 'wood' },
+	steel: { color: 0xa7abb0, metalness: 1.0, roughness: 0.3, fin: 'metal', bare: 0xc9cdd2 },
 	chrome: { color: 0xd2d5d9, metalness: 1.0, roughness: 0.16 },
-	blade: { color: 0xc3c7cb, metalness: 1.0, roughness: 0.22, wear: 1 },
-	darkblade: { color: 0x3b3e42, metalness: 0.8, roughness: 0.4, wear: 1 },
-	rust: { color: 0x6a4a36, metalness: 0.5, roughness: 0.75, wear: 1 },
+	blade: { color: 0xc3c7cb, metalness: 1.0, roughness: 0.22, fin: 'metal', bare: 0xd6d9dc },
+	darkblade: { color: 0x3b3e42, metalness: 0.8, roughness: 0.4, fin: 'metal', bare: 0xa5a9ae },
+	rust: { color: 0x6a4a36, metalness: 0.5, roughness: 0.75, fin: 'matte' },
 	brass: { color: 0xcfa24c, metalness: 1.0, roughness: 0.3 },
 	copper: { color: 0xc07a4e, metalness: 1.0, roughness: 0.34 },
 	lead: { color: 0x6c6e72, metalness: 0.7, roughness: 0.5 },
-	rubber: { color: 0x121213, metalness: 0.0, roughness: 0.92 },
+	rubber: { color: 0x19191a, metalness: 0.0, roughness: 0.9, grip: 1, fin: 'matte' },
 	orange: { color: 0xe0561c, metalness: 0.0, roughness: 0.5 },
 	red: { color: 0xa21d17, metalness: 0.0, roughness: 0.48 },
 	green2: { color: 0x2c6a2e, metalness: 0.0, roughness: 0.5 },
-	plum: { color: 0x6a3426, metalness: 0.0, roughness: 0.62 },
-	bakelite: { color: 0x5b2615, metalness: 0.0, roughness: 0.4 },
+	plum: { color: 0x6a3426, metalness: 0.0, roughness: 0.62, fin: 'poly' },
+	bakelite: { color: 0x5b2615, metalness: 0.0, roughness: 0.4, fin: 'poly' },
 	smoke: { color: 0x3a3630, metalness: 0.0, roughness: 0.25, transparent: true, opacity: 0.82 },
 	card: { color: 0xc9b58c, metalness: 0.0, roughness: 0.9 },
 	string: { color: 0x2a2a2a, metalness: 0.0, roughness: 0.85 },
 	cloth: { color: 0x2d2a26, metalness: 0.0, roughness: 0.95 },
 	white: { color: 0xe9e6de, metalness: 0.0, roughness: 0.5 },
-	aluBright: { color: 0x9aa1a8, metalness: 1.0, roughness: 0.34 },
+	aluBright: { color: 0x9aa1a8, metalness: 1.0, roughness: 0.34, fin: 'matte' },
 	glassG: { color: 0x2e6a3a, metalness: 0.1, roughness: 0.08, transparent: true, opacity: 0.72 },
 	lens: { color: 0x10263a, metalness: 0.6, roughness: 0.06, transparent: true, opacity: 0.35, lens: 1 },
 	lensDark: { color: 0x0a1822, metalness: 0.9, roughness: 0.05, lens: 1 },
@@ -70,11 +72,11 @@ function textures() {
 	if ( TEX ) return TEX;
 	TEX = {};
 	if ( typeof document === 'undefined' ) return TEX;
-	const mk = ( w, h, fn, srgb = false, rep = [ 1, 1 ] ) => {
+	const mk = ( w, h, fn, rep = [ 1, 1 ] ) => {
 		const c = document.createElement( 'canvas' ); c.width = w; c.height = h;
 		fn( c.getContext( '2d' ), w, h );
 		const t = new THREE.CanvasTexture( c );
-		t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+		t.colorSpace = THREE.NoColorSpace;
 		t.wrapS = t.wrapT = THREE.RepeatWrapping;
 		t.repeat.set( rep[ 0 ], rep[ 1 ] );
 		t.anisotropy = 4;
@@ -82,41 +84,93 @@ function textures() {
 	};
 	let seed = 7;
 	const rnd = () => ( seed = ( seed * 16807 ) % 2147483647 ) / 2147483647;
-	// roughness wear: fine speckle + soft blotches (lighter = rougher)
-	TEX.wear = mk( 256, 256, ( g, w, h ) => {
-		g.fillStyle = '#b8b8b8'; g.fillRect( 0, 0, w, h );
-		for ( let i = 0; i < 90; i ++ ) { const r = 6 + rnd() * 26; const v = 150 + rnd() * 90 | 0; g.fillStyle = `rgba(${v},${v},${v},0.25)`; g.beginPath(); g.arc( rnd() * w, rnd() * h, r, 0, 7 ); g.fill(); }
-		const d = g.getImageData( 0, 0, w, h );
-		for ( let i = 0; i < d.data.length; i += 4 ) { const n = ( rnd() - 0.5 ) * 60; d.data[ i ] = d.data[ i + 1 ] = d.data[ i + 2 ] = Math.max( 0, Math.min( 255, d.data[ i ] + n ) ); }
-		g.putImageData( d, 0, 0 );
-		// scratches: smoother (darker) streaks
-		g.strokeStyle = 'rgba(40,40,40,0.35)'; g.lineWidth = 1;
-		for ( let i = 0; i < 70; i ++ ) { const x = rnd() * w, y = rnd() * h, a = rnd() * 6.28, l = 8 + rnd() * 40; g.beginPath(); g.moveTo( x, y ); g.lineTo( x + Math.cos( a ) * l, y + Math.sin( a ) * l ); g.stroke(); }
-	}, false, [ 6, 6 ] );
 	// polymer stipple bump
 	TEX.stipple = mk( 128, 128, ( g, w, h ) => {
 		g.fillStyle = '#808080'; g.fillRect( 0, 0, w, h );
 		for ( let i = 0; i < 2600; i ++ ) { const v = rnd() < 0.5 ? 40 : 210; g.fillStyle = `rgb(${v},${v},${v})`; g.fillRect( rnd() * w, rnd() * h, 1.5, 1.5 ); }
-	}, false, [ 40, 40 ] );
-	// wood grain (albedo modulation)
-	TEX.wood = mk( 512, 128, ( g, w, h ) => {
-		g.fillStyle = '#d8d0c8'; g.fillRect( 0, 0, w, h );
-		for ( let y = 0; y < h; y ++ ) {
-			const band = Math.sin( y * 0.35 + Math.sin( y * 0.05 ) * 4 ) * 0.5 + 0.5;
-			for ( let x = 0; x < w; x += 4 ) {
-				const wob = Math.sin( x * 0.012 + y * 0.09 ) * 0.5 + Math.sin( x * 0.031 - y * 0.2 ) * 0.25;
-				const v = 150 + ( band * 0.6 + wob * 0.4 ) * 70 + ( rnd() - 0.5 ) * 12 | 0;
-				g.fillStyle = `rgb(${v},${v * 0.93 | 0},${v * 0.86 | 0})`; g.fillRect( x, y, 4, 1 );
-			}
-		}
-		g.strokeStyle = 'rgba(60,35,20,0.35)';
-		for ( let i = 0; i < 26; i ++ ) { const y0 = rnd() * h; g.lineWidth = 0.6 + rnd() * 1.4; g.beginPath(); g.moveTo( 0, y0 ); for ( let x = 0; x <= w; x += 16 ) g.lineTo( x, y0 + Math.sin( x * 0.02 + i ) * 3 + Math.sin( x * 0.07 ) * 1.2 ); g.stroke(); }
-	}, true, [ 3, 14 ] );
+	}, [ 40, 40 ] );
 	return TEX;
 }
 
+// The finish, worked out in the gun's own frame (every part's geometry is in it, so the noise lines up across parts):
+// value noise mottles the colour and the sheen, a fine grain bumps the normal, worn edges (the `wear` attribute: 1 on
+// bevels, 0 on faces) go through to bare metal, and wood gets growth rings round an axis along the gun.
+const WPN_PARS = /* glsl */`
+varying vec3 vWObj;
+#ifdef WPN_EDGE
+varying float vWear;
+#endif
+uniform vec3 uBare;
+float wHash( vec3 p ) { p = fract( p * 0.3183099 + 0.1 ); p *= 17.0; return fract( p.x * p.y * p.z * ( p.x + p.y + p.z ) ); }
+float wNoise( vec3 x ) {
+	vec3 i = floor( x ), f = fract( x );
+	f = f * f * ( 3.0 - 2.0 * f );
+	return mix( mix( mix( wHash( i ), wHash( i + vec3( 1.0, 0.0, 0.0 ) ), f.x ), mix( wHash( i + vec3( 0.0, 1.0, 0.0 ) ), wHash( i + vec3( 1.0, 1.0, 0.0 ) ), f.x ), f.y ),
+		mix( mix( wHash( i + vec3( 0.0, 0.0, 1.0 ) ), wHash( i + vec3( 1.0, 0.0, 1.0 ) ), f.x ), mix( wHash( i + vec3( 0.0, 1.0, 1.0 ) ), wHash( i + vec3( 1.0, 1.0, 1.0 ) ), f.x ), f.y ), f.z );
+}
+`;
+const WPN_SURFACE = /* glsl */`
+{
+	vec3 op = vWObj;
+	float n1 = wNoise( op * 140.0 ), n2 = wNoise( op * 700.0 + 3.1 );
+	#if defined( WPN_METAL ) || defined( WPN_POLY ) || defined( WPN_MATTE )
+	diffuseColor.rgb *= 0.9 + 0.2 * n1;
+	roughnessFactor = clamp( roughnessFactor * ( 0.82 + 0.36 * n2 ), 0.05, 1.0 );
+	#endif
+	#ifdef WPN_WOOD
+	float w = wNoise( op * vec3( 5.0, 40.0, 40.0 ) );
+	float ring = fract( length( op.yz + vec2( 0.31, 0.17 ) ) * 150.0 + w * 2.2 + wNoise( op * vec3( 1.5, 7.0, 7.0 ) ) * 3.0 );
+	float late = smoothstep( 0.5, 0.8, ring ) * ( 1.0 - smoothstep( 0.88, 1.0, ring ) );
+	float pore = smoothstep( 0.62, 0.9, wNoise( op * vec3( 30.0, 1100.0, 1100.0 ) ) );
+	diffuseColor.rgb *= ( 1.0 - 0.4 * late ) * ( 1.0 - 0.2 * pore ) * ( 0.88 + 0.24 * w );
+	roughnessFactor = clamp( roughnessFactor + 0.14 * late + 0.1 * pore, 0.05, 1.0 );
+	#endif
+	#ifdef WPN_EDGE
+	// patchy: only where the low noise is high does an edge wear through
+	float wm = smoothstep( 0.5, 0.8, vWear * smoothstep( 0.4, 0.75, wNoise( op * 60.0 + 7.3 ) ) + ( n2 - 0.5 ) * 0.35 );
+	#if defined( WPN_METAL )
+	diffuseColor.rgb = mix( diffuseColor.rgb, uBare, wm * 0.85 );
+	metalnessFactor = mix( metalnessFactor, 1.0, wm );
+	roughnessFactor = mix( roughnessFactor, 0.3, wm );
+	#elif defined( WPN_POLY )
+	diffuseColor.rgb *= 1.0 + 0.7 * wm;
+	roughnessFactor = mix( roughnessFactor, 0.85, wm );
+	#elif defined( WPN_WOOD )
+	diffuseColor.rgb *= 1.0 + 0.3 * wm;
+	roughnessFactor = mix( roughnessFactor, 0.7, wm );
+	#endif
+	#endif
+}
+`;
+// a fine cast / blasted grain on metal and polymer (a bump from the noise's screen derivatives)
+const WPN_GRAIN = /* glsl */`
+#if defined( WPN_METAL ) || defined( WPN_POLY )
+{
+	float h = wNoise( vWObj * 520.0 ) * 0.00003;
+	vec2 dH = vec2( dFdx( h ), dFdy( h ) );
+	vec3 sx = dFdx( - vViewPosition ), sy = dFdy( - vViewPosition );
+	vec3 r1 = cross( sy, normal ), r2 = cross( normal, sx );
+	float det = dot( sx, r1 ) * faceDirection;
+	normal = normalize( abs( det ) * normal - sign( det ) * ( dH.x * r1 + dH.y * r2 ) );
+}
+#endif
+`;
+function weaponShader( m, bare ) {
+	return ( shader ) => {
+		shader.uniforms.uBare = { value: bare };
+		shader.vertexShader = shader.vertexShader
+			.replace( '#include <common>', '#include <common>\nvarying vec3 vWObj;\n#ifdef WPN_EDGE\nattribute float wear;\nvarying float vWear;\n#endif' )
+			.replace( '#include <begin_vertex>', '#include <begin_vertex>\nvWObj = position;\n#ifdef WPN_EDGE\nvWear = wear;\n#endif' );
+		shader.fragmentShader = shader.fragmentShader
+			.replace( '#include <common>', '#include <common>\n' + WPN_PARS )
+			.replace( '#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\n' + WPN_SURFACE )
+			.replace( '#include <normal_fragment_maps>', '#include <normal_fragment_maps>\n' + WPN_GRAIN );
+	};
+}
+
 const MATS = {};
-// mode: 'world' (fogged, cloud-shadowed, cast shadows) | 'view' (first-person: no fog, lit by the view scene)
+// mode: 'world' (fogged, cloud-shadowed, cast shadows) | 'view' (first-person: no fog, lit by the view scene; the
+// worn edges read the geometry's `wear` attribute, which the world's merged item batches drop)
 export function weaponMaterials( mode = 'world' ) {
 	if ( MATS[ mode ] ) return MATS[ mode ];
 	const T = textures();
@@ -127,15 +181,20 @@ export function weaponMaterials( mode = 'world' ) {
 			color: d.color, metalness: d.metalness, roughness: d.roughness, transparent: !! d.transparent, opacity: d.opacity ?? 1,
 			emissive: d.emissive ?? 0x000000, emissiveIntensity: d.emissiveIntensity ?? 1,
 		} );
-		if ( d.wear && T.wear ) m.roughnessMap = T.wear;
 		if ( d.grip && T.stipple ) { m.bumpMap = T.stipple; m.bumpScale = 0.6; }
-		if ( d.wood && T.wood ) { m.map = T.wood; m.color.multiplyScalar( 1.25 ); }
 		if ( d.transparent ) { m.depthWrite = ! d.lens; }
 		m.name = 'wpn_' + k;
-		if ( mode === 'view' ) {
-			m.defines = { NO_ATMOS_FOG: '' };
-			patchMaterial( m, 'wpn-view', null, { noCloudShadow: true } );
-		} else patchMaterial( m, 'wpn' );
+		const view = mode === 'view';
+		m.defines = view ? { NO_ATMOS_FOG: '' } : {};
+		const fin = d.fin;
+		if ( fin ) {
+			m.defines[ 'WPN_' + fin.toUpperCase() ] = '';
+			if ( view && fin !== 'matte' ) m.defines.WPN_EDGE = '';
+		}
+		const extra = fin ? weaponShader( m, new THREE.Color( d.bare ?? d.color ) ) : null;
+		const key = ( view ? 'wpn-view' : 'wpn' ) + ( fin ? '-' + fin : '' );
+		if ( view ) patchMaterial( m, key, extra, { noCloudShadow: true } );
+		else patchMaterial( m, key, extra );
 		out[ k ] = m;
 	}
 	MATS[ mode ] = out;
@@ -146,10 +205,26 @@ export function weaponMaterials( mode = 'world' ) {
 
 function prep( g ) {
 	if ( g.index ) g = g.toNonIndexed();
-	for ( const k of Object.keys( g.attributes ) ) if ( ! [ 'position', 'normal', 'uv' ].includes( k ) ) g.deleteAttribute( k );
+	for ( const k of Object.keys( g.attributes ) ) if ( ! [ 'position', 'normal', 'uv', 'wear' ].includes( k ) ) g.deleteAttribute( k );
 	if ( ! g.attributes.uv ) g.setAttribute( 'uv', new THREE.Float32BufferAttribute( new Float32Array( g.attributes.position.count * 2 ), 2 ) );
 	if ( ! g.attributes.normal ) g.computeVertexNormals();
+	if ( ! g.attributes.wear ) edge( g, 0.15 );
 	g.clearGroups();
+	return g;
+}
+
+// the `wear` attribute the view finish reads: how far a vertex sits out on a bevel, from its normal before the part
+// is placed. 'box': between two faces of a box; 'ext': on an extrusion's bevel (between the profile wall and a cap);
+// 'extX' / 'extY': extruded along x / y; a number: the same everywhere (round parts)
+function edge( g, kind ) {
+	const n = g.attributes.normal, c = n.count, w = new Float32Array( c );
+	for ( let i = 0; i < c; i ++ ) {
+		if ( typeof kind === 'number' ) { w[ i ] = kind; continue; }
+		const x = Math.abs( n.getX( i ) ), y = Math.abs( n.getY( i ) ), z = Math.abs( n.getZ( i ) );
+		const f = kind === 'box' ? Math.max( x, y, z ) : kind === 'extX' ? Math.max( x, Math.hypot( y, z ) ) : kind === 'extY' ? Math.max( y, Math.hypot( x, z ) ) : Math.max( z, Math.hypot( x, y ) );
+		w[ i ] = Math.min( 1, ( 1 - f ) / 0.29 );
+	}
+	g.setAttribute( 'wear', new THREE.Float32BufferAttribute( w, 1 ) );
 	return g;
 }
 
@@ -193,13 +268,13 @@ export class Parts {
 	// axis-aligned box by extents, bevel radius r
 	box( mat, x0, x1, y0, y1, z0, z1, r = 0.002, rot = null ) {
 		const sx = Math.abs( x1 - x0 ), sy = Math.abs( y1 - y0 ), sz = Math.abs( z1 - z0 );
-		const g = r > 0 ? new RoundedBoxGeometry( sx, sy, sz, 1, Math.min( r, sx / 2.01, sy / 2.01, sz / 2.01 ) ) : new THREE.BoxGeometry( sx, sy, sz );
+		const g = edge( r > 0 ? new RoundedBoxGeometry( sx, sy, sz, 1, Math.min( r, sx / 2.01, sy / 2.01, sz / 2.01 ) ) : new THREE.BoxGeometry( sx, sy, sz ), 'box' );
 		if ( rot ) g.rotateX( rot[ 0 ] ).rotateY( rot[ 1 ] ).rotateZ( rot[ 2 ] );
 		return this.put( mat, g, [ ( x0 + x1 ) / 2, ( y0 + y1 ) / 2, ( z0 + z1 ) / 2 ] );
 	}
 	// centred box, optional rotation (radians, xyz)
 	boxC( mat, cx, cy, cz, sx, sy, sz, r = 0.002, rot = null ) {
-		const g = r > 0 ? new RoundedBoxGeometry( sx, sy, sz, 1, Math.min( r, sx / 2.01, sy / 2.01, sz / 2.01 ) ) : new THREE.BoxGeometry( sx, sy, sz );
+		const g = edge( r > 0 ? new RoundedBoxGeometry( sx, sy, sz, 1, Math.min( r, sx / 2.01, sy / 2.01, sz / 2.01 ) ) : new THREE.BoxGeometry( sx, sy, sz ), 'box' );
 		return this.put( mat, g, [ cx, cy, cz ], rot );
 	}
 	// cylinder along +x from x0 (radius r0) to x1 (radius r1)
@@ -245,7 +320,7 @@ export class Parts {
 		const depth = Math.max( 1e-4, Math.abs( z1 - z0 ) - 2 * bevel );
 		let g = new THREE.ExtrudeGeometry( s, { depth, bevelEnabled: bevel > 0, bevelThickness: bevel, bevelSize: bevel, bevelOffset: - bevel, bevelSegments: 1, curveSegments: curveSeg } );
 		g.translate( 0, 0, Math.min( z0, z1 ) + bevel );
-		g = toCreasedNormals( g, 0.7 );
+		g = edge( toCreasedNormals( g, 0.7 ), 'ext' );
 		return this.put( mat, g );
 	}
 	// symmetric side profile: thickness 2 * hz around z = zc
@@ -257,17 +332,17 @@ export class Parts {
 		let g = new THREE.ExtrudeGeometry( s, { depth, bevelEnabled: bevel > 0, bevelThickness: bevel, bevelSize: bevel, bevelOffset: - bevel, bevelSegments: 1, curveSegments: curveSeg } );
 		g.rotateX( - PI / 2 ); // extrusion (z) -> +y, shape y -> -z (we negated z above)
 		g.translate( 0, Math.min( y0, y1 ) + bevel, 0 );
-		g = toCreasedNormals( g, 0.7 );
+		g = edge( toCreasedNormals( g, 0.7 ), 'extY' );
 		return this.put( mat, g );
 	}
 	// front-view profile (z, y) extruded along x between x0 and x1
-	extFront( mat, pts, x0, x1, bevel = 0.0015, curveSeg = 3 ) {
-		const s = shape( pts );
+	extFront( mat, pts, x0, x1, bevel = 0.0015, curveSeg = 3, holes = [] ) {
+		const s = shape( pts, holes );
 		const depth = Math.max( 1e-4, Math.abs( x1 - x0 ) - 2 * bevel );
 		let g = new THREE.ExtrudeGeometry( s, { depth, bevelEnabled: bevel > 0, bevelThickness: bevel, bevelSize: bevel, bevelOffset: - bevel, bevelSegments: 1, curveSegments: curveSeg } );
 		g.rotateY( - PI / 2 ); // extrusion +z -> -x, shape x -> +z
 		g.translate( Math.max( x0, x1 ) - bevel, 0, 0 );
-		g = toCreasedNormals( g, 0.7 );
+		g = edge( toCreasedNormals( g, 0.7 ), 'extX' );
 		return this.put( mat, g );
 	}
 	torusX( mat, x, y, z, R, r, seg = 12 ) {
@@ -359,7 +434,7 @@ function bandProfile( L, d0, d1, bend, pw = 1.6, n = 8, rBottom = 0.004 ) {
 
 const MAG_SHAPES = {
 	pistol: { L: 0.118, d: 0.031, w: 0.021, bend: 0, mat: 'blk', base: 'poly' },
-	stanag: { L: 0.188, d: 0.062, w: 0.0225, bend: 0.014, pw: 2.2, mat: 'alu', base: 'blk' },
+	stanag: { L: 0.188, d: 0.062, w: 0.0225, bend: 0.026, pw: 2.4, mat: 'alu', base: 'blk', ribs: 1 },
 	stanag60: { L: 0.215, d: 0.064, w: 0.046, bend: 0.01, pw: 2, mat: 'poly', base: 'poly' },
 	mini14: { L: 0.125, d: 0.058, w: 0.022, bend: 0.01, mat: 'blued', base: 'blued' },
 	ak74: { L: 0.215, d: 0.068, d1: 0.074, w: 0.027, bend: 0.075, pw: 1.45, mat: 'plum', base: 'plum', ribs: 1 },
@@ -500,100 +575,171 @@ function trigger( P, x, y, len = 0.02 ) {
 }
 
 // ---- AR-15 family ----
+// a polygon circle (for holes: sight apertures, slots)
+const circle = ( cx, cy, r, n = 10 ) => Array.from( { length: n }, ( _, i ) => [ cx + Math.cos( - i / n * PI * 2 ) * r, cy + Math.sin( - i / n * PI * 2 ) * r ] );
+
+// the flat-top upper (walls, the port with the carrier behind it, forward assist, brass deflector, rail), the lower (magwell
+// flare, controls, pins, fences), an A2 grip, and the charging handle. Proportions from an M4A1: 22 mm upper, 24 mm lower.
+function arReceiver( P, g0 ) {
+	const uz = 0.0118, ux0 = - 0.128, ux1 = 0.104;
+	// upper: two walls (the right one cut by the ejection port, chamfered), a dark core and a chamfered top under the rail
+	const wall = [ [ ux0, - 0.017 ], [ ux1, - 0.017 ], [ ux1, 0.027 ], [ ux0, 0.027 ] ];
+	P.ext( 'alu', wall, - uz, - 0.0086, 0.0008 );
+	P.ext( 'alu', wall, 0.0086, uz, 0.0008, [ [ [ - 0.024, - 0.0065, 0.002 ], [ 0.05, - 0.0065, 0.002 ], [ 0.05, 0.0195, 0.002 ], [ - 0.024, 0.0195, 0.002 ] ] ] );
+	P.extFront( 'blk', [ [ - 0.009, - 0.016 ], [ 0.009, - 0.016 ], [ 0.009, 0.026 ], [ - 0.009, 0.026 ] ], ux0 + 0.001, ux1 - 0.001, 0 );
+	P.extFront( 'alu', [ [ - uz + 0.0002, 0.0262 ], [ uz - 0.0002, 0.0262 ], [ uz - 0.0002, 0.0286, 0.0012 ], [ 0.0098, 0.0348 ], [ - 0.0098, 0.0348 ], [ - uz + 0.0002, 0.0286, 0.0012 ] ], ux0, ux1, 0.0008 );
+	P.rail( 'alu', ux0 + 0.004, ux1 - 0.003, 0.041 );
+	// barrel nut
+	P.cyl( 'alu', ux1, ux1 + 0.022, 0.0172, 0, 0, 18 );
+	for ( let i = 0; i < 6; i ++ ) { const a = i / 6 * PI * 2 + 0.26; P.boxC( 'alu', ux1 + 0.011, Math.cos( a ) * 0.0172, Math.sin( a ) * 0.0172, 0.018, 0.004, 0.004, 0, [ a, 0, 0 ] ); }
+	// forward assist: housing and the knurled plunger, angled up and back on the right
+	P.rod( 'alu', [ - 0.056, 0.004, 0.0098 ], [ - 0.09, 0.013, 0.0172 ], 0.0074, 14 );
+	P.rod( 'blk', [ - 0.088, 0.0125, 0.0168 ], [ - 0.108, 0.0178, 0.0212 ], 0.0068, 14 );
+	for ( let i = 0; i < 3; i ++ ) { const t = 0.2 + i * 0.28; P.rod( 'blk', [ - 0.088 - 0.02 * t, 0.0125 + 0.0053 * t, 0.0168 + 0.0044 * t ], [ - 0.0895 - 0.02 * t, 0.0129 + 0.0053 * t, 0.0171 + 0.0044 * t ], 0.0072, 14 ); }
+	// brass deflector behind the port
+	P.extTop( 'alu', [ [ - 0.044, 0.0112 ], [ - 0.024, 0.0112 ], [ - 0.026, 0.0182, 0.002 ], [ - 0.037, 0.0172, 0.004 ] ], - 0.004, 0.0262, 0.0008 );
+	// dust cover, open: hanging from its hinge under the port, ribbed
+	P.cyl( 'steel', - 0.024, 0.05, 0.0013, - 0.0072, 0.0124, 8 );
+	P.box( 'alu', - 0.022, 0.048, - 0.029, - 0.008, 0.0122, 0.0134, 0.0006 );
+	for ( let i = 0; i < 3; i ++ ) P.box( 'alu', - 0.018 + i * 0.022, - 0.004 + i * 0.022, - 0.02, - 0.017, 0.0132, 0.0138, 0 );
+	// lower: side profile (magwell, trigger guard bosses, grip tang, the buffer tower), then the flared magwell lip
+	const lz = 0.0122;
+	P.extS( 'alu', [ [ - 0.134, - 0.017 ], [ ux1, - 0.017 ], [ 0.107, - 0.024 ], [ 0.11, - 0.066 ], [ 0.046, - 0.066 ], [ 0.046, - 0.047 ], [ - 0.035, - 0.047 ], [ - 0.07, - 0.047 ], [ - 0.106, - 0.042, 0.006 ], [ - 0.134, - 0.03, 0.008 ] ], lz, 0.0012 );
+	P.extFront( 'alu', [ [ - 0.0142, - 0.082 ], [ 0.0142, - 0.082 ], [ 0.0142, - 0.066, 0.002 ], [ 0.0122, - 0.058 ], [ - 0.0122, - 0.058 ], [ - 0.0142, - 0.066, 0.002 ] ], 0.044, 0.113, 0.0018 );
+	// the buffer tower round the tube's threads
+	P.extS( 'alu', [ [ - 0.134, - 0.03 ], [ - 0.122, - 0.03 ], [ - 0.122, - 0.017 ], [ - 0.134, - 0.017 ] ], 0.0135, 0.0015 );
+	// trigger guard, trigger, pins
+	triggerGuard( P, 'alu', - 0.036, 0.048, - 0.047, 0.031, 0.0045 );
+	trigger( P, 0.0, - 0.049 );
+	for ( const [ x, y, r ] of [ [ - 0.108, - 0.023, 0.0029 ], [ 0.098, - 0.023, 0.0029 ], [ - 0.016, - 0.034, 0.0017 ], [ 0.012, - 0.034, 0.0017 ] ] ) P.cylZ( r > 0.002 ? 'steel' : 'blk', x, y, - lz - 0.0009, lz + 0.0009, r, 10 );
+	// selector (left lever, right stub), bolt catch (left), mag release and its fence (right)
+	P.cylZ( 'blk', - 0.061, - 0.028, - lz - 0.0016, - lz, 0.0056, 12 );
+	P.extS( 'blk', [ [ - 0.063, - 0.025 ], [ - 0.04, - 0.029, 0.002 ], [ - 0.042, - 0.034, 0.002 ], [ - 0.063, - 0.031 ] ], 0.0008, 0.0003, - lz - 0.0022 );
+	P.cylZ( 'blk', - 0.061, - 0.028, lz, lz + 0.0012, 0.0036, 10 );
+	P.extS( 'blk', [ [ 0.03, - 0.021 ], [ 0.056, - 0.021, 0.002 ], [ 0.056, - 0.03, 0.003 ], [ 0.042, - 0.031 ], [ 0.034, - 0.028 ] ], 0.0012, 0.0004, - lz - 0.0012 );
+	P.ext( 'alu', [ [ 0.027, - 0.026, 0.002 ], [ 0.05, - 0.026, 0.002 ], [ 0.05, - 0.045, 0.003 ], [ 0.027, - 0.045, 0.003 ] ], lz - 0.0002, lz + 0.0015, 0.0005, [ circle( 0.0385, - 0.0355, 0.0068, 12 ) ] );
+	P.cylZ( 'blk', 0.0385, - 0.0355, lz - 0.0002, lz + 0.0021, 0.0055, 14 );
+	// A2 pistol grip: rounded, a finger nub, stippled
+	const g = pistolGrip( P, 'poly', - 0.036, - 0.046, 0.1, 0.36, 0.036, 0.032, 0.0135, 0.0055, 1 );
+	// charging handle (animated with the bolt): the T and its latch
+	const ch = P.sub( 'charge', - 0.13, 0.03, 0 );
+	ch.extTop( 'alu', [ [ - 0.144, - 0.021, 0.004 ], [ - 0.131, - 0.021, 0.003 ], [ - 0.127, - 0.0065 ], [ - 0.127, 0.0065 ], [ - 0.131, 0.021, 0.003 ], [ - 0.144, 0.021, 0.004 ] ], 0.0266, 0.0344, 0.0012 );
+	ch.box( 'alu', - 0.141, - 0.132, 0.0266, 0.0344, - 0.027, - 0.019, 0.0015 );
+	// bolt carrier through the port (phosphate), the bolt's lugs at its face
+	const bolt = P.sub( 'bolt', 0.0, 0.008, 0.01 );
+	bolt.box( 'blk', - 0.03, 0.05, - 0.0055, 0.0185, 0.0072, 0.0096, 0.0012 );
+	bolt.box( 'blk', - 0.01, 0.012, 0.0045, 0.011, 0.0092, 0.0099, 0.0005 );
+	bolt.cyl( 'steel', 0.04, 0.052, 0.0062, 0.006, 0.004, 12 );
+	return g;
+}
+
+// the M4's collapsible stock on its buffer tube: a sleeve round the tube, the web with its pocket, the butt pad, the
+// adjustment lever and the sling slot. x0: where the tube leaves the receiver
+function carStock( P, x0 ) {
+	P.cyl( 'alu', x0 - 0.21, x0, 0.0152, 0.004, 0, 18 );
+	P.box( 'alu', x0 - 0.2, x0 - 0.014, - 0.0162, - 0.0098, - 0.0045, 0.0045, 0.001 );
+	for ( let i = 0; i < 6; i ++ ) P.box( 'blk', x0 - 0.19 + i * 0.018, x0 - 0.184 + i * 0.018, - 0.0166, - 0.0142, - 0.0035, 0.0035, 0 );
+	// castle nut (notched) and the end plate with its sling loop
+	P.cyl( 'alu', x0 - 0.014, x0 - 0.002, 0.0188, 0.004, 0, 18 );
+	for ( let i = 0; i < 8; i ++ ) { const a = i / 8 * PI * 2; P.boxC( 'blk', x0 - 0.012, 0.004 + Math.cos( a ) * 0.0184, Math.sin( a ) * 0.0184, 0.006, 0.003, 0.0034, 0, [ a, 0, 0 ] ); }
+	P.cyl( 'blk', x0 - 0.002, x0 + 0.001, 0.0205, 0.004, 0, 18 );
+	P.put( 'steel', new THREE.TorusGeometry( 0.0065, 0.0014, 6, 12, PI ), [ x0 - 0.001, 0.004, - 0.024 ], [ PI / 2, PI / 2, 0 ] );
+	// the stock slides on the tube: body from xb to the butt
+	const xb = x0 - 0.235, xe = x0 - 0.087;
+	P.cyl( 'poly', xb, xe, 0.0196, 0.004, 0, 18, 0.0186 );
+	P.cyl( 'poly', xe, xe + 0.004, 0.0186, 0.004, 0, 18, 0.0172 );
+	// web under the sleeve: an outer frame round a pocket, the pocket's floor, the butt
+	const web = [ [ xe, - 0.008 ], [ xb + 0.004, - 0.008 ], [ xb + 0.002, - 0.07, 0.006 ], [ xb + 0.024, - 0.073, 0.004 ], [ xe - 0.046, - 0.03, 0.012 ], [ xe - 0.012, - 0.015, 0.006 ] ];
+	const pocket = [ [ xb + 0.066, - 0.02, 0.003 ], [ xb + 0.012, - 0.02, 0.003 ], [ xb + 0.012, - 0.058, 0.005 ], [ xb + 0.026, - 0.06, 0.004 ] ];
+	P.extS( 'poly', web, 0.0128, 0.0035, 0, [ pocket ] );
+	P.extS( 'poly', web, 0.0086, 0.001 );
+	P.extS( 'rubber', [ [ xb + 0.004, 0.0255, 0.007 ], [ xb - 0.011, 0.0245, 0.006 ], [ xb - 0.013, - 0.072, 0.008 ], [ xb + 0.004, - 0.076, 0.005 ] ], 0.0168, 0.0045 );
+	for ( let i = 0; i < 5; i ++ ) P.box( 'rubber', xb - 0.0135, xb - 0.011, 0.012 - i * 0.018, 0.016 - i * 0.018, - 0.013, 0.013, 0 );
+	// adjustment lever under the front, sling slot at the toe
+	P.extS( 'poly', [ [ xe - 0.03, - 0.013 ], [ xe + 0.004, - 0.013 ], [ xe + 0.004, - 0.019, 0.003 ], [ xe - 0.012, - 0.024, 0.004 ], [ xe - 0.03, - 0.02 ] ], 0.0055, 0.0015 );
+	P.ext( 'blk', [ [ xb + 0.012, - 0.068 ], [ xb + 0.03, - 0.07 ], [ xb + 0.03, - 0.082, 0.004 ], [ xb + 0.012, - 0.08, 0.004 ] ], - 0.004, 0.004, 0.0008, [ [ [ xb + 0.016, - 0.073 ], [ xb + 0.026, - 0.074 ], [ xb + 0.026, - 0.078 ], [ xb + 0.016, - 0.077 ] ] ] );
+	return xb - 0.013;
+}
+
 function arRifle( o ) {
 	const P = new Parts();
 	const v = o.v || 'm4';
 	const barrelL = { m4: 0.368, m16: 0.508, '416': 0.368, civ: 0.406 }[ v ];
-	const bEnd = 0.12 + barrelL;
+	const bEnd = 0.126 + barrelL;
 	const hgEnd = { m4: 0.3, m16: 0.43, '416': 0.37, civ: 0.405 }[ v ];
-	const furn = v === 'civ' ? 'poly' : 'poly';
-	// upper receiver
-	P.box( 'alu', - 0.125, 0.12, - 0.018, 0.034, - 0.0145, 0.0145, 0.004 );
-	P.box( 'alu', 0.1, 0.125, - 0.02, 0.03, - 0.016, 0.016, 0.004 ); // barrel nut shoulder
-	P.rail( 'alu', - 0.122, 0.118, 0.041 );
-	// ejection port / dust cover / brass deflector / forward assist
-	P.box( 'blk', - 0.028, 0.048, - 0.004, 0.021, 0.013, 0.0165, 0.001 );
-	P.box( 'alu', - 0.058, - 0.034, 0.0, 0.03, 0.012, 0.021, 0.003 );
-	P.cyl( 'blk', - 0.108, - 0.07, 0.0075, 0.016, 0.019, 10, 0.006 );
-	// lower receiver with the magwell
-	P.extS( 'alu', [ [ - 0.128, - 0.017 ], [ 0.122, - 0.017 ], [ 0.122, - 0.03 ], [ 0.117, - 0.074 ], [ 0.114, - 0.08, 0.003 ], [ 0.05, - 0.08, 0.003 ], [ 0.046, - 0.05 ], [ - 0.045, - 0.05 ], [ - 0.105, - 0.045 ], [ - 0.128, - 0.032, 0.008 ] ], 0.0148, 0.002 );
-	P.box( 'alu', 0.048, 0.118, - 0.08, - 0.06, - 0.0165, 0.0165, 0.002 ); // flared magwell
-	triggerGuard( P, 'alu', - 0.038, 0.05, - 0.048, 0.03 );
-	trigger( P, 0.0, - 0.05 );
-	// controls: selector, mag release, bolt catch, takedown pins
-	P.box( 'blk', - 0.07, - 0.05, - 0.03, - 0.024, - 0.018, - 0.0145, 0.001 );
-	P.cylZ( 'blk', - 0.06, - 0.027, - 0.019, - 0.0145, 0.005, 8 );
-	P.cylZ( 'blk', 0.04, - 0.035, 0.0145, 0.019, 0.005, 8 );
-	P.box( 'blk', 0.024, 0.044, - 0.034, - 0.02, - 0.018, - 0.0145, 0.001 );
-	P.cylZ( 'steel', 0.105, - 0.024, - 0.0155, 0.0155, 0.0022, 6 );
-	P.cylZ( 'steel', - 0.108, - 0.024, - 0.0155, 0.0155, 0.0022, 6 );
-	// pistol grip
-	const g = pistolGrip( P, furn, - 0.036, - 0.046, 0.1, 0.36, 0.036, 0.032, 0.0135, 0.004, 1 );
-	// buffer tube + stock
-	P.cyl( 'alu', - 0.135, - 0.125, 0.0175, 0.004, 0, 14 );
+	const g = arReceiver( P );
+	// stock
+	let stockX;
 	if ( v === 'm16' ) {
-		P.extS( 'poly', [ [ - 0.128, 0.022 ], [ - 0.43, 0.024, 0.004 ], [ - 0.435, - 0.088, 0.006 ], [ - 0.4, - 0.09 ], [ - 0.2, - 0.045 ], [ - 0.128, - 0.034, 0.006 ] ], 0.018, 0.004 );
-		P.box( 'rubber', - 0.447, - 0.432, - 0.09, 0.026, - 0.019, 0.019, 0.004 );
-		P.box( 'blk', - 0.425, - 0.395, - 0.07, - 0.02, 0.0175, 0.0195, 0.002 ); // trapdoor
-	} else {
-		P.cyl( 'alu', - 0.34, - 0.13, 0.0152, 0.004, 0, 14 );
-		P.cyl( 'alu', - 0.14, - 0.13, 0.019, 0.004, 0, 10 ); // castle nut
-		const sm = v === 'civ' ? 'poly' : 'poly';
-		P.extS( sm, [ [ - 0.24, 0.024, 0.004 ], [ - 0.355, 0.026, 0.004 ], [ - 0.362, - 0.072, 0.008 ], [ - 0.33, - 0.074, 0.004 ], [ - 0.262, - 0.024 ], [ - 0.24, - 0.014, 0.004 ] ], 0.0175, 0.004 );
-		P.box( 'rubber', - 0.372, - 0.358, - 0.076, 0.028, - 0.0195, 0.0195, 0.004 );
-		P.box( sm, - 0.25, - 0.24, - 0.03, - 0.012, - 0.012, 0.012, 0.002 ); // lever
-	}
-	// charging handle (animated with the bolt)
-	const ch = P.sub( 'charge', - 0.13, 0.03, 0 );
-	ch.box( 'alu', - 0.142, - 0.122, 0.024, 0.034, - 0.022, 0.022, 0.003 );
-	ch.box( 'alu', - 0.126, - 0.06, 0.026, 0.033, - 0.006, 0.006, 0.001 );
-	// bolt carrier face visible through the port
-	const bolt = P.sub( 'bolt', 0.0, 0.008, 0.01 );
-	bolt.box( 'steel', - 0.03, 0.045, 0.0, 0.017, 0.006, 0.0125, 0.001 );
-	// barrel
-	P.cyl( 'blued', 0.12, bEnd, 0.0095, 0, 0, 14, 0.0088 );
+		// fixed A2 stock: the tube is inside it
+		P.cyl( 'alu', - 0.14, - 0.128, 0.019, 0.004, 0, 16 );
+		P.extS( 'poly', [ [ - 0.14, 0.022, 0.003 ], [ - 0.43, 0.025, 0.006 ], [ - 0.436, - 0.088, 0.006 ], [ - 0.4, - 0.09, 0.004 ], [ - 0.2, - 0.045, 0.02 ], [ - 0.14, - 0.032, 0.006 ] ], 0.0172, 0.0045 );
+		P.box( 'rubber', - 0.447, - 0.432, - 0.09, 0.026, - 0.0185, 0.0185, 0.004 );
+		P.box( 'poly', - 0.425, - 0.39, - 0.07, - 0.024, 0.0165, 0.0185, 0.0015 ); // trapdoor
+		P.box( 'blk', - 0.36, - 0.34, - 0.062, - 0.052, - 0.012, 0.012, 0.002 ); // sling swivel
+		stockX = - 0.447;
+	} else stockX = carStock( P, - 0.128 );
+	// barrel: phosphate, the M4 profile steps down past the front sight
+	const fsx = v === 'm16' ? 0.545 : v === 'm4' ? 0.34 : 0;
+	P.lathe( 'blk', [ [ 0.126, 0 ], [ 0.126, 0.0096 ], [ 0.29, 0.0094 ], [ 0.292, 0.0082 ], [ bEnd - 0.004, 0.0078 ], [ bEnd, 0.0074 ], [ bEnd, 0 ] ], 0, 0, 16 );
 	// handguard
 	if ( v === 'm4' || v === 'm16' ) {
-		P.cyl( 'alu', 0.117, 0.13, 0.03, 0, 0, 18 ); // delta ring
-		P.box( 'alu', 0.13, hgEnd, - 0.026, 0.026, - 0.026, 0.026, 0.009 );
-		P.rail( 'alu', 0.132, hgEnd - 0.004, 0.035, 0.0105, 'top' );
-		P.rail( 'alu', 0.132, hgEnd - 0.004, - 0.035, 0.0105, 'bottom' );
-		P.rail( 'alu', 0.132, hgEnd - 0.004, 0.035, 0.0105, 'right' );
-		P.rail( 'alu', 0.132, hgEnd - 0.004, - 0.035, 0.0105, 'left' );
-		P.cyl( 'alu', hgEnd, hgEnd + 0.01, 0.024, 0, 0, 14 );
+		// rail system: an octagon with a rail on each flat, vents on the chamfers, ladder covers left and below
+		const a = 0.0105, b = 0.029;
+		P.extFront( 'alu', [ [ a, b, 0.0015 ], [ b, a, 0.0015 ], [ b, - a, 0.0015 ], [ a, - b, 0.0015 ], [ - a, - b, 0.0015 ], [ - b, - a, 0.0015 ], [ - b, a, 0.0015 ], [ - a, b, 0.0015 ] ], 0.126, hgEnd, 0.0015 );
+		P.rail( 'alu', 0.13, hgEnd - 0.003, 0.035, 0.0105, 'top' );
+		P.rail( 'alu', 0.13, hgEnd - 0.003, 0.035, 0.0105, 'right' );
+		for ( const [ sy, sz ] of [ [ 1, 1 ], [ 1, - 1 ], [ - 1, 1 ], [ - 1, - 1 ] ] ) {
+			for ( let i = 0; i < 5; i ++ ) {
+				const x = 0.15 + i * ( hgEnd - 0.175 ) / 4;
+				P.boxC( 'rubber', x, sy * 0.0203, sz * 0.0203, 0.014, 0.0012, 0.0052, 0, [ sy * sz * PI / 4, 0, 0 ] );
+			}
+		}
+		// ladder covers over the left and bottom rails (where the support hand sits)
+		P.box( 'poly', 0.134, hgEnd - 0.008, - 0.0118, 0.0118, - 0.0372, - 0.0288, 0.0022 );
+		P.box( 'poly', 0.134, hgEnd - 0.008, - 0.0372, - 0.0288, - 0.0118, 0.0118, 0.0022 );
+		for ( let x = 0.142; x < hgEnd - 0.012; x += 0.012 ) {
+			P.box( 'poly', x, x + 0.004, - 0.0112, 0.0112, - 0.0386, - 0.0366, 0 );
+			P.box( 'poly', x, x + 0.004, - 0.0386, - 0.0366, - 0.0112, 0.0112, 0 );
+		}
+		P.cyl( 'blk', hgEnd, hgEnd + 0.006, 0.0222, 0, 0, 16 );
+		for ( const s of [ - 1, 1 ] ) P.cylZ( 'steel', 0.138, - 0.018, s * 0.0265, s * 0.0292, 0.0022, 8 );
 	} else if ( v === '416' ) {
-		P.box( 'alu', 0.12, hgEnd, - 0.027, 0.027, - 0.027, 0.027, 0.01 );
-		P.rail( 'alu', 0.122, hgEnd - 0.002, 0.041, 0.0105, 'top' );
-		P.box( 'alu', 0.122, hgEnd - 0.002, 0.027, 0.035, - 0.011, 0.011, 0.001 );
-		P.rail( 'alu', 0.126, hgEnd - 0.004, - 0.036, 0.0105, 'bottom' );
-		P.rail( 'alu', 0.126, hgEnd - 0.004, 0.036, 0.0105, 'right' );
-		P.rail( 'alu', 0.126, hgEnd - 0.004, - 0.036, 0.0105, 'left' );
+		P.box( 'alu', 0.126, hgEnd, - 0.027, 0.027, - 0.027, 0.027, 0.01 );
+		P.rail( 'alu', 0.128, hgEnd - 0.002, 0.041, 0.0105, 'top' );
+		P.box( 'alu', 0.128, hgEnd - 0.002, 0.027, 0.035, - 0.011, 0.011, 0.001 );
+		P.rail( 'alu', 0.13, hgEnd - 0.004, - 0.036, 0.0105, 'bottom' );
+		P.rail( 'alu', 0.13, hgEnd - 0.004, 0.036, 0.0105, 'right' );
+		P.rail( 'alu', 0.13, hgEnd - 0.004, - 0.036, 0.0105, 'left' );
 	} else {
-		P.cyl( 'alu', 0.12, hgEnd, 0.026, 0, 0, 8, 0.026, PI / 8 );
-		P.rail( 'alu', 0.122, hgEnd - 0.002, 0.041, 0.0105, 'top' );
-		P.box( 'alu', 0.122, hgEnd - 0.002, 0.022, 0.035, - 0.011, 0.011, 0.001 );
-		for ( let i = 0; i < 6; i ++ ) for ( const s of [ - 1, 1 ] ) P.boxC( 'blk', 0.16 + i * 0.04, - 0.004, s * 0.0245, 0.024, 0.008, 0.004, 0.002, [ s * 0.0, 0, 0 ] );
+		P.cyl( 'alu', 0.126, hgEnd, 0.026, 0, 0, 8, 0.026, PI / 8 );
+		P.rail( 'alu', 0.128, hgEnd - 0.002, 0.041, 0.0105, 'top' );
+		P.box( 'alu', 0.128, hgEnd - 0.002, 0.022, 0.035, - 0.011, 0.011, 0.001 );
+		for ( let i = 0; i < 6; i ++ ) for ( const s of [ - 1, 1 ] ) P.boxC( 'rubber', 0.16 + i * 0.04, - 0.004, s * 0.0254, 0.024, 0.008, 0.002, 0.001 );
 	}
-	// front sight: A-frame on the gas block (m4, m16) or folding sights (416, civ)
-	const fsx = v === 'm16' ? 0.545 : v === 'm4' ? 0.34 : 0;
+	// front sight: the A2 base on the gas block (m4, m16) or a folding sight (416, civ)
 	const sightH = 0.066;
 	if ( fsx ) {
-		P.cyl( 'blk', fsx - 0.017, fsx + 0.017, 0.0135, 0, 0, 12 );
-		P.extS( 'blk', [ [ fsx - 0.02, - 0.004 ], [ fsx + 0.02, - 0.004 ], [ fsx + 0.012, 0.03 ], [ fsx + 0.009, 0.047 ], [ fsx - 0.009, 0.047 ], [ fsx - 0.014, 0.03 ] ], 0.0085, 0.0015 );
-		for ( const s of [ - 1, 1 ] ) P.box( 'blk', fsx - 0.009, fsx + 0.009, 0.045, 0.07, s * 0.0055, s * 0.0095, 0.0012 );
-		P.box( 'blk', fsx - 0.0022, fsx + 0.0022, 0.045, sightH, - 0.0014, 0.0014, 0 );
-		P.box( 'blk', fsx - 0.006, fsx + 0.012, - 0.03, - 0.012, - 0.004, 0.004, 0.001 ); // bayonet lug
+		P.cyl( 'blk', fsx - 0.018, fsx + 0.018, 0.0138, 0, 0, 16 );
+		P.extS( 'blk', [ [ fsx - 0.02, 0.004 ], [ fsx + 0.017, 0.004 ], [ fsx + 0.012, 0.028, 0.004 ], [ fsx + 0.009, 0.045 ], [ fsx - 0.01, 0.045 ], [ fsx - 0.016, 0.028, 0.004 ] ], 0.0085, 0.0015 );
+		for ( const s of [ - 1, 1 ] ) P.ext( 'blk', [ [ fsx - 0.0095, 0.043 ], [ fsx + 0.0095, 0.043 ], [ fsx + 0.0095, 0.069, 0.007 ], [ fsx - 0.0095, 0.069, 0.007 ] ], s > 0 ? 0.0056 : - 0.0096, s > 0 ? 0.0096 : - 0.0056, 0.001 );
+		P.cylY( 'blk', fsx, 0.043, 0.05, 0.0042, 0, 10 );
+		P.box( 'blk', fsx - 0.0019, fsx + 0.0019, 0.049, sightH, - 0.0015, 0.0015, 0.0003 );
+		P.box( 'blk', fsx - 0.005, fsx + 0.015, - 0.028, - 0.012, - 0.0038, 0.0038, 0.0012 ); // bayonet lug
+		P.put( 'steel', new THREE.TorusGeometry( 0.0085, 0.0014, 6, 14 ), [ fsx - 0.004, - 0.024, 0 ] ); // sling swivel
+		P.cylZ( 'steel', fsx - 0.012, 0.0, - 0.0142, 0.0142, 0.0016, 8 ); // taper pins
+		P.cylZ( 'steel', fsx + 0.012, 0.0, - 0.0142, 0.0142, 0.0016, 8 );
 	} else {
 		const f = P.sub( 'buisF', hgEnd - 0.02, 0.045, 0 );
 		const x = hgEnd - 0.02;
 		f.box( 'blk', x - 0.012, x + 0.012, 0.045, 0.052, - 0.011, 0.011, 0.001 );
-		for ( const s of [ - 1, 1 ] ) f.box( 'blk', x - 0.005, x + 0.005, 0.05, 0.072, s * 0.005, s * 0.009, 0.0012 );
-		f.box( 'blk', x - 0.0022, x + 0.0022, 0.05, sightH, - 0.0014, 0.0014, 0 );
+		for ( const s of [ - 1, 1 ] ) f.ext( 'blk', [ [ x - 0.005, 0.05 ], [ x + 0.005, 0.05 ], [ x + 0.005, 0.071, 0.004 ], [ x - 0.005, 0.071, 0.004 ] ], s > 0 ? 0.005 : - 0.009, s > 0 ? 0.009 : - 0.005, 0.0008 );
+		f.box( 'blk', x - 0.0019, x + 0.0019, 0.05, sightH, - 0.0015, 0.0015, 0.0003 );
 	}
-	// muzzle: A2 birdcage
-	P.lathe( 'blk', [ [ bEnd - 0.002, 0.0 ], [ bEnd - 0.002, 0.0105 ], [ bEnd + 0.045, 0.0112 ], [ bEnd + 0.052, 0.0105 ], [ bEnd + 0.052, 0.0 ] ], 0, 0, 14 );
-	for ( let i = 0; i < 4; i ++ ) { const a = i / 4 * PI * 2 + 0.4; P.boxC( 'rubber', bEnd + 0.027, Math.sin( a ) * 0.0105, Math.cos( a ) * 0.0105, 0.028, 0.004, 0.004, 0.001, [ a, 0, 0 ] ); }
-	// rear sight: folding BUIS or the M16 carry handle
+	// A2 birdcage: five slots round the top and sides, the bottom closed
+	P.lathe( 'blk', [ [ bEnd - 0.002, 0.0 ], [ bEnd - 0.002, 0.0096 ], [ bEnd + 0.005, 0.0111 ], [ bEnd + 0.046, 0.0113 ], [ bEnd + 0.052, 0.0104 ], [ bEnd + 0.052, 0.0046 ], [ bEnd + 0.05, 0.0 ] ], 0, 0, 18 );
+	for ( let i = 0; i < 5; i ++ ) { const a = ( i - 2 ) * 0.62; P.boxC( 'rubber', bEnd + 0.03, Math.cos( a ) * 0.0108, Math.sin( a ) * 0.0108, 0.026, 0.0012, 0.0036, 0, [ - a, 0, 0 ] ); }
+	// rear sight: a folding aperture (the M16's is in its carry handle)
 	const rearX = - 0.1;
 	if ( v === 'm16' ) {
 		const c = P.sub( 'carry', 0, 0.045, 0 );
@@ -604,22 +750,22 @@ function arRifle( o ) {
 		c.cylZ( 'blk', - 0.09, 0.07, 0.0105, 0.016, 0.006, 10 ); // windage knob
 	} else {
 		const r = P.sub( 'buisR', rearX, 0.045, 0 );
-		r.box( 'blk', rearX - 0.014, rearX + 0.012, 0.045, 0.053, - 0.011, 0.011, 0.001 );
-		r.box( 'blk', rearX - 0.002, rearX + 0.002, 0.052, 0.061, - 0.008, 0.008, 0.001 );
-		for ( const s of [ - 1, 1 ] ) r.box( 'blk', rearX - 0.004, rearX + 0.004, 0.052, 0.074, s * 0.0065, s * 0.0105, 0.0012 );
-		r.torusX( 'blk', rearX, sightH, 0, 0.0034, 0.0015, 10 );
+		r.box( 'blk', rearX - 0.015, rearX + 0.012, 0.0448, 0.0525, - 0.011, 0.011, 0.0012 );
+		r.cylZ( 'blk', rearX - 0.004, 0.049, 0.011, 0.016, 0.0045, 12 ); // clamp knob
+		for ( const s of [ - 1, 1 ] ) r.ext( 'blk', [ [ rearX - 0.0055, 0.051 ], [ rearX + 0.0055, 0.051 ], [ rearX + 0.004, 0.075, 0.004 ], [ rearX - 0.004, 0.075, 0.004 ] ], s > 0 ? 0.0062 : - 0.0102, s > 0 ? 0.0102 : - 0.0062, 0.0008 );
+		r.extFront( 'blk', [ [ - 0.0064, 0.0515 ], [ 0.0064, 0.0515 ], [ 0.0064, 0.071, 0.003 ], [ - 0.0064, 0.071, 0.003 ] ], rearX - 0.0016, rearX + 0.0016, 0.0005, 3, [ circle( 0, sightH, 0.0021, 12 ) ] );
 	}
 	const hideWithOptic = v === 'm16' ? [ 'carry' ] : [ 'buisR', 'buisF' ];
 	return {
 		P, info: {
 			sightH, rearX, eyeBack: 0.085, muzzle: [ bEnd + 0.052, 0, 0 ], eject: [ 0.01, 0.01, 0.018 ],
-			mag: { p: [ 0.083, - 0.022, 0 ], rake: 0 }, magSide: v ? null : null,
-			optic: [ - 0.03, 0.0448 ], light: [ hgEnd - 0.05, 0.0, 0.044 ], hideWithOptic,
+			mag: { p: [ 0.083, - 0.022, 0 ], rake: 0 },
+			optic: [ - 0.03, 0.0448 ], light: [ hgEnd - 0.05, 0.0, 0.0388 ], hideWithOptic,
 			grips: {
 				R: grip( [ g.p.x, g.p.y, 0 ], [ g.a.x, g.a.y, 0 ], [ 0.05, 0.15, 1 ], 0.017, { trig: [ 0.0, - 0.058, 0 ] } ),
 				L: grip( [ Math.min( 0.23, hgEnd - 0.07 ), - 0.004, 0 ], [ 1, 0.1, 0 ], [ 0, - 0.75, - 0.66 ], 0.03 ),
 			},
-			stock: - 0.37, len: bEnd + 0.052 + 0.37, charge: 'charge', bolt: 'bolt', boltTravel: 0.075,
+			stock: stockX, len: bEnd + 0.052 - stockX, charge: 'charge', bolt: 'bolt', boltTravel: 0.075,
 		},
 	};
 }
@@ -638,9 +784,17 @@ function akRifle( o ) {
 	// dust cover: rounded top
 	P.extFront( 'blued', [ [ - 0.0135, 0.008 ], [ 0.0135, 0.008 ], [ 0.0135, 0.02, 0.006 ], [ 0.0, 0.027, 0.01 ], [ - 0.0135, 0.02, 0.006 ] ], - 0.168, 0.075, 0.001 );
 	P.box( 'blued', - 0.176, - 0.162, 0.006, 0.03, - 0.004, 0.004, 0.002 ); // cover latch button
-	P.box( 'blk', - 0.03, 0.06, - 0.008, 0.014, 0.012, 0.0145, 0.001 ); // ejection port
-	// safety lever on the right
-	P.box( 'blued', - 0.13, 0.03, - 0.01, - 0.002, 0.0138, 0.0158, 0.001, [ 0, 0, 0.06 ] );
+	P.box( 'rubber', - 0.03, 0.06, - 0.008, 0.012, 0.0132, 0.0142, 0.0015 ); // ejection port
+	P.box( 'steel', - 0.02, 0.058, - 0.004, 0.008, 0.0136, 0.0144, 0.001 );
+	// dust cover stiffening ribs
+	for ( let i = 0; i < 3; i ++ ) { const x = - 0.13 + i * 0.075; P.extFront( 'blued', [ [ - 0.0142, 0.008 ], [ 0.0142, 0.008 ], [ 0.0142, 0.0202, 0.006 ], [ 0.0, 0.0275, 0.01 ], [ - 0.0142, 0.0202, 0.006 ] ], x, x + 0.006, 0.0008 ); }
+	// safety / selector lever on the right: a long stamped plate with its finger tab at the front
+	P.extS( 'blued', [ [ - 0.128, 0.0 ], [ 0.0, - 0.006 ], [ 0.028, - 0.009, 0.003 ], [ 0.034, - 0.018, 0.004 ], [ 0.02, - 0.02, 0.002 ], [ 0.0, - 0.012 ], [ - 0.128, - 0.007, 0.003 ] ], 0.0008, 0.0004, 0.0146 );
+	P.cylZ( 'blued', - 0.126, - 0.0035, 0.0135, 0.0158, 0.0045, 12 );
+	// rivets: the front trunnion, the rear trunnion, the trigger group pins
+	for ( const [ x, y ] of [ [ 0.078, - 0.03 ], [ 0.092, - 0.03 ], [ 0.106, - 0.03 ], [ 0.085, - 0.018 ], [ 0.099, - 0.018 ], [ - 0.152, - 0.03 ], [ - 0.14, - 0.03 ], [ - 0.02, - 0.036 ], [ 0.02, - 0.036 ] ] ) for ( const s of [ - 1, 1 ] ) P.cylZ( 'blued', x, y, s * 0.0135, s * 0.0148, 0.0022, 8 );
+	// the magazine well dimple
+	for ( const s of [ - 1, 1 ] ) P.box( 'blued', 0.06, 0.1, - 0.045, - 0.034, s > 0 ? 0.0133 : - 0.0141, s > 0 ? 0.0141 : - 0.0133, 0.002 );
 	// charging handle (bolt carrier)
 	const bolt = P.sub( 'bolt', 0.06, 0.004, 0.015 );
 	bolt.box( 'steel', - 0.02, 0.07, - 0.004, 0.012, 0.012, 0.016, 0.001 );
@@ -656,7 +810,7 @@ function akRifle( o ) {
 	P.cyl( 'blued', 0.16, 0.405, 0.0095, 0.028, 0, 12 );
 	P.extFront( furn, [ [ - 0.016, 0.014 ], [ 0.016, 0.014 ], [ 0.017, 0.03, 0.008 ], [ 0, 0.043, 0.012 ], [ - 0.017, 0.03, 0.008 ] ], 0.168, 0.33, 0.003 );
 	// lower handguard with the grooves
-	P.box( furn, 0.13, 0.36, - 0.034, 0.012, - 0.026, 0.026, 0.012 );
+	P.extFront( furn, [ [ - 0.0255, 0.012, 0.004 ], [ 0.0255, 0.012, 0.004 ], [ 0.0262, - 0.014, 0.008 ], [ 0.016, - 0.034, 0.012 ], [ - 0.016, - 0.034, 0.012 ], [ - 0.0262, - 0.014, 0.008 ] ], 0.13, 0.36, 0.005, 4 );
 	for ( const s of [ - 1, 1 ] ) P.box( furn === 'lam' ? 'walnut' : 'rubber', 0.16, 0.33, - 0.02, - 0.012, s * 0.0255, s * 0.027, 0.002 );
 	P.box( 'blued', 0.125, 0.135, - 0.036, 0.016, - 0.022, 0.022, 0.002 ); // retainer
 	P.box( 'blued', 0.36, 0.372, - 0.033, 0.015, - 0.02, 0.02, 0.003 );
@@ -692,7 +846,7 @@ function akRifle( o ) {
 			0, [ [ [ - 0.31, - 0.02 ], [ - 0.39, - 0.033 ], [ - 0.39, - 0.09, 0.01 ], [ - 0.34, - 0.07 ] ] ] );
 		P.box( 'rubber', - 0.445, - 0.43, - 0.146, - 0.02, - 0.018, 0.018, 0.004 );
 	} else {
-		P.extS( 'lam', [ [ - 0.168, 0.006 ], [ - 0.43, - 0.03, 0.004 ], [ - 0.436, - 0.142, 0.006 ], [ - 0.4, - 0.146, 0.004 ], [ - 0.24, - 0.085 ], [ - 0.168, - 0.046, 0.006 ] ], 0.0175, 0.005 );
+		P.extS( 'lam', [ [ - 0.168, 0.006 ], [ - 0.43, - 0.03, 0.006 ], [ - 0.436, - 0.142, 0.008 ], [ - 0.4, - 0.146, 0.004 ], [ - 0.24, - 0.085, 0.02 ], [ - 0.168, - 0.046, 0.006 ] ], 0.0175, 0.0068, 0, [], 5 );
 		P.box( 'blued', - 0.446, - 0.432, - 0.146, - 0.026, - 0.019, 0.019, 0.003 ); // butt plate
 	}
 	// optic side mount (shown with an optic)
@@ -715,6 +869,24 @@ function akRifle( o ) {
 }
 
 // ---- pistols ----
+// a closed slide: a lower band, the top band chamfered (or rounded) and cut on the right by the ejection port, the barrel
+// hood showing in the port, the extractor, the back plate with the firing pin, the muzzle and the guide rod at the front
+function closedSlide( sl, mat, xr, xf, bot, top, hz, round ) {
+	const yb = top - 0.0115, c = round ? 0.006 : 0.0038, px0 = - 0.016, px1 = 0.037;
+	const band = ( z1, rightEdge ) => round
+		? [ [ - hz, yb ], [ z1, yb ], rightEdge ? [ z1, top, c ] : [ z1, top ], [ - hz, top, c ] ]
+		: rightEdge ? [ [ - hz, yb ], [ z1, yb ], [ z1, top - c ], [ z1 - c, top ], [ - hz + c, top ], [ - hz, top - c ] ] : [ [ - hz, yb ], [ z1, yb ], [ z1, top ], [ - hz + c, top ], [ - hz, top - c ] ];
+	sl.extFront( mat, [ [ - hz, bot ], [ hz, bot ], [ hz, yb ], [ - hz, yb ] ], xr, xf, 0.0005 );
+	sl.extFront( mat, band( hz, true ), xr, px0, 0.0005 );
+	sl.extFront( mat, band( hz, true ), px1, xf, 0.0005 );
+	sl.extFront( mat, band( - 0.0012, false ), px0, px1, 0.0005 );
+	sl.box( 'blued', px0 + 0.0008, px1 - 0.0008, yb, top - 0.0009, - 0.0016, hz - 0.0022, 0.0007 );
+	sl.box( 'blk', px0 - 0.017, px0 - 0.002, top - 0.0092, top - 0.0056, hz - 0.0003, hz + 0.0006, 0.0003 );
+	sl.box( 'poly', xr - 0.0007, xr + 0.001, bot + 0.004, top - 0.004, - hz + 0.0028, hz - 0.0028, 0.001 );
+	sl.cyl( 'rubber', xr - 0.0009, xr - 0.0005, 0.0019, 0.004, 0, 10 );
+	sl.cyl( 'rubber', xf - 0.0003, xf + 0.0003, 0.0034, bot + 0.0048, 0, 10 );
+}
+
 function pistol( o ) {
 	const P = new Parts();
 	const v = o.v || 'glock';
@@ -758,19 +930,27 @@ function pistol( o ) {
 			slide.box( S.slide, xf - 0.022, xf, bot, top, - hz, hz, S.sb );
 			slide.cyl( 'steel', 0.0, xf - 0.02, 0.0072, 0.004, 0, 12 );
 			slide.box( 'blk', xr + 0.008, xr + 0.02, top - 0.004, top + 0.001, - hz - 0.001, hz + 0.001, 0.001 ); // decocker
-		} else {
-			slide.box( S.slide, xr, xf, bot, top, - hz, hz, S.sb );
-			slide.box( 'blk', - 0.02, 0.03, top - 0.012, top + 0.0006, 0.004, hz + 0.0006, 0.001 ); // ejection port
-		}
-		for ( let i = 0; i < 6; i ++ ) for ( const s of [ - 1, 1 ] ) slide.box( 'blk', xr + 0.004 + i * 0.0045, xr + 0.006 + i * 0.0045, bot + 0.005, top - 0.004, s * hz - 0.0006, s * hz + 0.0006, 0 );
+		} else closedSlide( slide, S.slide, xr, xf, bot, top, hz, v === '1911' || v === 'makarov' );
+		// rear cocking serrations: dark grooves
+		for ( let i = 0; i < 7; i ++ ) for ( const s of [ - 1, 1 ] ) slide.box( 'rubber', xr + 0.005 + i * 0.0036, xr + 0.0062 + i * 0.0036, bot + 0.004, top - 0.0045, s * hz - 0.0004, s * hz + 0.0002, 0 );
 		slide.box( 'blk', xr + 0.001, xr + 0.011, top - 0.001, sightH + 0.001, - 0.0065, 0.0065, 0.001 ); // rear sight
 		slide.box( 'blk', xf - 0.013, xf - 0.006, top - 0.001, sightH, - 0.0016, 0.0016, 0.0006 ); // front sight
 		slide.box( 'glowO', xf - 0.0105, xf - 0.0085, sightH - 0.0035, sightH - 0.0015, - 0.0017, 0.0017, 0 );
 		for ( const s of [ - 1, 1 ] ) slide.box( 'glow', xr + 0.0035, xr + 0.0055, sightH - 0.0035, sightH - 0.0015, s * 0.0038 - 0.001, s * 0.0038 + 0.001, 0 );
-		P.cyl( 'blk', xf - 0.004, xf + 0.001, 0.0062, 0.0, 0, 10 ); // barrel crown
+		P.cyl( 'blued', xf - 0.004, xf + 0.0006, 0.0064, 0.0, 0, 14 ); // barrel crown and bore
+		P.cyl( 'rubber', xf + 0.0006, xf + 0.0009, 0.0046, 0.0, 0, 12 );
 		// frame with the dust cover rail
 		P.box( S.frame, xr + 0.006, xf - 0.012, - 0.026, bot + 0.002, - hz + 0.0008, hz - 0.0008, 0.003 );
-		if ( v !== '1911' && v !== 'makarov' ) P.box( S.frame, 0.035, xf - 0.014, - 0.032, - 0.024, - 0.01, 0.01, 0.001 );
+		if ( v !== '1911' && v !== 'makarov' ) {
+			// dust cover rail with its cross slot
+			P.box( S.frame, 0.035, xf - 0.014, - 0.032, - 0.024, - 0.01, 0.01, 0.001 );
+			P.box( 'rubber', 0.056, 0.061, - 0.0325, - 0.027, - 0.0102, 0.0102, 0 );
+		}
+		// controls: slide stop (left), takedown lever (both sides), magazine catch (left), frame pins
+		P.box( 'blk', - 0.004, 0.02, - 0.0135, - 0.0105, - hz - 0.0005, - hz + 0.0008, 0.0005 );
+		for ( const s of [ - 1, 1 ] ) P.box( 'blk', 0.011, 0.018, - 0.0165, - 0.0115, s > 0 ? hz - 0.0012 : - hz - 0.0004, s > 0 ? hz + 0.0004 : - hz + 0.0012, 0.0004 );
+		P.box( S.frame === 'poly' ? 'poly' : 'blk', - 0.03, - 0.023, - 0.031, - 0.024, - hz - 0.001, - hz + 0.001, 0.0008 );
+		for ( const [ x, y ] of [ [ - 0.011, - 0.016 ], [ 0.006, - 0.021 ], [ - 0.052, - 0.027 ] ] ) P.cylZ( 'steel', x, y, - hz + 0.0004, hz - 0.0004, 0.0013, 8 );
 		if ( v === '1911' ) { P.cylZ( 'blued', xf - 0.006, - 0.003, - 0.0105, 0.0105, 0.0085, 12 ); P.box( 'blued', - 0.02, 0.01, - 0.02, - 0.012, - 0.0125, - 0.011, 0.001 ); }
 	}
 	triggerGuard( P, S.frame === 'poly' ? 'poly' : S.frame, - 0.022, S.deagle ? 0.045 : 0.034, - 0.022, S.deagle ? 0.032 : 0.027, 0.0045 );
@@ -1036,10 +1216,77 @@ function smg( o ) {
 }
 
 // ---- shotguns ----
-function pumpShotgun( o ) {
+// Remington 870 / Mossberg 500: a round-topped receiver with the port and the loading gate, a vent rib and bead, the
+// magazine tube and its cap, a grooved walnut pump on its action bars, the trigger plate with the cross-bolt safety, and
+// a pistol-grip stock with its recoil pad. The eye sits a little over the rib (eyeUp): the rib shows, running to the bead.
+function pump870( o ) {
 	const P = new Parts();
 	const v = o.v || '870';
+	const furn = v === '870' ? 'walnut' : 'poly';
+	const bEnd = 0.59, hz = 0.0165, top = 0.019, bot = - 0.036;
+	// receiver: rounded top, flat sides; the front shoulders down round the barrel
+	P.extFront( 'blued', [ [ - hz, bot, 0.002 ], [ hz, bot, 0.002 ], [ hz, top - 0.004 ], [ hz - 0.003, top, 0.006 ], [ - hz + 0.003, top, 0.006 ], [ - hz, top - 0.004 ] ], - 0.078, 0.112, 0.0012 );
+	P.extS( 'blued', [ [ 0.11, bot + 0.004 ], [ 0.124, bot + 0.012, 0.006 ], [ 0.124, 0.013, 0.004 ], [ 0.11, top - 0.001 ] ], hz - 0.0015, 0.0012 );
+	// ejection port with the bolt behind it, the loading port and its lifter underneath
+	P.box( 'rubber', 0.004, 0.074, - 0.013, 0.012, hz - 0.0003, hz + 0.0003, 0.0015 );
+	P.box( 'steel', 0.024, 0.072, - 0.0075, 0.0065, hz, hz + 0.0005, 0.0015 );
+	P.box( 'rubber', - 0.02, 0.086, bot - 0.0006, bot + 0.0004, - 0.012, 0.012, 0.002 );
+	P.box( 'blued', - 0.012, 0.078, bot - 0.0012, bot, - 0.009, 0.009, 0.0015 );
+	// trigger plate: the guard, the cross-bolt safety, the action release, the pins
+	P.extS( 'alu', [ [ - 0.078, bot + 0.001 ], [ 0.034, bot + 0.001 ], [ 0.034, bot - 0.006, 0.003 ], [ - 0.07, bot - 0.006 ] ], 0.013, 0.0012 );
+	triggerGuard( P, 'alu', - 0.052, 0.03, bot - 0.004, 0.028, 0.0048 );
+	trigger( P, - 0.02, bot - 0.004, 0.018 );
+	P.cylZ( 'blk', - 0.046, bot - 0.0015, - 0.0152, 0.0152, 0.003, 12 );
+	P.cylZ( 'rubber', - 0.046, bot - 0.0015, 0.0152, 0.0156, 0.0015, 8 );
+	P.extS( 'blk', [ [ 0.03, bot - 0.004 ], [ 0.044, bot - 0.004, 0.002 ], [ 0.046, bot - 0.009, 0.002 ], [ 0.032, bot - 0.008 ] ], 0.0012, 0.0004, - 0.0135 );
+	for ( const x of [ - 0.058, 0.09 ] ) P.cylZ( 'steel', x, - 0.026, - hz - 0.0005, hz + 0.0005, 0.0026, 10 );
+	if ( v === '500' ) P.box( 'blk', - 0.068, - 0.05, top - 0.001, top + 0.005, - 0.005, 0.005, 0.002 ); // tang safety
+	// barrel, vent rib with its posts, the bead
+	P.lathe( 'blued', [ [ 0.112, 0 ], [ 0.112, 0.0135 ], [ 0.13, 0.0135 ], [ 0.14, 0.0118 ], [ bEnd - 0.004, 0.0112 ], [ bEnd, 0.0108 ], [ bEnd, 0.0092 ], [ bEnd - 0.002, 0 ] ], 0, 0, 18 );
+	P.box( 'blued', 0.126, bEnd - 0.006, 0.0158, 0.0182, - 0.0042, 0.0042, 0.0008 );
+	for ( let x = 0.14; x < bEnd - 0.01; x += 0.028 ) P.box( 'blued', x, x + 0.004, 0.0105, 0.0162, - 0.0028, 0.0028, 0 );
+	for ( let x = 0.13; x < bEnd - 0.01; x += 0.01 ) P.box( 'rubber', x, x + 0.0025, 0.0181, 0.0184, - 0.0034, 0.0034, 0 );
+	const sightH = 0.0203;
+	P.sphere( 'white', bEnd - 0.012, sightH, 0, 0.0021, 10 );
+	// magazine tube, its knurled cap and the barrel's ring on it
+	P.cyl( 'blued', 0.112, bEnd - 0.1, 0.0112, - 0.028, 0, 16 );
+	P.lathe( 'blued', [ [ bEnd - 0.1, 0 ], [ bEnd - 0.1, 0.0128 ], [ bEnd - 0.079, 0.0128 ], [ bEnd - 0.074, 0.0105 ], [ bEnd - 0.072, 0 ] ], - 0.028, 0, 16 );
+	for ( let i = 0; i < 16; i ++ ) { const a = i / 16 * PI * 2; P.boxC( 'blued', bEnd - 0.09, - 0.028 + Math.cos( a ) * 0.0129, Math.sin( a ) * 0.0129, 0.014, 0.0014, 0.0014, 0, [ a, 0, 0 ] ); }
+	P.extS( 'blued', [ [ bEnd - 0.12, - 0.004 ], [ bEnd - 0.1, - 0.004 ], [ bEnd - 0.1, - 0.03 ], [ bEnd - 0.118, - 0.03 ] ], 0.0085, 0.0015 );
+	// pump: a rounded walnut forend with ring grooves, on two action bars into the receiver
+	const pump = P.sub( 'pump', 0.26, - 0.028, 0 );
+	const px0 = 0.19, px1 = 0.33;
+	pump.extFront( furn, [ [ - 0.0205, - 0.004, 0.004 ], [ 0.0205, - 0.004, 0.004 ], [ 0.022, - 0.03, 0.01 ], [ 0.012, - 0.05, 0.012 ], [ - 0.012, - 0.05, 0.012 ], [ - 0.022, - 0.03, 0.01 ] ], px0, px1, 0.005, 4 );
+	for ( let i = 0; i < 9; i ++ ) {
+		const x = px0 + 0.016 + i * 0.0135;
+		pump.extFront( 'rubber', [ [ - 0.0212, - 0.012 ], [ 0.0212, - 0.012 ], [ 0.0222, - 0.03, 0.01 ], [ 0.0124, - 0.0508, 0.012 ], [ - 0.0124, - 0.0508, 0.012 ], [ - 0.0222, - 0.03, 0.01 ] ], x, x + 0.0024, 0, 3 );
+	}
+	for ( const s of [ - 1, 1 ] ) pump.box( 'steel', px0 - 0.13, px0 + 0.01, - 0.03, - 0.0245, s * 0.0132, s * 0.0152, 0.0005 );
+	// stock: a pistol grip into a butt with the comb dropping to the heel, rounded, with a pad
+	// (a field gun's drop: the comb 38 mm under the rib, the heel 60)
+	const stock = [ [ - 0.078, top - 0.002 ], [ - 0.13, 0.0, 0.03 ], [ - 0.43, - 0.03, 0.006 ], [ - 0.434, - 0.145, 0.01 ], [ - 0.4, - 0.148 ], [ - 0.2, - 0.088, 0.03 ], [ - 0.125, - 0.085, 0.02 ], [ - 0.098, - 0.06, 0.01 ], [ - 0.078, bot, 0.004 ] ];
+	P.extS( furn, stock, 0.0175, 0.0065, 0, [], 5 );
+	P.extS( 'rubber', [ [ - 0.434, - 0.027, 0.006 ], [ - 0.452, - 0.028, 0.006 ], [ - 0.456, - 0.148, 0.008 ], [ - 0.436, - 0.15, 0.004 ] ], 0.0185, 0.005 );
+	P.extS( 'white', [ [ - 0.432, - 0.028 ], [ - 0.435, - 0.028 ], [ - 0.437, - 0.148 ], [ - 0.434, - 0.148 ] ], 0.0172, 0.001 );
+	// grip cap
+	P.extS( 'rubber', [ [ - 0.128, - 0.081 ], [ - 0.098, - 0.06 ], [ - 0.101, - 0.057 ], [ - 0.131, - 0.078 ] ], 0.013, 0.002 );
+	const gR = grip( [ - 0.11, - 0.042, 0 ], [ 0.62, 0.78, 0 ], [ 0.05, 0.15, 1 ], 0.019, { trig: [ - 0.02, - 0.045, 0 ] } );
+	return {
+		P, info: {
+			sightH, rearX: - 0.07, eyeBack: 0.06, eyeX: - 0.17, eyeUp: 0.026, frontX: bEnd - 0.012, muzzle: [ bEnd, 0, 0 ], eject: [ 0.035, 0.004, 0.018 ], shellPort: [ 0.03, - 0.04, 0 ],
+			optic: [ - 0.02, 0.03 ], opticParts: [ 'mount' ], light: [ 0.3, - 0.03, 0.024 ],
+			grips: { R: gR, L: grip( [ 0.265, - 0.03, 0 ], [ 1, 0.05, 0 ], [ 0, - 0.75, - 0.66 ], 0.024 ) },
+			stock: - 0.456, len: bEnd + 0.456, pump: 'pump', pumpTravel: 0.085,
+		},
+		mount: true,
+	};
+}
+
+function pumpShotgun( o ) {
 	const spas = o.arch === 'spas';
+	if ( ! spas ) return pump870( o );
+	const P = new Parts();
+	const v = o.v || '870';
 	const furn = v === '870' ? 'walnut' : 'poly';
 	const bEnd = spas ? 0.5 : 0.59;
 	P.box( spas ? 'blk' : 'blued', - 0.078, 0.12, - 0.036, 0.024, - 0.0165, 0.0165, 0.004 );
@@ -1140,38 +1387,64 @@ function boltRifle( o ) {
 	const m24 = v === 'm24', cz = v === 'cz';
 	const stockM = m24 ? 'od' : 'walnut';
 	const bEnd = m24 ? 0.66 : cz ? 0.52 : 0.66;
-	P.cyl( 'blued', - 0.105, 0.085, 0.0172, 0, 0, 16 );
-	P.cyl( 'blued', 0.085, bEnd, m24 ? 0.0135 : 0.0115, 0, 0, 16, m24 ? 0.0125 : 0.0085 );
-	P.box( 'blk', - 0.035, 0.035, 0.004, 0.0172, 0.009, 0.0178, 0.001 ); // ejection port
-	for ( const x of [ - 0.075, 0.05 ] ) P.box( 'blued', x - 0.012, x + 0.012, 0.014, 0.021, - 0.008, 0.008, 0.002 ); // scope bases
-	// bolt with handle (rotates about the bore axis, then slides back)
+	// round receiver: the port on the right with the bolt body in it, the recoil lug, the tang and the safety
+	P.cyl( 'blued', - 0.105, 0.085, 0.0172, 0, 0, 22 );
+	P.lathe( 'blued', [ [ 0.085, 0 ], [ 0.085, 0.0172 ], [ 0.09, 0.0158 ], [ 0.09, 0 ] ], 0, 0, 22 );
+	P.box( 'rubber', - 0.036, 0.036, 0.0015, 0.0165, 0.0112, 0.0152, 0.004 );
+	P.box( 'steel', - 0.034, 0.034, 0.003, 0.0135, 0.0118, 0.0142, 0.004 );
+	P.box( 'blued', 0.07, 0.085, - 0.026, - 0.012, - 0.012, 0.012, 0.002 );
+	P.extS( 'blued', [ [ - 0.105, - 0.012 ], [ - 0.105, 0.012 ], [ - 0.128, 0.004, 0.006 ], [ - 0.13, - 0.012 ] ], 0.0105, 0.0015 );
+	P.extS( 'blued', [ [ - 0.112, 0.0 ], [ - 0.098, 0.0 ], [ - 0.099, 0.006, 0.002 ], [ - 0.11, 0.006 ] ], 0.0012, 0.0004, 0.0118 ); // safety
+	for ( const x of [ - 0.075, 0.05 ] ) {
+		// scope bases, screwed down
+		P.box( 'blued', x - 0.013, x + 0.013, 0.013, 0.021, - 0.009, 0.009, 0.002 );
+		for ( const d of [ - 0.007, 0.007 ] ) P.cylY( 'steel', x + d, 0.02, 0.0213, 0.0022, 0, 8 );
+	}
+	// barrel: a sporter taper to the crown
+	P.lathe( 'blued', [ [ 0.09, 0 ], [ 0.09, m24 ? 0.0145 : 0.0142 ], [ 0.14, m24 ? 0.014 : 0.0128 ], [ bEnd - 0.004, m24 ? 0.0125 : 0.0086 ], [ bEnd, m24 ? 0.012 : 0.0082 ], [ bEnd, 0.004 ], [ bEnd - 0.002, 0 ] ], 0, 0, 18 );
+	// bolt: body, shroud, the swept handle and its knob (turns up about the bore, then slides back)
 	const bolt = P.sub( 'boltHandle', - 0.07, 0, 0 );
-	bolt.cyl( 'steel', - 0.13, - 0.02, 0.0095, 0, 0, 12 );
-	bolt.cyl( 'blued', - 0.14, - 0.12, 0.0135, 0, 0, 12 );
-	bolt.rod( 'steel', [ - 0.08, 0.002, 0.009 ], [ - 0.088, - 0.03, 0.05 ], 0.0035, 8 );
-	bolt.sphere( 'blued', - 0.09, - 0.034, 0.054, 0.0095, 10 );
-	// stock
+	bolt.cyl( 'steel', - 0.125, - 0.02, 0.0092, 0, 0, 16 );
+	bolt.lathe( 'blued', [ [ - 0.152, 0 ], [ - 0.152, 0.0065 ], [ - 0.146, 0.0092 ], [ - 0.13, 0.0132 ], [ - 0.12, 0.0135 ], [ - 0.12, 0 ] ], 0, 0, 16 );
+	bolt.cyl( 'steel', - 0.154, - 0.151, 0.0035, 0, 0, 10 );
+	bolt.rod( 'steel', [ - 0.08, 0.002, 0.008 ], [ - 0.084, - 0.012, 0.03 ], 0.0042, 10, 0.0038 );
+	bolt.rod( 'steel', [ - 0.084, - 0.012, 0.03 ], [ - 0.089, - 0.031, 0.05 ], 0.0038, 10, 0.0034 );
+	bolt.sphere( 'blued', - 0.09, - 0.034, 0.054, 0.0098, 14 );
+	// stock: a rounded butt with a Monte Carlo comb and a cheek piece, a channelled forend with a black tip, a grip cap,
+	// sling studs and a pad
 	if ( m24 ) {
 		P.extS( stockM, [ [ 0.085, - 0.008 ], [ 0.45, - 0.01, 0.01 ], [ 0.45, - 0.05, 0.012 ], [ 0.08, - 0.052 ], [ - 0.02, - 0.06 ], [ - 0.12, - 0.058 ], [ - 0.15, - 0.1, 0.02 ], [ - 0.19, - 0.1 ], [ - 0.2, - 0.052 ], [ - 0.43, - 0.08, 0.006 ], [ - 0.445, - 0.075, 0.004 ], [ - 0.445, 0.012, 0.006 ], [ - 0.2, 0.008 ], [ - 0.11, - 0.006 ] ], 0.022, 0.006 );
 	} else {
-		P.extS( stockM, [ [ 0.085, - 0.008 ], [ cz ? 0.36 : 0.42, - 0.012, 0.008 ], [ cz ? 0.365 : 0.425, - 0.036, 0.012 ], [ 0.08, - 0.05 ], [ - 0.08, - 0.056 ], [ - 0.13, - 0.072, 0.016 ], [ - 0.2, - 0.075 ], [ - 0.43, - 0.125, 0.008 ], [ - 0.44, - 0.12, 0.004 ], [ - 0.44, 0.004, 0.006 ], [ - 0.24, 0.012, 0.03 ], [ - 0.2, - 0.004 ], [ - 0.11, - 0.008 ] ], 0.0195, 0.006 );
-		if ( ! cz ) P.box( 'rubber', - 0.455, - 0.438, - 0.128, 0.008, - 0.02, 0.02, 0.005 );
-		else P.box( 'blued', - 0.448, - 0.438, - 0.126, 0.006, - 0.019, 0.019, 0.003 );
+		const fx1 = cz ? 0.36 : 0.415;
+		P.extFront( stockM, [ [ - 0.0185, 0.001, 0.003 ], [ - 0.0128, 0.001 ], [ - 0.0128, - 0.012 ], [ 0.0128, - 0.012 ], [ 0.0128, 0.001 ], [ 0.0185, 0.001, 0.003 ], [ 0.0192, - 0.028, 0.012 ], [ 0.009, - 0.046, 0.012 ], [ - 0.009, - 0.046, 0.012 ], [ - 0.0192, - 0.028, 0.012 ] ], 0.075, fx1, 0.004, 4 );
+		if ( ! cz ) P.extFront( 'rubber', [ [ - 0.017, - 0.004, 0.003 ], [ 0.017, - 0.004, 0.003 ], [ 0.0178, - 0.028, 0.012 ], [ 0.008, - 0.043, 0.01 ], [ - 0.008, - 0.043, 0.01 ], [ - 0.0178, - 0.028, 0.012 ] ], fx1, fx1 + 0.016, 0.004, 4 );
+		// action inletting, the wrist and the butt
+		P.extS( stockM, [ [ 0.08, - 0.006 ], [ 0.08, - 0.049, 0.01 ], [ - 0.062, - 0.052 ], [ - 0.098, - 0.07, 0.016 ], [ - 0.14, - 0.083, 0.008 ], [ - 0.2, - 0.078 ], [ - 0.43, - 0.126, 0.01 ], [ - 0.436, - 0.12, 0.004 ], [ - 0.436, 0.003, 0.008 ], [ - 0.25, 0.01, 0.04 ], [ - 0.19, - 0.004, 0.02 ], [ - 0.13, - 0.009 ] ], 0.0185, 0.0068, 0, [], 5 );
+		P.extS( stockM, [ [ - 0.21, - 0.004 ], [ - 0.36, - 0.012, 0.02 ], [ - 0.37, - 0.05, 0.02 ], [ - 0.23, - 0.042, 0.02 ] ], 0.0024, 0.0022, - 0.0198 ); // cheek piece
+		P.extS( 'rubber', [ [ - 0.138, - 0.0845 ], [ - 0.098, - 0.0725 ], [ - 0.1, - 0.069 ], [ - 0.14, - 0.0805 ] ], 0.014, 0.002 ); // grip cap
+		if ( ! cz ) {
+			P.extS( 'rubber', [ [ - 0.434, 0.004, 0.006 ], [ - 0.455, 0.003, 0.006 ], [ - 0.458, - 0.126, 0.008 ], [ - 0.436, - 0.13, 0.004 ] ], 0.0192, 0.005 );
+			P.extS( 'white', [ [ - 0.433, 0.003 ], [ - 0.4365, 0.003 ], [ - 0.4385, - 0.127 ], [ - 0.435, - 0.127 ] ], 0.0178, 0.001 );
+		} else P.box( 'blued', - 0.448, - 0.436, - 0.124, 0.004, - 0.018, 0.018, 0.003 );
+		for ( const [ x, y ] of [ [ 0.35, - 0.046 ], [ - 0.36, - 0.113 ] ] ) P.cylY( 'steel', x, y - 0.006, y + 0.001, 0.0035, 0, 10 );
 	}
-	triggerGuard( P, 'blued', - 0.035, 0.04, - 0.05, 0.028, 0.005 );
+	// trigger guard with the hinged floorplate
+	triggerGuard( P, 'blued', - 0.036, 0.04, - 0.05, 0.028, 0.0052 );
 	trigger( P, - 0.012, - 0.052, 0.017 );
-	if ( ! cz ) P.box( 'blued', 0.04, 0.085, - 0.056, - 0.05, - 0.011, 0.011, 0.002 ); // floorplate
-	// low irons
+	if ( ! cz ) P.extS( 'blued', [ [ 0.04, - 0.0495 ], [ 0.09, - 0.0495 ], [ 0.09, - 0.054, 0.003 ], [ 0.04, - 0.055 ] ], 0.011, 0.0012 );
+	// low irons: a leaf on the barrel, a ramp and bead at the muzzle
 	const sightH = 0.024;
-	P.box( 'blued', 0.25, 0.262, 0.008, sightH + 0.002, - 0.007, 0.007, 0.001 );
-	P.box( 'blued', bEnd - 0.02, bEnd - 0.012, 0.006, sightH, - 0.0015, 0.0015, 0.0005 );
+	P.extS( 'blued', [ [ 0.244, 0.009 ], [ 0.268, 0.009 ], [ 0.264, 0.017 ], [ 0.258, sightH + 0.002 ], [ 0.254, sightH + 0.002 ], [ 0.248, 0.017 ] ], 0.007, 0.001 );
+	P.extS( 'blued', [ [ bEnd - 0.05, 0.007 ], [ bEnd - 0.008, 0.007 ], [ bEnd - 0.01, 0.017, 0.002 ], [ bEnd - 0.02, 0.018 ] ], 0.0035, 0.0008 );
+	P.box( 'blued', bEnd - 0.02, bEnd - 0.012, 0.012, sightH, - 0.0015, 0.0015, 0.0005 );
+	P.sphere( 'brass', bEnd - 0.016, sightH, 0, 0.0015, 8 );
 	if ( cz ) P.box( 'blued', bEnd - 0.024, bEnd - 0.008, 0.006, sightH + 0.006, - 0.008, 0.008, 0.001 );
 	return {
 		P, info: {
 			sightH, rearX: 0.256, eyeBack: 0.3, muzzle: [ bEnd, 0, 0 ], eject: [ 0.0, 0.012, 0.016 ], shellPort: [ 0.0, 0.02, 0 ],
 			mag: cz ? { p: [ 0.02, - 0.036, 0 ], rake: 0 } : null, optic: [ - 0.012, 0.021 ],
 			grips: { R: grip( [ - 0.14, - 0.045, 0 ], [ 0.5, 0.86, 0 ], [ 0.05, 0.15, 1 ], 0.02, { trig: [ - 0.012, - 0.06, 0 ] } ), L: grip( [ 0.27, - 0.028, 0 ], [ 1, 0.05, 0 ], [ 0, - 0.75, - 0.66 ], 0.024 ) },
-			stock: - 0.455, len: bEnd + 0.46, boltHandle: 'boltHandle', boltTravel: 0.085,
+			stock: - 0.458, len: bEnd + 0.46, boltHandle: 'boltHandle', boltTravel: 0.085,
 		},
 	};
 }

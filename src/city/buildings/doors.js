@@ -21,24 +21,24 @@ function leafGeo( kind, w, h, inside ) {
 	const f = inside ? F_IN : 0;
 	const t = kind === 'vault' ? 0.14 : kind === 'roll' ? 0.06 : kind === 'metal' ? 0.05 : 0.045;
 	const glassy = kind === 'glass' || kind === 'glass2' || kind === 'glassd' || kind === 'slider';
-	const handle = M( L.metal, [ 70, 70, 72 ], 1, f );
+	const handle = M( L.spandrel, [ 70, 70, 72 ], 1, f );
 	const WHITE = [ 255, 255, 255 ];
 	if ( glassy ) {
-		const fr = M( L.metal, WHITE, 1, f ), fw = 0.07;
+		const fr = M( L.spandrel, WHITE, 1, f ), fw = 0.07;
 		g.box( 0, 0, - t / 2, w, 0.12, t / 2, fr ); g.box( 0, h - fw, - t / 2, w, h, t / 2, fr );
 		g.box( 0, 0.12, - t / 2, fw, h - fw, t / 2, fr ); g.box( w - fw, 0.12, - t / 2, w, h - fw, t / 2, fr );
 		// push bar both sides
 		g.box( 0.1, 0.98, - t / 2 - 0.05, w - 0.1, 1.02, - t / 2 - 0.02, handle ); g.box( 0.1, 0.98, t / 2 + 0.02, w - 0.1, 1.02, t / 2 + 0.05, handle );
 	} else if ( kind === 'roll' ) {
-		g.box( 0, 0, - t / 2, w, h, t / 2, M( L.metal, WHITE, 1, f ) );
-		for ( let y = 0.1; y < h; y += 0.17 ) g.box( 0, y, - t / 2 - 0.01, w, y + 0.03, t / 2 + 0.01, M( L.metal, [ 220, 220, 218 ], 1, f ) );
+		g.box( 0, 0, - t / 2, w, h, t / 2, M( L.spandrel, WHITE, 1, f ) );
+		for ( let y = 0.1; y < h; y += 0.17 ) g.box( 0, y, - t / 2 - 0.01, w, y + 0.03, t / 2 + 0.01, M( L.spandrel, [ 220, 220, 218 ], 1, f ) );
 		g.box( 0, 0, - t / 2 - 0.02, w, 0.08, t / 2 + 0.02, M( L.plain, [ 90, 90, 90 ], 1, f ) );
 	} else if ( kind === 'vault' ) {
-		g.box( 0, 0, - t / 2, w, h, t / 2, M( L.metal, WHITE, 1, f ) );
+		g.box( 0, 0, - t / 2, w, h, t / 2, M( L.spandrel, WHITE, 1, f ) );
 		g.cyl( w * 0.5, h * 0.5, - t / 2 - 0.08, 0.25, 0.04, 12, handle );
 	} else {
 		const metal = kind === 'metal';
-		const body = metal ? M( L.metal, WHITE, 1, f ) : M( kind === 'int' ? L.wood : L.plain, WHITE, 1, f );
+		const body = metal ? M( L.spandrel, WHITE, 1, f ) : M( kind === 'int' ? L.wood : L.plain, WHITE, 1, f );
 		g.box( 0, 0, - t / 2, w, h, t / 2, body );
 		if ( ! metal ) {
 			// raised panels on both faces

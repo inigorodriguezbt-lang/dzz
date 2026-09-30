@@ -24,26 +24,12 @@ function pickW( R, list ) {
 	return list[ list.length - 1 ][ 0 ];
 }
 
-// oriented rects { x, z, hw, hd, c, s } overlap (separating axes)
-function obbOverlap( a, b ) {
-	const axes = [ [ a.c, a.s ], [ - a.s, a.c ], [ b.c, b.s ], [ - b.s, b.c ] ];
-	const dx = b.x - a.x, dz = b.z - a.z;
-	for ( const [ ax, az ] of axes ) {
-		const ra = a.hw * Math.abs( a.c * ax + a.s * az ) + a.hd * Math.abs( - a.s * ax + a.c * az );
-		const rb = b.hw * Math.abs( b.c * ax + b.s * az ) + b.hd * Math.abs( - b.s * ax + b.c * az );
-		if ( Math.abs( dx * ax + dz * az ) > ra + rb ) return false;
-	}
-	return true;
-}
-
-export let STATS = null;
-export function infillStats( on ) { STATS = on ? {} : null; return STATS; }
 export function augmentBuildings( meta, hf ) {
 	const B = meta.buildings;
 	if ( B.infill ) return B.infill;
 	const D = B.data;
 	const N0 = Math.floor( D.length / NF );
-	// the baked footprints (with a margin for their yards) in a 64 m hash
+	// the baked buildings' ground (see below) in a 64 m hash
 	const H = 64, grid = new Map();
 	const hk = ( i, j ) => ( i + 2048 ) * 4096 + ( j + 2048 );
 	const addRect = ( o ) => {
@@ -54,21 +40,6 @@ export function augmentBuildings( meta, hf ) {
 			if ( ! a ) grid.set( k, a = [] );
 			a.push( o );
 		}
-	};
-	const occupied = ( x, z, list = grid.get( hk( Math.floor( x / H ), Math.floor( z / H ) ) ) ) => {
-		if ( ! list ) return false;
-		for ( const b of list ) {
-			const dx = x - b.x, dz = z - b.z;
-			if ( Math.abs( dx * b.c + dz * b.s ) < b.hw && Math.abs( - dx * b.s + dz * b.c ) < b.hd ) return true;
-		}
-		return false;
-	};
-	const blocked = ( o ) => {
-		const r = Math.hypot( o.hw, o.hd );
-		for ( let i = Math.floor( ( o.x - r ) / H ); i <= Math.floor( ( o.x + r ) / H ); i ++ ) for ( let j = Math.floor( ( o.z - r ) / H ); j <= Math.floor( ( o.z + r ) / H ); j ++ ) {
-			for ( const b of grid.get( hk( i, j ) ) || [] ) if ( obbOverlap( o, b ) ) return true;
-		}
-		return false;
 	};
 	// what a baked building really occupies: its whole lot where the lot is part of it (forecourts, car parks,
 	// yards, compounds), else the built rect and a margin (a tower on a big downtown lot leaves room for more)
@@ -111,15 +82,6 @@ export function augmentBuildings( meta, hf ) {
 		const c = Math.cos( rw.angle ), s = Math.sin( rw.angle ), h = rw.len / 2 + 60;
 		addSeg( rw.x - c * h, rw.z - s * h, rw.x + c * h, rw.z + s * h, rw.w / 2 + 40 );
 	}
-	const nearRoad = ( x, z, clear, list = segs.get( hk( Math.floor( x / H ), Math.floor( z / H ) ) ) ) => {
-		if ( ! list ) return false;
-		for ( const [ ax, az, bx, bz, hw ] of list ) {
-			const ex = bx - ax, ez = bz - az, l2 = ex * ex + ez * ez || 1;
-			const t = Math.max( 0, Math.min( 1, ( ( x - ax ) * ex + ( z - az ) * ez ) / l2 ) );
-			if ( Math.hypot( x - ax - t * ex, z - az - t * ez ) < hw + clear ) return true;
-		}
-		return false;
-	};
 
 	const out = [];
 	const cities = meta.cities || [];
@@ -150,7 +112,6 @@ export function augmentBuildings( meta, hf ) {
 		for ( const b of [ ...blocks ].sort() ) {
 			const [ i, j ] = b.split( ',' ).map( Number );
 			if ( ! ( E.has( ek( i, j, i + 1, j ) ) && E.has( ek( i, j + 1, i + 1, j + 1 ) ) && E.has( ek( i, j, i, j + 1 ) ) && E.has( ek( i + 1, j, i + 1, j + 1 ) ) ) ) continue;
-			if ( STATS ) STATS.blocks = ( STATS.blocks || 0 ) + 1;
 			const u0 = i * c.pu + street / 2 + walk, v0 = j * c.pv + street / 2 + walk;
 			const W = c.pu - street - 2 * walk, Dd = c.pv - street - 2 * walk;
 			const [ mx, mz ] = toW( u0 + W / 2, v0 + Dd / 2 );
@@ -231,7 +192,7 @@ export function augmentBuildings( meta, hf ) {
 				if ( type === 'house' ) { setF = 4 + R2() * 3; setS = 2 + R2() * 1.5; setB = 3 + R2() * 3; } else { setF = L.big ? 3 : 1; setS = L.big ? 2 : 0.6; setB = L.big ? 3 : 2 + R2() * 3; }
 				let w = L.w - setS * 2, d = L.d - setF - setB;
 				if ( type === 'house' ) { w = Math.min( w, 9 + R2() * 6 ); d = Math.min( d, 8 + R2() * 5 ); }
-				if ( w < 6 || d < 6 ) { if ( STATS ) STATS.small = ( STATS.small || 0 ) + 1; continue; }
+				if ( w < 6 || d < 6 ) continue;
 				const cu = L.u + L.w / 2;
 				const cv = L.face === 1 ? L.v + L.d - setF - d / 2 : L.v + setF + d / 2;
 				const [ x, z ] = toW( cu, cv );
@@ -245,7 +206,7 @@ export function augmentBuildings( meta, hf ) {
 					lo = Math.min( lo, h ); hi = Math.max( hi, h );
 					if ( hf.flagsNear( px, pz ) & ( FLAG_ROAD | FLAG_RUNWAY ) ) paved = true;
 				}
-				if ( paved || lo < 0.6 || hi - lo > 5 ) { if ( STATS ) STATS.ground = ( STATS.ground || 0 ) + 1; continue; }
+				if ( paved || lo < 0.6 || hi - lo > 5 ) continue;
 				// only Honolulu and Waikīkī build high; Hilo, Kahului and the towns stay low
 				const high = c.id === 'honolulu' || c.id === 'waikiki';
 				const floors = type === 'house' ? ( R2() < 0.3 ? 2 : 1 ) : ! high ? ( type === 'office' || type === 'apartment' || type === 'hotel' ? 2 + Math.floor( R2() * ( zone === 'core' ? 4 : 2 ) ) : 1 )

@@ -8,9 +8,11 @@ export const TILE_N = 1024, TILE_STEP = 2;
 const RECENTRE = 384; // m from the tile centre before a new one is requested
 const EDGE = 0.06; // blend band (fraction of the tile)
 
-export const GROUND_GLSL = /* glsl */`
+// fragment: without the coarse bathymetry sampler (the ocean fragment shader is at the sampler limit): off the
+// tile it takes the depth interpolated from the vertices (vSeaDepth), only ever used far from the camera
+export const groundGLSL = ( fragment ) => /* glsl */`
 	uniform highp sampler2D uLocalH; uniform vec4 uLocalRect; uniform float uLocalOn;
-	uniform sampler2D uBathy; uniform vec4 uBathyRect;
+	${ fragment ? '' : 'uniform sampler2D uBathy; uniform vec4 uBathyRect;' }
 	float waterLocalWeight( vec2 xz, out vec2 f ) {
 		float res = uLocalRect.w;
 		f = ( xz - uLocalRect.xy ) / uLocalRect.z * res - 0.5;
@@ -30,7 +32,7 @@ export const GROUND_GLSL = /* glsl */`
 	}
 	// ground height under the sea at xz (m)
 	float waterGroundAt( vec2 xz ) {
-		float coarse = textureLod( uBathy, ( xz - uBathyRect.xy ) / uBathyRect.zw, 0.0 ).r;
+		float coarse = ${ fragment ? 'uWaterLevel - vSeaDepth' : 'textureLod( uBathy, ( xz - uBathyRect.xy ) / uBathyRect.zw, 0.0 ).r' };
 		vec2 f;
 		float w = waterLocalWeight( xz, f );
 		return w > 0.0 ? mix( coarse, waterLocalHeight( f ), w ) : coarse;
@@ -46,6 +48,7 @@ export const GROUND_GLSL = /* glsl */`
 		return n.xz;
 	}
 `;
+export const GROUND_GLSL = groundGLSL( false );
 
 export class LocalTile {
 	constructor( hf ) {
@@ -71,6 +74,12 @@ export class LocalTile {
 		}
 	}
 
+	// the surf lace (0.7 s of work, off the main thread): resolves to { size, data } or null
+	lace( size = 512 ) {
+		if ( ! this.worker ) return Promise.resolve( null );
+		return this._call( { type: 'lace', size } ).then( ( r ) => r.result || null );
+	}
+
 	_call( msg, transfer = [] ) {
 		return new Promise( ( resolve ) => {
 			const id = this._id ++;
@@ -91,7 +100,7 @@ export class LocalTile {
 		// centre on a 128 m lattice; texel centres on the terrain's even-metre vertex lattice
 		const cx = Math.round( cam.x / 128 ) * 128, cz = Math.round( cam.z / 128 ) * 128;
 		const x0 = cx - size / 2 - TILE_STEP / 2, z0 = cz - size / 2 - TILE_STEP / 2;
-		this.pending = this._call( { type: 'tile', x0, z0, n: TILE_N, step: TILE_STEP } ).then( ( r ) => {
+		this.pending = this._call( { type: 'tile', x0, z0, n: TILE_N, step: TILE_STEP, fieldRes: 512 } ).then( ( r ) => {
 			this.pending = null;
 			if ( r.error || ! r.result ) { console.warn( 'shore tile failed', r.error ); return; }
 			this._apply( r.result );

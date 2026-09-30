@@ -6,15 +6,16 @@
 //    mirror-like and bright, mostly in light to moderate wind.
 //  - windrows: thin wavy foam lines along the wind in fresh wind (Langmuir circulation).
 // GLSL (SEA_DETAIL_GLSL): SeaDetailSample seaDetailSample( vec2 xz ) -> rough (short-wave slope
-// multiplier), gust 0..1, slick 0..1, streak 0..1. Needs uTime, uSeaDetail (sampler), uSeaDetailOffset,
-// uSeaWindDir, uSeaWindSpeed.
+// multiplier), gust 0..1, slick 0..1, streak 0..1. Needs uTime, uPatterns (the pattern array, layer 2 holds
+// the noise: FoamTexture.js), uSeaDetailOffset, uSeaWindDir, uSeaWindSpeed.
 import * as THREE from 'three';
 
 export const SEA_DETAIL_GLSL = /* glsl */`
-	uniform sampler2D uSeaDetail; uniform vec2 uSeaDetailOffset; uniform vec2 uSeaWindDir; uniform float uSeaWindSpeed;
+	uniform vec2 uSeaDetailOffset; uniform vec2 uSeaWindDir; uniform float uSeaWindSpeed;
 	uniform vec3 uSeaDetailAmt; // gust, slick, streak amounts
 	struct SeaDetailSample { float rough; float gust; float slick; float streak; };
-	vec4 seaDetailLoad( vec2 uv ) { return textureLod( uSeaDetail, uv, 0.0 ); }
+	// hardware bilinear, repeat-wrapped, level 0 (the noise is smooth and low frequency)
+	vec4 seaDetailLoad( vec2 uv ) { return textureLod( uPatterns, vec3( uv, 2.0 ), 0.0 ); }
 	SeaDetailSample seaDetailSample( vec2 xz ) {
 		vec2 p = xz - uSeaDetailOffset;
 		// gusts: two octaves (~600 m and ~230 m features), the second slowly morphing
@@ -56,9 +57,9 @@ function mulberry32( seed ) {
 	};
 }
 
-// Tileable smooth fbm in 4 channels (different seeds / base frequencies).
-export function makeSeaDetailTexture( size = 256 ) {
-	const data = new Uint16Array( size * size * 4 );
+// Tileable smooth fbm in 4 channels (different seeds / base frequencies), RGBA8 (the pattern array)
+export function makeSeaDetailData( size = 256 ) {
+	const data = new Uint8Array( size * size * 4 );
 	const channels = [ { seed: 11, freq: 4, oct: 4 }, { seed: 23, freq: 5, oct: 4 }, { seed: 37, freq: 4, oct: 3 }, { seed: 53, freq: 6, oct: 3 } ];
 	for ( let c = 0; c < 4; c ++ ) {
 		const { seed, freq, oct } = channels[ c ];
@@ -94,20 +95,15 @@ export function makeSeaDetailTexture( size = 256 ) {
 			vals[ y * size + x ] = v;
 			mn = Math.min( mn, v ); mx = Math.max( mx, v );
 		}
-		for ( let i = 0; i < size * size; i ++ ) data[ i * 4 + c ] = THREE.DataUtils.toHalfFloat( ( vals[ i ] - mn ) / ( mx - mn ) );
+		for ( let i = 0; i < size * size; i ++ ) data[ i * 4 + c ] = Math.round( ( vals[ i ] - mn ) / ( mx - mn ) * 255 );
 	}
-	// no mips: sampled at level 0, bilinear repeat
-	const t = new THREE.DataTexture( data, size, size, THREE.RGBAFormat, THREE.HalfFloatType );
-	t.wrapS = t.wrapT = THREE.RepeatWrapping;
-	t.magFilter = t.minFilter = THREE.LinearFilter;
-	t.generateMipmaps = false;
-	t.needsUpdate = true;
-	return t;
+	return data;
 }
 
 export class SeaDetail {
 	constructor() {
-		this.texture = makeSeaDetailTexture( 256 );
+		this.size = 256;
+		this.data = makeSeaDetailData( this.size );
 		this.offset = new THREE.Vector2(); // accumulated wind drift (m)
 		this.amount = new THREE.Vector3( 1, 1, 0.3 ); // gust, slick, streak
 	}

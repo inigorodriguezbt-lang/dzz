@@ -12,7 +12,7 @@ const MAX_SPOTS = 10; // loose loot spots per room
 // materials (all interior)
 const paint = ( c ) => M( L.plain, c, 1, F_IN );
 const wood = ( c = [ 176, 132, 92 ] ) => M( L.wood, c, 1, F_IN );
-const metal = ( c = [ 170, 172, 174 ] ) => M( L.metal, c, 1, F_IN );
+const metal = ( c = [ 170, 172, 174 ] ) => M( L.spandrel, c, 1, F_IN );
 const cloth = ( c ) => M( L.fabric, c, 0.8, F_IN );
 const DARK = paint( [ 40, 40, 42 ] ), WHITE = paint( [ 236, 236, 232 ] ), STEEL = metal( [ 190, 192, 194 ] ), BLACK = paint( [ 22, 22, 24 ] );
 const CHROME = metal( [ 220, 220, 222 ] ), PORCELAIN = M( L.plain, [ 244, 244, 240 ], 1, F_IN );
@@ -678,7 +678,7 @@ function washer( F, n ) {
 }
 
 function drum( F, c = [ 40, 80, 150 ] ) {
-	F.cyl( 0, 0, 0.3, 0.29, 0.88, 12, M( L.metal, c, 1, F_IN ) );
+	F.cyl( 0, 0, 0.3, 0.29, 0.88, 12, M( L.spandrel, c, 1, F_IN ) );
 	F.col( - 0.29, 0, 0.01, 0.29, 0.88, 0.59, 2 );
 	return F;
 }
@@ -1171,6 +1171,40 @@ export function furnishRoom( O, P, st, rm, fin ) {
 		}
 	}
 	if ( ! rm.open ) { dressing( C, rm.k ); barricade( C ); }
+	const art = ART[ rm.k ];
+	if ( art && ! rm.open ) wallArt( C, art, HOMEY[ arch ] || rm.k === 'hotelroom' );
+}
+
+// pictures on the walls, clear of doors and windows: seascapes, sunsets and green valleys (a sea band under a sky
+// band reads as a painting from across the room); some hang crooked or lie on the floor
+const ART = { living: 2, bedroom: 1, hotelroom: 2, lobby: 2, office: 1, meeting: 1, dining: 2, hall: 1, entry: 1, waiting: 2, dayroom: 1, vestry: 1 };
+const ART_SKY = [ [ 150, 190, 220 ], [ 236, 160, 110 ], [ 200, 210, 220 ], [ 250, 210, 150 ], [ 120, 150, 190 ] ];
+const ART_LAND = [ [ 40, 110, 140 ], [ 60, 120, 70 ], [ 30, 80, 120 ], [ 120, 90, 60 ], [ 70, 140, 150 ] ];
+function wallArt( C, n, home ) {
+	const O = C.O, R = O.R;
+	const frameM = paint( home ? WOODS[ ( R() * 4 ) | 0 ] : [ 40, 40, 42 ] );
+	for ( let k = 0, tries = 0; k < n && tries < 14; tries ++ ) {
+		const side = ( R() * 4 ) | 0;
+		const lo = side === 0 || side === 2 ? C.x0 : C.z0, hi = side === 0 || side === 2 ? C.x1 : C.z1;
+		const w = 0.5 + R() * 0.55, h = 0.38 + R() * 0.32;
+		if ( hi - lo < w + 0.7 ) continue;
+		const a = lo + 0.35 + w / 2 + R() * ( hi - lo - w - 0.7 );
+		// no window or door behind it
+		if ( C.blocked[ side ].some( b => b[ 0 ] < a + w / 2 + 0.15 && b[ 1 ] > a - w / 2 - 0.15 ) ) continue;
+		const F = frameOnWall( C, side, a );
+		const y0 = 1.3 + R() * 0.25;
+		if ( R() < 0.12 ) {
+			// knocked off the wall
+			F.box( - w / 2, 0.004, 0.25, w / 2, 0.03, 0.25 + h, frameM );
+		} else {
+			const sky = paint( ART_SKY[ ( R() * ART_SKY.length ) | 0 ] ), land = paint( ART_LAND[ ( R() * ART_LAND.length ) | 0 ] );
+			const hz = y0 + h * ( 0.35 + R() * 0.3 );
+			F.box( - w / 2, y0, 0.004, w / 2, y0 + h, 0.028, frameM );
+			F.box( - w / 2 + 0.035, y0 + 0.035, 0.028, w / 2 - 0.035, hz, 0.032, land );
+			F.box( - w / 2 + 0.035, hz, 0.028, w / 2 - 0.035, y0 + h - 0.035, 0.032, sky );
+		}
+		k ++;
+	}
 }
 
 // someone tried to hold the place: planks and a door leaning by the entrance, a table on its side
