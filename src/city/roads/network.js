@@ -5,7 +5,10 @@
 //     where a higher-class highway already covers the same path (routes share corridors in the bake);
 //   - city streets (meta.streets) with their intersection nodes on each city's grid;
 //   - runways + a parallel taxiway, military / airport perimeter fences with gates;
+//   - paved parking lots on the ground the buildings leave free in the town blocks, with driveways;
 //   - the static outbreak "events" along the highways: roadblocks, checkpoints, traffic jams, crashes.
+import { augmentBuildings } from '../buildings/infill.js';
+import { TYPE_OF } from '../buildings/data.js';
 
 export const CELL = 320; // streaming cell (m)
 export const MILE = 1609.34 / 8; // one real mile at the world's 1:8 horizontal scale
@@ -172,32 +175,77 @@ export function roadPoint( r, s, out ) {
 // ---- the build ------------------------------------------------------------------------------------------
 
 export function buildNetwork( meta, hf ) {
+	// the buildings module appends its infill lots to meta.buildings (deterministic, idempotent); the parking lots
+	// must see them, so every side builds them first whatever module happens to run first
+	augmentBuildings( meta, hf );
 	const net = {
 		meta, hf, cities: meta.cities,
-		streets: [], nodes: new Map(), roads: [], runways: [], fences: [], events: [], signs: [], markers: [], regs: [],
+		frames: fitFrames( meta ),
+		streets: [], nodes: new Map(), roads: [], runways: [], fences: [], events: [], signs: [], markers: [], regs: [], lots: [],
+		edges: new Map(), // 'city:axis:i:j' (the street's low grid end) -> street
 		shash: new SegHash( 48 ), // streets
 		rhash: new SegHash( 48 ), // drawn highway runs
 		allhash: new SegHash( 64 ), // every highway knot segment, drawn or not
+		lhash: new SegHash( 48 ), // parking lots (their diagonals)
 		zones: [], // rectangles no street may cross (runways, taxiways): { x, z, cx, sx, hl, hw }
 	};
 	buildRunways( net, meta );
 	buildStreets( net, meta );
 	buildRoads( net, meta, hf );
 	buildFences( net, meta );
+	buildLots( net, meta, hf );
 	buildEvents( net, meta );
 	return net;
 }
 
+// The bake stores each city's grid angle rounded to 0.01 rad: rebuilt from that, the grid drifts by up to ~3 m
+// against the baked streets, buildings and flattened street beds far from the centre (Honolulu). Fit every
+// city's frame (origin + angle; the block pitch is exact) to its baked street ends instead (2-D Procrustes).
+function fitFrames( meta ) {
+	const pts = meta.cities.map( () => [] );
+	for ( const s of meta.streets ) {
+		const c = meta.cities[ s[ 0 ] ];
+		const ca = Math.cos( c.angle ), sa = Math.sin( c.angle );
+		for ( const [ x, z ] of [ [ s[ 1 ], s[ 2 ] ], [ s[ 4 ], s[ 5 ] ] ] ) {
+			const i = Math.round( ( ( x - c.x ) * ca + ( z - c.z ) * sa ) / c.pu ), j = Math.round( ( - ( x - c.x ) * sa + ( z - c.z ) * ca ) / c.pv );
+			pts[ s[ 0 ] ].push( x, z, i * c.pu, j * c.pv );
+		}
+	}
+	return meta.cities.map( ( c, k ) => {
+		const P = pts[ k ], n = P.length / 4;
+		let angle = c.angle, ox = c.x, oz = c.z;
+		if ( n >= 4 ) {
+			let mx = 0, mz = 0, mu = 0, mv = 0;
+			for ( let q = 0; q < P.length; q += 4 ) { mx += P[ q ]; mz += P[ q + 1 ]; mu += P[ q + 2 ]; mv += P[ q + 3 ]; }
+			mx /= n; mz /= n; mu /= n; mv /= n;
+			let dot = 0, cross = 0;
+			for ( let q = 0; q < P.length; q += 4 ) {
+				const px = P[ q ] - mx, pz = P[ q + 1 ] - mz, qu = P[ q + 2 ] - mu, qv = P[ q + 3 ] - mv;
+				dot += qu * px + qv * pz; cross += qu * pz - qv * px;
+			}
+			// (world = origin + R( angle ) ( u, v ), as the bake's toW)
+			if ( dot > 0 ) {
+				angle = Math.atan2( cross, dot );
+				const ca = Math.cos( angle ), sa = Math.sin( angle );
+				ox = mx - ( mu * ca - mv * sa ); oz = mz - ( mu * sa + mv * ca );
+			}
+		}
+		const ca = Math.cos( angle ), sa = Math.sin( angle );
+		return { x: ox, z: oz, angle, ca, sa, toW: ( u, v ) => [ ox + u * ca - v * sa, oz + u * sa + v * ca ], toG: ( x, z ) => [ ( x - ox ) * ca + ( z - oz ) * sa, - ( x - ox ) * sa + ( z - oz ) * ca ] };
+	} );
+}
+
 // runway + a parallel taxiway on the side with fewer buildings
 function buildRunways( net, meta ) {
-	const B = meta.buildings.data;
+	// (the baked buildings only: the taxiway side must not depend on the buildings module's infill)
+	const B = meta.buildings.data, NB = meta.buildings.infill ? meta.buildings.infill.from * 11 : B.length;
 	for ( let k = 0; k < meta.runways.length; k ++ ) {
 		const rw = meta.runways[ k ];
 		const cx = Math.cos( rw.angle ), sx = Math.sin( rw.angle );
 		// right of the runway direction
 		const nx = - sx, nz = cx;
 		let side = 1, cnt = [ 0, 0 ];
-		for ( let i = 0; i < B.length; i += 11 ) {
+		for ( let i = 0; i < NB; i += 11 ) {
 			const dx = B[ i ] - rw.x, dz = B[ i + 1 ] - rw.z;
 			const along = dx * cx + dz * sx, across = dx * nx + dz * nz;
 			if ( Math.abs( along ) > rw.len / 2 + 40 ) continue;
@@ -244,20 +292,18 @@ function buildStreets( net, meta ) {
 		const key = ci * 1e6 + ( i + 500 ) * 1000 + ( j + 500 );
 		let n = nodes.get( key );
 		if ( ! n ) {
-			const c = meta.cities[ ci ];
-			const ca = Math.cos( c.angle ), sa = Math.sin( c.angle );
-			const u = i * c.pu, v = j * c.pv;
-			n = { key, city: ci, i, j, x: c.x + u * ca - v * sa, z: c.z + u * sa + v * ca, arms: 0, w: 0, walk: 0, kind: streetKind( c ),
-				ca, sa, streets: [ null, null, null, null ] };
+			const c = meta.cities[ ci ], F = net.frames[ ci ];
+			const [ x, z ] = F.toW( i * c.pu, j * c.pv );
+			n = { key, city: ci, i, j, x, z, arms: 0, w: 0, walk: 0, kind: streetKind( c ),
+				ca: F.ca, sa: F.sa, streets: [ null, null, null, null ] };
 			nodes.set( key, n );
 		}
 		return n;
 	};
 	for ( let si = 0; si < meta.streets.length; si ++ ) {
 		const [ ci, ax, az, , bx, bz, , w, walk ] = meta.streets[ si ];
-		const c = meta.cities[ ci ];
-		const ca = Math.cos( c.angle ), sa = Math.sin( c.angle );
-		const uv = ( x, z ) => [ Math.round( ( ( x - c.x ) * ca + ( z - c.z ) * sa ) / c.pu ), Math.round( ( - ( x - c.x ) * sa + ( z - c.z ) * ca ) / c.pv ) ];
+		const c = meta.cities[ ci ], F = net.frames[ ci ];
+		const uv = ( x, z ) => { const [ u, v ] = F.toG( x, z ); return [ Math.round( u / c.pu ), Math.round( v / c.pv ) ]; };
 		let [ ia, ja ] = uv( ax, az ), [ ib, jb ] = uv( bx, bz );
 		const axis = ja === jb ? 0 : 1;
 		if ( ( axis === 0 && ib < ia ) || ( axis === 1 && jb < ja ) ) { [ ia, ib ] = [ ib, ia ]; [ ja, jb ] = [ jb, ja ]; }
@@ -277,7 +323,9 @@ function buildStreets( net, meta ) {
 		const names = kind === SK.BASE ? BASE_NAMES : STREET_NAMES;
 		st.name = ( ( hashStr( c.id ) % names.length ) + axis * 37 + st.line * 7 + names.length * 64 ) % names.length;
 		st.base = kind === SK.BASE;
+		st.drives = null; // driveways into parking lots: [ [ side, a0, a1 ] ] (see buildLots)
 		net.streets.push( st );
+		net.edges.set( ci + ':' + axis + ':' + A.i + ':' + A.j, st );
 		net.shash.add( st, w / 2 + walk + 4 );
 		A.arms |= 1 << ( axis === 0 ? 0 : 1 ); A.streets[ axis === 0 ? 0 : 1 ] = st;
 		Bn.arms |= 1 << ( axis === 0 ? 2 : 3 ); Bn.streets[ axis === 0 ? 2 : 3 ] = st;
@@ -464,12 +512,12 @@ function buildFences( net, meta ) {
 		byCity.get( s.city ).set( s.axis + ':' + s.a.i + ':' + s.a.j, s );
 	}
 	for ( const [ ci, edges ] of byCity ) {
-		const c = meta.cities[ ci ];
+		const c = meta.cities[ ci ], F = net.frames[ ci ];
 		const has = ( axis, i, j ) => edges.has( axis + ':' + i + ':' + j );
 		// a block exists when all four of its edges do
 		const block = ( i, j ) => has( 0, i, j ) && has( 0, i, j + 1 ) && has( 1, i, j ) && has( 1, i + 1, j );
-		const ca = Math.cos( c.angle ), sa = Math.sin( c.angle );
-		const toW = ( u, v ) => [ c.x + u * ca - v * sa, c.z + u * sa + v * ca ];
+		const ca = F.ca, sa = F.sa;
+		const toW = F.toW;
 		const D = c.street / 2 + 6;
 		const segs = [];
 		const eu = [ ca, sa ], ev = [ - sa, ca ];
@@ -522,6 +570,212 @@ function buildFences( net, meta ) {
 			for ( const p of pieces ) net.fences.push( { ax: p[ 0 ], az: p[ 1 ], bx: p[ 2 ], bz: p[ 3 ], ox, oz, city: ci, military: c.kind === 'military' } );
 		}
 	}
+}
+
+// ---- parking lots --------------------------------------------------------------------------------------------
+// The bake and the buildings' infill leave ground free in the town blocks (open lots, the corridors the highways
+// cleared through the grids, the backs of big blocks), which read as dry lawn between the buildings. Most of it
+// in the denser districts becomes surface parking: a rectangle on the city grid against one street, reached by
+// a driveway across the sidewalk. Layout along b (depth, from the back): periods of row | aisle | row (17.8 m,
+// rows back to back between periods), then a single-loaded row + aisle or a drive lane at the front; a cross
+// aisle without stalls at the a = la end, where the driveway comes in.
+export const LOT = { ROW: 5.4, AISLE: 7, PERIOD: 17.8, STALL: 2.6, CROSS: 7, DRIVE: 6.5, LIFT: 0.045 };
+// the share of a block's free ground that is paved, by distance from the centre (fraction of the radius)
+const LOT_ZONES = {
+	metro: [ [ 0.3, 0.9 ], [ 0.62, 0.8 ], [ 9, 0.3 ] ],
+	town: [ [ 0.3, 0.8 ], [ 9, 0.25 ] ],
+	resort: [ [ 0.75, 0.6 ], [ 9, 0.25 ] ],
+	village: [ [ 0.22, 0.55 ], [ 9, 0 ] ],
+};
+// the ground a building keeps round its footprint (local frame, the front is -z): yards, forecourts, walks
+const CLAIM = { side: 2.5, back: 3, front: 8, gas: 16 };
+
+function buildLots( net, meta, hf ) {
+	const D = meta.buildings.data, NB = Math.floor( D.length / 11 );
+	const G = 64, claims = new Map();
+	const gk = ( i, j ) => ( i + 2048 ) * 4096 + ( j + 2048 );
+	for ( let i = 0; i < NB; i ++ ) {
+		const k = i * 11, x = D[ k ], z = D[ k + 1 ], w = D[ k + 2 ], d = D[ k + 3 ], a = D[ k + 4 ];
+		const front = TYPE_OF[ D[ k + 7 ] ] === 'gas' ? CLAIM.gas : CLAIM.front;
+		const o = { x, z, c: Math.cos( a ), s: Math.sin( a ), x0: - w / 2 - CLAIM.side, x1: w / 2 + CLAIM.side, z0: - d / 2 - front, z1: d / 2 + CLAIM.back };
+		const r = Math.hypot( w / 2 + CLAIM.side, d / 2 + front );
+		for ( let gi = Math.floor( ( x - r ) / G ); gi <= Math.floor( ( x + r ) / G ); gi ++ ) for ( let gj = Math.floor( ( z - r ) / G ); gj <= Math.floor( ( z + r ) / G ); gj ++ ) {
+			const key = gk( gi, gj );
+			let l = claims.get( key );
+			if ( ! l ) claims.set( key, l = [] );
+			l.push( o );
+		}
+	}
+	// the claims that reach a disc
+	const near = ( x, z, r ) => {
+		const set = new Set();
+		for ( let gi = Math.floor( ( x - r ) / G ); gi <= Math.floor( ( x + r ) / G ); gi ++ ) for ( let gj = Math.floor( ( z - r ) / G ); gj <= Math.floor( ( z + r ) / G ); gj ++ ) for ( const o of claims.get( gk( gi, gj ) ) || [] ) set.add( o );
+		return set;
+	};
+	const CS = 2.5;
+	for ( let ci = 0; ci < meta.cities.length; ci ++ ) {
+		const c = meta.cities[ ci ], zones = LOT_ZONES[ c.kind ];
+		if ( ! zones || ! c.pu ) continue;
+		const F = net.frames[ ci ];
+		const E = ( axis, i, j ) => net.edges.get( ci + ':' + axis + ':' + i + ':' + j );
+		// the blocks: grid cells whose four edges are streets (low corner = the axis-0 street's low end)
+		const blocks = [];
+		for ( const st of net.streets ) if ( st.city === ci && st.axis === 0 ) {
+			const i = st.a.i, j = st.a.j;
+			if ( E( 0, i, j + 1 ) && E( 1, i, j ) && E( 1, i + 1, j ) ) blocks.push( [ i, j, st ] );
+		}
+		const hwS = c.street / 2, wk = c.walk || 0;
+		for ( const [ i, j, st0 ] of blocks ) {
+			const u0 = i * c.pu + hwS + wk, u1 = ( i + 1 ) * c.pu - hwS - wk, v0 = j * c.pv + hwS + wk, v1 = ( j + 1 ) * c.pv - hwS - wk;
+			const [ mx, mz ] = F.toW( ( u0 + u1 ) / 2, ( v0 + v1 ) / 2 );
+			const dc = Math.hypot( mx - c.x, mz - c.z ) / Math.max( 1, c.radius );
+			const p = zones.find( q => dc < q[ 0 ] )[ 1 ];
+			const R = mulberry32( hashStr( 'lot:' + c.id + ':' + i + ':' + j ) );
+			if ( R() >= p ) continue;
+			const nu = Math.floor( ( u1 - u0 ) / CS ), nv = Math.floor( ( v1 - v0 ) / CS );
+			if ( nu < 6 || nv < 6 ) continue;
+			const pu = ( u1 - u0 - nu * CS ) / 2, pv = ( v1 - v0 - nv * CS ) / 2;
+			const rad = Math.hypot( u1 - u0, v1 - v0 ) / 2;
+			const nearHw = highwayEdgeDist( net, mx, mz, rad + 24 )[ 0 ] < rad + 6;
+			const nearZone = inZone( net, mx, mz, rad + 12 );
+			const free = new Uint8Array( nu * nv ), hs = new Float32Array( nu * nv );
+			free.fill( 1 );
+			// the buildings' claims burnt into the raster (grid frame: cell (a, b) centre at ( ua + a CS, vb + b CS ))
+			const ua = u0 + pu + CS / 2, vb = v0 + pv + CS / 2;
+			for ( const o of near( mx, mz, rad ) ) {
+				// claim corners -> grid, their bounds -> cell ranges, then the exact test per cell
+				let a0 = Infinity, a1 = - Infinity, b0 = Infinity, b1 = - Infinity;
+				for ( const [ lx, lz ] of [ [ o.x0, o.z0 ], [ o.x1, o.z0 ], [ o.x0, o.z1 ], [ o.x1, o.z1 ] ] ) {
+					const [ gu, gv ] = F.toG( o.x + lx * o.c - lz * o.s, o.z + lx * o.s + lz * o.c );
+					a0 = Math.min( a0, gu ); a1 = Math.max( a1, gu ); b0 = Math.min( b0, gv ); b1 = Math.max( b1, gv );
+				}
+				const ia0 = Math.max( 0, Math.floor( ( a0 - ua ) / CS ) ), ia1 = Math.min( nu - 1, Math.ceil( ( a1 - ua ) / CS ) );
+				const ib0 = Math.max( 0, Math.floor( ( b0 - vb ) / CS ) ), ib1 = Math.min( nv - 1, Math.ceil( ( b1 - vb ) / CS ) );
+				for ( let a = ia0; a <= ia1; a ++ ) for ( let b = ib0; b <= ib1; b ++ ) {
+					if ( ! free[ a * nv + b ] ) continue;
+					const [ x, z ] = F.toW( ua + a * CS, vb + b * CS );
+					const dx = x - o.x, dz = z - o.z, lx = dx * o.c + dz * o.s, lz = - dx * o.s + dz * o.c;
+					if ( lx > o.x0 && lx < o.x1 && lz > o.z0 && lz < o.z1 ) free[ a * nv + b ] = 0;
+				}
+			}
+			for ( let a = 0; a < nu; a ++ ) for ( let b = 0; b < nv; b ++ ) {
+				const [ x, z ] = F.toW( ua + a * CS, vb + b * CS );
+				const h = hf.heightAt( x, z );
+				hs[ a * nv + b ] = h;
+				if ( ! free[ a * nv + b ] ) continue;
+				if ( h < 0.8 || ( nearHw && highwayEdgeDist( net, x, z, 20 )[ 0 ] < 3 ) || ( nearZone && inZone( net, x, z, 8 ) ) ) free[ a * nv + b ] = 0;
+			}
+			// too steep for a car park
+			for ( let a = 0; a < nu; a ++ ) for ( let b = 0; b < nv; b ++ ) {
+				const h = hs[ a * nv + b ];
+				if ( ( a + 1 < nu && Math.abs( hs[ ( a + 1 ) * nv + b ] - h ) > 0.4 ) || ( b + 1 < nv && Math.abs( hs[ a * nv + b + 1 ] - h ) > 0.4 ) ) {
+					free[ a * nv + b ] = 0;
+					if ( a + 1 < nu ) free[ ( a + 1 ) * nv + b ] = 0;
+					if ( b + 1 < nv ) free[ a * nv + b + 1 ] = 0;
+				}
+			}
+			// up to three lots, the largest rectangle against one of the four streets first
+			for ( let n = 0; n < 3; n ++ ) {
+				const best = bestLot( free, nu, nv, hs );
+				if ( ! best ) break;
+				const [ side, s0, s1, depth ] = best;
+				// block cells -> the lot in the frontage street's terms
+				let st, sgn, g0, g1, dA, dB; // street, side of it, grid rect
+				if ( side === 0 || side === 1 ) { // along u, against the v0 (side 0) or v1 street
+					st = side === 0 ? st0 : E( 0, i, j + 1 );
+					sgn = side === 0 ? 1 : - 1;
+					const b0 = side === 0 ? 0 : nv - depth, b1 = side === 0 ? depth : nv;
+					g0 = [ u0 + pu + s0 * CS, v0 + pv + b0 * CS ]; g1 = [ u0 + pu + ( s1 + 1 ) * CS, v0 + pv + b1 * CS ];
+					if ( side === 0 ) g0[ 1 ] = v0; else g1[ 1 ] = v1; // flush against the sidewalk
+					for ( let a = s0 - 1; a <= s1 + 1; a ++ ) for ( let b = b0 - 1; b <= b1; b ++ ) if ( a >= 0 && a < nu && b >= 0 && b < nv ) free[ a * nv + b ] = 0;
+				} else { // along v, against the u0 (side 2) or u1 street
+					st = side === 2 ? E( 1, i, j ) : E( 1, i + 1, j );
+					sgn = side === 2 ? - 1 : 1;
+					const a0 = side === 2 ? 0 : nu - depth, a1 = side === 2 ? depth : nu;
+					g0 = [ u0 + pu + a0 * CS, v0 + pv + s0 * CS ]; g1 = [ u0 + pu + a1 * CS, v0 + pv + ( s1 + 1 ) * CS ];
+					if ( side === 2 ) g0[ 0 ] = u0; else g1[ 0 ] = u1;
+					for ( let a = a0 - 1; a <= a1; a ++ ) for ( let b = s0 - 1; b <= s1 + 1; b ++ ) if ( a >= 0 && a < nu && b >= 0 && b < nv ) free[ a * nv + b ] = 0;
+				}
+				if ( ! st ) continue;
+				dA = [ st.dx, st.dz ]; dB = [ st.dz * sgn, - st.dx * sgn ]; // b: from the street into the block
+				dB = [ - dB[ 0 ], - dB[ 1 ] ];
+				const [ cx, cz ] = F.toW( ( g0[ 0 ] + g1[ 0 ] ) / 2, ( g0[ 1 ] + g1[ 1 ] ) / 2 );
+				const L = side <= 1 ? g1[ 0 ] - g0[ 0 ] : g1[ 1 ] - g0[ 1 ], Dp = side <= 1 ? g1[ 1 ] - g0[ 1 ] : g1[ 0 ] - g0[ 0 ];
+				// the cross aisle (and the driveway) at the end away from the nearer corner... either end: flip a
+				const flip = R() < 0.5 ? 1 : - 1;
+				const ax = dA[ 0 ] * flip, az = dA[ 1 ] * flip;
+				// along the street: where the lot's frontage starts and ends
+				const sMid = ( cx - st.ax ) * st.dx + ( cz - st.az ) * st.dz;
+				const lot = {
+					id: net.lots.length, city: ci, street: st, side: sgn, x: cx, z: cz, ax, az, bx: dB[ 0 ], bz: dB[ 1 ], la: L, lb: Dp,
+					kind: c.kind === 'metro' && dc < 0.62 ? 0 : dc < 0.3 || c.kind === 'resort' ? 1 : 2, seed: Math.floor( R() * 65536 ),
+				};
+				// the driveway: in the cross aisle, kept off the sidewalk's corners
+				const sA = st.w / 2 + st.walk + 1.2 + LOT.DRIVE / 2, sB = st.len - st.w / 2 - st.walk - 1.2 - LOT.DRIVE / 2;
+				let sd = sMid + flip * ( L / 2 - LOT.CROSS / 2 );
+				sd = Math.max( sA, Math.min( sB, sd ) );
+				if ( Math.abs( sd - sMid ) > L / 2 - LOT.DRIVE / 2 ) continue;
+				lot.drive = [ sd - LOT.DRIVE / 2, sd + LOT.DRIVE / 2 ];
+				// the drive's position along the lot's a axis (the shader keeps it free of stalls)
+				lot.driveA = L / 2 + flip * ( sd - sMid );
+				( st.drives || ( st.drives = [] ) ).push( [ sgn, lot.drive[ 0 ], lot.drive[ 1 ] ] );
+				// layout: stall periods from the back, what's left at the front
+				const nP = Math.floor( Dp / LOT.PERIOD ), rem = Dp - nP * LOT.PERIOD;
+				lot.periods = nP;
+				lot.single = rem >= LOT.ROW + LOT.AISLE ? 1 : 0;
+				lot.stalls = Math.max( 0, Math.floor( ( L - LOT.CROSS - 0.4 ) / LOT.STALL ) );
+				if ( ! lot.stalls || ( ! nP && ! lot.single ) ) { st.drives.pop(); continue; }
+				let h0 = Infinity, h1 = - Infinity;
+				for ( const [ qa, qb ] of [ [ - 1, - 1 ], [ 1, - 1 ], [ - 1, 1 ], [ 1, 1 ], [ 0, 0 ] ] ) {
+					const h = hf.heightAt( cx + ax * qa * L / 2 + lot.bx * qb * Dp / 2, cz + az * qa * L / 2 + lot.bz * qb * Dp / 2 );
+					h0 = Math.min( h0, h ); h1 = Math.max( h1, h );
+				}
+				lot.y = ( h0 + h1 ) / 2;
+				net.lots.push( lot );
+				const r = Math.hypot( L, Dp ) / 2;
+				net.lhash.add( { ax: cx - 0.01, az: cz, bx: cx + 0.01, bz: cz, lot }, r );
+			}
+		}
+	}
+}
+
+// the largest free rectangle of the block raster that stands against one of its four sides:
+// [ side (0 v-low, 1 v-high, 2 u-low, 3 u-high), first, last (cells along the side), depth (cells) ] or null
+function bestLot( free, nu, nv, hs ) {
+	const MIN_L = 7, MIN_D = 6, MAX_D = 20; // 17.5 m x 15 m .. 50 m deep (2.5 m cells)
+	let best = null, bestA = 0;
+	for ( let side = 0; side < 4; side ++ ) {
+		const along = side < 2 ? nu : nv, across = side < 2 ? nv : nu;
+		const cell = ( s, t ) => side === 0 ? s * nv + t : side === 1 ? s * nv + ( nv - 1 - t ) : side === 2 ? t * nv + s : ( nu - 1 - t ) * nv + s;
+		const depth = new Int32Array( along );
+		for ( let s = 0; s < along; s ++ ) { let t = 0; while ( t < across && t < MAX_D && free[ cell( s, t ) ] ) t ++; depth[ s ] = t; }
+		for ( let s0 = 0; s0 < along; s0 ++ ) {
+			let md = MAX_D;
+			for ( let s1 = s0; s1 < along; s1 ++ ) {
+				md = Math.min( md, depth[ s1 ] );
+				if ( md < MIN_D ) break;
+				if ( s1 - s0 + 1 < MIN_L ) continue;
+				const area = ( s1 - s0 + 1 ) * md;
+				if ( area <= bestA ) continue;
+				// gentle enough overall (a car park may slope a little)
+				let lo = Infinity, hi = - Infinity;
+				for ( const s of [ s0, ( s0 + s1 ) >> 1, s1 ] ) for ( const t of [ 0, md >> 1, md - 1 ] ) { const h = hs[ cell( s, t ) ]; lo = Math.min( lo, h ); hi = Math.max( hi, h ); }
+				if ( hi - lo > 1.0 + 0.04 * Math.max( s1 - s0 + 1, md ) * 2.5 ) continue;
+				bestA = area; best = [ side, s0, s1, md ];
+			}
+		}
+	}
+	return best;
+}
+
+// the parking lot at a point, or null
+export function lotAt( net, x, z, pad = 0 ) {
+	let hit = null;
+	net.lhash.query( x, z, 4, ( sg ) => {
+		const L = sg.lot, dx = x - L.x, dz = z - L.z;
+		if ( Math.abs( dx * L.ax + dz * L.az ) < L.la / 2 + pad && Math.abs( dx * L.bx + dz * L.bz ) < L.lb / 2 + pad ) { hit = L; return false; }
+	} );
+	return hit;
 }
 
 // roadblocks, checkpoints, jams, crash sites, highway signs and mile markers along the drawn runs

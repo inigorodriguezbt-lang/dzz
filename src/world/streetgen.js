@@ -638,7 +638,7 @@ function walkStrip( C, st, side, a0, a1 ) {
 function walkPiece( C, G, sm, st, side, nx, nz, capStart, capEnd ) {
 	const hw = st.w / 2, wk = st.walk;
 	const R = sm.length;
-	const seed = net.cities[ st.city ].angle; // the paving pattern follows the city grid
+	const seed = net.frames[ st.city ].angle; // the paving pattern follows the city grid
 	// along coordinate increases along st.d; for side -1 the "right" order flips
 	const rowV = [];
 	for ( const s of sm ) {
@@ -909,7 +909,7 @@ function emitNodes( C ) {
 function nodeWalks( C, n, toW, eu, ev, has ) {
 	const G = C.out.walk;
 	const hw = n.w / 2, wk = n.walk;
-	const seed = net.cities[ n.city ].angle;
+	const seed = net.frames[ n.city ].angle;
 	const nodeYaw = yawX( eu[ 0 ], eu[ 1 ] );
 	// a walkable slab over a node-frame rectangle (local x along eu, local z along ev)
 	const slab = ( A0, A1, B0, B1 ) => {

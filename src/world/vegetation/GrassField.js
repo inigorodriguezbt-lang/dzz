@@ -540,6 +540,9 @@ function makeGrassMaterial( U ) {
 			.replace( '#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = gRough;' )
 			.replace( '#include <lights_physical_fragment>', '#include <lights_physical_fragment>\n' + FRAG_SPECULAR )
 			.replace( '#include <lights_fragment_maps>', FRAG_TRANSLUCENT + '\n#include <lights_fragment_maps>' );
+		// (ours) the blades take the cascades' plain 5-tap filter instead of the contact-hardening search
+		// (21 taps): thin, many layers deep and most of the fragments near the camera, where the search runs
+		shader.fragmentShader = shader.fragmentShader.replace( /sunShadowCSM\(([^;]*?), true \)/, 'sunShadowCSM($1, false )' );
 	} );
 	return m;
 }
@@ -577,7 +580,9 @@ export class GrassField {
 			mesh.frustumCulled = false;
 			mesh.castShadow = false;
 			mesh.receiveShadow = true;
-			return { mesh, geometry, attr, arr, max, count: 0, clumpEnd: p.clumpEnd, tris: p.b.triangles };
+			// candidate cells (distance, x0, z0) and their order: drawn front to back, the nearer blades hide
+			// the ones behind before they are shaded
+			return { mesh, geometry, attr, arr, max, count: 0, clumpEnd: p.clumpEnd, tris: p.b.triangles, cand: new Float64Array( max * 3 ), order: new Uint16Array( max ) };
 		} );
 		this.meshes = this.levels.map( ( l ) => l.mesh );
 		this._frustum = new THREE.Frustum();
@@ -653,13 +658,17 @@ export class GrassField {
 			const lvl = d < this.rNear ? near : d < this.rMid ? mid : far;
 			const c = lvl === near ? nc ++ : lvl === mid ? mc ++ : fc ++;
 			if ( c >= lvl.max ) continue;
-			lvl.arr[ c * 4 ] = x0 - ox;
-			lvl.arr[ c * 4 + 1 ] = z0 - oz;
-			lvl.arr[ c * 4 + 2 ] = x0;
-			lvl.arr[ c * 4 + 3 ] = z0;
+			lvl.cand[ c * 3 ] = d; lvl.cand[ c * 3 + 1 ] = x0; lvl.cand[ c * 3 + 2 ] = z0;
 		}
 		for ( const [ lvl, count ] of [ [ near, nc ], [ mid, mc ], [ far, fc ] ] ) {
 			lvl.count = Math.min( count, lvl.max );
+			const { cand, order, arr } = lvl;
+			for ( let k = 0; k < lvl.count; k ++ ) order[ k ] = k;
+			order.subarray( 0, lvl.count ).sort( ( a, b ) => cand[ a * 3 ] - cand[ b * 3 ] );
+			for ( let k = 0; k < lvl.count; k ++ ) {
+				const c = order[ k ], x0 = cand[ c * 3 + 1 ], z0 = cand[ c * 3 + 2 ];
+				arr[ k * 4 ] = x0 - ox; arr[ k * 4 + 1 ] = z0 - oz; arr[ k * 4 + 2 ] = x0; arr[ k * 4 + 3 ] = z0;
+			}
 			lvl.geometry.instanceCount = lvl.count;
 			lvl.attr.clearUpdateRanges();
 			lvl.attr.addUpdateRange( 0, Math.max( 1, lvl.count ) * 4 );

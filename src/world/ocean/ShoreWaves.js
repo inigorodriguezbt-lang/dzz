@@ -123,7 +123,7 @@ function evaluateCode( name, mode ) {
 			// field of single-vertex spikes over the whole bore
 			float w1 = smoothstep( 0.8, 0.4, shoreLumpSpacing ) * 0.7;
 			float w2 = smoothstep( 0.45, 0.25, shoreLumpSpacing ) * 0.3;
-			if ( roller != 0.0 ) {
+			if ( roller != 0.0 && w1 > 0.0 ) {
 				float lumpy = sSat( perlin2( vec2( along * 0.045, mW * 3.7 ) ) * 1.2 + 0.55 );
 				float amp = roller * mix( 0.25, 0.7, lumpy );
 				vec2 q1 = vec2( along * 0.28, sx * 0.7 - t * 0.8 );
@@ -133,10 +133,12 @@ function evaluateCode( name, mode ) {
 				float La = perlin2( q1 + vec2( eL * 0.28, 0.0 ) ) * w1 + perlin2( q2 + vec2( eL * 0.8, 0.0 ) ) * w2;
 				float Ls = perlin2( q1 + vec2( 0.0, eL * 0.7 ) ) * w1 + perlin2( q2 + vec2( 0.0, eL * 1.6 ) ) * w2;
 				// lumps stand up from the roller (rounded caps, flatter troughs between them)
-				float lump = max( L0 * 1.5 + 0.2, -0.3 );
+				// (the lift fades out with the band limit too: no step where the lumps end)
+				float lift = 0.2 * w1 / 0.7;
+				float lump = max( L0 * 1.5 + lift, -0.3 );
 				disp.y += lump * amp;
-				float dAlong = L0 * 1.5 + 0.2 > -0.3 ? ( La - L0 ) / eL * 1.5 : 0.0;
-				float dSx = L0 * 1.5 + 0.2 > -0.3 ? ( Ls - L0 ) / eL * 1.5 : 0.0;
+				float dAlong = L0 * 1.5 + lift > -0.3 ? ( La - L0 ) / eL * 1.5 : 0.0;
+				float dSx = L0 * 1.5 + lift > -0.3 ? ( Ls - L0 ) / eL * 1.5 : 0.0;
 				float dShore = - dSx; // d/d(shoreward) = - d/dsx
 				vec2 g = ( vec2( - dir.y, dir.x ) * dAlong + dir * dShore ) * amp * n.y;
 				nShore = normalize( vec3( n.x - g.x, max( n.y, 0.04 ), n.z - g.y ) );

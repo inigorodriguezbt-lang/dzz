@@ -78,6 +78,7 @@ export function waterSurfaceGLSL( opts ) {
 	}
 	const vertex = common + /* glsl */`
 	const float WATER_SHORE_DEEP = 26.0; // m: ShoreWaves' envelope smoothstep( 26, 13, depth ) is 0 beyond
+	const float WATER_SHORE_DRY = -4.0; // m: (ours) ground above the highest swash run-up (storm surf: ~3 m)
 	float waterSurfaceSeaDepth( vec2 xz ) { return uWaterLevel - waterGroundAt( xz ); }
 	WaterSurfaceVertex waterSurfaceVertex( vec4 node, vec2 grid ) {
 		CdlodVertex lod = cdlodMorph( node, grid, cameraPosition, 0.0 );
@@ -87,7 +88,11 @@ export function waterSurfaceGLSL( opts ) {
 		float depth = uWaterLevel - ground;
 		vec3 disp = vec3( 0.0 );
 		float foam = 0.0;
+		// (ours) the grid covers the land too, where the cascades are attenuated to exactly 0 (depth <= 0): skip
+		// their fetches there (most of a beach view's water vertices lie under the sand)
+		if ( depth > 0.0 ) {
 		${ cascadesV }
+		}
 		disp *= uWaterAmp;
 		vec3 extra = vec3( 0.0 );
 		vec3 shoreN = vec3( 0.0, 1.0, 0.0 );
@@ -100,7 +105,7 @@ export function waterSurfaceGLSL( opts ) {
 		// (ours) band-limited to the mesh spacing like the FFT cascades: the breakers' metre-scale shapes alias on
 		// the 8 m+ grid beyond ~300 m (the islands' coasts reach far further out than Tidewater's one bay)
 		float shoreBand = smoothstep( 8.0, 4.0, spacing );
-		bool nearShore = depth < WATER_SHORE_DEEP && shoreBand > 0.0;
+		bool nearShore = depth < WATER_SHORE_DEEP && depth > WATER_SHORE_DRY && shoreBand > 0.0;
 		float swashLevel = -1e4;
 		if ( nearShore ) {
 			shoreLumpSpacing = spacing;
