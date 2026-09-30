@@ -57,6 +57,7 @@ const HAND_HOLD = {
 	item: { at: [ 0.13, - 0.16, - 0.32 ], x: [ - 0.2, 0.5, 0.85 ], y: [ 0.75, - 0.55, 0.3 ] },
 	// torches and other long things point forward, held overhand
 	long: { at: [ 0.2, - 0.17, - 0.32 ], x: [ - 0.1, 0.2, - 1 ], y: [ - 0.3, - 0.95, 0 ] },
+
 };
 // gun holds at the hip: the gun frame's origin (trigger, on the bore line) in view space, its turn (pitch, yaw, roll;
 // yaw + points the muzzle in towards the crosshair, roll + leans the top in to show its right side) and where the
@@ -72,6 +73,9 @@ const GUN_HOLD = {
 };
 // a bolt handle's knob, in the gun frame at rest: the firing hand closes on it from behind and below
 const BOLT_KNOB = grip( [ - 0.09, - 0.034, 0.054 ], [ 0.35, 0.93, 0 ], [ 0.1, 0.2, 1 ], 0.012 );
+// a fishing rod, placed like a melee weapon (its grip point in view space, its own axes: +x to the tip, +y the reel's
+// side): up and out to the right, the tip clear of the middle of the screen where the bobber floats
+const ROD_HOLD = { at: [ 0.2, - 0.12, - 0.4 ], x: [ 0.42, 0.45, - 0.79 ], y: [ 0, - 1, - 0.5 ] };
 // elbows for anything held that isn't a gun
 // (out to the side and not far below the hand: the forearm comes into the frame from the bottom corner)
 const ITEM_ELBOW_R = V( 0.42, - 0.3, - 0.12 ), ITEM_ELBOW_L = V( - 0.3, - 0.3, - 0.15 );
@@ -421,9 +425,18 @@ export class ViewModel {
 		const sz = info.size;
 		const r = clamp( Math.min( sz.y, sz.z ) * 0.5, 0.012, 0.045 );
 		const long = sz.x > 0.12;
+		// a rod (gear.js 'rod'): the reel 0.32 of the length back from the middle, the handle behind it, the blank on
+		// y = 0.013 of the model
+		const rod = def.tool?.kind === 'fishingrod';
+		const ry = 0.013 - info.centre.y;
 		return {
-			kind, def, obj: g, size: sz.clone(), long,
-			grips: { R: grip( [ long ? - sz.x * 0.15 : 0, 0, 0 ], [ 1, 0, 0 ], [ 0, 1, 0.25 ], r ) },
+			kind, def, obj: g, size: sz.clone(), long, rod,
+			grips: rod ? {
+				// both hands under the handle, the backs of the hands down and out: the forearms come in from the
+				// bottom-right and bottom-left corners, clear of the middle
+				R: grip( [ - sz.x * 0.36, ry, 0 ], [ 1, 0, 0 ], [ 0, 0.8, - 0.6 ], 0.012 ),
+				L: grip( [ - sz.x * 0.36 - 0.12, ry, 0 ], [ 1, 0, 0 ], [ 0, 0.8, 0.6 ], 0.012 ),
+			} : { R: grip( [ long ? - sz.x * 0.15 : 0, 0, 0 ], [ 1, 0, 0 ], [ 0, 1, 0.25 ], r ) },
 		};
 	}
 
@@ -605,6 +618,10 @@ export class ViewModel {
 			const g = _v.copy( it.grips.R.p ).applyQuaternion( hipQ );
 			hipP.set( ...MH.at ).sub( g );
 		} else if ( it.kind === 'fists' ) { hipP.set( 0.14, - 0.2, - 0.32 ); hipQ.identity(); }
+		else if ( it.rod ) {
+			basisQ( V( ...ROD_HOLD.x ), V( ...ROD_HOLD.y ), hipQ );
+			hipP.set( ...ROD_HOLD.at ).sub( _v.copy( it.grips.R.p ).applyQuaternion( hipQ ) );
+		}
 		else {
 			// grenades, tools and anything else: the right hand is posed in view space and the item sits in its grip
 			const HH = HAND_HOLD[ it.kind === 'throw' ? 'throw' : it.long ? 'long' : 'item' ];

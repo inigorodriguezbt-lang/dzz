@@ -3,6 +3,7 @@
 // seconds instead of minutes.
 //   /test/preview/vegworld.html?at=x,z | label=Mauna Kea  &h=eye height (m) | y=absolute
 //     &yaw=deg&pitch=deg&hour=10&veg=high&rd=1400&grass=1&wind=0.45&frames=N&settle=N
+//     &hide=veg|far|mid|near|grass|pebbles
 // window.__ready once the cells around the camera are in, window.__done after `frames` more frames,
 // window.__grab() renders a frame and returns it as a PNG data URL (see vegshot.mjs).
 import * as THREE from 'three';
@@ -87,7 +88,12 @@ const veg = install( game );
 // ?hide=veg|far|mid|near|grass: hide parts to find out what draws what
 const hide = q.get( 'hide' ) || '';
 if ( hide === 'veg' ) veg.group.visible = false;
-else if ( hide ) for ( const b of hide.split( ',' ) ) for ( const t of veg.bandTargets[ b ] || [] ) t.mesh.layers.set( 5 );
+else if ( hide ) for ( const b of hide.split( ',' ) ) {
+	for ( const t of veg.bandTargets[ b ] || [] ) t.mesh.layers.set( 5 );
+	// the ground flora: grass field, pebbles
+	if ( b === 'grass' ) for ( const m of veg.grassField.meshes ) m.layers.set( 5 );
+	if ( b === 'pebbles' ) veg.pebbles.mesh.layers.set( 5 );
+}
 // ?sbias=x: the sun's shadow bias (reversed depth test)
 if ( q.has( 'sbias' ) ) world.sun.shadow.bias = + q.get( 'sbias' );
 // ?noreceive=1: vegetation doesn't receive the sun's shadow; ?nocast=1: doesn't cast it
