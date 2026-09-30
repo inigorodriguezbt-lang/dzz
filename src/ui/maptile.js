@@ -67,8 +67,14 @@ function landColor( hf, x, z, h, s4, c, relief, i, j, at, G, step ) {
 	return c;
 }
 
+// the height data ends in open ocean at the edge of the world, often shallower than the last stop: the sea fades
+// into the out-of-world fill over this many metres so that edge never shows as a straight seam
+const EDGE = 4000;
+const DEEP = SEA[ SEA.length - 1 ][ 1 ];
+
 export function renderMapTile( hf, { x0, z0, size, px } ) {
 	const N = px, step = size / N;
+	const X0 = hf.x0, X1 = hf.x0 + 2 * hf.halfX, Z0 = hf.z0, Z1 = hf.z0 + 2 * hf.halfZ;
 	// the hillshade gradient spans at least one 8 m height-grid cell, else the finest level shows every facet
 	const G = Math.max( 1, Math.round( 8 / step ) ), W = N + 2 * G;
 	const hs = new Float32Array( W * W );
@@ -95,6 +101,8 @@ export function renderMapTile( hf, { x0, z0, size, px } ) {
 			// a pale fringe where the reef meets the sand
 			const shore = sm( - 0.8, 0, h ) * 0.3;
 			sea[ 0 ] = mix( sea[ 0 ], 180, shore ); sea[ 1 ] = mix( sea[ 1 ], 220, shore ); sea[ 2 ] = mix( sea[ 2 ], 214, shore );
+			const e = sm( 0, EDGE, Math.min( x - X0, X1 - x, z - Z0, Z1 - z ) );
+			if ( e < 1 ) { sea[ 0 ] = mix( DEEP[ 0 ], sea[ 0 ], e ); sea[ 1 ] = mix( DEEP[ 1 ], sea[ 1 ], e ); sea[ 2 ] = mix( DEEP[ 2 ], sea[ 2 ], e ); }
 		}
 		if ( t > 0 ) landColor( hf, x, z, h, s4, land, relief, i, j, at, G, step );
 		out[ k ] = mix( sea[ 0 ], land[ 0 ], t ); out[ k + 1 ] = mix( sea[ 1 ], land[ 1 ], t ); out[ k + 2 ] = mix( sea[ 2 ], land[ 2 ], t ); out[ k + 3 ] = 255;

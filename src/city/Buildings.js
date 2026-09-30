@@ -16,9 +16,10 @@
 // buildingAt(pos) -> { i, type, label, city, x, z, storey } | null, gasPumps() -> [ { x, y, z, name } ],
 // update(dt), serialize(save), load(save), dispose(). State: save.world.doors / containers / looted.
 import * as THREE from 'three';
-import { NF, readBuilding, fitToGround, shapeOf, rectOf, pumpsOf, LABEL, LOCATE, NEAR_CELL, FAR_CELL, cellKey, hash32, strHash, rng, BOX_STRIDE, PMAT, PK } from './buildings/data.js';
+import { NF, BT, readBuilding, fitToGround, shapeOf, rectOf, effectiveType, pumpsOf, LABEL, LOCATE, NEAR_CELL, FAR_CELL, cellKey, hash32, strHash, rng, BOX_STRIDE, PMAT, PK } from './buildings/data.js';
 import { buildingMaterials, setBuildingState, commitState, setShadowsEnabled, geoToBuffer, decalToBuffer, glassToBuffer } from './buildings/materials.js';
 import { Doors } from './buildings/doors.js';
+import { terminalCanopyOf } from './buildings/exterior.js';
 import { rollLoot } from '../game/items/Loot.js';
 
 const IN_LOAD = 90, IN_DROP = 130; // interior hysteresis (m from the built rect)
@@ -51,6 +52,7 @@ class City {
 		this.data = B.data;
 		this.N = Math.floor( B.data.length / NF );
 		this.recs = new Array( this.N );
+		this.lites = new Array( this.N );
 		this.shapes = new Array( this.N );
 		this.mats = buildingMaterials( this.N );
 		setShadowsEnabled( this.mats, game.settings.get( 'shadows' ) !== 'off' );
@@ -60,9 +62,10 @@ class City {
 		game.scene.add( this.group );
 		// spatial index by building centre
 		this.nearIdx = new Map(); this.farIdx = new Map();
+		// (records are seated on the ground lazily: the index only needs the centres)
 		for ( let i = 0; i < this.N; i ++ ) {
-			const r = this.rec( i );
-			const nk = cellKey( Math.floor( r.x / NEAR_CELL ), Math.floor( r.z / NEAR_CELL ) ), fk = cellKey( Math.floor( r.x / FAR_CELL ), Math.floor( r.z / FAR_CELL ) );
+			const x = B.data[ i * NF ], z = B.data[ i * NF + 1 ];
+			const nk = cellKey( Math.floor( x / NEAR_CELL ), Math.floor( z / NEAR_CELL ) ), fk = cellKey( Math.floor( x / FAR_CELL ), Math.floor( z / FAR_CELL ) );
 			( this.nearIdx.get( nk ) || this.nearIdx.set( nk, [] ).get( nk ) ).push( i );
 			( this.farIdx.get( fk ) || this.farIdx.set( fk, [] ).get( fk ) ).push( i );
 		}
@@ -80,6 +83,7 @@ class City {
 		this.lightSrc = [];
 		this.evalT = 1; this.lightT = 0;
 		this.stateTouched = new Set();
+		this._inCache = { x: NaN, y: NaN, z: NaN, v: false };
 		this.offProvider = game.interact.addProvider( ( ray, maxDist ) => this.provide( ray, maxDist ) );
 		this.offTaken = null;
 		this.seed = ( game.seed | 0 ) || 1;
@@ -95,10 +99,20 @@ class City {
 	toWorld( r, lx, lz ) { return [ r.x + lx * r.c - lz * r.s, r.z + lx * r.s + lz * r.c ]; }
 	// distance from (x, z) to building i's built rect
 	rectDist( i, x, z ) {
-		const r = this.rec( i ), { rect } = this.shape( i );
-		const [ lx, lz ] = this.toLocal( r, x, z );
-		const dx = Math.max( rect.x0 - lx, 0, lx - rect.x1 ), dz = Math.max( rect.z0 - lz, 0, lz - rect.z1 );
+		const q = this.lite( i );
+		const dx0 = x - q.x, dz0 = z - q.z;
+		const lx = dx0 * q.c + dz0 * q.s, lz = - dx0 * q.s + dz0 * q.c;
+		const dx = Math.max( q.x0 - lx, 0, lx - q.x1 ), dz = Math.max( q.z0 - lz, 0, lz - q.z1 );
 		return Math.hypot( dx, dz );
+	}
+	// the footprint alone (centre, frame, built rect): no ground seating, cheap enough for every query
+	lite( i ) {
+		let q = this.lites[ i ];
+		if ( ! q ) {
+			const r = readBuilding( this.data, i ), R = rectOf( shapeOf( r, this.cities ) );
+			q = this.lites[ i ] = { x: r.x, z: r.z, c: r.c, s: r.s, x0: R.x0, x1: R.x1, z0: R.z0, z1: R.z1 };
+		}
+		return q;
 	}
 
 	// ---- per frame ---------------------------------------------------------------------------------------------
@@ -198,6 +212,7 @@ class City {
 		add( rect.x0, r.lo - 0.8, rect.z0, rect.x1, top, rect.z1, S.arch === 'tent' ? 'foliage' : 'concrete' );
 		for ( const [ px, pz ] of pumpsOf( r, S ) ) { const y = this.game.hf.heightAt( ...this.toWorld( r, px, pz ) ); add( px - 0.7, y - 0.5, pz - 1.3, px + 0.7, y + 1.7, pz + 1.3, 'metal' ); }
 		if ( S.arch === 'fire' ) add( rect.x1 - 3.2, r.lo - 0.5, rect.z1, rect.x1, S.top + 5.2, rect.z1 + 3.2 );
+		if ( S.arch === 'terminal' ) { const c = terminalCanopyOf( { S, rect } ); for ( const [ x, z ] of c.cols ) add( x - 0.2, r.lo - 0.5, z - 0.2, x + 0.2, c.y, z + 0.2, 'metal' ); }
 		this.shellBoxes.set( bi, list );
 	}
 
@@ -288,7 +303,7 @@ class City {
 
 	* _clearGen( boxes, items ) {
 		const P = this.physics, W = this.game.items3d;
-		for ( let k = 0; k < boxes.length; k ++ ) { P.remove( boxes[ k ] ); if ( k % 48 === 47 ) yield; }
+		for ( let k = 0; k < boxes.length; k ++ ) { P.remove( boxes[ k ] ); if ( k % 8 === 7 ) yield; }
 		for ( let k = 0; k < items.length; k ++ ) { W?.remove?.( items[ k ] ); if ( k % 8 === 7 ) yield; }
 	}
 
@@ -341,7 +356,9 @@ class City {
 		const over = () => performance.now() - t0 > BUDGET_MS;
 		// clearing what was dropped first: it is cheap per step and nothing waits on new work more than on that
 		while ( this.dropQ.length ) {
-			if ( this.dropQ[ 0 ].next().done ) this.dropQ.shift();
+			let done = true;
+			try { done = this.dropQ[ 0 ].next().done; } catch ( e ) { console.error( 'buildings: drop', e ); }
+			if ( done ) this.dropQ.shift();
 			if ( over() ) return;
 		}
 		for ( ;; ) {
@@ -351,7 +368,8 @@ class City {
 				if ( q.kind === 'cell' ) { if ( q.c.dead ) continue; this.cur = this._cellGen( q.c, q.res ); }
 				else { if ( q.st.dead || this.interiors.get( q.I.bi ) !== q.I ) continue; this.cur = this._storeyGen( q.I, q.st, q.res ); }
 			}
-			if ( this.cur.next().done ) this.cur = null;
+			// one bad building must not stop the streaming of all the others
+			try { if ( this.cur.next().done ) this.cur = null; } catch ( e ) { console.error( 'buildings: integrate', e ); this.cur = null; }
 			if ( over() ) break;
 		}
 	}
@@ -403,8 +421,12 @@ class City {
 			if ( ++ n % 64 === 0 ) yield;
 		}
 		yield;
+		for ( const rec of res.doors ) {
+			if ( st.dead ) return;
+			st.doors.push( this.doors.add( I, st.si, rec ) );
+			yield;
+		}
 		if ( st.dead ) return;
-		for ( const rec of res.doors ) st.doors.push( this.doors.add( I, st.si, rec ) );
 		// containers, beds and taps as world-space oriented boxes / points
 		const obb = ( o ) => { const [ x, z ] = this.toWorld( r, o.cx, o.cz ); return { ...o, x, y: o.cy, z, yaw: yaw + ( o.yaw || 0 ) }; };
 		st.containers = res.containers.map( obb );
@@ -494,7 +516,13 @@ class City {
 				for ( const c of st.containers ) {
 					const t = rayOBB( o, dir, c, maxDist );
 					if ( t === null ) continue;
-					out.push( { t, id: 'cont:' + c.key, label: ( this.searched.has( c.key ) || this.saved.containers[ c.key ] ? 'Open ' : 'Search ' ) + c.label.toLowerCase(), action: () => this.search( c ) } );
+					const name = c.label.toLowerCase();
+					let label, sub;
+					if ( this._isLocked( c ) ) {
+						const how = this._unlockWith( c );
+						if ( how === 'pry' ) { label = 'Pry open'; sub = c.label; } else if ( how === 'pick' ) { label = 'Pick lock'; sub = c.label; } else { label = 'Open ' + name; sub = 'Locked'; }
+					} else label = ( this.searched.has( c.key ) || this.saved.containers[ c.key ] ? 'Open ' : 'Search ' ) + name;
+					out.push( { t, id: 'cont:' + c.key, label, sub, action: () => this.search( c ) } );
 				}
 				for ( const b of st.beds ) {
 					const t = rayOBB( o, dir, b, maxDist );
@@ -522,15 +550,23 @@ class City {
 
 	hasPry() { return !! this.game.player.inventory.hasTool?.( 'pry' ); }
 
+	_isLocked( c ) { return !! c.locked && ! this.saved.containers[ c.key ]?.u && ! this.containers.get( c.key )?.unlocked; }
+	// what opens a locked container: a pry tool (anything), a lockpick (not a safe), or nothing at hand
+	_unlockWith( c ) {
+		if ( this.hasPry() ) return 'pry';
+		if ( this.game.player.inventory.count?.( 'lockpick' ) > 0 && c.locked < 2 ) return 'pick';
+		return null;
+	}
+
 	search( c ) {
 		const g = this.game;
-		if ( c.locked && ! this.saved.containers[ c.key ]?.u && ! this.containers.get( c.key )?.unlocked ) {
-			const pick = g.player.inventory.count?.( 'lockpick' ) > 0 && c.locked < 2;
-			if ( this.hasPry() ) {
+		if ( this._isLocked( c ) ) {
+			const how = this._unlockWith( c ), pick = how === 'pick';
+			if ( how === 'pry' ) {
 				g.actions.start( { label: 'Prying open', time: 4 + c.locked * 3, onDone: () => { this._unlockC( c ); g.events.emit( 'noise', { pos: new THREE.Vector3( c.x, c.y, c.z ), radius: 18, source: g.player, kind: 'door' } ); g.audio?.play( 'hit_metal', { pos: new THREE.Vector3( c.x, c.y, c.z ), vol: 0.8 } ); this._open( c ); } } );
 			} else if ( pick ) {
 				g.actions.start( { label: 'Picking lock', time: 8, onDone: () => { this._unlockC( c ); this._open( c ); } } );
-			} else { g.audio?.play( 'door_locked', { vol: 0.5 } ); g.toast( c.locked >= 2 ? 'Locked, needs a crowbar' : 'Locked', 'warn' ); }
+			} else { g.audio?.play( 'door_locked', { vol: 0.5 } ); g.toast( c.locked >= 2 ? 'Needs a crowbar' : 'Locked', 'warn' ); }
 			return;
 		}
 		if ( this.searched.has( c.key ) || this.saved.containers[ c.key ] ) { this._open( c ); return; }
@@ -572,18 +608,20 @@ class City {
 		const keys = Object.keys( LOCATE ).filter( k => norm( LOCATE[ k ] ) === want || norm( k ) === want || norm( LABEL[ k ] ) === want );
 		if ( ! keys.length ) return null;
 		let best = null, bd = Infinity;
+		const tmp = {};
 		for ( let i = 0; i < this.N; i ++ ) {
-			const r = this.rec( i );
-			if ( ! keys.includes( r.type ) ) continue;
+			const r = readBuilding( this.data, i, tmp );
 			const d = ( r.x - pos.x ) ** 2 + ( r.z - pos.z ) ** 2;
-			if ( d < bd ) { bd = d; best = r; }
+			if ( d >= bd || ! keys.includes( effectiveType( r, this.cities ).type ) ) continue;
+			bd = d; best = i;
 		}
-		if ( ! best ) return null;
+		if ( best === null ) return null;
+		best = this.rec( best );
 		const cityName = this.cities[ best.city ]?.name;
-		const { rect } = this.shape( best.i );
+		const { S, rect } = this.shape( best.i );
 		// the spot just outside the front door
 		const [ x, z ] = this.toWorld( best, ( rect.x0 + rect.x1 ) / 2, rect.z0 - 2.5 );
-		return { name: LABEL[ best.type ] + ( cityName ? ` (${cityName})` : '' ), x, z, i: best.i };
+		return { name: LABEL[ S.type ] + ( cityName ? ` (${cityName})` : '' ), x, z, i: best.i };
 	}
 
 	doorAt( pos, r = 1.5 ) { return this.doors.near( pos, r ); }
@@ -594,31 +632,36 @@ class City {
 			const ids = this.nearIdx.get( cellKey( i, j ) );
 			if ( ! ids ) continue;
 			for ( const bi of ids ) {
-				const r = this.rec( bi );
-				if ( Math.abs( r.x - pos.x ) > 90 || Math.abs( r.z - pos.z ) > 90 ) continue;
-				const { S, rect } = this.shape( bi );
-				const [ lx, lz ] = this.toLocal( r, pos.x, pos.z );
-				if ( lx < rect.x0 - margin || lx > rect.x1 + margin || lz < rect.z0 - margin || lz > rect.z1 + margin ) continue;
+				const q = this.lite( bi );
+				if ( Math.abs( q.x - pos.x ) > 90 || Math.abs( q.z - pos.z ) > 90 ) continue;
+				const dx0 = pos.x - q.x, dz0 = pos.z - q.z;
+				const lx = dx0 * q.c + dz0 * q.s, lz = - dx0 * q.s + dz0 * q.c;
+				if ( lx < q.x0 - margin || lx > q.x1 + margin || lz < q.z0 - margin || lz > q.z1 + margin ) continue;
+				const r = this.rec( bi ), { S } = this.shape( bi );
 				let storey = 0;
 				for ( let k = 0; k < S.n; k ++ ) if ( pos.y >= S.ys[ k ] - 0.6 ) storey = k;
-				return { i: bi, type: r.type, label: LABEL[ r.type ], city: this.cities[ r.city ]?.name || '', x: r.x, z: r.z, storey, top: S.top, floor: S.fy };
+				return { i: bi, type: S.type, label: LABEL[ S.type ], city: this.cities[ r.city ]?.name || '', x: r.x, z: r.z, storey, top: S.top, floor: S.fy };
 			}
 		}
 		return null;
 	}
 
+	// asked by several systems each frame for the same position: remember the last answer
 	isIndoors( pos ) {
+		const c = this._inCache;
+		if ( c.x === pos.x && c.y === pos.y && c.z === pos.z ) return c.v;
 		const b = this.buildingAt( pos );
-		if ( ! b ) return false;
-		return pos.y > b.floor - 0.4 && pos.y < b.top - 0.3;
+		const v = !! b && pos.y > b.floor - 0.4 && pos.y < b.top - 0.3;
+		c.x = pos.x; c.y = pos.y; c.z = pos.z; c.v = v;
+		return v;
 	}
 
 	gasPumps() {
 		if ( this._pumps ) return this._pumps;
 		const out = [];
 		for ( let i = 0; i < this.N; i ++ ) {
+			if ( this.data[ i * NF + 7 ] !== BT.gas ) continue;
 			const r = this.rec( i );
-			if ( r.type !== 'gas' ) continue;
 			const { S } = this.shape( i );
 			for ( const [ px, pz ] of pumpsOf( r, S ) ) {
 				const [ x, z ] = this.toWorld( r, px, pz );

@@ -127,8 +127,8 @@ const handlers = {
 // inland ponds and marshes: isSea)
 const DIRS = Array.from( { length: 10 }, ( _, i ) => [ Math.cos( i / 10 * Math.PI * 2 ), Math.sin( i / 10 * Math.PI * 2 ) ] );
 function shoreness( x, z, y ) {
-	if ( y > 9 || ! isSea( hf, x, z ) ) return 0;
-	if ( y < 0.2 ) return 1;
+	if ( y > 9 ) return 0;
+	if ( y < 0.2 ) return isSea( hf, x, z );
 	for ( const r of [ 6, 14, 24, 34, 46 ] ) {
 		for ( const [ dx, dz ] of DIRS ) if ( hf.baseHeight( x + dx * r, z + dz * r ) < 0 && isSea( hf, x + dx * r, z + dz * r ) ) return 1 - r / 52;
 	}

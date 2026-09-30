@@ -1,7 +1,10 @@
 // Standalone vegetation preview (not shipped): the plant models, their mid LOD and impostors side by
 // side on a flat lawn, with the game's vegetation materials, sun shadows and wind.
-//   /test/preview/vegetation.html?set=trees|small&cam=x,y,z&look=x,y,z&hour=..&frames=N&wind=0..1
-// Rows (front to back): full model, mid model, impostor. window.__ready / __done for test/shot.mjs.
+//   /test/preview/vegetation.html?set=trees|small|forest|grass&cam=x,y,z&look=x,y,z&hour=..&frames=N&wind=0..1
+//     &aa=msaa|taa|none (LOD fade mode: alpha to coverage, moving dither, clean swap) &sun=..&hemi=.. (light)
+//     &layout=pairs (levels side by side) &atlas=A|B|leaf (texture debug view)
+// Rows (front to back): full model, mid model, impostor; set=forest: a far-band impostor forest seen
+// from a mountainside. window.__ready / __done for test/shot.mjs.
 import * as THREE from 'three';
 import { G, preloadTextures } from '../../src/render/Materials.js';
 import { SP, STRIDE, SPECIES } from '../../src/world/vegetation/species.js';
@@ -16,6 +19,10 @@ const SET = q.get( 'set' ) || 'trees';
 const SETS = {
 	trees: { list: [ SP.PALM, SP.PALM, SP.PALM, SP.MONKEYPOD, SP.KUKUI, SP.OHIA, SP.PINE, SP.IRONWOOD, SP.KIAWE ], gap: 20 },
 	small: { list: [ SP.TREEFERN, SP.BANANA, SP.TI, SP.SHRUB, SP.NAUPAKA, SP.TALLGRASS, SP.PINEAPPLE, SP.CANE, SP.ROCK, SP.FERN, SP.GRASS ], gap: 4.5 },
+	// a lowland forest of far impostors seen from a mountainside (the game's far band)
+	forest: { list: [], gap: 20 },
+	// grass clumps: grazed pasture (left) beside a meadow (right), at eye height
+	grass: { list: [], gap: 4 },
 };
 const set = SETS[ SET ];
 // ?list=2,3: only these species (ids from species.js)
@@ -53,7 +60,7 @@ const el = Math.max( 0.05, Math.sin( ( hour - 6 ) / 12 * Math.PI ) ) * 1.1;
 const az = + ( q.get( 'sunaz' ) || 200 ) * Math.PI / 180; // compass azimuth of the sun (0 north = -z)
 const sunDir = new THREE.Vector3( Math.sin( az ) * Math.cos( el ), Math.sin( el ), - Math.cos( az ) * Math.cos( el ) ).normalize();
 G.uSunDir.value.copy( sunDir );
-const sun = new THREE.DirectionalLight( 0xfff1dc, 3.2 );
+const sun = new THREE.DirectionalLight( 0xfff1dc, + ( q.get( 'sun' ) ?? 3.2 ) );
 sun.position.copy( sunDir ).multiplyScalar( 200 );
 sun.castShadow = true;
 sun.shadow.mapSize.set( 2048, 2048 );
@@ -62,7 +69,7 @@ sun.shadow.camera.updateProjectionMatrix();
 sun.shadow.bias = - 0.0004;
 sun.shadow.normalBias = 0.04;
 scene.add( sun, sun.target );
-scene.add( new THREE.HemisphereLight( 0xbfd8ff, 0x4a4030, 1.1 ) );
+scene.add( new THREE.HemisphereLight( 0xbfd8ff, 0x4a4030, + ( q.get( 'hemi' ) ?? 1.1 ) ) );
 G.uSunColor.value.set( 0xfff1dc );
 
 const ground = new THREE.Mesh( new THREE.PlaneGeometry( 4000, 4000 ), new THREE.MeshStandardMaterial( { color: 0x5b6e32, roughness: 1 } ) );
@@ -117,6 +124,40 @@ function inst( s, x, z, k ) {
 	}
 }
 const origin = new THREE.Vector3();
+// ?aa=msaa (alpha to coverage, default) | taa (moving dither) | none (clean swap): the LOD fade modes
+const AA = q.get( 'aa' ) || 'msaa';
+VG.uVegFadeMode.value = AA === 'taa' ? 1 : 0;
+for ( const t of [ ...targets, impT ] ) t.material.alphaToCoverage = AA === 'msaa';
+let impF = null;
+if ( SET === 'forest' ) {
+	impF = imp.makeTarget( 'far' );
+	impF.material.alphaToCoverage = AA === 'msaa';
+	scene.add( impF.mesh );
+	const R = + ( q.get( 'rd' ) || 1400 );
+	const ranges = [];
+	for ( let s = 0; s < 18; s ++ ) if ( SPEC[ s ].imp === 'far' ) ranges[ s ] = { imp: [ SPEC[ s ].mid || SPEC[ s ].near, R ] };
+	imp.setRanges( ranges, { far: 1, blend: 1e5 }, 0.03 );
+	let seed = 7;
+	const rnd = () => ( seed = ( seed * 16807 ) % 2147483647 ) / 2147483647;
+	const W = [ [ SP.PALM, 0.3 ], [ SP.MONKEYPOD, 0.15 ], [ SP.KUKUI, 0.15 ], [ SP.OHIA, 0.25 ], [ SP.IRONWOOD, 0.1 ], [ SP.KIAWE, 0.05 ] ];
+	const rec = new Float32Array( STRIDE );
+	impF.begin();
+	const cx = + ( q.get( 'fx' ) || 0 ), cz = + ( q.get( 'fz' ) || - 700 );
+	for ( let n = 0; n < 60000; n ++ ) {
+		const x = cx + ( rnd() - 0.5 ) * 2600, z = cz + ( rnd() - 0.5 ) * 1400;
+		// clearings: a coarse checkerboard of groves
+		if ( ( Math.floor( x / 180 ) + Math.floor( z / 140 ) ) % 3 === 0 && rnd() < 0.8 ) continue;
+		let r = rnd(), k = 0;
+		while ( k < W.length - 1 && r > W[ k ][ 1 ] ) { r -= W[ k ][ 1 ]; k ++; }
+		const s = W[ k ][ 0 ], rank = rnd();
+		const d = Math.hypot( x, z );
+		if ( d > R || rank > imp.keepAt( d ) + 0.15 ) continue;
+		rec.set( s === SP.PALM ? [ x, 0, z, 7 + 9 * rnd(), rnd() * 6.28, rank, 0.1 * rnd(), rnd() * 6.28 ] : [ x, 0, z, 0.7 + 0.5 * rnd(), rnd() * 6.28, rank, 0.9 + 0.2 * rnd(), rnd() ] );
+		impF.push( rec, 0, 0, 0, 0, imp.slot[ s ] + rank * 0.999 );
+	}
+	impF.end( origin );
+	window.__impF = impF;
+}
 for ( const t of targets ) t.begin();
 impT.begin();
 // layout=rows: full / mid / impostor rows one behind the other; layout=pairs: side by side
@@ -131,14 +172,30 @@ set.list.forEach( ( s, k ) => {
 	if ( lods[ s ].mid ) { rec.set( inst( s, x + rowX[ 1 ], rowZ[ 1 ], k ) ); lods[ s ].mid.push( rec, 0, 0, 0, 0 ); }
 	if ( imp.slot[ s ] >= 0 ) { rec.set( inst( s, x + rowX[ 2 ], rowZ[ 2 ], k ) ); impT.push( rec, 0, 0, 0, 0, imp.slot[ s ] + rec[ 5 ] * 0.999 ); }
 } );
+if ( SET === 'grass' ) {
+	// scatter.js grass: ~3.7 clumps / m² x density; pasture s 0.5-0.8 (b 1), meadow 0.6-1.15 (b 0)
+	let seed = 3;
+	const rnd = () => ( seed = ( seed * 16807 ) % 2147483647 ) / 2147483647;
+	const rec = new Float32Array( STRIDE );
+	const pk = Math.round( 0.25 * 255 ); // moisture 0.25 (a typical leeward meadow), flat, no south exposure
+	for ( let n = 0; n < 9000; n ++ ) {
+		const x = ( rnd() - 0.5 ) * 30, z = - rnd() * 24;
+		const pasture = x < 0;
+		if ( rnd() > ( pasture ? 0.9 : 0.8 ) ) continue;
+		rec.set( [ x, 0, z, pasture ? 0.5 + 0.3 * rnd() : 0.6 + 0.55 * rnd(), rnd() * 6.28, rnd(), pk + 128 * 65536, pasture ? 1 : 0 ] );
+		lods[ SP.GRASS ].near.push( rec, 0, 0, 0, 0 );
+	}
+}
 for ( const t of targets ) t.end( origin );
 impT.end( origin );
 
 const W = set.gap * set.list.length;
 const cam = ( q.get( 'cam' ) || '' ).split( ',' ).map( Number );
 const look = ( q.get( 'look' ) || '' ).split( ',' ).map( Number );
-camera.position.set( ...( cam.length === 3 ? cam : [ 0, set.gap * 0.5, W * 0.62 ] ) );
-camera.lookAt( ...( look.length === 3 ? look : [ 0, set.gap * 0.35, rowZ[ 1 ] ] ) );
+const forest = SET === 'forest';
+const lawnSet = SET === 'grass';
+camera.position.set( ...( cam.length === 3 ? cam : forest ? [ 0, 300, 0 ] : lawnSet ? [ 0, 1.7, 2 ] : [ 0, set.gap * 0.5, W * 0.62 ] ) );
+camera.lookAt( ...( look.length === 3 ? look : forest ? [ 0, 0, - 1400 ] : lawnSet ? [ 0, 0, - 8 ] : [ 0, set.gap * 0.35, rowZ[ 1 ] ] ) );
 VG.uWindStr.value = 0.25 + + ( q.get( 'wind' ) ?? 0.45 ) * 0.95;
 
 // atlas debug view: ?atlas=A|B draws the impostor atlas full screen, ?atlas=leaf the foliage atlas
@@ -152,7 +209,8 @@ if ( q.get( 'atlas' ) ) {
 	renderer.render( s2, oc );
 	window.__ready = true; window.__done = true;
 } else {
-	const maxFrames = + ( q.get( 'frames' ) || 0 );
+	// (a few frames more than asked: headless drivers can finish the first shader compiles late)
+	const maxFrames = q.get( 'frames' ) ? + q.get( 'frames' ) + 9 : 0;
 	let frames = 0;
 	let last = performance.now();
 	const loop = () => {

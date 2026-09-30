@@ -2,8 +2,8 @@
 // awnings, signs, canopies and rooftop clutter. Everything a storey owns is tagged with that storey so
 // the shell can hide it while the real interior of that storey is loaded (the interior rebuilds it).
 import { L, hash32, rng, pick, pumpsOf } from './data.js';
-import { M, slabT } from './plan.js';
-import { signFor, signUV, SIGNS } from './names.js';
+import { M, slabT, SIDE_N } from './plan.js';
+import { signFor, signUV, signIndex, SIGNS } from './names.js';
 
 const WHITE = [ 255, 255, 255 ];
 
@@ -298,6 +298,7 @@ function flatRoof( g, P, x0, z0, x1, z1, top, lod ) {
 	if ( P.stair && P.stair.roof && S.n > 1 ) g.setTag( P.r.i + 1, S.n - 1 );
 	g.box( x0, top - 0.02, z0, x1, top + 0.08, z1, { py: deck, px: mat.ext, nx: mat.ext, pz: mat.ext, nz: mat.ext } );
 	g.setTag( P.r.i + 1, 255 );
+	if ( S.arch === 'ctower' ) return; // the cab's roof: towerCab
 	// parapet
 	const ph = S.arch === 'tower' ? 1.1 : S.arch === 'house' ? 0.35 : 0.8;
 	const t = 0.22;
@@ -635,6 +636,19 @@ export function frontSteps( P, gh ) {
 			out.push( { x, z, nx: f.nx, nz: f.nz, side, w: ramp ? op.w + 0.8 : Math.max( 1.2, op.w + 0.4 ), rise, gy, kind: op.kind, ramp, len: ramp ? Math.min( 14, Math.max( 2, rise / 0.14 ) ) : 0 } );
 		}
 	}
+	// a walk-up's ground-floor gallery stands on the plinth: a flight up from the ground in the middle of
+	// each of its outer edges
+	for ( const rl of st.rails ) {
+		if ( rl.room.k !== 'gallery' ) continue;
+		const len = Math.hypot( rl.x1 - rl.x0, rl.z1 - rl.z0 );
+		if ( len < 1.6 ) continue;
+		const [ nx, nz ] = SIDE_N[ rl.side ];
+		const x = ( rl.x0 + rl.x1 ) / 2, z = ( rl.z0 + rl.z1 ) / 2;
+		const gy = groundAt( P, gh, x + nx * 1.5, z + nz * 1.5 );
+		const rise = fy - gy;
+		if ( rise < 0.25 ) continue;
+		out.push( { x, z, nx, nz, side: rl.side, w: Math.min( 2.4, len - 0.4 ), rise, gy, kind: 'walk', ramp: false, len: 0 } );
+	}
 	void rect;
 	return out;
 }
@@ -714,6 +728,8 @@ function features( g, P, lod, gh ) {
 	if ( S.arch === 'shop' || S.arch === 'food' || S.arch === 'bigbox' || S.arch === 'gas' || ( S.arch === 'tower' && S.shop ) ) storefronts( g, P, lod );
 	else if ( [ 'police', 'fire', 'hospital', 'clinic', 'school', 'church', 'hq', 'armory', 'office', 'tower', 'walkup' ].includes( S.arch ) ) nameSign( g, P, lod );
 	if ( P.feats.canopy ) gasCanopy( g, P, lod, gh );
+	if ( S.arch === 'terminal' ) terminalCanopy( g, P, lod, gh );
+	if ( S.arch === 'ctower' ) towerCab( g, P, lod );
 	if ( S.arch === 'fire' && lod === 0 ) {
 		// the hose-drying tower
 		// behind the building (the stairwell fills the back corner inside)
@@ -723,6 +739,82 @@ function features( g, P, lod, gh ) {
 		flatCap( g, x0 - 0.1, z0 - 0.1, x1 + 0.1, z1 + 0.1, S.top + 5 );
 	}
 	void st; void mat; void r; void gh;
+}
+
+// ---- the airport ---------------------------------------------------------------------------------------------
+
+// the drop-off canopy along the terminal's landside front: its extent and its columns (local coords)
+export function terminalCanopyOf( P ) {
+	const { rect, S } = P;
+	const c = { x0: rect.x0 + 1.5, x1: rect.x1 - 1.5, z0: rect.z0 - 6, z1: rect.z0, y: S.fy + 4.9, cols: [] };
+	const n = Math.max( 2, Math.round( ( c.x1 - c.x0 ) / 8 ) );
+	for ( let i = 0; i <= n; i ++ ) c.cols.push( [ c.x0 + 0.4 + ( c.x1 - c.x0 - 0.8 ) * i / n, c.z0 + 0.5 ] );
+	return c;
+}
+
+function terminalCanopy( g, P, lod, gh ) {
+	const c = terminalCanopyOf( P );
+	const white = M( L.metal, [ 236, 236, 232 ], 2 ), under = M( L.plain, [ 226, 226, 222 ], 1 );
+	g.box( c.x0, c.y, c.z0, c.x1, c.y + 0.55, c.z1, { px: white, nx: white, nz: white, py: M( L.bitumen, [ 176, 176, 176 ], 4 ), ny: under } );
+	const colM = M( L.metal, [ 200, 202, 206 ], 1 );
+	for ( const [ x, z ] of c.cols ) {
+		const y = gh ? groundAt( P, gh, x, z ) : P.S.fy;
+		g.cyl( x, y - 0.3, z, 0.18, c.y - y + 0.3, lod > 0 ? 6 : 12, colM, 0 );
+	}
+	// the curb along the drop-off lane
+	if ( lod === 0 ) {
+		const cm = M( L.concrete, [ 214, 210, 202 ], 2 );
+		const y = gh ? groundAt( P, gh, ( c.x0 + c.x1 ) / 2, c.z0 ) : P.S.fy;
+		g.box( c.x0, y - 0.3, c.z0 - 0.02, c.x1, y + 0.15, c.z0 + 0.25, cm );
+	}
+	// Departures over the left door, Arrivals over the right one
+	const st = P.storeys[ 0 ];
+	const f = st.facades.find( f => f.side === 0 && f.ops.some( o => o.ext ) );
+	if ( ! f ) return;
+	// (u runs to the right of someone facing the building)
+	const doors = f.ops.filter( o => o.ext ).sort( ( a, b ) => a.u - b.u ).map( o => f.ax + ( f.bx - f.ax ) / f.len * o.u );
+	const names = [ signIndex( 'Departures' ), signIndex( 'Arrivals' ) ];
+	doors.forEach( ( x, k ) => {
+		const idx = names[ Math.min( k, 1 ) ];
+		if ( idx < 0 ) return;
+		const sg = { idx, board: SIGNS[ idx ].bg };
+		signBoard( g, x - 2.6, x + 2.6, c.y + 0.05, c.y + 0.5, c.z0 - 0.12, sg );
+	} );
+}
+
+// the control tower's cab: a catwalk round it, the overhanging roof, antennas and the radar
+export function towerCatwalkOf( P ) {
+	const { rect, S } = P;
+	return { x0: rect.x0 - 1.1, x1: rect.x1 + 1.1, z0: rect.z0 - 1.1, z1: rect.z1 + 1.1, y: S.ys[ S.n - 1 ] };
+}
+
+function towerCab( g, P, lod ) {
+	const { rect, S, mat } = P;
+	const cw = towerCatwalkOf( P ), y = cw.y;
+	const deck = M( L.concrete, [ 206, 204, 198 ], 2 ), under = M( L.plain, [ 214, 212, 206 ], 1 );
+	const DM = { py: deck, ny: under, px: mat.ext, nx: mat.ext, pz: mat.ext, nz: mat.ext };
+	g.box( cw.x0, y - 0.3, cw.z0, cw.x1, y, rect.z0, DM );
+	g.box( cw.x0, y - 0.3, rect.z1, cw.x1, y, cw.z1, DM );
+	g.box( cw.x0, y - 0.3, rect.z0, rect.x0, y, rect.z1, DM );
+	g.box( rect.x1, y - 0.3, rect.z0, cw.x1, y, rect.z1, DM );
+	const corners = [ [ cw.x0, cw.z0 ], [ cw.x1, cw.z0 ], [ cw.x1, cw.z1 ], [ cw.x0, cw.z1 ] ];
+	for ( let k = 0; k < 4; k ++ ) railing( g, P, corners[ k ], corners[ ( k + 1 ) % 4 ], y, [], lod > 0 ? 1.5 : 0.5, 'catwalk' );
+	// the roof slab overhangs the slanted-looking glass
+	const top = S.top;
+	const roofM = { py: M( L.bitumen, [ 176, 176, 176 ], 4 ), ny: under, px: mat.ext, nx: mat.ext, pz: mat.ext, nz: mat.ext };
+	g.box( rect.x0 - 1.3, top - 0.05, rect.z0 - 1.3, rect.x1 + 1.3, top + 0.5, rect.z1 + 1.3, roofM );
+	const R = rng( hash32( P.bid, 0x70e ) );
+	const mast = M( L.metal, [ 190, 190, 190 ], 1 ), red = M( L.plain, [ 190, 40, 32 ], 1 );
+	const cx = ( rect.x0 + rect.x1 ) / 2, cz = ( rect.z0 + rect.z1 ) / 2;
+	g.cyl( cx + 2.2, top + 0.5, cz - 2.2, 0.08, 6.5, 6, mast, 1 );
+	g.cyl( cx + 2.2, top + 7.0, cz - 2.2, 0.14, 0.3, 8, red, 1 );
+	if ( lod > 0 ) return;
+	g.cyl( cx - 2.4, top + 0.5, cz + 2.0, 0.05, 3.5 + R() * 2, 6, mast, 1 );
+	// the radar on a short plinth
+	g.box( cx - 0.5, top + 0.5, cz - 0.5, cx + 0.5, top + 1.3, cz + 0.5, M( L.plain, [ 220, 220, 216 ], 1 ) );
+	g.push().translate( cx, top + 1.5, cz ).rotY( R() * Math.PI );
+	g.box( - 1.2, - 0.2, - 0.08, 1.2, 0.35, 0.08, M( L.plain, [ 236, 236, 232 ], 1 ) );
+	g.pop();
 }
 
 export function hoseTower( P ) {

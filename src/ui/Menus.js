@@ -751,11 +751,18 @@ export class Menus {
 		m.focus( focusId );
 	}
 
-	async _endWorld( id ) {
-		try {
-			const S = this.app.saves, w = await S.load( id );
-			if ( w && ! w.dead ) { w.dead = true; await S.save( w ); }
-		} catch ( e ) { console.warn( 'could not end the world', e ); }
+	// store a hardcore world's final record (this death, its stats and play time) as dead; inside a frame so its
+	// thumbnail is the last view instead of a black canvas
+	_endWorld( g ) {
+		return this._saveInFrame( async () => {
+			try {
+				const s = g.gather ? g.gather() : await this.app.saves.load( g.save.id );
+				if ( ! s ) return;
+				s.dead = true;
+				s.thumb = this.app.thumbnail() || s.thumb;
+				await this.app.saves.save( s );
+			} catch ( e ) { console.warn( 'could not end the world', e ); }
+		} );
 	}
 
 	death( info = {} ) {
@@ -764,7 +771,7 @@ export class Menus {
 		const kills = info.kills ?? g?.stats?.lifeKills ?? 0;
 		// hardcore: the world ends now. Game.saveNow() skips saves once a hardcore survivor is dead, so its dead
 		// flag never reaches storage on its own; without this, Continue and Play would reopen the world.
-		const ended = hard && g.save?.id ? this._endWorld( g.save.id ) : null;
+		const ended = hard ? this._endWorld( g ) : null;
 		let busy = false;
 		const quit = async () => {
 			if ( busy ) return;

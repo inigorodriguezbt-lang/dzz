@@ -6,7 +6,7 @@ import { icon } from './icons.js';
 import { toggle, popMenu, placePop } from './widgets.js';
 import { drawGlyph } from './canvasIcons.js';
 
-const MAX_PPM = 3; // px per metre: past this the 4 m relief tiles only get blurrier
+const MAX_PPM = 2; // px per metre: past this the 4 m relief tiles only get blurrier (8 px per texel)
 const PAN = 600; // keyboard pan, px/s
 const ACCENT = '#FF7A2E', ALARM = '#FF5C5C';
 const LAYERS = [ [ 'roads', 'Roads' ], [ 'buildings', 'Buildings' ], [ 'grid', 'Grid' ], [ 'markers', 'Markers' ], [ 'vehicles', 'Vehicles' ] ];
@@ -226,22 +226,22 @@ export class MapUI {
 		return m;
 	}
 
-	// the marker whose glyph or label is under the point
+	// the marker whose glyph (or name, where it is shown) is under the point
 	_markerAt( sx, sy ) {
 		if ( ! this.layers.markers ) return null;
-		const list = this.ui.game.markers.list();
-		for ( let k = list.length - 1; k >= 0; k -- ) {
-			const r = this._markerRect( list[ k ] );
-			if ( sx >= r[ 0 ] && sx <= r[ 2 ] && sy >= r[ 1 ] && sy <= r[ 3 ] ) return list[ k ];
+		const g = this.ui.game;
+		const shown = this._placeMarkers( g.markers.list(), this._meRect(), this.ui.u || 1 );
+		for ( let k = shown.length - 1; k >= 0; k -- ) {
+			const r = shown[ k ].rect;
+			if ( sx >= r[ 0 ] && sx <= r[ 2 ] && sy >= r[ 1 ] && sy <= r[ 3 ] ) return shown[ k ].m;
 		}
 		return null;
 	}
 
-	// screen rect of a marker's glyph and label: hit testing, and kept clear of place names
-	_markerRect( m ) {
-		const u = this.ui.u, [ x, y ] = this._toScreen( m.x, m.z );
-		const tw = m.kind === 'death' ? 0 : this._labelWidth( m.label );
-		return [ x - 10 * u, y - 10 * u, x + ( tw ? 10 * u + tw + 2 * u : 10 * u ), y + 10 * u ];
+	// screen rect of the player disc
+	_meRect() {
+		const u = this.ui.u || 1, me = this._me(), [ px, py ] = this._toScreen( me.x, me.z );
+		return [ px - 14 * u, py - 14 * u, px + 14 * u, py + 14 * u ];
 	}
 
 	_labelWidth( text ) {
@@ -454,8 +454,9 @@ export class MapUI {
 		ctx.setTransform( this.dpr, 0, 0, this.dpr, 0, 0 );
 		const [ px, py ] = this._toScreen( me.x, me.z );
 		// place names keep clear of the player, the markers and the plates over the map
-		const avoid = [ [ px - 14 * u, py - 14 * u, px + 14 * u, py + 14 * u ], ...this._chrome( u ) ];
-		if ( this.layers.markers ) for ( const m of markers ) avoid.push( this._markerRect( m ) );
+		const meR = this._meRect();
+		const shown = this.layers.markers ? this._placeMarkers( markers, meR, u ) : [];
+		const avoid = [ meR, ...this._chrome( u ), ...shown.map( o => o.rect ) ];
 		const res = mv.draw( ctx, { cx: v.cx, cz: v.cz, ppm: v.ppm, rot: 0, w: W, h: H },
 			{ priority: 0.1, u, pxRatio: this.dpr, layers: this.layers, avoid, under: ( c, toScreen ) => this._grid( c, toScreen ) } );
 		this._fading = res.fading;
@@ -465,11 +466,9 @@ export class MapUI {
 			const [ sx, sy ] = res.toScreen( p.x, p.z );
 			if ( sx > - 20 && sy > - 20 && sx < W + 20 && sy < H + 20 ) drawGlyph( ctx, 'car', sx, sy, 18 * u, { color: '#fff', lw: 1.5 * u, halo: 1.25 * u } );
 		}
-		if ( this.layers.markers ) {
-			// death last, so it is never under a user marker
-			const order = markers.slice().sort( ( a, b ) => ( a.kind === 'death' ) - ( b.kind === 'death' ) );
-			for ( const m of order ) this._drawMarker( ctx, m, res.toScreen, u );
-		}
+		// death last, so it is never under a user marker
+		shown.sort( ( a, b ) => ( a.m.kind === 'death' ) - ( b.m.kind === 'death' ) );
+		for ( const o of shown ) this._drawMarker( ctx, o.m, res.toScreen, u, o.label );
 		this._drawPlayer( ctx, px, py, yaw, u );
 		// scale bar: a round distance close to 120u
 		const d = nice( 120 * u / v.ppm ), len = Math.round( d * v.ppm );
@@ -508,13 +507,31 @@ export class MapUI {
 		ctx.restore();
 	}
 
-	_drawMarker( ctx, m, toScreen, u ) {
+	// which marker names fit: every glyph is drawn, a name only where it clears the player, the other glyphs and
+	// the names already placed (markers bunch up when zoomed out). Returns [ { m, label, rect } ], rect = what shows.
+	_placeMarkers( markers, player, u ) {
+		const hit = ( r, p ) => r[ 0 ] < p[ 2 ] && r[ 2 ] > p[ 0 ] && r[ 1 ] < p[ 3 ] && r[ 3 ] > p[ 1 ];
+		const at = markers.map( m => this._toScreen( m.x, m.z ) );
+		const glyphs = at.map( ( [ x, y ] ) => [ x - 8 * u, y - 10 * u, x + 8 * u, y + 10 * u ] );
+		const placed = [ player ];
+		return markers.map( ( m, i ) => {
+			const g = glyphs[ i ], [ x, y ] = at[ i ];
+			if ( m.kind === 'death' || ! m.label ) return { m, label: false, rect: g };
+			const r = [ x + 8 * u, y - 12 * u, x + 12 * u + this._labelWidth( m.label ), y + 4 * u ];
+			if ( placed.some( p => hit( r, p ) ) || glyphs.some( ( p, k ) => k !== i && hit( r, p ) ) ) return { m, label: false, rect: g };
+			placed.push( r );
+			return { m, label: true, rect: [ g[ 0 ], r[ 1 ], r[ 2 ], g[ 3 ] ] };
+		} );
+	}
+
+	_drawMarker( ctx, m, toScreen, u, label = true ) {
 		const [ sx, sy ] = toScreen( m.x, m.z );
 		if ( sx < - 200 || sy < - 30 || sx > this.W + 30 || sy > this.H + 30 ) return;
 		// glyph boxes are 24-grid icons: the diamond fills 12 x 17 of its 24, the skull 16 x 17
 		if ( m.kind === 'death' ) { drawGlyph( ctx, 'skull', sx, sy, 20 * u, { color: ALARM, lw: 1.5 * u, halo: 1.5 * u } ); return; }
 		if ( m.kind === 'locate' ) drawGlyph( ctx, 'marker', sx, sy, 20 * u, { color: ACCENT, lw: 2 * u, halo: 1.5 * u } );
 		else drawGlyph( ctx, 'marker', sx, sy, 20 * u, { color: '#000', fill: ACCENT, lw: 1.5 * u } );
+		if ( ! label ) return;
 		ctx.save();
 		ctx.font = `600 ${13 * u}px Inter, system-ui, sans-serif`;
 		ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';

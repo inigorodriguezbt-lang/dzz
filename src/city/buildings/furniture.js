@@ -1106,6 +1106,61 @@ export function furnishRoom( O, P, st, rm, fin ) {
 			}
 			break;
 		}
+		case 'checkin': {
+			// check-in desks in a row across the hall, the bag belt behind them, a few abandoned suitcases
+			const n = Math.max( 1, Math.min( 4, Math.floor( ( C.w - 4 ) / 5.5 ) ) );
+			const cz = C.z0 + Math.min( 6.5, C.d * 0.55 );
+			for ( let i = 0; i < n; i ++ ) {
+				const x = ( C.x0 + C.x1 ) / 2 + ( i - ( n - 1 ) / 2 ) * 5.5;
+				const r = [ x - 2.1, cz, x + 2.1, cz + 2.0 ];
+				if ( C.used.some( u => overlaps( u, r ) ) || C.clear.some( u => overlaps( u, r ) ) ) continue;
+				C.used.push( r );
+				const F = frame( O, x, st.y, cz, 0 );
+				checkinDesk( F, 3.8 );
+			}
+			for ( let i = 0; i < 4; i ++ ) { const f = inRoom( C, 0.5, 0.35, 0.8 ); if ( f ) suitcase( f ); }
+			for ( let i = 0; i < 3; i ++ ) { const b = onWall( C, 1.8, 0.55, 0.9, [ 0, 1, 3 ] ); if ( b ) seats( b, 3, [ 60, 80, 110 ] ); }
+			for ( let i = 0; i < 2; i ++ ) { const p = onWall( C, 0.45, 0.45, 1.0, [ 0, 1, 3 ], 'corner' ); if ( p ) plant( p ); }
+			break;
+		}
+		case 'gate': {
+			// rows of joined seats facing the apron windows, the gate desk by the doors
+			const gd = onWall( C, 2.2, 0.7, 1.1, [ 3, 1 ], 'centre' );
+			if ( gd ) { counter( gd, 2.2, 0.7, 1.05, paint( [ 60, 70, 90 ] ) ); gd.container( - 0.6, 0, 0, 0.6, 1.05, 0.7, 'Desk', 'office', 8, { n: 1 } ); gd.box( - 0.25, 1.05, 0.1, 0.25, 1.37, 0.13, BLACK ); }
+			const m = [ [ 50, 70, 110 ], [ 40, 44, 50 ], [ 120, 40, 40 ] ][ ( R() * 3 ) | 0 ];
+			// back-to-back pairs of rows with an aisle between the pairs
+			for ( let z = C.z0 + 1.6; z + 1.15 < C.z1 - 2.2; z += 2.75 ) {
+				for ( let x = C.x0 + 1.4; x + 3.0 < C.x1 - 1.0; x += 4.2 ) {
+					const r = [ x, z, x + 3.0, z + 1.15 ];
+					if ( C.used.some( u => overlaps( u, r ) ) || C.clear.some( u => overlaps( u, r ) ) ) continue;
+					C.used.push( r );
+					seats( frame( O, x + 1.5, st.y, z + 0.55, Math.PI ), 5, m );
+					seats( frame( O, x + 1.5, st.y, z + 0.6, 0 ), 5, m );
+				}
+			}
+			for ( let i = 0; i < 3; i ++ ) { const f = inRoom( C, 0.5, 0.35, 0.6 ); if ( f ) suitcase( f ); }
+			break;
+		}
+		case 'claim': {
+			// the baggage carousel with what nobody came back for
+			const lw = Math.min( 7, C.w - 2.6 ), ld = Math.min( 2.2, C.d - 3 );
+			const F = centre( C, lw, ld );
+			if ( F ) carousel( F, lw, ld );
+			for ( let i = 0; i < 3; i ++ ) { const f = inRoom( C, 0.5, 0.35, 0.6 ); if ( f ) suitcase( f ); }
+			const b = onWall( C, 1.8, 0.55, 0.9, [ 1, 3, 0 ] ); if ( b ) seats( b, 3, [ 60, 80, 110 ] );
+			break;
+		}
+		case 'cab': {
+			// radar and radio consoles under the windows
+			for ( let i = 0; i < 4; i ++ ) {
+				const w = Math.min( 2.4, Math.max( C.w, C.d ) - 1.2 );
+				const f = onWall( C, w, 0.75, 0.9, [ 0, 1, 2, 3 ] );
+				if ( ! f ) break;
+				console_( f, w );
+			}
+			for ( let i = 0; i < 2; i ++ ) { const c = inRoom( C, 0.6, 0.6, 0.4 ); if ( c ) chair( c, cloth( [ 50, 52, 58 ] ), R() < 0.3 ); }
+			break;
+		}
 		case 'porch': {
 			if ( R() < 0.6 ) { const f = inRoom( C, 0.7, 0.7, 0.3 ); if ( f ) chair( f, wood( [ 120, 90, 60 ] ), R() < 0.2 ); }
 			break;
@@ -1150,6 +1205,99 @@ function barricade( C ) {
 			return;
 		}
 	}
+}
+
+// ---- the airport ----------------------------------------------------------------------------------------------------
+
+// a check-in desk (passengers in front, -z) with the scale and the bag belt behind
+function checkinDesk( F, w ) {
+	const body = paint( [ 70, 80, 96 ] ), top = M( L.terrazzo, [ 230, 226, 216 ], 1.5, F_IN );
+	F.box( - w / 2, 0, 0, w / 2, 1.02, 0.6, body );
+	F.box( - w / 2 - 0.02, 1.02, - 0.04, w / 2 + 0.02, 1.06, 0.62, top );
+	// the scales between the desks
+	F.box( - 0.4, 0, - 0.02, 0.4, 0.28, 0.58, STEEL );
+	for ( const s of [ - 1, 1 ] ) {
+		F.box( s * w / 4 - 0.25, 1.06, 0.3, s * w / 4 + 0.25, 1.38, 0.33, BLACK );
+		F.container( s * w / 4 - 0.5, 0, 0.1, s * w / 4 + 0.5, 1.06, 0.6, 'Desk', 'office', 8, { n: 1 } );
+	}
+	F.col( - w / 2, 0, 0, w / 2, 1.06, 0.62, 1 );
+	// the belt behind, past the agents' walkway
+	F.box( - w / 2, 0, 1.3, w / 2, 0.42, 1.95, STEEL );
+	F.box( - w / 2 + 0.03, 0.42, 1.34, w / 2 - 0.03, 0.44, 1.91, BLACK );
+	F.col( - w / 2, 0, 1.3, w / 2, 0.44, 1.95, 2, 2 );
+	F.spot( w / 4, 1.06, 0.3, 'office', 0.35 );
+	F.spot( - w / 4, 0.44, 1.6, 'hotel_room', 0.3 );
+	return F;
+}
+
+// joined airport seats on a beam (n seats of 0.6 m), facing +z
+function seats( F, n, c ) {
+	const cm = cloth( c ), w = n * 0.6;
+	for ( let k = 0; k < n; k ++ ) {
+		const a = - w / 2 + k * 0.6 + 0.03, b = a + 0.54;
+		F.box( a, 0.42, 0.05, b, 0.47, 0.5, cm ).box( a, 0.47, 0.02, b, 0.86, 0.08, cm );
+	}
+	F.box( - w / 2, 0.3, 0.2, w / 2, 0.36, 0.3, metal() );
+	F.box( - w / 2 + 0.1, 0, 0.2, - w / 2 + 0.16, 0.3, 0.3, metal() ).box( w / 2 - 0.16, 0, 0.2, w / 2 - 0.1, 0.3, 0.3, metal() );
+	F.col( - w / 2, 0, 0, w / 2, 0.5, 0.55, 2, 2 );
+	F.spot( ( F.O.R() - 0.5 ) * w * 0.8, 0.47, 0.3, 'hotel_room', 0.12 );
+	return F;
+}
+
+// a suitcase left standing or lying on the floor (searchable)
+function suitcase( F ) {
+	const O = F.O, R = O.R;
+	const c = [ [ 40, 44, 52 ], [ 120, 30, 36 ], [ 30, 70, 110 ], [ 60, 90, 70 ], [ 170, 150, 110 ] ][ ( R() * 5 ) | 0 ];
+	const m = paint( c );
+	if ( R() < 0.5 ) {
+		// upright with the handle out
+		F.box( - 0.22, 0.03, - 0.13, 0.22, 0.68, 0.13, m ).box( - 0.12, 0.68, - 0.02, - 0.1, 0.95, 0.0, BLACK ).box( 0.1, 0.68, - 0.02, 0.12, 0.95, 0.0, BLACK ).box( - 0.12, 0.93, - 0.02, 0.12, 0.96, 0.0, BLACK );
+		F.col( - 0.22, 0, - 0.13, 0.22, 0.68, 0.13, 1, 2 );
+		F.container( - 0.22, 0, - 0.13, 0.22, 0.68, 0.13, 'Suitcase', 'hotel_room', 20, { n: 2, empty: 0.3 } );
+	} else {
+		// flat on its back
+		F.box( - 0.34, 0, - 0.22, 0.34, 0.26, 0.22, m ).box( - 0.08, 0.26, - 0.03, 0.08, 0.3, 0.03, BLACK );
+		F.col( - 0.34, 0, - 0.22, 0.34, 0.26, 0.22, 1, 2 );
+		F.container( - 0.34, 0, - 0.22, 0.34, 0.26, 0.22, 'Suitcase', 'hotel_room', 20, { n: 2, empty: 0.3 } );
+	}
+	return F;
+}
+
+// an oval baggage carousel (a rounded run of metal plates round a central island)
+function carousel( F, w, d ) {
+	const r = d / 2, ex = w / 2 - r;
+	F.box( - ex, 0, 0, ex, 0.45, d, STEEL );
+	F.box( - ex, 0.45, 0.04, ex, 0.47, d - 0.04, BLACK );
+	F.cyl( - ex, 0, r, r, 0.45, 12, STEEL ).cyl( ex, 0, r, r, 0.45, 12, STEEL );
+	F.cyl( - ex, 0.45, r, r - 0.04, 0.02, 12, BLACK ).cyl( ex, 0.45, r, r - 0.04, 0.02, 12, BLACK );
+	// the island in the middle
+	F.box( - ex, 0.47, r - 0.3, ex, 0.9, r + 0.3, metal( [ 150, 152, 156 ] ) );
+	F.col( - w / 2, 0, 0, w / 2, 0.47, d, 2, 2 ).col( - ex, 0.47, r - 0.3, ex, 0.9, r + 0.3, 2, 2 );
+	const O = F.O;
+	for ( let i = 0; i < 4; i ++ ) {
+		if ( O.R() < 0.35 ) continue;
+		const x = - ex + ( i + 0.5 ) * ( 2 * ex ) / 4, z = O.R() < 0.5 ? 0.35 : d - 0.35;
+		const [ tx, tz ] = F.T( x, z );
+		suitcase( frame( O, tx, F.y + 0.47, tz, F.rot + O.R() * 0.6 - 0.3 ) );
+	}
+	return F;
+}
+
+// a tower cab console: a sloped desk with screens and radios
+function console_( F, w ) {
+	const body = paint( [ 70, 74, 80 ] );
+	F.box( - w / 2, 0, 0.1, w / 2, 0.78, 0.75, body );
+	F.box( - w / 2, 0.78, 0.05, w / 2, 0.82, 0.78, paint( [ 40, 42, 46 ] ) );
+	const n = Math.max( 1, Math.floor( w / 0.7 ) );
+	for ( let k = 0; k < n; k ++ ) {
+		const x = - w / 2 + ( k + 0.5 ) * w / n;
+		F.box( x - 0.26, 0.82, 0.12, x + 0.26, 1.2, 0.16, BLACK );
+		F.box( x - 0.2, 0.82, 0.35, x + 0.2, 0.86, 0.55, paint( [ 50, 52, 58 ] ) );
+	}
+	F.col( - w / 2, 0, 0.05, w / 2, 0.82, 0.78, 2, 2 );
+	F.container( - w / 2, 0, 0.1, - w / 2 + 0.6, 0.78, 0.75, 'Cabinet', 'office', 10, { n: 1 } );
+	F.spot( w / 2 - 0.3, 0.82, 0.5, 'office', 0.4 );
+	return F;
 }
 
 function filing( F, loot ) {

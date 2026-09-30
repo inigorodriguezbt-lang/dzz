@@ -415,7 +415,7 @@ export function buildBroadleaf( kind, lod = 0, seed = 21 ) {
 
 // Leaf cards of a crown. The mid level keeps the outer shell of every lobe (a little enlarged) and
 // drops the cards buried inside: the crown keeps the full model's silhouette and outer shading, so
-// the short dithered hand-over between the two levels doesn't show.
+// the short hand-over between the two levels doesn't show.
 const MID_KEEP = 0.5, MID_GROW = 1.15;
 function emitCrown( b, specs, lod, extra, crownC, crownR ) {
 	let list = specs;

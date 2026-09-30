@@ -15,6 +15,7 @@ export const KINDS = {
 	waiting: { hub: 3 }, classroom: {}, nave: { hub: 2 }, vestry: {}, hallbig: { hub: 3 }, bay: { hub: 3 }, dayroom: { hub: 1 },
 	dorm: {}, bunk: {}, latrine: {}, vault: {}, sorting: {}, workshop: {}, openoffice: { hub: 1 }, meeting: {}, breakroom: {},
 	hotelroom: {}, hbath: {}, entry: { hub: 2 }, elevator: {}, utility: {}, rx: {}, tent: { hub: 1 }, observatory: { hub: 1 }, teller: { hub: 3 },
+	checkin: { hub: 3 }, gate: { hub: 3 }, claim: { hub: 2 }, cab: { hub: 1 },
 };
 
 const EPS = 0.02;
@@ -134,6 +135,18 @@ function palette( P ) {
 			mat.roof = mat.ext;
 			P.winStyle = 0;
 			break;
+		case 'terminal':
+			mat.ext = M( L.panels, pick( R, [ [ 226, 226, 220 ], [ 214, 218, 222 ], [ 232, 226, 212 ] ] ), 3 );
+			mat.roof = M( L.bitumen, [ 176, 176, 176 ], 4 );
+			mat.awning = M( L.metal, [ 236, 236, 232 ], 2 );
+			P.winStyle = 3; P.frame = 2;
+			break;
+		case 'ctower':
+			mat.ext = M( L.concrete, [ 226, 224, 218 ], 3 );
+			mat.roof = M( L.bitumen, [ 176, 176, 176 ], 4 );
+			mat.rail = M( L.plain, [ 236, 236, 232 ], 1 );
+			P.winStyle = 1; P.frame = 2;
+			break;
 		case 'dome':
 			mat.ext = M( L.stucco, [ 236, 236, 232 ], 3 );
 			// the Mauna Kea domes are painted white steel
@@ -163,7 +176,11 @@ function windowsFor( P, room, len, st, side ) {
 		return { bay: b, w: ww, h, sill, style };
 	};
 	if ( ws === 0 ) return null;
+	// the control tower's cab is glass all round, above a desk-high sill
+	if ( S.arch === 'ctower' && st.i === S.n - 1 ) return w( 1.6, 1.52, ch - 1.15, 0.95, 3 );
 	switch ( k ) {
+		case 'checkin': case 'gate': case 'claim':
+			return w( 2.0, 1.92, ch - 1.0, 0.35, 3 );
 		case 'bath': case 'hbath': case 'restroom': case 'latrine': return len >= 1.3 ? { bay: len, w: 0.65, h: 0.7, sill: 1.5, style: 11 } : null;
 		case 'stair': return len >= 2 ? { bay: len, w: 0.9, h: Math.min( 1.6, ch - 1.6 ), sill: 1.1, style: ws === 3 ? 3 : ws === 4 ? 1 : ws } : null;
 		case 'hall': case 'corridor': case 'entry': return len >= 1.5 && len < 4 ? { bay: len, w: Math.min( 1.1, len - 0.5 ), h: 1.3, sill: 0.95, style: ws === 4 ? 1 : ws } : null;
@@ -791,6 +808,52 @@ const LAYOUT = {
 		extDoor( st, off, 2, { kind: 'metal' } );
 	},
 
+	// a small island airport: the check-in hall on the landside (front), the gate lounge, a café, a shop and
+	// the baggage claim on the airside (back)
+	terminal( P ) {
+		const { rect } = P;
+		const st = P.storeys[ 0 ];
+		const W = rect.x1 - rect.x0, D = rect.z1 - rect.z0;
+		const fz = rect.z0 + Math.min( 12, D * 0.45 );
+		const ow = Math.min( 4.5, W * 0.1 );
+		const off = room( st, 'office', rect.x0, rect.z0, rect.x0 + ow, fz );
+		const rr1 = room( st, 'restroom', rect.x1 - ow, rect.z0, rect.x1, ( rect.z0 + fz ) / 2 );
+		const rr2 = room( st, 'restroom', rect.x1 - ow, ( rect.z0 + fz ) / 2, rect.x1, fz );
+		const hall = room( st, 'checkin', rect.x0 + ow, rect.z0, rect.x1 - ow, fz );
+		const [ a, b, c, d ] = spans( rect.x0, rect.x1, [ 0, 10, 7, 9 ] );
+		const gate = room( st, 'gate', a[ 0 ], fz, a[ 1 ], rect.z1 );
+		const cafe = room( st, 'dining', b[ 0 ], fz, b[ 1 ], rect.z1 );
+		const shop = room( st, 'sales', c[ 0 ], fz, c[ 1 ], rect.z1, { shop: 'convenience' } );
+		const claim = room( st, 'claim', d[ 0 ], fz, d[ 1 ], rect.z1 );
+		link( st, hall, gate, 'open' ); link( st, hall, cafe, 'open' ); link( st, gate, cafe, 'open' );
+		link( st, hall, shop, 'door' ); link( st, hall, claim, 'open' );
+		link( st, hall, off, 'door', { lock: 0.5 } ); link( st, hall, rr1 ); link( st, hall, rr2 );
+		extDoor( st, hall, 0, { kind: 'glass2', w: 2.0, h: 2.4, at: 0.3 } );
+		extDoor( st, hall, 0, { kind: 'glass2', w: 2.0, h: 2.4, at: 0.7 } );
+		extDoor( st, gate, 2, { kind: 'glass2', w: 1.8, h: 2.4, at: 0.3 } );
+		extDoor( st, gate, 2, { kind: 'glass2', w: 1.8, h: 2.4, at: 0.75 } );
+		extDoor( st, claim, 2, { kind: 'roll', w: 3.0, h: 3.0, at: 0.5 } );
+		extDoor( st, off, 3, { kind: 'metal' } );
+	},
+
+	// the control tower: a stair up the shaft, an equipment or office room per storey, the cab on top
+	ctower( P ) {
+		const { rect, S } = P;
+		const sd = stairDims( P );
+		const sl = Math.min( sd.sl, rect.z1 - rect.z0 - 2.2 );
+		const sx1 = rect.x0 + sd.sw, sz0 = rect.z1 - sl;
+		setStair( P, rect.x0, sz0, sx1, rect.z1, 0, false );
+		for ( const st of P.storeys ) {
+			const top = st.i === S.n - 1;
+			const sr = room( st, 'stair', rect.x0, sz0, sx1, rect.z1 );
+			const front = room( st, top ? 'cab' : st.i === 0 ? 'lobby' : 'hall', rect.x0, rect.z0, rect.x1, sz0 );
+			const side = room( st, top ? 'cab' : st.i === 0 ? 'office' : st.i % 2 ? 'utility' : 'office', sx1, sz0, rect.x1, rect.z1 );
+			link( st, front, sr, 'open' );
+			link( st, front, side, top ? 'open' : 'door', { lock: st.i === 0 ? 0.4 : 0 } );
+			if ( st.i === 0 ) extDoor( st, front, 0, { kind: 'metal', at: 0.6 } );
+		}
+	},
+
 	tent( P ) {
 		const { rect } = P;
 		const st = P.storeys[ 0 ];
@@ -868,34 +931,38 @@ function derive( P, st ) {
 	for ( const rm of rooms ) { rm.x0 = snap( rm.x0 ); rm.x1 = snap( rm.x1 ); rm.z0 = snap( rm.z0 ); rm.z1 = snap( rm.z1 ); }
 	// shared edges between rooms
 	const edges = []; // { x0,z0,x1,z1 (on the line), A (low side), B (high side), axis: 'x'|'z' }
+	const touch = ( p, q ) => {
+		// p's high side against q's low side: a vertical line (constant x), then a horizontal one
+		if ( Math.abs( p.x1 - q.x0 ) < EPS ) {
+			const z0 = Math.max( p.z0, q.z0 ), z1 = Math.min( p.z1, q.z1 );
+			if ( z1 - z0 > 0.05 ) edges.push( { axis: 'z', x0: p.x1, z0, x1: p.x1, z1, A: p, B: q } );
+		}
+		if ( Math.abs( p.z1 - q.z0 ) < EPS ) {
+			const x0 = Math.max( p.x0, q.x0 ), x1 = Math.min( p.x1, q.x1 );
+			if ( x1 - x0 > 0.05 ) edges.push( { axis: 'x', x0, z0: p.z1, x1, z1: p.z1, A: p, B: q } );
+		}
+	};
 	for ( let i = 0; i < rooms.length; i ++ ) for ( let j = i + 1; j < rooms.length; j ++ ) {
 		const A = rooms[ i ], B = rooms[ j ];
-		// vertical line (constant x)
-		for ( const [ p, q ] of [ [ A, B ], [ B, A ] ] ) {
-			if ( Math.abs( p.x1 - q.x0 ) < EPS ) {
-				const z0 = Math.max( p.z0, q.z0 ), z1 = Math.min( p.z1, q.z1 );
-				if ( z1 - z0 > 0.05 ) edges.push( { axis: 'z', x0: p.x1, z0, x1: p.x1, z1, A: p, B: q } );
-			}
-			if ( Math.abs( p.z1 - q.z0 ) < EPS ) {
-				const x0 = Math.max( p.x0, q.x0 ), x1 = Math.min( p.x1, q.x1 );
-				if ( x1 - x0 > 0.05 ) edges.push( { axis: 'x', x0, z0: p.z1, x1, z1: p.z1, A: p, B: q } );
-			}
-		}
+		// rooms that don't even touch (the common case in big plans) are skipped cheaply
+		if ( A.x1 < B.x0 - EPS || B.x1 < A.x0 - EPS || A.z1 < B.z0 - EPS || B.z1 < A.z0 - EPS ) continue;
+		touch( A, B ); touch( B, A );
 	}
+	// each room's edges (the lookups below would otherwise scan every edge of the storey)
+	const byRoom = new Map();
+	const addTo = ( m, k, v ) => { const a = m.get( k ); if ( a ) a.push( v ); else m.set( k, [ v ] ); };
+	for ( const e of edges ) { addTo( byRoom, e.A, e ); addTo( byRoom, e.B, e ); }
 	// connectivity: explicit links first, then every unreached room joins its best reachable neighbour
 	const adj = new Map();
 	for ( const e of edges ) {
 		const len = e.axis === 'z' ? e.z1 - e.z0 : e.x1 - e.x0;
-		for ( const [ a, b ] of [ [ e.A, e.B ], [ e.B, e.A ] ] ) {
-			if ( ! adj.has( a ) ) adj.set( a, [] );
-			adj.get( a ).push( { r: b, e, len } );
-		}
+		addTo( adj, e.A, { r: e.B, e, len } ); addTo( adj, e.B, { r: e.A, e, len } );
 	}
 	const linked = new Set();
 	const reach = new Set();
 	for ( const x of st.ext ) reach.add( x.room );
 	for ( const rm of rooms ) if ( rm.open || rm.k === 'stair' ) reach.add( rm );
-	const keyOf = ( a, b ) => Math.min( a.id, b.id ) + ':' + Math.max( a.id, b.id );
+	const keyOf = ( a, b ) => a.id < b.id ? a.id * 65536 + b.id : b.id * 65536 + a.id;
 	const linkMap = new Map();
 	for ( const l of st.links ) linkMap.set( keyOf( l.a, l.b ), l );
 	let changed = true;
@@ -931,7 +998,7 @@ function derive( P, st ) {
 	// place link openings on their longest shared edge
 	for ( const l of st.links ) {
 		if ( l.kind === 'none' || l.kind === 'open' ) continue;
-		const cand = edges.filter( e => ( e.A === l.a && e.B === l.b ) || ( e.A === l.b && e.B === l.a ) );
+		const cand = ( byRoom.get( l.a ) || [] ).filter( e => ( e.A === l.a && e.B === l.b ) || ( e.A === l.b && e.B === l.a ) );
 		if ( ! cand.length ) continue;
 		cand.sort( ( p, q ) => ( q.x1 - q.x0 + q.z1 - q.z0 ) - ( p.x1 - p.x0 + p.z1 - p.z0 ) );
 		const e = cand[ 0 ];
@@ -981,8 +1048,7 @@ function derive( P, st ) {
 			const line = side === 0 ? rm.z0 : side === 1 ? rm.x1 : side === 2 ? rm.z1 : rm.x0;
 			const lo = axis === 'x' ? rm.x0 : rm.z0, hi = axis === 'x' ? rm.x1 : rm.z1;
 			const cover = [];
-			for ( const e of edges ) {
-				if ( e.A !== rm && e.B !== rm ) continue;
+			for ( const e of byRoom.get( rm ) || [] ) {
 				if ( e.axis !== axis ) continue;
 				const el = axis === 'x' ? e.z0 : e.x0;
 				if ( Math.abs( el - line ) > EPS ) continue;

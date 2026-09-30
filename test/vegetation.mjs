@@ -113,9 +113,9 @@ for ( const [ name, x, z ] of [ [ 'Waikiki city', - 3880, - 9660 ], [ 'Waikiki h
 	ok( onWalk( gr.all, 0.2 ) === 0, `${name}: grass on streets or sidewalks (${onWalk( gr.all, 0.2 )})` );
 	ok( onWalk( det.all, 0.5 ) === 0, `${name}: understory on streets or sidewalks (${onWalk( det.all, 0.5 )})` );
 	ok( onWalk( can.all, 0.5 ) === 0, `${name}: trunks on streets or sidewalks (${onWalk( can.all, 0.5 )})` );
-	// lawns are mown short
-	const tall = gr.all.filter( a => inCity( a ) && a[ 4 ] > 0.3 ).length;
-	ok( tall === 0, `${name}: town lawn grass is short (${tall} tall clumps)` );
+	// the town blocks are mown lawns the terrain paints: no grass clumps on them
+	const lawn = gr.all.filter( a => inCity( a ) ).length;
+	ok( lawn === 0, `${name}: no grass clumps on the town blocks (${lawn})` );
 }
 
 // ---- altitude: the summits are bare, no trees above the tree line, palms stay low ------------------

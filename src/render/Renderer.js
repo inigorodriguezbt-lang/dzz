@@ -198,6 +198,8 @@ export class Renderer {
 				uFlareColor: { value: G.uSunColor.value }, uFlareResY: { value: 1 },
 				...this.mb.uniforms,
 			},
+			// (the motion blur gather is compiled in only while it is on)
+			defines: { MOTION_BLUR: 0 },
 			vertexShader: FS_VERT,
 			fragmentShader: GRADE_FRAG,
 			depthTest: false, depthWrite: false,
@@ -302,6 +304,10 @@ export class Renderer {
 			this.mb.updateCamera( cam, cam.userData.projNoJitter );
 		} else this.mb.reset();
 		this.gtao.temporal = taaOn;
+		// the post shafts this frame (the per-material haze leaves their near sunlit share to them): by day in
+		// clear to cloudy weather
+		const shaftsOn = this.hazeOn && G.uNight.value < 0.5 && G.uHazeDensity.value < 1.6 * 1.35 && G.uUnderwater.value < 0.5;
+		G.uHazeShafts.value = shaftsOn ? 1 : 0;
 		// 1: opaque + sky
 		gl.shadowMap.needsUpdate = f.shadows !== false;
 		cam.layers.set( LAYER_WORLD );
@@ -330,8 +336,7 @@ export class Renderer {
 		let out = T.main;
 		if ( this.hazeOn ) {
 			const sh = !! this.shadows?.source;
-			const shafts = G.uNight.value < 0.5 && G.uHazeDensity.value < 1.6 * 1.35 && G.uUnderwater.value < 0.5;
-			if ( this.haze.render( gl, T.main.texture, T.main.depthTexture, cam, T.beauty, sh, shafts ) ) out = T.beauty;
+			if ( this.haze.render( gl, T.main.texture, T.main.depthTexture, cam, T.beauty, sh, shaftsOn ) ) out = T.beauty;
 		}
 		// TAA resolve after the water, transparents and haze; the resolved image goes back into mainRT, where the
 		// view model is drawn over it (never into the history)
@@ -362,6 +367,10 @@ export class Renderer {
 		this.mb.uniforms.tMbVM.value = T.main.depthTexture;
 		this.mb.uniforms.uMbVMOn.value = f.viewScene && out === T.main ? 1 : 0;
 		this.mb.render( gl, this.taa.prevDepth.texture, mbOn );
+		if ( this.grade.defines.MOTION_BLUR !== ( mbOn ? 1 : 0 ) ) {
+			this.grade.defines.MOTION_BLUR = mbOn ? 1 : 0;
+			this.grade.needsUpdate = true;
+		}
 		const post = out.texture;
 		// 6: bloom down chain (also feeds the exposure meter), then the up chain
 		let src = post;
@@ -438,7 +447,9 @@ const GRADE_FRAG = /* glsl */`
 	uniform vec2 resolution;
 	varying vec2 vUv;
 	${FLARE_GLSL}
+	#if MOTION_BLUR
 	${MB_GLSL}
+	#endif
 
 	// three's ACES fitted curve (sRGB => XYZ => D65_2_D60 => AP1 => RRT_SAT, RRT + ODT fit, ODT_SAT =>
 	// XYZ => D60_2_D65 => sRGB), clamped
@@ -495,7 +506,9 @@ const GRADE_FRAG = /* glsl */`
 		uv += wob * vec2( sin( time * 1.3 + uv.y * 6.0 ), cos( time * 1.1 + uv.x * 5.0 ) );
 		if ( underwater > 0.0 ) uv += underwater * 0.003 * vec2( sin( time * 2.0 + uv.y * 30.0 ), cos( time * 1.7 + uv.x * 25.0 ) );
 		vec3 c = sharpen > 0.0 ? rcas( uv ) : texture2D( tColor, uv ).rgb;
+		#if MOTION_BLUR
 		c = mbApply( c, uv );
+		#endif
 		if ( drunk > 0.0 ) c = mix( c, texture2D( tColor, uv + vec2( 0.006, 0.002 ) * drunk * sin( time ) ).rgb, 0.5 * drunk );
 		c += texture2D( tBloom, uv ).rgb * bloomStrength;
 		c += flareLight( vUv );

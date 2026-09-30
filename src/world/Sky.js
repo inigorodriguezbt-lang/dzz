@@ -9,6 +9,7 @@ import { AtmosphereLUT, atmosphereTransmittance, sunDirection, SUN_ILLUMINANCE, 
 import { G, COMMON_GLSL, SHARED_PARS } from '../render/Materials.js';
 import { FS_VERT } from '../render/Renderer.js';
 import { Clouds, CLOUD_VIEW_GLSL } from '../render/sky/Clouds.js';
+import { CIRRUS_GLSL } from '../render/sky/Cirrus.js';
 
 const ENV_SIZE = 128;
 const ss = THREE.MathUtils.smoothstep;
@@ -112,25 +113,32 @@ export class Sky {
 				uMoonPhase: { value: 0.5 }, uCloudsOn: { value: 1 },
 				uCloudView: { value: null }, uCvRight: { value: this.clouds.viewRight }, uCvUp: { value: this.clouds.viewUp },
 				uCvFwd: { value: this.clouds.viewFwd }, uCvTan: { value: this.clouds.viewTan }, uCvValid: { value: 0 },
-			}, G ),
+				uPxAngle: { value: 0.001 },
+			}, G, this.clouds.cirrus.uniforms ),
 			defines: { REVERSED: this.r.reversed ? 1 : 0 },
 			vertexShader: /* glsl */`
 				varying vec2 vNdc;
 				void main() { vNdc = position.xy; gl_Position = vec4( position.xy, REVERSED == 1 ? 0.0 : 1.0, 1.0 ); }`,
 			fragmentShader: /* glsl */`
 				${SHARED_PARS}
-				uniform mat4 uInvProj; uniform mat4 uCamWorld; uniform float uCloudsOn;
+				uniform mat4 uInvProj; uniform mat4 uCamWorld; uniform float uCloudsOn; uniform float uPxAngle;
 				varying vec2 vNdc;
 				${COMMON_GLSL}
 				${DISC_GLSL}
 				${CLOUD_VIEW_GLSL}
+				${CIRRUS_GLSL}
 				void main() {
 					vec4 vp = uInvProj * vec4( vNdc, 0.5, 1.0 );
 					vec3 d = normalize( ( uCamWorld * vec4( normalize( vp.xyz / vp.w ), 0.0 ) ).xyz );
 					vec3 base = skyBackground( d, 1.0 ) + skyMoon( d );
 					vec3 sun = skySunDisk( d );
 					vec4 cl = vec4( 0.0, 0.0, 0.0, 1.0 );
-					if ( uCloudsOn > 0.5 ) cl = cloudsSampleView( d );
+					if ( uCloudsOn > 0.5 ) {
+						// the view's cumulus over the cirrus (per pixel); outside the view the panorama has both
+						vec2 cuv;
+						if ( cloudsViewUv( d, cuv ) ) cl = clOver( cloudsViewAt( cuv, d ), cloudsHigh( d, uPxAngle ) );
+						else cl = cloudsPanoSample( d );
+					}
 					gl_FragColor = vec4( base * cl.a + sun * cloudsSunTransmittance( cl.a ) + cl.rgb, 1.0 );
 				}`,
 			depthTest: true, depthWrite: false,
@@ -213,6 +221,7 @@ export class Sky {
 		G.uStarI.value = night;
 		G.uMoonDir.value.copy( this.moonDir );
 		G.uMoonBright.value = moonK * nb;
+		G.uNightGlow.value = Math.max( moonK, 0.3 ) * nb;
 		const nightAmb = 0.012 * night * nb;
 		G.uSkyIrr.value.set( this.skyIrradiance.x + nightAmb * 0.6, this.skyIrradiance.y + nightAmb * 0.7, this.skyIrradiance.z + nightAmb );
 		G.uHorizon.value.copy( this.horizonColor );
@@ -234,6 +243,8 @@ export class Sky {
 		du.uInvProj.value.copy( camera.projectionMatrixInverse );
 		du.uCamWorld.value.copy( camera.matrixWorld );
 		du.uMoonPhase.value = this.moonPhase;
+		// the pixel footprint (radians) filters the cirrus fibres
+		du.uPxAngle.value = 2 * Math.tan( THREE.MathUtils.degToRad( camera.fov * 0.5 ) ) / ( camera.zoom || 1 ) / this.viewSize.y;
 
 		// ---- environment: one cube face per frame, then the prefilter; refreshed when the sun moved or
 		// every 3 s so drifting clouds stay in sync (Tidewater Environment.js update)

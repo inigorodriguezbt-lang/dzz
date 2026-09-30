@@ -342,7 +342,7 @@ export class Doors {
 		g.player.shake = Math.max( g.player.shake || 0, 0.25 );
 		const dmg = 18 + Math.random() * 14;
 		this.bash( d, d.kind === 'metal' || d.kind === 'roll' ? dmg * 0.35 : dmg, g.player );
-		if ( d.broken ) g.toast( 'The door gave way', 'good' );
+		if ( d.broken ) g.toast( 'Door broken', 'good' );
 	}
 
 	serialize() { return this.saved; }

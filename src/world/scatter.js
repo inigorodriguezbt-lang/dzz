@@ -31,6 +31,18 @@ export function citiesNear( cities, x0, z0, size ) {
 }
 
 const sstep = ( a, b, x ) => { const t = Math.min( 1, Math.max( 0, ( x - a ) / ( b - a ) ) ); return t * t * ( 3 - 2 * t ); };
+
+// 0 wild .. 1 built-up at (x, z) from the town discs alone (as Env.urban without the CITY flag)
+export function townAt( cities, x, z ) {
+	let u = 0;
+	for ( const c of cities || [] ) {
+		const R = c.radius || 300, dx = x - c.x, dz = z - c.z;
+		const d2 = dx * dx + dz * dz;
+		if ( d2 > R * R * 1.3225 ) continue;
+		u = Math.max( u, ( URBAN[ c.kind ] ?? 0.8 ) * ( 1 - sstep( R * 0.8, R * 1.15, Math.sqrt( d2 ) ) ) );
+	}
+	return u;
+}
 // 1 inside [b, c], fading out below a and above d
 const band = ( v, a, b, c, d ) => sstep( a, b, v ) * ( 1 - sstep( c, d, v ) );
 
@@ -533,10 +545,10 @@ function grass( ctx ) {
 		if ( e.flags & ( NO_GROW | FLAG.FIELD ) ) return;
 		if ( e.sd < 45 && h < 3.4 ) return; // beach sand
 		const m = e.m;
-		// the flagged town blocks are mown lawns (the terrain paints them); the rest of a town has no
-		// wild meadow grass, and neither have the cleared yards of country houses
-		const city = ( e.flags & FLAG.CITY ) ? 1 : 0;
-		if ( ! city && ( hash2( gi, gj, 416 ) < e.u || nearBuilding( ctx.bld, x, z, 6 ) ) ) return;
+		// towns keep mown lawns only, which the terrain paints (short, even, no blades to see): no grass
+		// clumps on the town blocks, none in the rest of a town, none in the cleared yards of country houses
+		if ( e.flags & FLAG.CITY ) return;
+		if ( hash2( gi, gj, 416 ) < e.u || nearBuilding( ctx.bld, x, z, 6 ) ) return;
 		let d = 0.3 + 0.7 * sstep( 0.06, 0.38, m );
 		// where the terrain paints the rain forest's floor (Terrain.js jungleW) only a little grass grows
 		const wetM = Math.min( 1, m * 1.15 + 0.14 );
@@ -545,13 +557,12 @@ function grass( ctx ) {
 		d *= 1 - sstep( 0.6, 0.95, e.sl );
 		d *= 1 - sstep( 480, 600, h ) * 0.8;
 		d *= 0.5 + 0.5 * sstep( 0.2, 0.6, vnoise( x / 6.5, z / 6.5, 41 ) ); // clumpy meadows
-		if ( city ) d = 0.5;
 		if ( e.use === 3 ) d = Math.max( d, 0.9 );
 		if ( hash2( gi, gj, 411 ) >= d ) return;
 		// clear of the pavement (the flag grid is 8 m coarse): streets, their sidewalks and road shoulders
-		if ( roads.near( x, z, city ? 0.4 : 0.25 ) || ( city && nearBuilding( ctx.bld, x, z, 0.8 ) ) ) return;
+		if ( roads.near( x, z, 0.25 ) ) return;
 		const r1 = hash2( gi, gj, 412 );
-		const s = city ? 0.2 + 0.08 * r1 : e.use === 3 ? 0.5 + 0.3 * r1 : ( 0.6 + 0.55 * r1 ) * ( 0.8 + 0.4 * sstep( 0.2, 0.6, m ) );
+		const s = e.use === 3 ? 0.5 + 0.3 * r1 : ( 0.6 + 0.55 * r1 ) * ( 0.8 + 0.4 * sstep( 0.2, 0.6, m ) );
 		const gy = ground.at( x, z );
 		if ( gy < 0.4 ) return;
 		// the ground's slope and south exposure (the terrain's meadow tone depends on them)
@@ -559,8 +570,8 @@ function grass( ctx ) {
 		const nl = Math.hypot( hx, 2, hz );
 		const slope = 1 - 2 / nl, south = - hz / nl;
 		// a: moisture, slope and south exposure packed in 8 bits each (the blades take the terrain's tone
-		// there, see VegMaterial vegGroundTone), b: lawn
+		// there, see VegMaterial vegGroundTone), b: grazed pasture (short)
 		const pk = Math.round( m * 255 ) + Math.round( Math.min( 1, slope ) * 255 ) * 256 + Math.round( ( south * 0.5 + 0.5 ) * 255 ) * 65536;
-		ctx.out.add( SP.GRASS, x, gy - 0.03, z, s, hash2( gi, gj, 414 ) * TAU, hash2( gi, gj, 415 ), pk, city );
+		ctx.out.add( SP.GRASS, x, gy - 0.03, z, s, hash2( gi, gj, 414 ) * TAU, hash2( gi, gj, 415 ), pk, e.use === 3 ? 1 : 0 );
 	} );
 }

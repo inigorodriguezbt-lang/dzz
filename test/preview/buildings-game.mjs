@@ -8,25 +8,35 @@ import fs from 'node:fs';
 import { launch, lean } from '../lib/browser.mjs';
 
 const [ port, outdir, stepsFile, query = 'quick=1&mode=creative&frames=2' ] = process.argv.slice( 2 );
+// lines also go to <outdir>/log.txt as they happen (a killed run keeps what it printed)
+const log = ( ...a ) => { const t = a.join( ' ' ); console.log( t ); try { fs.appendFileSync( `${outdir}/log.txt`, t + '\n' ); } catch ( e ) { /* ignore */ } };
 const steps = JSON.parse( fs.readFileSync( stepsFile, 'utf8' ) );
 fs.mkdirSync( outdir, { recursive: true } );
+try { fs.writeFileSync( `${outdir}/log.txt`, '' ); } catch ( e ) { /* ignore */ }
 const browser = await launch();
-const page = await browser.newPage( { viewport: { width: 960, height: 540 } } );
+// LITE=1: a smaller view and lower settings (several test browsers share one memory limit)
+const lite = process.env.LITE === '1';
+const page = await browser.newPage( { viewport: lite ? { width: 800, height: 450 } : { width: 960, height: 540 } } );
 await lean( page );
-await page.addInitScript( ( rd ) => {
-	try { localStorage.setItem( 'deadtide.settings.v1', JSON.stringify( { antialias: 'fxaa', shadows: 'medium', renderDistance: rd, clouds: 'off', water: 'medium', tutorial: false } ) ); } catch ( e ) { /* ignore */ }
-}, Number( process.env.RD || 900 ) );
+await page.addInitScript( ( o ) => {
+	try { localStorage.setItem( 'deadtide.settings.v1', JSON.stringify( { antialias: 'fxaa', shadows: o.lite ? 'low' : 'medium', terrainDetail: o.lite ? 'low' : undefined, renderDistance: o.rd, clouds: 'off', water: o.lite ? 'low' : 'medium', vegetation: o.lite ? 'low' : undefined, tutorial: false } ) ); } catch ( e ) { /* ignore */ }
+}, { rd: Number( process.env.RD || 900 ), lite } );
+// STUB=vehicles,creatures,... : those content modules load as empty stubs (a lighter page for building checks)
+const STUBS = { vegetation: '/src/world/Vegetation.js', roads: '/src/city/Roads.js', items: '/src/game/items/WorldItems.js', hands: '/src/weapons/Hands.js', creatures: '/src/ai/Creatures.js', vehicles: '/src/vehicles/Vehicles.js' };
+for ( const k of ( process.env.STUB || '' ).split( ',' ).filter( Boolean ) ) {
+	await page.route( `**${STUBS[ k ]}*`, route => route.fulfill( { contentType: 'application/javascript', body: 'export function install() {}' } ) );
+}
 const logs = [];
-page.on( 'crash', () => { console.log( 'PAGE CRASHED\n' + logs.join( '\n' ) ); process.exit( 2 ); } );
+page.on( 'crash', () => { log( 'PAGE CRASHED\n' + logs.join( '\n' ) ); process.exit( 2 ); } );
 page.on( 'console', m => { const t = m.text(); if ( ! t.includes( '[vite]' ) && ! t.includes( 'GPU stall' ) && ! t.includes( 'GL_INVALID_OPERATION' ) ) logs.push( `[${m.type()}] ${t.slice( 0, 400 )}` ); } );
 page.on( 'pageerror', e => logs.push( `[pageerror] ${e.message}` ) );
 const t0 = Date.now();
 await page.goto( `http://127.0.0.1:${port}/?${query}` );
 try { await page.waitForFunction( () => window.__ready === true && window.__app?.game, null, { timeout: 480000, polling: 1000 } ); } catch ( e ) {
-	console.log( 'TIMEOUT waiting for ready\n' + logs.slice( - 40 ).join( '\n' ) );
+	log( 'TIMEOUT waiting for ready\n' + logs.slice( - 40 ).join( '\n' ) );
 	await browser.close(); process.exit( 1 );
 }
-console.log( `ready ${( ( Date.now() - t0 ) / 1000 ).toFixed( 0 )} s` );
+log( `ready ${( ( Date.now() - t0 ) / 1000 ).toFixed( 0 )} s` );
 await page.evaluate( () => {
 	// time game.city.update
 	const C = window.__app.game.city;
@@ -75,6 +85,9 @@ for ( const s of steps ) {
 			a.world.update( 1 / 30 );
 			a.input.endFrame();
 			n ++;
+			// render now and then: streamed meshes upload (and free their CPU copies) a few at a time instead
+			// of all at the next shot
+			if ( s.render !== false && i % 30 === 29 ) a.renderer.render( { scene: a.world.scene, camera: a.world.camera, viewScene: null, viewCamera: g.viewCamera, grade: g.grade() } );
 			await yieldNow();
 			if ( a.world.pool.busy ) await new Promise( r => setTimeout( r, 5 ) );
 		}
@@ -93,10 +106,10 @@ for ( const s of steps ) {
 		if ( perf ) perf.heap = Math.round( ( performance.memory?.usedJSHeapSize || 0 ) / 1e6 );
 		return { out, url, perf, info };
 	}, s );
-	if ( r.out !== undefined ) console.log( ( s.shot || s.name || s.js?.slice( 0, 40 ) || '' ) + ': ' + JSON.stringify( r.out ) );
-	if ( r.perf ) console.log( '  perf', JSON.stringify( r.perf ) );
+	if ( r.out !== undefined ) log( ( s.shot || s.name || s.js?.slice( 0, 40 ) || '' ) + ': ' + JSON.stringify( r.out ) );
+	if ( r.perf ) log( '  perf', JSON.stringify( r.perf ) );
 	if ( r.url ) fs.writeFileSync( `${outdir}/${s.shot}.jpg`, Buffer.from( r.url.split( ',' )[ 1 ], 'base64' ) );
-	if ( s.shot ) console.log( `shot ${s.shot} ${( ( Date.now() - t1 ) / 1000 ).toFixed( 1 )} s ${JSON.stringify( r.info )}` );
+	if ( s.shot ) log( `shot ${s.shot} ${( ( Date.now() - t1 ) / 1000 ).toFixed( 1 )} s ${JSON.stringify( r.info )}` );
 }
-console.log( logs.slice( 0, 80 ).join( '\n' ) );
+log( logs.slice( 0, 80 ).join( '\n' ) );
 await browser.close();

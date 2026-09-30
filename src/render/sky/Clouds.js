@@ -5,12 +5,15 @@
 // three multiple-scattering octaves, powder and base darkening, a quarter-rate lattice trace reconstructed
 // temporally at half resolution, a 512x160 panorama (reflections, environment) and a 256^2 ground shadow
 // map. Lit by our Hillaire atmosphere: the key light (sun, or the moon at night) and the sky-view LUT.
+// Above them the cirrus veil of Tidewater's previous cloud system (sky/Cirrus.js), in the panorama here and
+// per pixel over the view clouds in the dome.
 // The shape noise is generated here with Tidewater's Perlin-Worley code (not sky-pro's baked volume),
 // remapped to the same per-channel mean and contrast; interleaved gradient noise replaces the blue noise.
 // WebGPU compute kernels become fragment passes (MRT where a kernel wrote two textures).
 import * as THREE from 'three';
 import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
 import { G, COMMON_GLSL, SHARED_PARS } from '../Materials.js';
+import { Cirrus, CIRRUS_GLSL } from './Cirrus.js';
 
 const f = ( x ) => {
 	const s = Number( x ).toString();
@@ -485,6 +488,7 @@ export class Clouds {
 		this.shadowMap = rt( SHADOW_RES, SHADOW_RES );
 		this._pp = 0;
 		this.viewTex = this.history[ 0 ].textures[ 0 ];
+		this.cirrus = new Cirrus( gl );
 
 		this._buildPasses();
 
@@ -516,7 +520,7 @@ export class Clouds {
 		const U = this.U;
 		const common = SHARED_PARS + COMMON_GLSL + PARS_GLSL;
 		const mat = ( name, frag, extra = {}, glsl3 = false ) => new THREE.ShaderMaterial( {
-			name, uniforms: Object.assign( extra, U, G ), vertexShader: FS_VERT, fragmentShader: frag,
+			name, uniforms: Object.assign( extra, U, G, this.cirrus.uniforms ), vertexShader: FS_VERT, fragmentShader: frag,
 			depthTest: false, depthWrite: false, glslVersion: glsl3 ? THREE.GLSL3 : null,
 		} );
 		this.quad = new FullScreenQuad();
@@ -680,7 +684,7 @@ export class Clouds {
 			}`, { scCurrentColor: { value: null }, scCurrentMeta: { value: null }, scPreviousColor: { value: null }, scPreviousMeta: { value: null } }, true );
 
 		// panorama (reflections, environment): one lattice slot per frame, all after a reset
-		this.panoMat = mat( 'CloudsPanorama', common + CORE_GLSL + MARCH_GLSL + /* glsl */`
+		this.panoMat = mat( 'CloudsPanorama', common + CORE_GLSL + MARCH_GLSL + CIRRUS_GLSL + /* glsl */`
 			void main() {
 				ivec2 texel = ivec2( gl_FragCoord.xy );
 				ivec2 lat = ivec2( scfPano.z );
@@ -691,7 +695,7 @@ export class Clouds {
 				vec3 dir = vec3( cos( elev ) * cos( az ), sin( elev ), cos( elev ) * sin( az ) );
 				float cone = ${f( 2 * Math.PI / PANO_W )};
 				ScMarch m = scMarch( scfPosition.xyz, dir, 0.5, cone, cone, 128, true );
-				gl_FragColor = vec4( m.color, 1.0 - m.alpha );
+				gl_FragColor = clOver( vec4( m.color, 1.0 - m.alpha ), cloudsHigh( dir, cone ) );
 			}` );
 
 		// cloud shadow on the ground (sea level) around the camera: optical depth along the key light
@@ -774,6 +778,7 @@ export class Clouds {
 			this.historyValid = false;
 			this.panoWarm = true;
 		}
+		this.cirrus.update( dt, coverage, true );
 		const wd = G.uWind.value;
 		const wl = Math.hypot( wd.x, wd.y ) || 1;
 		const wx = wd.x / wl, wz = wd.y / wl;
@@ -911,6 +916,7 @@ export class Clouds {
 	}
 
 	disable() {
+		this.cirrus.update( 0, 0, false );
 		G.uCloudPanoOn.value = 0;
 		G.uCloudShadowOn.value = 0;
 		this.viewValid = 0;
@@ -926,17 +932,23 @@ export class Clouds {
 // for; outside it the panorama (Tidewater SkyProClouds.js cloudsSampleView)
 export const CLOUD_VIEW_GLSL = /* glsl */`
 	uniform sampler2D uCloudView; uniform vec3 uCvRight; uniform vec3 uCvUp; uniform vec3 uCvFwd; uniform vec2 uCvTan; uniform float uCvValid;
-	vec4 cloudsSampleView( vec3 dir ) {
+	// uv of dir in the view history; false outside it
+	bool cloudsViewUv( vec3 dir, out vec2 uv ) {
 		float x = dot( dir, uCvRight );
 		float y = dot( dir, uCvUp );
 		float z = dot( dir, uCvFwd );
-		vec2 uv = vec2( x / max( z, 1e-4 ) / uCvTan.x * 0.5 + 0.5, y / max( z, 1e-4 ) / uCvTan.y * 0.5 + 0.5 );
-		bool inside = uCvValid > 0.5 && z > 0.01 && all( greaterThanEqual( uv, vec2( 0.0 ) ) ) && all( lessThanEqual( uv, vec2( 1.0 ) ) );
-		if ( inside ) {
-			vec4 v = max( texture2D( uCloudView, uv ), vec4( 0.0 ) );
-			float above = smoothstep( -0.05, -0.03, dir.y );
-			return vec4( v.rgb * above, 1.0 - min( v.a, 1.0 ) * above );
-		}
+		uv = vec2( x / max( z, 1e-4 ) / uCvTan.x * 0.5 + 0.5, y / max( z, 1e-4 ) / uCvTan.y * 0.5 + 0.5 );
+		return uCvValid > 0.5 && z > 0.01 && all( greaterThanEqual( uv, vec2( 0.0 ) ) ) && all( lessThanEqual( uv, vec2( 1.0 ) ) );
+	}
+	// the cumulus of the view history (rgb in-scatter, a transmittance)
+	vec4 cloudsViewAt( vec2 uv, vec3 dir ) {
+		vec4 v = max( texture2D( uCloudView, uv ), vec4( 0.0 ) );
+		float above = smoothstep( -0.05, -0.03, dir.y );
+		return vec4( v.rgb * above, 1.0 - min( v.a, 1.0 ) * above );
+	}
+	vec4 cloudsSampleView( vec3 dir ) {
+		vec2 uv;
+		if ( cloudsViewUv( dir, uv ) ) return cloudsViewAt( uv, dir );
 		return cloudsPanoSample( dir );
 	}
 `;

@@ -198,6 +198,8 @@ function heightToNormal( hc, strength = 3 ) {
 	return out;
 }
 
+function releaseData( t ) { t.onUpdate = null; t.image.data = null; }
+
 const srgbToLin = ( v ) => { v /= 255; return v <= 0.04045 ? v / 12.92 : Math.pow( ( v + 0.055 ) / 1.055, 2.4 ); };
 
 let _set = null;
@@ -261,6 +263,8 @@ export function buildingTextures() {
 	B.wrapS = B.wrapT = THREE.RepeatWrapping; B.generateMipmaps = true;
 	B.minFilter = THREE.LinearMipmapLinearFilter; B.magFilter = THREE.LinearFilter;
 	B.needsUpdate = true;
+	// ~45 MB of CPU copies are dead weight once the arrays are on the GPU (nothing re-uploads them)
+	A.onUpdate = B.onUpdate = releaseData;
 	// the sign atlas
 	const sc = paintSignAtlas( document.createElement( 'canvas' ) );
 	const S = new THREE.CanvasTexture( sc );

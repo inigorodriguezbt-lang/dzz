@@ -133,6 +133,12 @@ const COMMERCIAL = { convenience: 1, restaurant: 1, clothing: 1, fastfood: 1, ba
 export function effectiveType( r, cities ) {
 	const city = cities[ r.city ];
 	if ( ! city ) return { type: r.type, shop: null };
+	// the airports' lots by the runway (the bake keeps a warehouse and a hangar there): the terminal and the
+	// control tower
+	if ( city.kind === 'airport' ) {
+		if ( r.type === 'warehouse' ) return { type: 'terminal', shop: null };
+		if ( r.type === 'hangar' ) return { type: 'tower', shop: null };
+	}
 	if ( city.id === 'waikiki' && r.type === 'house' ) return { type: 'apartment', shop: null };
 	if ( city.id === 'honolulu' && COMMERCIAL[ r.type ] && r.w >= 20 ) {
 		const dc = Math.hypot( r.x - city.x, r.z - city.z ) / Math.max( 1, city.radius );
@@ -218,8 +224,18 @@ export function shapeOf( r, cities ) {
 		case 'mil_hq': S.arch = 'hq'; H = 3.6; H0 = 4.0; S.n = 2; S.bw = Math.min( W - 4, 34 ); S.bd = 20; S.oz = - D / 2 + 4 + S.bd / 2; break;
 		case 'armory': S.arch = 'armory'; H = 4.5; S.n = 1; S.bw = Math.min( W - 6, 26 ); S.bd = 16; S.oz = - D / 2 + 4 + S.bd / 2; break;
 		case 'hangar': S.arch = 'hangar'; H = 13; S.n = 1; S.bw = Math.min( W, 48 ); S.bd = Math.min( D, 50 ); S.roof = 'arch'; S.pave = true; break;
-		case 'terminal': S.arch = 'terminal'; H = 7; S.n = 1; front( 40 ); break;
-		case 'tower': S.arch = 'ctower'; H = 3.5; S.n = 6; S.bw = 8; S.bd = 8; break;
+		case 'terminal':
+			// one tall hall: landside (the front) a drop-off lane and parking, airside (the back) the apron
+			S.arch = 'terminal'; H = 6.2; S.n = 1;
+			S.bw = Math.min( W - 4, 52 ); S.bd = Math.min( D - 18, 28 ); S.oz = - D / 2 + Math.min( 14, ( D - S.bd ) / 2 ) + S.bd / 2;
+			S.pave = true;
+			break;
+		case 'tower':
+			// the shaft (stair and equipment rooms) and the glazed cab on top
+			S.arch = 'ctower'; H = 3.4; H0 = 3.8; S.n = Math.max( 7, Math.min( 9, r.floors + 1 ) ); S.bw = 8; S.bd = 8;
+			S.oz = Math.max( 0, D / 2 - S.bd / 2 - 10 );
+			S.pave = true;
+			break;
 		case 'observatory': S.arch = 'dome'; H = 5.5; S.n = 1; S.bw = S.bd = Math.min( W, D, 18 ); S.roof = 'dome'; break;
 		case 'mil_tent': S.arch = 'tent'; H = 2.2; S.n = 1; S.bw = Math.min( W, 10 ); S.bd = Math.min( D, 5.5 ); S.roof = 'tent'; S.raise = 0.05; break;
 		case 'shed': S.arch = 'garage'; H = 3.2; S.n = 1; break;
@@ -244,6 +260,8 @@ export function shapeOf( r, cities ) {
 	S.bw = Math.max( 5, S.bw ); S.bd = Math.max( 4, S.bd );
 	S.Hs = [];
 	for ( let i = 0; i < S.n; i ++ ) S.Hs.push( i === 0 && H0 ? H0 : H );
+	// the control tower's cab: taller, glazed all round
+	if ( S.arch === 'ctower' ) S.Hs[ S.n - 1 ] = 4.2;
 	S.fy = r.base + S.raise; // floor of the ground storey (world y)
 	S.ys = [];
 	let y = S.fy;
@@ -253,6 +271,7 @@ export function shapeOf( r, cities ) {
 	const span = Math.min( S.bw, S.bd );
 	S.roofH = S.roof === 'hip' || S.roof === 'gable' ? span / 2 * S.pitch + 0.3 : S.roof === 'arch' ? S.bw * 0.28 : S.roof === 'dome' ? S.bw * 0.5 : S.roof === 'tent' ? 0.9 : 1.6;
 	if ( S.arch === 'church' ) S.roofH += 8;
+	if ( S.arch === 'ctower' ) S.roofH += 7; // antennas and the radar
 	return S;
 }
 

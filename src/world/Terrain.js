@@ -352,6 +352,10 @@ export function makeTerrainMaterial( detail = 'high' ) {
 				varying vec4 vSurf; varying vec4 vMask; varying vec3 vRel; varying float vAO;
 				uniform sampler2D terrainDetailTex; uniform vec3 uTerOrigin; uniform vec2 uTerOff[ ${ OFS_N } ];
 				uniform vec3 uTerPh; uniform vec4 uTerWind; uniform vec3 uTerGrass;
+				// (ours) forest floor under the vegetation's canopy: the sky it still sees, and the sunlight the
+				// leaves pass on (fraction of the key light, green)
+				#define TER_CANOPY_SKY 0.3
+				#define TER_CANOPY_T vec3( 0.03, 0.05, 0.012 )
 				${ TERRAIN_SHADING_GLSL }
 				${ TERRAIN_FNS }` )
 			.replace( '#include <map_fragment>', hooks + TERRAIN_ALBEDO )
@@ -399,6 +403,7 @@ const TERRAIN_ALBEDO = /* glsl */`
 	vec3 albedoOut = vec3( 0.0 );
 	float hdOut = 0.0;
 	float meadowW = 0.0;
+	float underCanopy = 0.0;
 
 	// ---- data: geometric normal and our land cover (per vertex)
 	vec3 N0 = normalize( ( vec4( vNormal, 0.0 ) * viewMatrix ).xyz );
@@ -850,7 +855,12 @@ const TERRAIN_ALBEDO = /* glsl */`
 		// ---- ambient occlusion: baked horizon + cavity, plus litter / crevices / seagrass canopy
 		float aoDetail = mix( 1.0, dN.y * 0.5 + 0.7, jungleW * ( 1.0 - sandW ) * notRock * landW )
 			* mix( 1.0, smoothstep( 0.2, 0.7, clump ) * 0.35 + 0.65, meadowW );
+		// (ours) the forest floor near the camera lies under the vegetation's canopy, which hides most of the
+		// sky: without this the dark floor showed the blue sky's diffuse and specular light and read slate-teal.
+		// Farther out the terrain paints the canopy itself (canopyW), which sees the whole sky.
+		underCanopy = jungleW * ( 1.0 - canopyW ) * notRock * landW * ( 1.0 - sandW ) * ( 1.0 - pathW * 0.5 );
 		outAO = aoV * aoDetail * ( 1.0 - seagrassW * 0.3 ) * ( 1.0 - rubbleW * smoothstep( 0.55, 0.2, dN.x ) * 0.35 )
+			* mix( 1.0, TER_CANOPY_SKY, underCanopy )
 			* mix( 1.0, smoothstep( 0.15, 0.6, canopyH ) * 0.6 + 0.4, canopyW );
 
 		albedoOut = albedo;
@@ -861,6 +871,12 @@ const TERRAIN_ALBEDO = /* glsl */`
 	dtAO *= clamp( outAO, 0.0, 1.0 );
 	float tRough = outRough;
 	diffuseColor = vec4( albedoOut, 1.0 );
+	// light passed down through the leaves (green, diffuse: not in the sun's shadow map)
+	if ( underCanopy > 0.0 ) {
+		vec3 Ls = normalize( uSunDir );
+		totalEmissiveRadiance += albedoOut * uSunColor * TER_CANOPY_T * ( max( Ls.y, 0.0 ) * underCanopy
+			* cloudShadowAt( vWorldPos ) * terrainSunShadowAt( vWorldPos ) * RECIPROCAL_PI );
+	}
 `;
 
 const TERRAIN_NORMAL = /* glsl */`

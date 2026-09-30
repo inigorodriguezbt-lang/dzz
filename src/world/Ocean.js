@@ -1,9 +1,12 @@
-// The Pacific: a camera-centred polar grid with Gerstner swell, surf lines that follow the depth
-// contours onto the beaches, refraction and depth absorption from the opaque pass, sky reflections,
-// sun glitter, shore foam and whitecaps. The same wave sum runs on the CPU for swimming and boats.
+// The Pacific: a camera-centred polar grid with Gerstner swell, shaded with Tidewater's water model
+// (ocean/waterShade.js: exact Fresnel, SSR, GGX glitter, the Snell-refracted water column). Only sea
+// connected to the open ocean is drawn (ocean/seaMask.js). The same wave sum runs on the CPU for
+// swimming and boats.
 import * as THREE from 'three';
 import { G, COMMON_GLSL } from '../render/Materials.js';
 import { LAYER_POST } from '../render/Renderer.js';
+import { buildSeaMask, seaMaskAt } from './ocean/seaMask.js';
+import { waterShadeUniforms, WATER_HELPERS_GLSL, WATER_SHADE_GLSL, FOAM_LIGHT_SIMPLE } from './ocean/waterShade.js';
 
 const TAU = Math.PI * 2;
 // polar grid: segments around, first ring spacing, growth per ring
@@ -17,39 +20,45 @@ export class Ocean {
 		this.seaState = 0.5; // 0 calm .. 1 storm
 		this.time = 0;
 		this.waves = makeWaves();
-		this.quality = quality;
-		this.mesh = new THREE.Mesh( buildPolarGrid( GRID[ quality ] ), this._material() );
+		this.quality = GRID[ quality ] ? quality : 'high';
+		this.seaMask = buildSeaMask( hf );
+		this.mesh = new THREE.Mesh( buildPolarGrid( GRID[ this.quality ] ), this._material() );
 		this.mesh.frustumCulled = false;
 		this.mesh.layers.set( LAYER_POST );
 		this.mesh.renderOrder = 10;
 		this.mesh.matrixAutoUpdate = false;
-		this.bathy = makeBathyTexture( hf );
-		this.mat.uniforms.uBathy.value = this.bathy;
-		this.mat.uniforms.uBathyRect.value.set( hf.x0 - hf.CS / 2, hf.z0 - hf.CS / 2, hf.CS * hf.cnx, hf.CS * hf.cnz );
+		// the projection this frame is drawn with (the TAA jitters it inside the render call)
+		this.mesh.onBeforeRender = ( gl, scene, camera ) => {
+			const u = this.mat.uniforms;
+			u.uProj.value.copy( camera.projectionMatrix );
+			u.uCamWorld.value.copy( camera.matrixWorld );
+		};
+		const u = this.mat.uniforms;
+		u.uBathy.value = makeBathyTexture( hf, this.seaMask );
+		u.uBathyRect.value.set( hf.x0 - hf.CS / 2, hf.z0 - hf.CS / 2, hf.CS * hf.cnx, hf.CS * hf.cnz );
 	}
 
 	_material() {
 		const W = this.waves;
 		const mat = new THREE.ShaderMaterial( {
 			name: 'Ocean',
-			uniforms: Object.assign( {
-				uSceneColor: { value: null }, uSceneDepth: { value: null }, uInvProj: { value: new THREE.Matrix4() }, uViewport: { value: new THREE.Vector2( 1, 1 ) },
+			uniforms: Object.assign( waterShadeUniforms( THREE ), {
 				uWaveDir: { value: W.map( w => new THREE.Vector2( w.dx, w.dz ) ) }, uWaveK: { value: W.map( w => w.k ) }, uWaveA: { value: W.map( w => w.a ) },
 				uWaveW: { value: W.map( w => w.w ) }, uWaveP: { value: W.map( w => w.p ) }, uSea: { value: 0.5 }, uWTime: { value: 0 },
-				uDetail: { value: makeDetailNormals() }, uBathy: { value: null }, uBathyRect: { value: new THREE.Vector4() }, uEnv: { value: null },
-				uCamFar: { value: 1 }, uUnder: { value: 0 },
+				uDetail: { value: makeDetailNormals() }, uBathy: { value: null }, uBathyRect: { value: new THREE.Vector4() },
+				uSlopeScale: { value: 1 },
 			}, G ),
-			defines: { NW: W.length, REVERSED: this.r.reversed ? 1 : 0 },
+			defines: { NW: W.length, REVERSED: this.r.reversed ? 1 : 0, LOGDEPTH: this.r.logDepth ? 1 : 0, WQ: WQ[ this.quality ] },
 			vertexShader: /* glsl */`
 				uniform vec2 uWaveDir[ NW ]; uniform float uWaveK[ NW ]; uniform float uWaveA[ NW ]; uniform float uWaveW[ NW ]; uniform float uWaveP[ NW ];
 				uniform float uSea; uniform float uWTime; uniform sampler2D uBathy; uniform vec4 uBathyRect; uniform vec3 uCamPos;
-				varying vec3 vWorld; varying vec3 vN; varying float vFoam; varying float vDepth; varying float vSurf; varying vec4 vClip;
-				float bathyAt( vec2 xz ) { return texture2D( uBathy, ( xz - uBathyRect.xy ) / uBathyRect.zw ).r; }
+				varying vec3 vWorld; varying vec3 vN; varying float vFoam; varying float vDepth; varying float vSurf; varying vec2 vLagXZ; varying float vWaveH; varying float vJac;
+				vec2 bathyAt( vec2 xz ) { return texture2D( uBathy, ( xz - uBathyRect.xy ) / uBathyRect.zw ).rg; }
 				void main() {
 					vec3 p = ( modelMatrix * vec4( position, 1.0 ) ).xyz;
 					vec2 xz0 = p.xz;
 					float dist = length( xz0 - uCamPos.xz );
-					float depth = -bathyAt( xz0 );
+					float depth = -bathyAt( xz0 ).r;
 					vDepth = depth;
 					// waves shrink in shallow water and far away (where the grid is coarse)
 					float att = smoothstep( 0.0, 3.0, depth ) * 0.8 + 0.2;
@@ -86,107 +95,81 @@ export class Ocean {
 					p += disp;
 					vN = normalize( cross( dz, dx ) );
 					vFoam = clamp( ( 0.55 - jac ) * 1.8, 0.0, 1.0 ) * uSea;
+					vJac = jac;
+					vLagXZ = xz0;
+					vWaveH = disp.y;
 					vWorld = p;
 					gl_Position = projectionMatrix * viewMatrix * vec4( p, 1.0 );
-					vClip = gl_Position;
 				}`,
 			fragmentShader: /* glsl */`
 				uniform float uTime; uniform vec3 uCamPos; uniform vec3 uSunDir; uniform vec3 uSunColor;
 				uniform sampler2D uSkyLUT; uniform float uFogDensity; uniform float uFogFalloff; uniform float uFogBoost;
 				uniform float uWet; uniform float uCloudCover; uniform vec2 uCloudOffset; uniform float uCloudShadowK;
 				uniform vec2 uWind; uniform float uNight; uniform float uUnderwater; uniform float uWaterLevel;
-				uniform sampler2D uSceneColor; uniform sampler2D uSceneDepth; uniform mat4 uInvProj; uniform vec2 uViewport;
-				uniform sampler2D uDetail; uniform float uSea; uniform float uWTime; uniform float uUnder;
-				varying vec3 vWorld; varying vec3 vN; varying float vFoam; varying float vDepth; varying float vSurf; varying vec4 vClip;
+				uniform sampler2D uDetail; uniform float uSea; uniform float uWTime; uniform float uSlopeScale;
+				uniform sampler2D uBathy; uniform vec4 uBathyRect;
+				varying vec3 vWorld; varying vec3 vN; varying float vFoam; varying float vDepth; varying float vSurf; varying vec2 vLagXZ; varying float vWaveH; varying float vJac;
 				${COMMON_GLSL}
-				vec3 viewPosFromDepth( vec2 uv, float d ) {
-					#if REVERSED == 1
-						vec4 v = uInvProj * vec4( uv * 2.0 - 1.0, d, 1.0 );
-					#else
-						vec4 v = uInvProj * vec4( uv * 2.0 - 1.0, d * 2.0 - 1.0, 1.0 );
-					#endif
-					return v.xyz / v.w;
+				${WATER_HELPERS_GLSL}
+				#define WATER_FOAM_LIGHT ${FOAM_LIGHT_SIMPLE}
+				struct WaterSurfaceFrag { vec3 normal; float foam; float rough; float aeration; float jacobian; };
+				// seabed height under the refracted ray: the opaque scene behind the water there
+				// (the scene seen through the projection of p, if it lies under the water behind the surface)
+				float waterGroundAt( vec3 p, float fallback, float surfViewZ, float surfY ) {
+					vec2 uv = waterProject( ( viewMatrix * vec4( p, 1.0 ) ).xyz );
+					if ( any( lessThan( uv, vec2( 0.0 ) ) ) || any( greaterThan( uv, vec2( 1.0 ) ) ) ) return fallback;
+					float d = waterSceneDepthAt( uv );
+					if ( waterIsSky( d ) ) return fallback;
+					vec3 q = waterViewPos( uv, - waterViewDepth( d ) );
+					float y = ( uCamWorld * vec4( q, 1.0 ) ).y;
+					return q.z < surfViewZ - WATER_BEHIND && y < surfY ? y : fallback;
 				}
 				void main() {
-					vec2 suv = gl_FragCoord.xy / uViewport;
-					vec3 V = uCamPos - vWorld;
-					float dist = length( V );
-					V /= dist;
-					bool under = uUnder > 0.5;
-					// normal: swell + two scrolling ripple layers, flattened with distance
-					vec3 N = normalize( vN );
-					float fd = 1.0 - smoothstep( 80.0, 900.0, dist );
-					vec2 w1 = vWorld.xz / 9.0 + uWind * uWTime * 0.05;
-					vec2 w2 = vWorld.xz / 3.1 - uWind.yx * uWTime * 0.08;
+					// only sea connected to the open ocean (no pools in dips behind the dunes)
+					if ( texture2D( uBathy, ( vWorld.xz - uBathyRect.xy ) / uBathyRect.zw ).g < 0.5 ) discard;
+					vec3 pos = vWorld;
+					vec2 lagXZ = vLagXZ;
+					float vHeight = vWaveH;
+					// footprint of this pixel on the surface (m), for filtering / roughness
+					float footprint = max( length( fwidth( lagXZ ) ), 1e-4 );
+					float seenFromBelow = 0.0;
+
+					// ---- surface: swell + two scrolling ripple layers, flattened with distance
+					float distS = length( uCamPos - pos );
+					vec3 Ns = normalize( vN );
+					float fd = 1.0 - smoothstep( 80.0, 900.0, distS );
+					vec2 w1 = pos.xz / 9.0 + uWind * uWTime * 0.05;
+					vec2 w2 = pos.xz / 3.1 - uWind.yx * uWTime * 0.08;
 					vec3 d1 = texture2D( uDetail, w1 ).xyz * 2.0 - 1.0;
 					vec3 d2 = texture2D( uDetail, w2 * vec2( 1.0, -1.0 ) + 0.37 ).xyz * 2.0 - 1.0;
 					vec2 dn = ( d1.xy * 0.6 + d2.xy * 0.4 ) * ( 0.35 + uSea * 0.5 ) * fd;
-					N = normalize( N + vec3( dn.x, 0.0, dn.y ) );
-					if ( under ) N = -N;
-					// water depth along the view ray from the opaque pass
-					float sd = texture2D( uSceneDepth, suv ).r;
-					vec3 vpS = viewPosFromDepth( suv, sd );
-					vec4 vpW4 = uInvProj * vec4( vClip.xy / vClip.w, 0.0, 1.0 );
-					float sceneDist = length( vpS );
-					#if REVERSED == 1
-						bool sky = sd <= 0.0;
-					#else
-						bool sky = sd >= 1.0;
-					#endif
-					float thick = sky ? 1e4 : max( sceneDist - dist, 0.0 );
-					// refraction: offset the scene lookup by the normal, less where the water is thin
-					vec2 ruv = suv + N.xz * 0.04 * clamp( thick * 0.3, 0.0, 1.0 ) / max( 1.0, dist * 0.02 );
-					float rd = texture2D( uSceneDepth, ruv ).r;
-					if ( length( viewPosFromDepth( ruv, rd ) ) < dist ) ruv = suv; // don't pull in things in front
-					vec3 refr = texture2D( uSceneColor, ruv ).rgb;
-					// absorption and scattering in the water column (tropical: red goes first)
-					float colDepth = min( thick, 200.0 );
-					vec3 sigma = vec3( 0.46, 0.085, 0.062 ) * 1.6;
-					vec3 trans = exp( -sigma * colDepth );
-					float dayL = max( uSunColor.g, 0.0 );
-					vec3 deep = vec3( 0.004, 0.035, 0.085 ) * ( 0.25 + dayL * 0.55 );
-					vec3 shallowTint = vec3( 0.05, 0.28, 0.28 ) * ( 0.2 + dayL * 0.4 );
-					vec3 scatter = mix( shallowTint, deep, smoothstep( 1.0, 12.0, colDepth ) );
-					vec3 below = refr * trans + scatter * ( 1.0 - trans );
-					// reflection: sky with a sun glint
-					vec3 R = reflect( -V, N );
-					R.y = abs( R.y );
-					vec3 refl = texture2D( uSkyLUT, skyLutUv( normalize( R + vec3( 0.0, 0.02, 0.0 ) ) ) ).rgb;
-					refl *= 1.0 - uCloudCover * 0.35;
-					float F = 0.02 + 0.98 * pow( 1.0 - max( dot( N, V ), 0.0 ), 5.0 );
-					if ( under ) F = clamp( 1.0 - dot( -V, vec3( 0, -1, 0 ) ) * 1.6, 0.0, 1.0 ) ;
-					vec3 Hh = normalize( V + normalize( uSunDir ) );
-					float rough = 0.02 + ( 1.0 - fd ) * 0.06 + uSea * 0.03;
-					float NdH = max( dot( N, Hh ), 0.0 );
-					float a2 = rough * rough;
-					float dd = NdH * NdH * ( a2 - 1.0 ) + 1.0;
-					float spec = a2 / ( 3.14159 * dd * dd ) * 0.25;
-					float cs = cloudShadowAt( vWorld );
-					vec3 col;
-					if ( under ) {
-						col = mix( below, vec3( 0.02, 0.12, 0.14 ) * dayL, F );
-					} else {
-						col = mix( below, refl, F ) + uSunColor * spec * F * cs * step( 0.0, normalize( uSunDir ).y );
-					}
-					// foam: shore wash, surf crests, whitecaps
-					float fn = vnoise2( vWorld.xz * 0.9 + uWTime * 0.25 ) * 0.6 + vnoise2( vWorld.xz * 2.7 - uWTime * 0.4 ) * 0.4;
-					float shore = ( 1.0 - smoothstep( 0.0, 0.35 + fn * 0.25, colDepth ) ) * step( 0.0, colDepth ) * ( sky ? 0.0 : 1.0 );
-					float foam = max( shore * 0.9, smoothstep( 0.45, 0.9, vSurf ) * smoothstep( 0.35, 0.8, fn ) );
-					foam = max( foam, vFoam * smoothstep( 0.4, 0.8, fn ) );
-					vec3 foamC = vec3( 0.9, 0.95, 0.95 ) * ( uSunColor * max( normalize( uSunDir ).y, 0.0 ) * 0.28 + texture2D( uSkyLUT, vec2( 0.5, 0.9 ) ).rgb * 0.9 );
-					col = mix( col, foamC, clamp( foam, 0.0, 1.0 ) * 0.85 );
-					if ( ! under ) col = atmosphereFog( col, vWorld );
-					// the edge against the sand: fade in over the first centimetres
-					float alpha = sky ? 1.0 : smoothstep( 0.0, 0.06, colDepth );
-					gl_FragColor = vec4( col, alpha );
+					WaterSurfaceFrag surf;
+					surf.normal = normalize( Ns + vec3( dn.x, 0.0, dn.y ) );
+					float fn = vnoise2( pos.xz * 0.9 + uWTime * 0.25 ) * 0.6 + vnoise2( pos.xz * 2.7 - uWTime * 0.4 ) * 0.4;
+					float fm = max( smoothstep( 0.45, 0.9, vSurf ) * smoothstep( 0.35, 0.8, fn ), vFoam * smoothstep( 0.4, 0.8, fn ) );
+					surf.foam = clamp( fm, 0.0, 1.0 ) * 0.85;
+					surf.rough = 1.0;
+					surf.aeration = 0.0;
+					surf.jacobian = vJac;
+
+					// seabed height seen through this pixel
+					vec2 suv = gl_FragCoord.xy / uViewport;
+					float sd = waterSceneDepthAt( suv );
+					float groundH = -1e4;
+					if ( ! waterIsSky( sd ) ) groundH = ( uCamWorld * vec4( waterViewPos( suv, - waterViewDepth( sd ) ), 1.0 ) ).y;
+
+					${WATER_SHADE_GLSL}
+
+					if ( seenFromBelow < 0.5 ) outCol = atmosphereFog( outCol, pos );
+					gl_FragColor = vec4( outCol, 1.0 );
 				}`,
-			transparent: true, depthWrite: true, side: THREE.DoubleSide,
+			side: THREE.DoubleSide, depthWrite: true,
 		} );
 		this.mat = mat;
 		return mat;
 	}
 
-	// 'low' | 'medium' | 'high': grid density, ripple layers and refraction
+	// 'low' | 'medium' | 'high': grid density, screen-space reflections
 	setQuality( q ) {
 		if ( ! GRID[ q ] || q === this.quality ) return;
 		this.quality = q;
@@ -201,18 +184,26 @@ export class Ocean {
 		const u = this.mat.uniforms;
 		u.uWTime.value = this.time;
 		u.uSea.value = 0.35 + this.seaState * 1.1;
+		// wind speed at 10 m (m/s) for the Cox-Munk slope variance
+		u.uWindU.value = 3 + this.seaState * 12;
 		u.uSceneColor.value = sceneColor;
 		u.uSceneDepth.value = sceneDepth;
-		u.uInvProj.value.copy( camera.projectionMatrixInverse );
 		u.uViewport.value.copy( viewport );
-		u.uUnder.value = camera.position.y < this.heightAt( camera.position.x, camera.position.z ) ? 1 : 0;
+		u.uCamFar.value = camera.far;
+		u.uProj.value.copy( camera.projectionMatrix );
+		u.uCamWorld.value.copy( camera.matrixWorld );
+		const wh = this.heightAt( camera.position.x, camera.position.z );
+		u.uCamWaterH.value = wh;
+		G.uUnderwater.value = camera.position.y < wh ? 1 : 0;
 		this.mesh.position.set( camera.position.x, 0, camera.position.z );
 		this.mesh.updateMatrix();
 		this.mesh.updateMatrixWorld();
 	}
 
-	// CPU twin of the vertex shader (vertical part) for swimming, boats and splashes
+	// CPU twin of the vertex shader (vertical part) for swimming, boats and splashes; -1000 where there is
+	// no sea (inland dips)
 	heightAt( x, z, t = this.time ) {
+		if ( seaMaskAt( this.hf, this.seaMask, x, z ) < 0.5 ) return - 1000;
 		const depth = - this.hf.coarseBilinear( x, z );
 		const att = smooth( 0, 3, depth ) * 0.8 + 0.2;
 		const sea = 0.35 + this.seaState * 1.1;
@@ -299,12 +290,16 @@ function makeDetailNormals() {
 	return t;
 }
 
-// the coarse heights as a half-float texture for depth lookups in the water shader
-function makeBathyTexture( hf ) {
+// the coarse heights (r) and the sea mask (g) as a half-float texture on the coarse cell centres
+function makeBathyTexture( hf, mask ) {
 	const W = hf.cnx, H = hf.cnz;
-	const data = new Uint16Array( W * H );
-	for ( let i = 0; i < W * H; i ++ ) data[ i ] = THREE.DataUtils.toHalfFloat( Math.max( - 2000, hf.coarse[ i ] * hf.iq ) );
-	const t = new THREE.DataTexture( data, W, H, THREE.RedFormat, THREE.HalfFloatType );
+	const data = new Uint16Array( W * H * 2 );
+	const one = THREE.DataUtils.toHalfFloat( 1 ), zero = THREE.DataUtils.toHalfFloat( 0 );
+	for ( let i = 0; i < W * H; i ++ ) {
+		data[ i * 2 ] = THREE.DataUtils.toHalfFloat( Math.max( - 2000, hf.coarse[ i ] * hf.iq ) );
+		data[ i * 2 + 1 ] = mask[ i ] ? one : zero;
+	}
+	const t = new THREE.DataTexture( data, W, H, THREE.RGFormat, THREE.HalfFloatType );
 	t.magFilter = THREE.LinearFilter; t.minFilter = THREE.LinearFilter;
 	t.generateMipmaps = false;
 	t.needsUpdate = true;

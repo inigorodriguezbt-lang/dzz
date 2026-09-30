@@ -39,8 +39,10 @@ export const G = {
 	uTransLUT: { value: null },
 	uMoonDir: { value: new THREE.Vector3( 0, 1, 0 ) },
 	uMoonBright: { value: 0 }, // moon phase brightness x above the horizon
+	uNightGlow: { value: 0 }, // night sky glow: the moonlit sky, down to airglow and starlight without a moon
 	uStarI: { value: 0 },
 	uHazeDensity: { value: 1.6 },
+	uHazeShafts: { value: 0 }, // 1 while the post shaft march runs (it adds the near sunlit in-scatter back)
 	uHillShadow: { value: tex1( - 1e4, 0, 0, 0 ) }, // (top height, occluder distance) of the terrain's shadow
 	uHillShadowRect: { value: new THREE.Vector4( 0, 0, 1, 1 ) }, // x0, z0, sizeX, sizeZ
 	uHillShadowOn: { value: 0 },
@@ -79,7 +81,7 @@ export const COMMON_GLSL = /* glsl */`
 	#ifndef DT_COMMON
 	#define DT_COMMON
 	uniform float uFrame; uniform vec3 uSkyIrr; uniform vec3 uHorizon; uniform vec3 uSkySunDir; uniform float uAtmoR;
-	uniform sampler2D uTransLUT; uniform vec3 uMoonDir; uniform float uMoonBright; uniform float uStarI; uniform float uHazeDensity;
+	uniform sampler2D uTransLUT; uniform vec3 uMoonDir; uniform float uMoonBright; uniform float uNightGlow; uniform float uStarI; uniform float uHazeDensity; uniform float uHazeShafts;
 	uniform sampler2D uHillShadow; uniform vec4 uHillShadowRect; uniform float uHillShadowOn;
 	uniform sampler2D uCloudShadow; uniform vec4 uCloudShadowRect; uniform float uCloudShadowOn;
 	uniform sampler2D uCloudPano; uniform float uCloudPanoOn;
@@ -143,13 +145,15 @@ export const COMMON_GLSL = /* glsl */`
 		vec3 glow = vec3( 0.55, 0.6, 0.75 ) * ( band * dark * 0.0035 );
 		return ( star + glow ) * uStarI * smoothstep( 0.0, 0.2, dir.y );
 	}
-	// faint blue-grey moonlit sky (a little brighter toward the horizon) and the moon's aureole
+	// faint blue-grey moonlit sky (a little brighter toward the horizon) and the moon's aureole. Tidewater's
+	// moon is always up; ours follows its real path and phase, so the glow keeps a floor (airglow,
+	// starlight) on moonless nights (uNightGlow), the aureole only with the moon up
 	vec3 skyMoonSky( vec3 dir ) {
 		float ang = acos( clamp( dot( dir, uMoonDir ), -1.0, 1.0 ) );
 		float aureole = exp( ang * -14.0 ) * 2.4 + exp( ang * -2.5 ) * 0.9;
 		float grad = mix( 1.7, 1.0, clamp( dir.y * 3.0, 0.0, 1.0 ) );
 		float up = smoothstep( -0.05, 0.15, uMoonDir.y );
-		return vec3( 0.005, 0.0068, 0.0105 ) * ( grad + aureole ) * uNight * up * uMoonBright;
+		return vec3( 0.005, 0.0068, 0.0105 ) * ( grad * uNightGlow + aureole * up * uMoonBright ) * uNight;
 	}
 	// everything behind the clouds but the sun and moon discs
 	vec3 skyBackground( vec3 dir, float starK ) {
@@ -320,7 +324,7 @@ export const COMMON_GLSL = /* glsl */`
 		if ( uStarI > 0.001 ) fog += skyMoonSky( vh );
 		vec3 Ep = uSunColor * hazePhase( dot( dir, uSunDir ) );
 		float eL = dtLum( Ep );
-		float fSun = eL / ( eL + dtLum( uSkyIrr ) + 1e-5 );
+		float fSun = eL / ( eL + dtLum( uSkyIrr ) + 1e-5 ) * min( uHazeShafts, 1.0 );
 		float h = smoothstep( 0.0, HZ_NEAR, dist );
 		float tau = ( hazeLayerDepth( HZ_MARINE_SIGMA, HZ_MARINE_H, camH, dir.y, dist ) + hazeLayerDepth( HZ_AEROSOL_SIGMA, HZ_AEROSOL_H, camH, dir.y, dist ) ) * uHazeDensity;
 		float T = exp( - tau );

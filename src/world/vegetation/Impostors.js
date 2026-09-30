@@ -3,7 +3,8 @@
 //
 // At startup every species model (the full LOD 0 mesh) is rendered from IMP_N x IMP_N directions on
 // the upper hemisphere (hemi-octahedral layout) into two atlases:
-//   A: base colour (leaf texel x vertex colour x baked exposure, gamma-2 encoded), coverage
+//   A: base colour (leaf texel x vertex colour x baked exposure; sRGB storage, so the resolve, the box
+//      filter and the mipmaps average in linear light), coverage
 //   B: plant-local normal * 0.5 + 0.5, leaf flag (1 foliage, 0 bark / solid parts)
 //   C: (half resolution) leaf exposure, for the indirect light (the near models' ambient occlusion)
 // Each species owns one IMP_N x IMP_N block of frames; the whole bake is one draw per atlas.
@@ -15,15 +16,16 @@
 // lean as a shear), picks the three frames around the view direction (barycentric blend; far away
 // only the nearest) and re-projects the ray onto each frame's plane, which is exact for any view
 // direction. Colours use the same per-species tints as the near models, so the hand-over at the LOD
-// distance is a dithered cross-fade between matching images.
+// distance is a short cross-fade between matching images (VegMaterial vegTexel).
 import * as THREE from 'three';
+import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
 import { G, patchMaterial } from '../../render/Materials.js';
 import { SP, NSP, PALM_H } from './species.js';
 import { KIND, VG } from './VegMaterial.js';
 import { InstanceTarget } from './InstanceTarget.js';
 
 export const IMP_N = 6; // frames per side of a species block
-const FRAME = 80; // px per frame
+const FRAME = 96; // px per frame: about one texel per pixel at the switch from the mid models (1080p)
 const BLEND_DIST = 220; // m: three-frame blending within, nearest frame beyond (default; see setRanges)
 const ATLAS_N = 2048; // leaf atlas size (mip level estimate in the bake)
 
@@ -43,7 +45,7 @@ function octDecode( u, v, out ) {
 
 const BAKE_VERT = /* glsl */`
 	attribute vec4 aMat; attribute vec3 aCol;
-	varying vec2 vUv; varying vec4 vMat; varying vec3 vCol; varying vec3 vN;
+	varying vec2 vUv; varying vec4 vMat; varying vec3 vCol; varying vec3 vN; varying vec3 vP;
 	void main() {
 		vUv = uv;
 		// the palm trunk's ring texture repeats every 1.6 m along the 10 m model trunk (as the near shader)
@@ -52,31 +54,38 @@ const BAKE_VERT = /* glsl */`
 		vec3 p = position;
 		// fruit and grass seed heads show on some plants only: left out of the shared image
 		if ( aMat.w > 98.5 || ( aMat.w > 29.5 && aMat.w < 30.5 ) ) p = vec3( 0.0, - 1e4, 0.0 );
-		gl_Position = projectionMatrix * viewMatrix * instanceMatrix * vec4( p, 1.0 );
+		vec4 wp = instanceMatrix * vec4( p, 1.0 );
+		vP = wp.xyz;
+		gl_Position = projectionMatrix * viewMatrix * wp;
 	}
 `;
 
 const BAKE_FRAG = /* glsl */`
-	uniform sampler2D tLeaf; uniform sampler2D tPalmBark; uniform sampler2D tBark; uniform float uPass;
-	varying vec2 vUv; varying vec4 vMat; varying vec3 vCol; varying vec3 vN;
+	uniform sampler2D tLeaf; uniform sampler2D tPalmBark; uniform sampler2D tBark; uniform float uPass; uniform float uEdgeK;
+	varying vec2 vUv; varying vec4 vMat; varying vec3 vCol; varying vec3 vN; varying vec3 vP;
 	void main() {
 		float part = vMat.x;
+		// leaf cards seen edge-on are thinned as on the near models (VegMaterial vegEdge); the frame looks
+		// down -z. (derivatives before the branches: uniform control flow)
+		vec3 fn = cross( dFdx( vP ), dFdy( vP ) );
+		float facing = abs( fn.z ) / max( length( fn ), 1e-12 );
+		vec2 dx = dFdx( vUv ), dy = dFdy( vUv );
 		vec4 c;
 		float leaf = 0.0;
 		if ( part < 0.5 ) c = texture2D( tPalmBark, vUv );
 		else if ( part < 1.5 ) c = vec4( texture2D( tBark, vUv ).rgb / dot( max( textureLod( tBark, vec2( 0.5 ), 12.0 ).rgb, vec3( 1e-4 ) ), vec3( 0.333 ) ), 1.0 ); // as the near shader
 		else {
-			vec2 dx = dFdx( vUv ), dy = dFdy( vUv );
 			c = textureGrad( tLeaf, vUv, dx, dy );
 			// the same coverage-keeping threshold as the near foliage at this minification
 			float lod = log2( max( max( length( dx ), length( dy ) ) * ${ATLAS_N.toFixed( 1 )}, 1e-4 ) );
-			if ( c.a < mix( 0.5, 0.2, clamp( lod / 4.0, 0.0, 1.0 ) ) ) discard;
+			float edge = part < 2.5 ? ( 1.0 - smoothstep( 0.08, 0.35, facing ) ) * uEdgeK : 0.0;
+			if ( c.a < mix( 0.5, 0.2, clamp( lod / 4.0, 0.0, 1.0 ) ) + edge ) discard;
 			leaf = part < 2.5 ? 1.0 : 0.0;
 		}
 		// the near shader's albedo (VegMaterial FRAG_COLOR) before the per-plant tints
 		float ao = vMat.y;
 		vec3 col = c.rgb * vCol * ( part < 1.5 ? vec3( mix( 0.6, 1.0, ao ) ) : mix( 0.55, 1.0, ao ) * mix( vec3( 1.0 ), vec3( 1.16, 1.22, 0.92 ), smoothstep( 0.62, 1.0, ao ) * 0.7 ) );
-		if ( uPass < 0.5 ) gl_FragColor = vec4( sqrt( max( col, vec3( 0.0 ) ) ), 1.0 );
+		if ( uPass < 0.5 ) gl_FragColor = vec4( max( col, vec3( 0.0 ) ), 1.0 );
 		else if ( uPass < 1.5 ) gl_FragColor = vec4( normalize( vN ) * 0.5 + 0.5, leaf );
 		else gl_FragColor = vec4( ao, 0.0, 0.0, 1.0 );
 	}
@@ -108,11 +117,11 @@ const VERT_PARS = /* glsl */`
 		vec3 wbase = base + modelMatrix[ 3 ].xyz;
 		float s = iPos.w, yaw = iDat.x, pa = iDat.z, pb = iDat.w;
 		float d = distance( wbase, uCamPos );
-		// fade in: a short dithered cross-fade with the near / mid model at the plant's own jittered
-		// switch distance (as VegMaterial: complementary, the plant stays solid). Everything past
-		// that shrinks instead of dissolving: the plants the distance thinning drops (by rank) and all
-		// of them at the end of the range, so the far canopy never turns into dither noise. The far
-		// canopy's end is not jittered: the CPU streams it to a fixed radius.
+		// fade in: a short cross-fade with the near / mid model at the plant's own jittered switch
+		// distance (as VegMaterial: the plant stays solid). Everything past that shrinks instead of
+		// dissolving: the plants the distance thinning drops (by rank) and all of them at the end of
+		// the range, so the far canopy never breaks up into a pattern. The far canopy's end is not
+		// jittered: the CPU streams it to a fixed radius.
 		float jit = 0.92 + 0.16 * fract( rank * 7.77 + 0.31 );
 		float fin = smoothstep( Rg.x, Rg.y, d / jit );
 		float fend = 1.0 - smoothstep( Rg.z, Rg.w, uImpFar > 0.5 ? d : d / jit );
@@ -262,15 +271,15 @@ const FRAG_COLOR = /* glsl */`
 	float impLod = log2( max( max( length( dFdx( vImpQ ) ), length( dFdy( vImpQ ) ) ) * ${( FRAME / 2 ).toFixed( 1 )}, 1e-4 ) );
 	float impCut = mix( 0.42, 0.2, clamp( ( impLod - 0.5 ) / 3.0, 0.0, 1.0 ) );
 	#ifdef ALPHA_TO_COVERAGE
-	// MSAA: soft crown edges (a one-pixel ramp over the coverage) and the fade-in as sample coverage;
-	// the incoming impostor is opaque by the band's middle, where the model starts to fade (VegMaterial)
-	diffuseColor.a = clamp( ( impCov - impCut ) / max( fwidth( impCov ), 0.02 ) + 0.5, 0.0, 1.0 ) * min( 1.0, 2.0 * vImpZ.x );
+	// MSAA: soft crown edges (a ramp over the coverage, at least 0.22 wide so a crown's partly covered
+	// fringe blends) and the fade-in as sample coverage; the incoming impostor is opaque by the band's
+	// middle, where the model starts to fade (VegMaterial)
+	diffuseColor.a = clamp( ( impCov - impCut ) / max( fwidth( impCov ), 0.22 ) + 0.5, 0.0, 1.0 ) * min( 1.0, 2.0 * vImpZ.x );
 	if ( diffuseColor.a < 0.01 ) discard;
 	#else
 	if ( impCov < impCut || impDither( gl_FragCoord.xy ) >= vImpZ.x ) discard;
 	#endif
 	vec3 impCol = impA.rgb / impCov;
-	impCol *= impCol;
 	float impLeaf = clamp( impB.a / impCov, 0.0, 1.0 );
 	float impAo = clamp( impC.x / max( impC.y, 1e-3 ), 0.0, 1.0 );
 	impCol *= mix( vImpBarkC, vImpTint, impLeaf );
@@ -281,6 +290,9 @@ const FRAG_COLOR = /* glsl */`
 	float impSpec = mix( 0.3, impCanopy ? 0.15 : 0.4, impLeaf );
 	float impAoI = mix( 0.4, 1.0, impAo );
 	float impTrans = impLeaf * ( impCanopy ? 0.5 * ( impAo * 0.6 + 0.4 ) : 0.3 );
+	// the crown shades itself: the models get that from the sun's shadow map, the impostor (its shadow
+	// lookup sits outside its own crown) from the baked exposure: sunlight fades towards the inside
+	dtSunMod = mix( 0.55, 1.0, smoothstep( 0.3, 0.9, impAo ) );
 `;
 
 // small leaf specular (F0 and F90 scaled like MeshPhysicalMaterial's specularIntensity)
@@ -358,7 +370,7 @@ export class Impostors {
 		} );
 		const make = ( name, k = 1 ) => {
 			const rt = new THREE.WebGLRenderTarget( this.cols * FRAME * k, this.rows * FRAME * k, {
-				type: THREE.UnsignedByteType, depthBuffer: true, generateMipmaps: true, samples: 0,
+				type: THREE.UnsignedByteType, depthBuffer: false, generateMipmaps: true, samples: 0,
 				minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter,
 			} );
 			rt.texture.name = name;
@@ -366,6 +378,7 @@ export class Impostors {
 			return rt;
 		};
 		this.rtA = make( 'vegImpostorA' );
+		this.rtA.texture.colorSpace = THREE.SRGBColorSpace;
 		this.rtB = make( 'vegImpostorB' );
 		this.rtC = make( 'vegImpostorC', 0.5 );
 		this.uniforms.tImpA.value = this.rtA.texture;
@@ -401,7 +414,7 @@ export class Impostors {
 		const gl = this.gl;
 		const mat = new THREE.ShaderMaterial( {
 			name: 'veg-impostor-bake',
-			uniforms: { tLeaf: VG.tLeaf, tPalmBark: VG.tPalmBark, tBark: VG.tBark, uPass: { value: 0 } },
+			uniforms: { tLeaf: VG.tLeaf, tPalmBark: VG.tPalmBark, tBark: VG.tBark, uPass: { value: 0 }, uEdgeK: { value: 0 } },
 			vertexShader: BAKE_VERT, fragmentShader: BAKE_FRAG, side: THREE.DoubleSide,
 		} );
 		// one orthographic view over the atlas in frame units: every frame is a unit cell and the
@@ -446,19 +459,68 @@ export class Impostors {
 		const prevShadow = gl.shadowMap.enabled;
 		gl.autoClear = false;
 		gl.shadowMap.enabled = false;
-		for ( const [ rt, pass ] of [ [ this.rtA, 0 ], [ this.rtB, 1 ], [ this.rtC, 2 ] ] ) {
-			mat.uniforms.uPass.value = pass;
-			gl.setRenderTarget( rt );
-			gl.setClearColor( 0x000000, 0 );
-			gl.clear( true, true, false );
-			gl.render( scene, cam );
-		}
+		// Each species block is rendered supersampled (SS x the atlas resolution, multisampled) into a small
+		// temporary target and box-filtered into its atlas region (the C atlas is half resolution: twice the
+		// filter). The leaflets and frond edges resolve into fractional coverage like the near model's
+		// minified foliage: a distant crown is a soft, even canopy with its gaps, not aliased speckles or
+		// solid paper cut-outs. The temporary buffers go right after the bake.
+		const SS = 2;
+		const blockPx = IMP_N * FRAME;
+		const samples = Math.min( 4, gl.capabilities.maxSamples || 0 );
+		const mk = ( cs ) => {
+			const t = new THREE.WebGLRenderTarget( blockPx * SS, blockPx * SS, { type: THREE.UnsignedByteType, depthBuffer: true, samples, generateMipmaps: false } );
+			t.texture.colorSpace = cs;
+			return t;
+		};
+		// colour through sRGB storage (averaged in linear light), normals and exposure linear
+		const tmpS = mk( THREE.SRGBColorSpace ), tmpL = mk( THREE.NoColorSpace );
+		// box filter of k x k source texels per target texel: ( k / 2 )^2 bilinear taps
+		const copy = new FullScreenQuad( new THREE.ShaderMaterial( {
+			uniforms: { tSrc: { value: null }, uTexel: { value: new THREE.Vector2( 1 / ( blockPx * SS ), 1 / ( blockPx * SS ) ) }, uTaps: { value: 1 } },
+			vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4( position.xy, 0.0, 1.0 ); }',
+			fragmentShader: `uniform sampler2D tSrc; uniform vec2 uTexel; uniform float uTaps; varying vec2 vUv;
+				void main() {
+					if ( uTaps < 1.5 ) { gl_FragColor = texture2D( tSrc, vUv ); return; }
+					vec4 c = vec4( 0.0 );
+					for ( int j = 0; j < 2; j ++ ) for ( int i = 0; i < 2; i ++ ) c += texture2D( tSrc, vUv + ( vec2( i, j ) - 0.5 ) * 2.0 * uTexel );
+					gl_FragColor = c * 0.25;
+				}`,
+			depthTest: false, depthWrite: false,
+		} ) );
+		gl.setClearColor( 0x000000, 0 );
+		for ( const rt of [ this.rtA, this.rtB, this.rtC ] ) { gl.setRenderTarget( rt ); gl.clear( true, false, false ); }
+		this.species.forEach( ( s, k ) => {
+			const bx = ( k % this.bcols ) * IMP_N, by = Math.floor( k / this.bcols ) * IMP_N;
+			meshes.forEach( ( m, q ) => { m.visible = q === k; } );
+			const kind = this.spec[ s ].kind;
+			mat.uniforms.uEdgeK.value = kind === KIND.PALM ? 0 : kind === KIND.TREE || kind === KIND.PINE ? 0.45 : 0.25;
+			cam.left = bx; cam.right = bx + IMP_N; cam.bottom = by; cam.top = by + IMP_N;
+			cam.updateProjectionMatrix();
+			for ( const [ rt, pass, res ] of [ [ this.rtA, 0, 1 ], [ this.rtB, 1, 1 ], [ this.rtC, 2, 0.5 ] ] ) {
+				mat.uniforms.uPass.value = pass;
+				const tmp = pass === 0 ? tmpS : tmpL;
+				copy.material.uniforms.tSrc.value = tmp.texture;
+				gl.setRenderTarget( tmp );
+				gl.clear( true, true, false );
+				gl.render( scene, cam );
+				const px = blockPx * res;
+				rt.viewport.set( bx * FRAME * res, by * FRAME * res, px, px );
+				copy.material.uniforms.uTaps.value = SS / res > 2 ? 4 : 1;
+				gl.setRenderTarget( rt );
+				copy.render( gl );
+				rt.viewport.set( 0, 0, rt.width, rt.height );
+			}
+		} );
 		gl.setRenderTarget( prevTarget );
 		gl.setClearColor( prevClear, prevAlpha );
 		gl.autoClear = prevAuto;
 		gl.shadowMap.enabled = prevShadow;
 		for ( const mesh of meshes ) mesh.dispose();
 		mat.dispose();
+		copy.material.dispose();
+		copy.dispose();
+		tmpS.dispose();
+		tmpL.dispose();
 		this.baked = true;
 	}
 

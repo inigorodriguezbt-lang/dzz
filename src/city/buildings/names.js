@@ -150,8 +150,14 @@ add( 'phone', 'Wireless Hawaii', WHITE, BLUE, 'box', '', BLUE );
 add( 'bakery', 'Malasada Bakery', CREAM, BROWN, 'serif' );
 add( 'bakery', 'Sweet Bread Bakery', PINK, WHITE, 'serif' );
 
+add( 'terminal', 'Departures', NAVY, WHITE, 'band', '', YELLOW );
+add( 'terminal', 'Arrivals', NAVY, WHITE, 'band', '', YELLOW );
+
 export const SIGN_ROWS = Math.ceil( SIGNS.length / SIGN_COLS );
 export const ATLAS_W = SIGN_W * SIGN_COLS, ATLAS_H = SIGN_H * SIGN_ROWS;
+
+// the index of the sign with this text (-1 if none)
+export function signIndex( text ) { return SIGNS.findIndex( s => s.text === text ); }
 
 // shop kinds that live in strip-mall units but have no sign list of their own
 const ALIAS = { sports: 'sports', shed: null, tent: null, observatory: null, barracks: null, terminal: null, tower: null };

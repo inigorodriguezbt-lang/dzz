@@ -6,7 +6,7 @@
 import { Geo, GlassGeo, F_IN } from './geo.js';
 import { L, hash32, rng, winState, winHash, DECAL, decalUV, pumpsOf } from './data.js';
 import { M, slabT } from './plan.js';
-import { storeyOutside, frontSteps, stepBoxes, groundAt, bulkhead, hoseTower } from './exterior.js';
+import { storeyOutside, frontSteps, stepBoxes, groundAt, bulkhead, hoseTower, terminalCanopyOf, towerCatwalkOf } from './exterior.js';
 import { furnishRoom } from './furniture.js';
 
 // physics materials: indices into data.js PMAT (collider records: data.js BOX_STRIDE)
@@ -60,6 +60,11 @@ function finishes( P, rm, R ) {
 		case 'bar': floor = M( L.woodfloor, [ 180, 140, 110 ], 1.6, F_IN, { r: 1 } ); wall = M( L.plaster, [ 120, 60, 40 ], 3, F_IN ); break;
 		case 'elevator': floor = M( L.metal, [ 150, 150, 150 ], 1, F_IN ); wall = M( L.metal, [ 170, 170, 168 ], 1.5, F_IN ); break;
 		case 'stair': floor = M( L.concrete, [ 200, 198, 192 ], 3, F_IN ); wall = M( L.plaster, [ 226, 226, 220 ], 3, F_IN ); break;
+		case 'checkin': case 'gate': case 'claim':
+			floor = M( L.terrazzo, [ 236, 234, 228 ], 2.5, F_IN ); ceil = M( L.ceiltile, [ 250, 250, 248 ], 1.2, F_IN );
+			wall = M( L.plaster, [ 232, 232, 228 ], 3, F_IN );
+			break;
+		case 'cab': floor = M( L.carpet, [ 90, 96, 110 ], 2, F_IN ); ceil = M( L.ceiltile, [ 240, 240, 238 ], 1.2, F_IN ); break;
 		case 'tent': floor = M( L.fabric, [ 70, 70, 52 ], 1.5, F_IN ); break;
 		case 'observatory': floor = M( L.concrete, [ 170, 170, 172 ], 3, F_IN ); wall = M( L.plaster, [ 236, 236, 234 ], 3, F_IN ); break;
 	}
@@ -145,6 +150,8 @@ export function buildStorey( P, si, gh ) {
 		for ( const s of [ P.stair, ...( P.stairs2 || [] ) ] ) if ( s && Math.abs( ( s.x0 + s.x1 ) / 2 - ( rm.x0 + rm.x1 ) / 2 ) < 0.3 && Math.abs( ( s.z0 + s.z1 ) / 2 - ( rm.z0 + rm.z1 ) / 2 ) < 0.3 ) return s;
 		return null;
 	};
+	// the ground storey's front steps first: the porch railings leave gaps for them
+	if ( si === 0 ) P.feats.steps = frontSteps( P, gh );
 	const holes = st.holes || [];
 	const holesAbove = si + 1 < S.n ? P.storeys[ si + 1 ].holes || [] : ( P.stair && P.stair.roof && S.n > 1 ? [ holeOf( P.stair ) ] : [] );
 
@@ -191,6 +198,7 @@ export function buildStorey( P, si, gh ) {
 	outsideColliders( O, P, st );
 	if ( si === 0 ) groundExtras( O, P, gh );
 	if ( si === S.n - 1 ) roofTop( O, P );
+	if ( si === S.n - 1 && S.arch === 'ctower' ) catwalk( O, P );
 	// ---- doors ----
 	for ( const d of st.doors ) doorRecord( O, P, st, d );
 	// ---- furniture, loot, outbreak dressing ----
@@ -486,6 +494,7 @@ function stairFlights( O, P, st, rm, s, H ) {
 				O.col( rx0, yt, rz0, rx1, yt + 0.95, rz1, PM.metal, 2 );
 			}
 		}
+		openStairRails( O, P, st, rm, s, F, run, true );
 	} else {
 		const wm = M( L.plaster, [ 222, 222, 216 ], 3, F_IN );
 		O.g.box( x0, y0, z0, x1, y0 + H, z1, wm );
@@ -514,6 +523,42 @@ function stairGuard( O, P, st, rm, s ) {
 	const [ x0, z0, x1, z1 ] = F.rect( 1.18, 1.24, 0, F.sw / 2 );
 	O.g.box( x0, y, z0, x1, y + 1.0, z1, rmat );
 	O.col( x0, y, z0, x1, y + 1.0, z1, PM.metal, 2 );
+	if ( rm.open ) openStairRails( O, P, st, rm, s, F, 0, false );
+}
+
+// guard rails round the landings of an open stair (walk-ups): on its open sides, at the storey's landing and
+// (below a storey with flights) round the half landing
+function openStairRails( O, P, st, rm, s, F, run, flights ) {
+	const toAB = ( x, z ) => s.e === 0 ? [ z - s.z0, x - s.x0 ] : s.e === 2 ? [ s.z1 - z, x - s.x0 ] : s.e === 3 ? [ x - s.x0, z - s.z0 ] : [ s.x1 - x, z - s.z0 ];
+	const rmat = P.mat.rail, t = 0.05;
+	const yh = st.y + st.h / 2;
+	const bar = ( a0, a1, b0, b1, y ) => {
+		if ( a1 - a0 < 0.04 || b1 - b0 < 0.04 ) return;
+		const [ x0, z0, x1, z1 ] = F.rect( a0, a1, b0, b1 );
+		O.g.box( x0, y + 0.94, z0, x1, y + 1.0, z1, rmat );
+		O.g.box( x0, y + 0.1, z0, x1, y + 0.14, z1, rmat );
+		const along = a1 - a0 > b1 - b0, len = along ? a1 - a0 : b1 - b0, n = Math.max( 1, Math.round( len / 0.12 ) );
+		for ( let k = 0; k <= n; k ++ ) {
+			const f = k / n, a = along ? a0 + len * f : ( a0 + a1 ) / 2, b = along ? ( b0 + b1 ) / 2 : b0 + len * f;
+			const [ px0, pz0, px1, pz1 ] = F.rect( a - 0.012, a + 0.012, b - 0.012, b + 0.012 );
+			O.g.box( px0, y + 0.14, pz0, px1, y + 0.94, pz1, rmat, 12 );
+		}
+		O.col( x0, y, z0, x1, y + 1.0, z1, PM.metal, 2 );
+	};
+	for ( const rl of st.rails ) {
+		if ( rl.room !== rm ) continue;
+		const [ a0, b0 ] = toAB( rl.x0, rl.z0 ), [ a1, b1 ] = toAB( rl.x1, rl.z1 );
+		if ( Math.abs( a0 - a1 ) < 0.01 ) {
+			// the far end, across the half landing (the entry end opens onto the gallery)
+			if ( flights && a0 > F.len - 0.05 ) bar( F.len - t, F.len, Math.min( b0, b1 ), Math.max( b0, b1 ), yh );
+			continue;
+		}
+		// a side along the run: the storey's own landing, and the half landing
+		const bb = Math.min( b0, b1 ) < 0.05 ? [ 0, t ] : [ F.sw - t, F.sw ];
+		const lo = Math.min( a0, a1 ), hi = Math.max( a0, a1 );
+		if ( lo < 1.2 ) bar( Math.max( lo, 0 ), Math.min( hi, 1.2 ), bb[ 0 ], bb[ 1 ], st.y );
+		if ( flights && hi > 1.2 + run ) bar( Math.max( lo, 1.2 + run ), hi, bb[ 0 ], bb[ 1 ], yh );
+	}
 }
 const house = ( P ) => P.S.arch === 'house';
 
@@ -552,12 +597,26 @@ function outsideColliders( O, P, st ) {
 // ---- ground storey: front steps, the plinth, porch posts ----------------------------------------------------------
 
 function groundExtras( O, P, gh ) {
-	P.feats.steps = frontSteps( P, gh );
 	for ( const s of P.feats.steps ) for ( const b of stepBoxes( P, s ) ) O.col( b[ 0 ], b[ 1 ], b[ 2 ], b[ 3 ], b[ 4 ], b[ 5 ], P.S.arch === 'house' ? PM.wood : PM.concrete );
 	// the shell's solid bits outside the walls: pump islands, canopy columns, the fire station's hose tower
 	const S = P.S;
 	for ( const [ px, pz ] of pumpsOf( P.r, S ) ) { const y = gh ? groundAt( P, gh, px, pz ) : S.fy; O.col( px - 0.7, y - 0.5, pz - 1.3, px + 0.7, y + 1.7, pz + 1.3, PM.metal ); }
 	if ( S.arch === 'fire' ) { const [ x0, z0, x1, z1 ] = hoseTower( P ); O.col( x0, P.r.lo - 0.5, z0, x1, S.top + 5.2, z1, PM.concrete ); }
+	if ( S.arch === 'terminal' ) { const c = terminalCanopyOf( P ); for ( const [ x, z ] of c.cols ) O.col( x - 0.2, P.r.lo - 0.5, z - 0.2, x + 0.2, c.y, z + 0.2, PM.metal ); }
+}
+
+// the control tower's catwalk round the cab (reachable through a broken pane)
+function catwalk( O, P ) {
+	const { rect } = P, c = towerCatwalkOf( P ), y = c.y;
+	O.col( c.x0, y - 0.3, c.z0, c.x1, y, rect.z0 );
+	O.col( c.x0, y - 0.3, rect.z1, c.x1, y, c.z1 );
+	O.col( c.x0, y - 0.3, rect.z0, rect.x0, y, rect.z1 );
+	O.col( rect.x1, y - 0.3, rect.z0, c.x1, y, rect.z1 );
+	const r = 0.05;
+	O.col( c.x0, y, c.z0, c.x1, y + 1.0, c.z0 + r, PM.metal, 2 );
+	O.col( c.x0, y, c.z1 - r, c.x1, y + 1.0, c.z1, PM.metal, 2 );
+	O.col( c.x0, y, c.z0, c.x0 + r, y + 1.0, c.z1, PM.metal, 2 );
+	O.col( c.x1 - r, y, c.z0, c.x1, y + 1.0, c.z1, PM.metal, 2 );
 }
 
 // ---- the roof over the top storey: deck with the stair opening, parapet and bulkhead colliders --------------------

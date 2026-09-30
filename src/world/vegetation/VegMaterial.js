@@ -108,8 +108,8 @@ const VERT_PARS = /* glsl */`
 		float yaw = iDat.x, rank = iDat.y, pa = iDat.z, pb = iDat.w;
 		vec3 wbase = base + modelMatrix[ 3 ].xyz;
 		float d = distance( wbase, uCamPos );
-		// LOD window: a short dithered cross-fade with the neighbouring level (the two images are
-		// complementary, so the plant stays solid); the CPU already dropped rank >= density. Every
+		// LOD window: a short cross-fade with the neighbouring level (see vegTexel: the plant stays
+		// solid); the CPU already dropped rank >= density. Every
 		// plant moves its switch distances by up to ±8 % (the same factor in all its levels and the
 		// impostors), so a forest never changes level along one ring around the camera.
 		float dl = d / vegLodJitter( rank );
@@ -279,7 +279,9 @@ const FRAG_PARS = /* glsl */`
 			float lod = log2( max( max( length( dx ), length( dy ) ) * 2048.0, 1e-4 ) );
 			float th = mix( 0.5, 0.2, clamp( lod / 4.0, 0.0, 1.0 ) ) + cut;
 			#ifdef ALPHA_TO_COVERAGE
-			cov = clamp( ( c.a - th ) / aw + 0.5, 0.0, 1.0 );
+			// (minified, the alpha is a noisy field around the cut: the ramp stays narrow and leans solid,
+			// or a distant crown would turn see-through; the edges up close keep their one-pixel ramp)
+			cov = clamp( ( c.a - th ) / min( aw, 0.15 ) + 0.5 + 0.5 * clamp( lod / 4.0, 0.0, 1.0 ), 0.0, 1.0 );
 			#else
 			if ( c.a < th ) discard;
 			#endif
