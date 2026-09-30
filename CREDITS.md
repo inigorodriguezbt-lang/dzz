@@ -30,7 +30,8 @@ brown bark, rough linen.
 ## Characters
 
 Where human models are used they come from the [Microsoft Rocketbox Avatar Library](https://github.com/microsoft/Microsoft-Rocketbox)
-(© Microsoft Corporation, MIT; licence in `public/models/characters/`), animated procedurally in code.
+(© Microsoft Corporation, MIT; licence in `public/models/characters/`), animated procedurally in code. The first-person
+arms are cut from the `m_swim` avatar.
 
 ## Libraries and fonts
 

@@ -104,8 +104,9 @@ export class Game {
 		this.stats.lifeStart = this.time.hours;
 		this.justSpawned = true;
 		if ( this.mode === 'creative' ) {
-			for ( const [ id, q ] of [ [ 'm4a1', 1 ], [ 'mag_stanag30', 3 ], [ 'glock17', 1 ], [ 'machete', 1 ], [ 'backpack_hiking', 1 ] ] ) {
-				const st = makeStack( id, q, { full: true } );
+			// magazines don't stack: three separate full ones
+			for ( const id of [ 'm4a1', 'mag_stanag30', 'mag_stanag30', 'mag_stanag30', 'glock17', 'machete', 'backpack_hiking' ] ) {
+				const st = makeStack( id, 1, { full: true } );
 				if ( st ) this.player.inventory.add( st );
 			}
 		}
