@@ -540,9 +540,10 @@ function makeGrassMaterial( U ) {
 			.replace( '#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = gRough;' )
 			.replace( '#include <lights_physical_fragment>', '#include <lights_physical_fragment>\n' + FRAG_SPECULAR )
 			.replace( '#include <lights_fragment_maps>', FRAG_TRANSLUCENT + '\n#include <lights_fragment_maps>' );
+	}, {
 		// (ours) the blades take the cascades' plain 5-tap filter instead of the contact-hardening search
 		// (21 taps): thin, many layers deep and most of the fragments near the camera, where the search runs
-		shader.fragmentShader = shader.fragmentShader.replace( /sunShadowCSM\(([^;]*?), true \)/, 'sunShadowCSM($1, false )' );
+		pcf: true,
 	} );
 	return m;
 }

@@ -7,7 +7,7 @@
 // of the coarser terrain LOD far away while standing objects on the road (whose depth grows much faster along
 // a grazing ray) are practically unaffected.
 import * as THREE from 'three';
-import { G, COMMON_GLSL, patchMaterial, tex } from '../../render/Materials.js';
+import { G, COMMON_GLSL, SHARED_PARS, patchMaterial, tex } from '../../render/Materials.js';
 import { noiseTexture, crackTexture, signAtlas, decalAtlas, ATLAS_H } from './textures.js';
 import { ATLAS_SIZE } from './kinds.js';
 
@@ -180,9 +180,11 @@ function makeRoadMaterial() {
 						edgeWet = smoothstep( 3.2, 4.3, au );
 					} else if ( cls < 2.5 ) {
 						// dirt / rural track: two compacted ruts, grass down the middle, ragged edges into the terrain
-						vec3 d1 = texture2D( tDirt, wp * 0.27 ).rgb;
-						vec3 d2 = texture2D( tDirt, vec2( wp.y, - wp.x ) * 0.09 ).rgb;
-						col = mix( d1, d2, 0.4 ) * ( 0.85 + 0.3 * nf.r );
+						// packed earth: the scan's dried-mud cracks kept small and soft, warmer and darker than the bare texture
+						vec3 d1 = texture2D( tDirt, wp * 0.45 ).rgb;
+						vec3 d2 = texture2D( tDirt, vec2( wp.y, - wp.x ) * 0.11 ).rgb;
+						col = mix( d1, d2, 0.45 );
+						col = mix( col, vec3( dot( col, vec3( 0.3, 0.59, 0.11 ) ) ), 0.35 ) * vec3( 0.82, 0.7, 0.56 ) * ( 0.78 + 0.3 * nf.r );
 						col = mix( col, col * vec3( 1.35, 0.72, 0.52 ), vRd2.z );
 						float rut = exp( - pow( ( au - 0.85 ) / 0.3, 2.0 ) );
 						col *= 1.0 - 0.16 * rut;
@@ -345,8 +347,9 @@ function makeRoadMaterial() {
 					col *= 1.0 - cr.r * 0.5 * crackAmt;
 					col = mix( col, vec3( 0.035, 0.032, 0.03 ), cr.g * 0.6 * crackAmt );
 					rRough = mix( rRough, 0.5, cr.g * crackAmt );
-					// patches
-					col = mix( col, col * 0.62, patchM );
+					// patches: newer, darker and smoother asphalt, a little blotchy where the roller left it (not a flat shadow)
+					col = mix( col, col * ( 0.7 + 0.12 * nh.r ) + vec3( 0.004 ), patchM );
+					rNS *= 1.0 - 0.5 * patchM;
 					// paint: worn by traffic, flaking in spots
 					float wear = smoothstep( 0.12, 0.55, texture2D( tNoise, vec2( s * 0.031, u * 0.23 ) ).g ) * ( 0.55 + 0.45 * smoothstep( 0.2, 0.5, nh.b ) );
 					paint = clamp( paint, 0.0, 1.0 ) * wear * ( 1.0 - patchM );
@@ -644,16 +647,15 @@ function makeGlowMaterial() {
 			}`,
 		fragmentShader: /* glsl */`
 			uniform sampler2D tDecal;
-			uniform float uTime; uniform vec3 uCamPos; uniform vec3 uSunDir; uniform vec3 uSunColor;
-			uniform sampler2D uSkyLUT; uniform float uFogDensity; uniform float uFogFalloff; uniform float uFogBoost;
-			uniform float uCloudCover; uniform vec2 uCloudOffset; uniform float uCloudShadowK; uniform float uNight;
+			${SHARED_PARS}
 			varying vec2 vDuv; varying vec4 vDec; varying vec3 vWorldPos;
 			${COMMON_GLSL}
 			${FLICKER_GLSL}
 			void main() {
+				float lit = smoothstep( 0.3, 0.7, uNight ) * flickerAt( vDec.y ) * vDec.z;
+				if ( lit < 0.002 ) discard;
 				vec2 cuv = ( vec2( 0.0, 0.0 ) + 0.02 + vDuv * 0.96 ) / 4.0; // cell 12 = column 0, bottom row
 				float a = texture2D( tDecal, cuv ).a;
-				float lit = smoothstep( 0.3, 0.7, uNight ) * flickerAt( vDec.y ) * vDec.z;
 				vec3 c = vec3( 1.0, 0.72, 0.4 ) * a * lit * 0.35;
 				// fade with the atmosphere like everything else
 				vec3 fogged = atmosphereFog( c, vWorldPos ) - atmosphereFog( vec3( 0.0 ), vWorldPos );

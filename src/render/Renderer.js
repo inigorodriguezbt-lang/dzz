@@ -75,11 +75,20 @@ export class Renderer {
 		// single bright glints can't flicker; 3x3 tent upsamples accumulating each level
 		const TAPS = /* glsl */`
 			uniform sampler2D tSrc; uniform vec2 texel; varying vec2 vUv;
+			#ifdef SANITIZE
+			// (the first level drops NaN / Inf texels: one bad pixel must not bloom into a black block)
+			vec3 bTap( float x, float y ) {
+				vec3 c = texture2D( tSrc, vUv + texel * vec2( x, y ) ).rgb;
+				return any( equal( floatBitsToUint( c ) & 0x7f800000u, uvec3( 0x7f800000u ) ) ) ? vec3( 0.0 ) : min( c, vec3( 65504.0 ) );
+			}
+			#else
 			vec3 bTap( float x, float y ) { return texture2D( tSrc, vUv + texel * vec2( x, y ) ).rgb; }
+			#endif
 			float lum( vec3 c ) { return dot( c, vec3( 0.2126, 0.7152, 0.0722 ) ); }
 			vec3 karis( vec3 c ) { return c / ( lum( c ) + 1.0 ); }`;
 		const down = ( first ) => new THREE.ShaderMaterial( {
 			name: first ? 'BloomDownKaris' : 'BloomDown',
+			defines: first ? { SANITIZE: 1 } : {},
 			uniforms: { tSrc: { value: null }, texel: { value: new THREE.Vector2() } },
 			vertexShader: FS_VERT,
 			fragmentShader: TAPS + /* glsl */`
@@ -164,6 +173,8 @@ export class Renderer {
 					float rate = tgt > cur ? 1.6 : 1.1;
 					float k = uReset > 0.5 ? 1.0 : 1.0 - exp( - uDt * rate );
 					float next = exp2( mix( log2( max( cur, 1e-3 ) ), log2( tgt ), k ) );
+					// (a NaN that reached the meter would stick in the adaptation for good: start over instead)
+					if ( ( floatBitsToUint( next ) & 0x7f800000u ) == 0x7f800000u ) next = 1.0;
 					gl_FragColor = vec4( next, avg, tgt, 1.0 );
 				}`,
 			depthTest: false, depthWrite: false,

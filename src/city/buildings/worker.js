@@ -40,7 +40,7 @@ export function buildingJob( hf, world, msg ) {
 		const P = planOf( hf, world, msg.i );
 		const gh = msg.si === 0 ? groundGrid( hf, P.r ) : null;
 		const o = buildStorey( P, msg.si, gh );
-		const transfer = [ ...transferOf( o.geo ), ...transferOf( o.dec ), o.boxes.buffer ];
+		const transfer = [ ...transferOf( o.geo ), ...transferOf( o.fine ), ...transferOf( o.dec ), o.boxes.buffer ];
 		if ( o.glass ) transfer.push( o.glass.pos.buffer, o.glass.nor.buffer, o.glass.idx.buffer );
 		return { result: o, transfer };
 	}

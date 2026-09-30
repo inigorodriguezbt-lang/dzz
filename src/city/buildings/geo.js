@@ -7,6 +7,10 @@
 //   color     u8x3 (sRGB tint, normalized)          aMat u8 (layer | 64 interior | 128 glow)
 //   aTag      u16x2 (building index + 1, storey or 255 = never hidden)
 //   aWin      u16x4 (u*32, v*32, bay*256, seed)     aWin2 u8x4 (winW*20, winH*20, sill*20, style)
+//   aLt       u8x2 interiors only: baked daylight (ambient multiplier / 2) and ambient occlusion (light.js)
+//
+// A material with `sub` (metres) splits its quads into a grid (finer at the edges) so the interiors' baked
+// per-vertex light has vertices to live on.
 
 export const F_IN = 64; // interior surface: dimmer sky light
 export const F_GLOW = 128; // emissive (lanterns, candles)
@@ -29,7 +33,7 @@ export class Geo {
 			const g = ( A, k, old ) => { const a = new A( nc * k ); if ( old ) a.set( old.subarray( 0, this.n * k ) ); return a; };
 			this.pos = g( Float32Array, 3, this.pos ); this.nor = g( Int8Array, 3, this.nor ); this.uv = g( Float32Array, 2, this.uv );
 			this.col = g( Uint8Array, 3, this.col ); this.mat = g( Uint8Array, 1, this.mat ); this.tag = g( Uint16Array, 2, this.tag );
-			this.wn = g( Uint16Array, 4, this.wn ); this.wn2 = g( Uint8Array, 4, this.wn2 );
+			this.wn = g( Uint16Array, 4, this.wn ); this.wn2 = g( Uint8Array, 4, this.wn2 ); this.lt = g( Uint8Array, 2, this.lt );
 			this.cap = nc;
 		}
 		if ( ic > this.icap ) {
@@ -110,13 +114,15 @@ export class Geo {
 		this.mat[ i ] = M.l | ( M.f || 0 );
 		this.tag[ i * 2 ] = this.tag0; this.tag[ i * 2 + 1 ] = this.tag1;
 		this.wn[ i * 4 + 3 ] = 0; this.wn2[ i * 4 + 3 ] = 0;
+		this.lt[ i * 2 ] = 128; this.lt[ i * 2 + 1 ] = 255;
 		return i;
 	}
 
 	// quad a-b-c-d counter-clockwise seen from the front; uv given per corner
 	quadUV( a, b, c, d, uvs, M, n = null ) {
-		this._grow( this.n + 4, this.ni + 6 );
 		if ( ! n ) n = qnormal( a, b, c );
+		if ( M.sub ) { const su = splits( dist( a, b ), M.sub ), sv = splits( dist( a, d ), M.sub ); if ( su.length > 2 || sv.length > 2 ) return this._quadGrid( a, b, c, d, uvs, M, n, su, sv ); }
+		this._grow( this.n + 4, this.ni + 6 );
 		const i = this._v( a[ 0 ], a[ 1 ], a[ 2 ], n[ 0 ], n[ 1 ], n[ 2 ], uvs[ 0 ], uvs[ 1 ], M );
 		this._v( b[ 0 ], b[ 1 ], b[ 2 ], n[ 0 ], n[ 1 ], n[ 2 ], uvs[ 2 ], uvs[ 3 ], M );
 		this._v( c[ 0 ], c[ 1 ], c[ 2 ], n[ 0 ], n[ 1 ], n[ 2 ], uvs[ 4 ], uvs[ 5 ], M );
@@ -125,6 +131,30 @@ export class Geo {
 		I[ k ] = i; I[ k + 1 ] = i + 1; I[ k + 2 ] = i + 2; I[ k + 3 ] = i; I[ k + 4 ] = i + 2; I[ k + 5 ] = i + 3;
 		this.ni += 6;
 		return i;
+	}
+
+	// a quad as a grid of cells at fractions su (a->b) x sv (a->d), bilinear in position and uv
+	_quadGrid( a, b, c, d, uvs, M, n, su, sv ) {
+		const nu = su.length, nv = sv.length;
+		this._grow( this.n + nu * nv, this.ni + ( nu - 1 ) * ( nv - 1 ) * 6 );
+		const base = this.n;
+		const lerp = ( p, q, t ) => p + ( q - p ) * t;
+		for ( let j = 0; j < nv; j ++ ) {
+			const t = sv[ j ];
+			for ( let i = 0; i < nu; i ++ ) {
+				const s = su[ i ];
+				const P = ( k ) => lerp( lerp( a[ k ], b[ k ], s ), lerp( d[ k ], c[ k ], s ), t );
+				const U = ( k ) => lerp( lerp( uvs[ k ], uvs[ 2 + k ], s ), lerp( uvs[ 6 + k ], uvs[ 4 + k ], s ), t );
+				this._v( P( 0 ), P( 1 ), P( 2 ), n[ 0 ], n[ 1 ], n[ 2 ], U( 0 ), U( 1 ), M );
+			}
+		}
+		const I = this.idx;
+		for ( let j = 0; j < nv - 1; j ++ ) for ( let i = 0; i < nu - 1; i ++ ) {
+			const p = base + j * nu + i, k = this.ni;
+			I[ k ] = p; I[ k + 1 ] = p + 1; I[ k + 2 ] = p + nu + 1; I[ k + 3 ] = p; I[ k + 4 ] = p + nu + 1; I[ k + 5 ] = p + nu;
+			this.ni += 6;
+		}
+		return base;
 	}
 
 	// quad with uv projected on its own plane (u along a->b, v perpendicular), in metres / M.s
@@ -276,7 +306,7 @@ export class Geo {
 	get empty() { return this.ni === 0; }
 
 	// typed arrays sized to the content (copies, ready to transfer)
-	finish( withWin = true ) {
+	finish( withWin = true, withLt = false ) {
 		const n = this.n, ni = this.ni;
 		const out = {
 			count: n,
@@ -285,6 +315,7 @@ export class Geo {
 			idx: n < 65536 ? Uint16Array.from( this.idx.subarray( 0, ni ) ) : this.idx.slice( 0, ni ),
 		};
 		if ( withWin ) { out.wn = this.wn.slice( 0, n * 4 ); out.wn2 = this.wn2.slice( 0, n * 4 ); }
+		if ( withLt ) out.lt = this.lt.slice( 0, n * 2 );
 		// bounds for culling
 		let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = - Infinity, y1 = - Infinity, z1 = - Infinity;
 		const p = out.pos;
@@ -302,7 +333,21 @@ export function transferOf( g ) {
 	if ( ! g ) return [];
 	const t = [ g.pos.buffer, g.nor.buffer, g.uv.buffer, g.col.buffer, g.mat.buffer, g.tag.buffer, g.idx.buffer ];
 	if ( g.wn ) t.push( g.wn.buffer, g.wn2.buffer );
+	if ( g.lt ) t.push( g.lt.buffer );
 	return t;
+}
+
+const dist = ( p, q ) => Math.hypot( q[ 0 ] - p[ 0 ], q[ 1 ] - p[ 1 ], q[ 2 ] - p[ 2 ] );
+// fractions along an edge of length L cut into cells of at most s, with a narrow band at each end (corners are
+// where the baked occlusion changes fastest)
+function splits( L, s ) {
+	if ( L < 0.9 ) return [ 0, 1 ];
+	const e = Math.min( 0.3, L * 0.2 ) / L;
+	const inner = 1 - 2 * e, n = Math.max( 1, Math.ceil( inner * L / s ) );
+	const out = [ 0, e ];
+	for ( let k = 1; k < n; k ++ ) out.push( e + inner * k / n );
+	out.push( 1 - e, 1 );
+	return out;
 }
 
 function qnormal( a, b, c ) {

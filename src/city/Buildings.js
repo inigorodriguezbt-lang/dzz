@@ -27,6 +27,7 @@ import { augmentBuildings } from './buildings/infill.js';
 const IN_LOAD = 90, IN_DROP = 130; // interior hysteresis (m from the built rect)
 const MAX_INTERIORS = 30;
 const SHADOW_D = 18; // interiors closer than this cast the sun's shadows themselves
+const FINE_D = 30; // the small things in rooms show within this
 const NEAR_R = 330, NEAR_OUT = 450; // near shells
 const BUDGET_MS = 4; // main-thread integration per frame (a step that starts under it may run a little over)
 const QUALITY = { low: 0.7, medium: 0.85, high: 1, ultra: 1.2 };
@@ -276,7 +277,7 @@ class City {
 			const sh = I.d < SHADOW_D;
 			if ( sh !== !! I.shadows ) {
 				I.shadows = sh;
-				for ( const st of I.storeys.values() ) for ( const m of st.meshes ) if ( m.material === this.mats.interior ) m.castShadow = sh;
+				for ( const st of I.storeys.values() ) for ( const m of st.meshes ) if ( m.material === this.mats.interior && ! m.userData.fine ) m.castShadow = sh;
 				this.stateTouched.add( I.bi );
 			}
 		}
@@ -434,6 +435,8 @@ class City {
 		const yaw = - r.angle;
 		const place = ( m ) => { m.position.set( r.x, 0, r.z ); m.rotation.y = yaw; m.matrixAutoUpdate = false; m.updateMatrix(); m.visible = false; this.group.add( m ); st.meshes.push( m ); return m; };
 		if ( res.geo ) { const m = place( new THREE.Mesh( geoToBuffer( res.geo ), this.mats.interior ) ); m.castShadow = !! I.shadows; m.receiveShadow = true; }
+		// the small things (clutter on tables and shelves, on the floor): only up close, no shadows
+		if ( res.fine ) { const m = place( new THREE.Mesh( geoToBuffer( res.fine ), this.mats.interior ) ); m.userData.fine = true; m.receiveShadow = true; }
 		if ( res.dec ) { const m = place( new THREE.Mesh( decalToBuffer( res.dec ), this.mats.decal ) ); m.receiveShadow = true; m.renderOrder = 1; }
 		if ( res.glass ) { const m = place( new THREE.Mesh( glassToBuffer( res.glass ), this.mats.glass ) ); m.layers.set( 1 ); }
 		yield;
@@ -474,8 +477,9 @@ class City {
 		this.stateTouched.add( I.bi );
 	}
 
-	// decals and glass panes only matter up close (each is a draw call per storey)
+	// decals, glass panes and clutter only matter up close (each is a draw call per storey)
 	_meshVisible( I, m ) {
+		if ( m.userData.fine ) return I.d < FINE_D;
 		if ( m.material === this.mats.decal ) return I.d < 35;
 		if ( m.material === this.mats.glass ) return I.d < 60;
 		return true;

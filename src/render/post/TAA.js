@@ -47,6 +47,8 @@ const RESOLVE_FRAG = /* glsl */`
 	vec3 taauTonemap( vec3 c ) { return c / ( max( max( 0.0, c.r ), max( c.g, c.b ) ) + 1.0 ); }
 	vec3 taauTonemapInverse( vec3 c ) { return c / max( 1e-4, 1.0 - max( c.r, max( c.g, c.b ) ) ); }
 	float taauMinDivMax( float a, float b ) { float m = max( a, b ); return m != 0.0 ? min( a, b ) / m : 0.0; }
+	// NaN or Inf (exponent bits all set; a bit test, which fast-math can't fold away like isnan / x != x)
+	bool taauBad( vec4 c ) { return any( equal( floatBitsToUint( c ) & 0x7f800000u, uvec4( 0x7f800000u ) ) ); }
 	// Lanczos-2 of the squared distance (FSR2 Lanczos2ApproxSq)
 	float taauLanczos2Sq( float x2In ) {
 		float x2 = min( x2In, 4.0 );
@@ -151,21 +153,30 @@ const RESOLVE_FRAG = /* glsl */`
 		bool inMotionLastFrame = false;
 		float blurPrev = 0.0;
 		if ( ! isNewSample ) {
-			historyColor = taauToYCoCg( min( taauSampleHistory( historyUV ).rgb * exposure, vec3( 65504.0 ) ) );
+			vec4 hs = taauSampleHistory( historyUV );
 			vec4 ls = textureLod( tLock, historyUV, 0.0 );
+			// a NaN / Inf that got into the history (or the exposure) restarts the pixel instead of spreading
+			if ( taauBad( hs ) || taauBad( ls ) || taauBad( vec4( exposure ) ) ) { isNewSample = true; hs = vec4( 0.0 ); ls = vec4( 0.0 ); }
+			historyColor = taauToYCoCg( min( hs.rgb * exposure, vec3( 65504.0 ) ) );
 			lockStatus = ls.xy;
 			temporalReactive = sat( abs( ls.z ) );
 			inMotionLastFrame = ls.z < 0.0;
 			blurPrev = ls.w;
 		}
 
-		// ---- the 3x3 input taps: prepared (exposed) YCoCg colour, lock luma
+		// ---- the 3x3 input taps: prepared (exposed) YCoCg colour, lock luma. A NaN / Inf tap (one bad pixel of a
+		// material) is dropped: it takes the centre's value and no weight, so it can't turn into a black block
 		vec3 samples[ 9 ];
 		float lumas[ 9 ];
+		bool valid[ 9 ];
 		float lumaSum = 0.0;
+		vec4 centreRaw = taauLoadBeauty( closestTap );
+		centreRaw = taauBad( centreRaw ) ? vec4( 0.0 ) : centreRaw;
 		for ( int i = 0; i < 9; i ++ ) {
 			ivec2 tap = closestTap + ivec2( i % 3 - 1, i / 3 - 1 );
-			vec3 rgb = min( max( taauLoadBeauty( tap ).rgb, vec3( 0.0 ) ) * exposure, vec3( 65504.0 ) );
+			vec4 raw = taauLoadBeauty( tap );
+			valid[ i ] = ! taauBad( raw );
+			vec3 rgb = min( max( ( valid[ i ] ? raw : centreRaw ).rgb, vec3( 0.0 ) ) * exposure, vec3( 65504.0 ) );
 			samples[ i ] = taauToYCoCg( rgb );
 			lumas[ i ] = taauLockLuma( rgb );
 			lumaSum += lumas[ i ];
@@ -231,7 +242,7 @@ const RESOLVE_FRAG = /* glsl */`
 			vec2 offset = vec2( tap ) + vec2( 0.5 ) + uJitter - pIn; // sample position - output position
 			bool onScreen = all( greaterThanEqual( tap, ivec2( 0 ) ) ) && all( lessThan( tap, iSize ) );
 			vec2 ob = offset * kernelBias;
-			float w = onScreen ? taauLanczos2Sq( dot( ob, ob ) ) : 0.0;
+			float w = onScreen && valid[ i ] ? taauLanczos2Sq( dot( ob, ob ) ) : 0.0;
 			vec3 c = samples[ i ];
 			colorSum += c * w;
 			weightSum += w;
@@ -331,7 +342,8 @@ const RESOLVE_FRAG = /* glsl */`
 		newReactive = isNewSample ? 1.0 : newReactive;
 		if ( sat( hrVelocity * 10.0 ) >= 1.0 ) newReactive = -max( TAAU_EPS, newReactive );
 
-		oColor = vec4( max( outColor, vec3( 0.0 ) ) / max( exposure, 1e-6 ), 1.0 );
+		outColor = max( outColor, vec3( 0.0 ) ) / max( exposure, 1e-6 );
+		oColor = vec4( taauBad( vec4( outColor, 1.0 ) ) ? vec3( 0.0 ) : outColor, 1.0 );
 		oLock = vec4( lockStatus, newReactive, isNewSample ? 0.0 : blurAcc * ( 1.0 - alphaOut ) );
 		oLumaHistory = lumaHist;
 	}`;

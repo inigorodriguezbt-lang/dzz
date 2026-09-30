@@ -51,7 +51,7 @@ await page.evaluate( () => {
 		let calm = 0;
 		while ( calm < 6 && performance.now() - t0 < maxMs ) {
 			await new Promise( r => setTimeout( r, 250 ) );
-			calm = a.world.pool.busy === 0 ? calm + 1 : 0;
+			calm = a.world.pool.busy === 0 && ! a.game.roads?.loading?.length ? calm + 1 : 0;
 		}
 		return + ( ( performance.now() - t0 ) / 1000 ).toFixed( 1 );
 	};

@@ -390,7 +390,9 @@ function replaceOnce( src, a, b, what ) {
 // Locals every patched fragment shader has: dtAO (material AO, 1), dtSunMod (key-light multiplier, 1)
 // and dtSunVis (cascaded sun shadow x cloud x hill shadow x dtSunMod, computed just before the lights).
 // Defines: NO_ATMOS_FOG, NO_SUN_VIS (opts.noCloudShadow), NO_SUN_SHADOW (no cascade shadow received),
-// NO_GROUND_BOUNCE.
+// NO_GROUND_BOUNCE, SUN_SHADOW_PCF (opts.pcf: the 5-tap PCF on every cascade instead of the contact-hardening
+// search on the near one; for thin, many-layered surfaces like grass blades, where the 21-tap search is costly
+// and its soft penumbrae are lost in the detail anyway).
 export function patchMaterial( mat, key = 'std', extra = null, opts = {} ) {
 	const prev = mat.onBeforeCompile;
 	mat.fog = false;
@@ -413,6 +415,7 @@ export function patchMaterial( mat, key = 'std', extra = null, opts = {} ) {
 		let fs = shader.fragmentShader;
 		// (view models: no world-space key-light shadows and no ground bounce)
 		if ( opts.noCloudShadow ) fs = '#define NO_SUN_VIS\n#define NO_GROUND_BOUNCE\n' + fs;
+		if ( opts.pcf ) fs = '#define SUN_SHADOW_PCF\n' + fs;
 		fs = fs.replace( '#include <common>', '#include <common>\nvarying vec3 vWorldPos;\n' + PARS + COMMON_GLSL );
 		fs = replaceOnce( fs, 'void main() {', 'void main() {\n\tfloat dtAO = 1.0; float dtSunMod = 1.0; float dtSunVis = 1.0;', 'main' );
 		fs = fs.replace( '#include <fog_fragment>', /* glsl */`
@@ -424,7 +427,11 @@ export function patchMaterial( mat, key = 'std', extra = null, opts = {} ) {
 			{
 				float shadowVis = terrainSunShadowAt( vWorldPos );
 				#ifndef NO_SUN_SHADOW
+				#ifdef SUN_SHADOW_PCF
+				if ( shadowVis > 0.0 ) shadowVis *= sunShadowCSM( vWorldPos, normalize( inverseTransformDirection( nonPerturbedNormal, viewMatrix ) ), false );
+				#else
 				if ( shadowVis > 0.0 ) shadowVis *= sunShadowCSM( vWorldPos, normalize( inverseTransformDirection( nonPerturbedNormal, viewMatrix ) ), true );
+				#endif
 				#endif
 				// (uCloudShadowK 0: no world shadows at all, e.g. item icons rendered in their own scene)
 				dtSunVis = cloudShadowAt( vWorldPos ) * mix( 1.0, shadowVis, uCloudShadowK ) * dtSunMod;
@@ -446,7 +453,7 @@ export function patchMaterial( mat, key = 'std', extra = null, opts = {} ) {
 		}
 		if ( extra ) extra( shader );
 	};
-	mat.customProgramCacheKey = () => key + ( opts.noWet ? '-nw' : '' ) + ( opts.noCloudShadow ? '-nc' : '' );
+	mat.customProgramCacheKey = () => key + ( opts.noWet ? '-nw' : '' ) + ( opts.noCloudShadow ? '-nc' : '' ) + ( opts.pcf ? '-pcf' : '' );
 	return mat;
 }
 

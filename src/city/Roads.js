@@ -228,13 +228,15 @@ export class Roads {
 		if ( this.dirty || this.lastRefill.distanceToSquared( cam ) > REFILL_MOVE * REFILL_MOVE ) this._refill( cam );
 	}
 
-	// build the pending near cells, nearest first, within the frame budget
+	// build the pending near cells, nearest first, within the frame budget (more of it while a backlog waits, after a
+	// teleport or at a low frame rate)
 	_pump() {
 		const L = this.loading, t0 = performance.now();
+		const budget = LOAD_BUDGET * ( 1 + Math.min( 3, ( L.length - 1 ) / 3 ) );
 		while ( L.length ) {
 			const c = L[ 0 ];
 			if ( ! c.pending || c.pending.next().done ) { c.pending = null; L.shift(); }
-			if ( performance.now() - t0 > LOAD_BUDGET ) break;
+			if ( performance.now() - t0 > budget ) break;
 		}
 	}
 

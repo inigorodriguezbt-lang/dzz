@@ -306,7 +306,15 @@ export const L = {
 	greyroof: 11, bitumen: 12, woodfloor: 13, tiles: 14, carpet: 15, concrete: 16, metal: 17, rust: 18, fabric: 19, sidewalk: 20,
 	asphalt: 21, wood: 22, ceiltile: 23, products: 24, books: 25, lattice: 26, lino: 27, terrazzo: 28, cmu: 29, parking: 30, tilewall: 31,
 	sign0: 32, spandrel: 33,
+	// interiors: wallpapers (damask, stripes), a rug (fit to the rug), hotel carpet, cardboard, pictures and posters (4 x 4 atlas)
+	wallpaper: 34, wallstripe: 35, rug: 36, hcarpet: 37, cardboard: 38, art: 39,
+	// flat: glossy paint / ceramic / plastic, and chrome / mirror
+	gloss: 40, chrome: 41,
 };
+// cell k of the art atlas as a `fit` uv rect [ u0, v at the bottom, u1, v at the top ] (the array layers keep the
+// canvas rows as painted: v grows down the picture)
+export const artUV = ( k ) => [ ( k % 4 ) / 4 + 0.004, ( ( k >> 2 ) + 1 ) / 4 - 0.004, ( k % 4 + 1 ) / 4 - 0.004, ( k >> 2 ) / 4 + 0.004 ];
+export const ART = { sea: 0, sunset: 1, valley: 2, palm: 3, flowers: 4, abstract: 5, portrait: 6, family: 7, surf: 8, tiki: 9, wanted: 10, notice: 11, menu: 12, calendar: 13, map: 14, board: 15 };
 // layers backed by a real texture (with a normal map); the rest are drawn procedurally
 export const TEX_LAYERS = [ null, 'stucco', 'plaster', 'beige', 'bluewall', 'panels', 'planks', 'oldplanks', 'brick', 'tinroof', 'roof',
 	'greyroof', 'bitumen', 'woodfloor', 'tiles', 'carpet', 'concrete', 'metal', 'rust', 'fabric', 'sidewalk', 'asphalt' ];
@@ -322,15 +330,22 @@ export function winHash( seed, bi ) {
 
 // decal atlas cells (textures.js): blood pools / splatters, smears and drag trails, hand prints, papers, dirt and
 // leaves, broken glass, footprints, scorch
-export const DECAL = { blood: [ 0, 1, 2, 3 ], smear: [ 4, 5, 6 ], hands: 7, paper: [ 8, 9, 10, 11 ], dirt: 12, glass: 13, steps: 14, scorch: 15 };
-// uv rect [ u0, v0, u1, v1 ] of decal cell k (flipY: canvas row 0 at the top)
+export const DECAL = {
+	blood: [ 0, 1, 2, 3 ], smear: [ 4, 5, 6 ], hands: 7, paper: [ 8, 9, 10, 11 ], dirt: 12, glass: 13, steps: 14, scorch: 15,
+	// soft contact shadow under furniture, oil, a dried water stain, bullet holes, broken crockery, spilled food, writing
+	shadow: 16, oil: 17, water: 18, holes: 19, debris: 20, crumbs: 21, help: 22, tally: 23, pills: 24, drag: 25,
+};
+// uv rect [ u0, v0, u1, v1 ] of decal cell k (4 columns x 8 rows; flipY: canvas row 0 at the top)
 export function decalUV( k ) {
 	const col = k % 4, row = ( k / 4 ) | 0;
-	return [ col / 4 + 0.002, 1 - ( row + 1 ) / 4 + 0.002, ( col + 1 ) / 4 - 0.002, 1 - row / 4 - 0.002 ];
+	return [ col / 4 + 0.002, 1 - ( row + 1 ) / 8 + 0.001, ( col + 1 ) / 4 - 0.002, 1 - row / 8 - 0.001 ];
 }
 
 // what the facade shader shows in window bi of a facade piece with this seed: 0 glass, 1 boarded up, 2 broken.
 // The seed's top 4 bits carry the building's boarded share (x 1/20); the interior builder mirrors this exactly.
+// a window's identity within a storey (its pane centre on the facade line): furniture.js boards some up from
+// inside and light.js lets less light in through those
+export const winKey = ( x, z, y ) => `${Math.round( x * 20 )},${Math.round( z * 20 )},${Math.round( y * 20 )}`;
 export function winState( seed, bi ) {
 	const h = winHash( seed, bi );
 	const r = ( h & 1023 ) / 1024;

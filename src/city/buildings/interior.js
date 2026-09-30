@@ -8,6 +8,7 @@ import { L, hash32, rng, winState, winHash, DECAL, decalUV, pumpsOf } from './da
 import { M, slabT, extOf } from './plan.js';
 import { storeyOutside, frontSteps, stepBoxes, groundAt, bulkhead, hoseTower, terminalCanopyOf, towerCatwalkOf, penthouseOf, portalOf } from './exterior.js';
 import { furnishRoom } from './furniture.js';
+import { bakeLight } from './light.js';
 
 // physics materials: indices into data.js PMAT (collider records: data.js BOX_STRIDE)
 export const PM = { concrete: 0, wood: 1, metal: 2, glass: 3, rock: 4 };
@@ -69,6 +70,8 @@ function finishes( P, rm, R ) {
 		case 'observatory': floor = M( L.concrete, [ 170, 170, 172 ], 3, F_IN ); wall = M( L.plaster, [ 236, 236, 234 ], 3, F_IN ); break;
 	}
 	if ( P.S.arch === 'house' && ( k === 'hall' || k === 'stair' ) ) floor = M( L.woodfloor, [ 255, 244, 232 ], 1.6, F_IN, { r: 1 } );
+	// big surfaces are cut into a grid for the baked light (light.js)
+	for ( const m of [ floor, wall, ceil, wain ] ) if ( m ) m.sub = 0.9;
 	return { floor, wall, ceil, wain };
 }
 const pick3 = ( R, a ) => a[ Math.floor( R() * a.length ) % a.length ];
@@ -78,10 +81,12 @@ const pick3 = ( R, a ) => a[ Math.floor( R() * a.length ) % a.length ];
 class Out {
 	constructor( P, si ) {
 		this.P = P; this.si = si; this.st = P.storeys[ si ];
-		this.g = new Geo( 8192 ); this.dec = new Geo( 256 ); this.glass = new GlassGeo();
+		// g: the storey and its furniture; gd: small things (drawn only up close); dec: decals
+		this.g = new Geo( 8192 ); this.gd = new Geo( 4096 ); this.dec = new Geo( 256 ); this.glass = new GlassGeo();
 		this.boxes = []; this.doors = []; this.containers = []; this.spots = []; this.beds = []; this.taps = []; this.lights = []; this.statics = [];
+		this.barred = new Set(); // windows boarded up from inside (data.js winKey)
 		this.R = rng( hash32( P.bid, si, 0x1a7 ) );
-		this.g.setTag( 0, 255 ); this.dec.setTag( 0, 255 );
+		this.g.setTag( 0, 255 ); this.gd.setTag( 0, 255 ); this.dec.setTag( 0, 255 );
 	}
 	// axis-aligned collider in building-local coords
 	col( x0, y0, z0, x1, y1, z1, mat = 0, kind = 0 ) {
@@ -97,6 +102,17 @@ class Out {
 		const c = Math.cos( a ) * s / 2, sn = Math.sin( a ) * s / 2;
 		const p = ( u, v ) => [ x + u * c - v * sn, y, z + u * sn + v * c ];
 		this.dec.quadUV( p( - 1, 1 ), p( 1, 1 ), p( 1, - 1 ), p( - 1, - 1 ), [ uv[ 0 ], uv[ 1 ], uv[ 2 ], uv[ 1 ], uv[ 2 ], uv[ 3 ], uv[ 0 ], uv[ 3 ] ], { l: 0, c: tint, s: 1 }, [ 0, 1, 0 ] );
+	}
+	// a decal on any four corners (counter-clockwise seen from the front, normal n)
+	decalQuad( a, b, c, d, k, tint = 1, n = [ 0, 1, 0 ] ) {
+		const uv = decalUV( k ), t = typeof tint === 'number' ? [ 255 * tint, 255 * tint, 255 * tint ] : tint;
+		this.dec.quadUV( a, b, c, d, [ uv[ 0 ], uv[ 1 ], uv[ 2 ], uv[ 1 ], uv[ 2 ], uv[ 3 ], uv[ 0 ], uv[ 3 ] ], { l: 0, c: t, s: 1 }, n );
+	}
+	// a floor decal at a piece's local point (kind: a DECAL key; lists pick one)
+	decalAt( F, lx, lz, s, kind, ly = 0, a = null ) {
+		const k = DECAL[ kind ], cell = Array.isArray( k ) ? k[ ( this.R() * k.length ) | 0 ] : k;
+		const [ x, z ] = F.T( lx, lz );
+		this.decalFloor( x, F.y + ly + 0.006, z, s, cell, a ?? this.R() * 6.3 );
 	}
 	decalWall( x, y, z, nx, nz, w, h, k, tint = [ 255, 255, 255 ] ) {
 		const uv = decalUV( k );
@@ -204,9 +220,10 @@ export function buildStorey( P, si, gh ) {
 	// ---- furniture, loot, outbreak dressing ----
 	for ( const rm of st.rooms ) furnishRoom( O, P, st, rm, fin.get( rm ) );
 
+	bakeLight( P, st, [ O.g, O.gd ], O.dec, O.barred );
 	const glass = O.glass.finish();
 	return {
-		geo: O.g.empty ? null : O.g.finish( false ), dec: O.dec.empty ? null : O.dec.finish( false ), glass,
+		geo: O.g.empty ? null : O.g.finish( false, true ), fine: O.gd.empty ? null : O.gd.finish( false, true ), dec: O.dec.empty ? null : O.dec.finish( false ), glass,
 		boxes: new Float32Array( O.boxes ), doors: O.doors, containers: O.containers, spots: O.spots, beds: O.beds, taps: O.taps, lights: O.lights,
 	};
 }

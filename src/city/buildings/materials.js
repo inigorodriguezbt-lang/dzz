@@ -24,6 +24,8 @@ const SURF = [
 	[ 0.9, 0, 0.8 ], [ 0.45, 0.35, 0.6 ], [ 0.8, 0.25, 1 ], [ 0.95, 0, 0.7 ], [ 0.9, 0, 0.8 ], [ 0.95, 0, 0.8 ], [ 0.55, 0, 0 ], [ 0.95, 0, 0.6 ], // 16-23
 	[ 0.5, 0, 0 ], [ 0.8, 0, 0 ], [ 0.8, 0, 0.8 ], [ 0.35, 0, 0.3 ], [ 0.25, 0, 0 ], [ 0.9, 0, 0.9 ], [ 0.95, 0, 0.6 ], [ 0.18, 0, 0.8 ], // 24-31
 	[ 0.5, 0, 0 ], [ 0.2, 0.35, 0.3 ], // 32 sign, 33 spandrel glass
+	[ 0.85, 0, 0.35 ], [ 0.85, 0, 0.3 ], [ 0.97, 0, 0.8 ], [ 0.97, 0, 0.7 ], [ 0.9, 0, 0.6 ], [ 0.45, 0, 0 ], // 34-39 interiors
+	[ 0.28, 0, 0 ], [ 0.12, 0.9, 0 ], // 40 gloss, 41 chrome
 ];
 
 const glslArr = ( type, n, fn ) => `const ${type} ${n}[ ${LAYERS} ] = ${type}[ ${LAYERS} ]( ${Array.from( { length: LAYERS }, ( _, i ) => fn( SURF[ i ] || SURF[ 0 ] ) ).join( ', ' )} );`;
@@ -32,6 +34,9 @@ const f = ( v ) => v.toFixed( 3 );
 const PARS_V = /* glsl */`
 	attribute vec2 aUv; attribute vec3 aCol; attribute float aMat;
 	varying vec2 vTUv; varying vec3 vTint; flat varying float vMat;
+	#ifdef INTERIOR
+		attribute vec2 aLt; varying vec2 vLt;
+	#endif
 	#ifdef FACADE
 		attribute vec2 aTag; attribute vec4 aWin; attribute vec4 aWin2;
 		uniform highp sampler2D uBState;
@@ -62,6 +67,9 @@ export const HIDE_GLSL = /* glsl */`
 
 const VERT = /* glsl */`#include <begin_vertex>
 	vTUv = aUv; vTint = pow( aCol, vec3( 2.2 ) ); vMat = aMat;
+	#ifdef INTERIOR
+		vLt = aLt;
+	#endif
 	#ifdef FACADE
 		vWinUV = aWin.xy / 32.0;
 		vWinF = vec4( aWin.z / 256.0, aWin.w, 0.0, 0.0 );
@@ -72,8 +80,11 @@ const VERT = /* glsl */`#include <begin_vertex>
 
 const PARS_F = /* glsl */`
 	uniform highp sampler2DArray tArr; uniform highp sampler2DArray tNrm; uniform sampler2D tSign;
-	uniform float uGain[ ${LAYERS} ]; uniform float uInAmb; uniform float uInSun;
+	uniform float uGain[ ${LAYERS} ]; uniform float uInAmb; uniform float uInSun; uniform float uInBounce; uniform float uInDebug;
 	varying vec2 vTUv; varying vec3 vTint; flat varying float vMat;
+	#ifdef INTERIOR
+		varying vec2 vLt;
+	#endif
 	${glslArr( 'float', 'ROUGH', s => f( s[ 0 ] ) )}
 	${glslArr( 'float', 'METAL', s => f( s[ 1 ] ) )}
 	${glslArr( 'float', 'NSTR', s => f( s[ 2 ] ) )}
@@ -355,7 +366,7 @@ function makeLit( key, defines, T, state ) {
 	mat.defines = { ...defines };
 	const U = {
 		tArr: { value: T.albedo }, tNrm: { value: T.normal }, tSign: { value: T.signs }, uGain: { value: T.gains },
-		uInAmb: { value: 0.55 }, uInSun: { value: 1 }, uBState: { value: state },
+		uInAmb: { value: 0.55 }, uInSun: { value: 1 }, uInBounce: { value: 0.012 }, uInDebug: { value: 0 }, uBState: { value: state },
 	};
 	mat.userData.u = U;
 	patchMaterial( mat, key, ( sh ) => {
@@ -381,9 +392,20 @@ function makeLit( key, defines, T, state ) {
 					float il = dot( ind, vec3( 0.2126, 0.7152, 0.0722 ) );
 					// ceilings catch the light bounced off the floor
 					float bUp = inverseTransformDirection( normal, viewMatrix ).y;
-					reflectedLight.indirectDiffuse = mix( vec3( il ), ind, 0.3 ) * vec3( 1.06, 1.0, 0.9 ) * uInAmb * ( 1.0 + 0.6 * max( - bUp, 0.0 ) );
-					reflectedLight.indirectSpecular *= uInAmb * 0.6;
+					#ifdef INTERIOR
+						// the baked daylight (windows, doors, neighbouring rooms) and room-corner occlusion (light.js)
+						float bLm = vLt.x * 2.0, bAo = vLt.y;
+					#else
+						float bLm = 1.0, bAo = 1.0;
+					#endif
+					vec3 bInd = mix( vec3( il ), ind, 0.3 ) * vec3( 1.06, 1.0, 0.9 ) * uInAmb * ( 1.0 + 0.3 * max( - bUp, 0.0 ) );
+					// sunlight falling in through the windows lights the room it lands in: a warm fill on sunny days
+					vec3 bSun = uSunColor * ( uInBounce * max( uSunDir.y, 0.0 ) * ( 1.0 + 0.5 * max( - bUp, 0.0 ) ) * min( bLm, 1.2 ) ) * BRDF_Lambert( material.diffuseColor );
+					reflectedLight.indirectDiffuse = ( bInd + bSun ) * bLm * bAo;
+					reflectedLight.indirectSpecular *= uInAmb * 0.6 * bLm * bAo;
 					reflectedLight.directDiffuse *= uInSun; reflectedLight.directSpecular *= uInSun;
+					// (tuning views: 1 the baked daylight, 2 the occlusion)
+					if ( uInDebug > 0.5 ) { reflectedLight.directDiffuse = vec3( 0.0 ); reflectedLight.directSpecular = vec3( 0.0 ); reflectedLight.indirectSpecular = vec3( 0.0 ); reflectedLight.indirectDiffuse = vec3( uInDebug < 1.5 ? bLm * 0.5 : bAo ); }
 				}` );
 	} );
 	return mat;
@@ -429,7 +451,7 @@ export function buildingMaterials( nBuildings ) {
 		T, state, stateData: data, rows,
 		near: makeLit( 'bld-near', { FACADE: '' }, T, state ),
 		far: makeLit( 'bld-far', { FACADE: '', LOD_FAR: '' }, T, state ),
-		interior: makeLit( 'bld-int', {}, T, state ),
+		interior: makeLit( 'bld-int', { INTERIOR: '' }, T, state ),
 		depthNear: makeDepth( 'bld-depth-near', false, state ),
 		depthFar: makeDepth( 'bld-depth-far', true, state ),
 		glass, decal,
@@ -473,6 +495,7 @@ export function geoToBuffer( g ) {
 	b.setAttribute( 'aUv', new THREE.BufferAttribute( g.uv, 2 ) );
 	b.setAttribute( 'aCol', new THREE.BufferAttribute( g.col, 3, true ) );
 	b.setAttribute( 'aMat', new THREE.BufferAttribute( g.mat, 1 ) );
+	if ( g.lt ) b.setAttribute( 'aLt', new THREE.BufferAttribute( g.lt, 2, true ) );
 	if ( g.wn ) {
 		b.setAttribute( 'aTag', new THREE.BufferAttribute( g.tag, 2 ) );
 		b.setAttribute( 'aWin', new THREE.BufferAttribute( g.wn, 4 ) );

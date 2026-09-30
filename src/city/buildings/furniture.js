@@ -1,24 +1,19 @@
-// Room contents, built with the interior (worker side): furniture merged into the storey mesh, colliders,
-// searchable containers, loot spots on tables, counters and shelves, beds and couches to sleep on, taps, candles,
-// and the outbreak's dressing (blood, papers, tipped chairs). Pieces are drawn in a local frame: origin on the
-// floor at the wall, x along the wall, +z out of the wall into the room.
-import { F_IN, F_GLOW } from './geo.js';
-import { L, hash32, DECAL } from './data.js';
-import { M } from './plan.js';
+// Room contents, built with the interior (worker side): what furnishes each kind of room in each kind of building,
+// placed against walls clear of doors and windows. The pieces themselves live in home.js (homes, hotel rooms),
+// trade.js (shops, offices, hospitals, police, bases) and outbreak.js (the dead, bags, barricades, blood); kit.js
+// has the local frame they draw in. Small things go into the storey's fine mesh (only drawn up close).
+import { L, DECAL, winKey, winState } from './data.js';
+import { M, slabT } from './plan.js';
+import { F_IN } from './geo.js';
+import {
+	frame, paint, gloss, wood, metal, cloth, card, art, DARK, WHITE, BLACK, STEEL, CHROME, PLASTIC,
+	SOFA, BLANKET, WOODS, CLOTHES, pickOf, legs, scatter, SMALL, plate, mug, book,
+} from './kit.js';
+import * as H from './home.js';
+import * as T from './trade.js';
+import * as X from './outbreak.js';
 
 const WALL_T = 0.25;
-const MAX_SPOTS = 10; // loose loot spots per room
-
-// materials (all interior)
-const paint = ( c ) => M( L.plain, c, 1, F_IN );
-const wood = ( c = [ 176, 132, 92 ] ) => M( L.wood, c, 1, F_IN );
-const metal = ( c = [ 170, 172, 174 ] ) => M( L.spandrel, c, 1, F_IN );
-const cloth = ( c ) => M( L.fabric, c, 0.8, F_IN );
-const DARK = paint( [ 40, 40, 42 ] ), WHITE = paint( [ 236, 236, 232 ] ), STEEL = metal( [ 190, 192, 194 ] ), BLACK = paint( [ 22, 22, 24 ] );
-const CHROME = metal( [ 220, 220, 222 ] ), PORCELAIN = M( L.plain, [ 244, 244, 240 ], 1, F_IN );
-const SOFA = [ [ 120, 96, 80 ], [ 70, 90, 110 ], [ 150, 140, 120 ], [ 90, 110, 80 ], [ 140, 70, 60 ], [ 110, 110, 116 ] ];
-const BLANKET = [ [ 180, 60, 60 ], [ 60, 90, 150 ], [ 220, 210, 190 ], [ 90, 130, 100 ], [ 200, 150, 60 ], [ 150, 110, 170 ], [ 240, 240, 236 ] ];
-const WOODS = [ [ 176, 132, 92 ], [ 130, 90, 60 ], [ 200, 170, 130 ], [ 96, 64, 44 ] ];
 
 // the loot table of a shop's floor by its kind
 const SHOP_TABLE = {
@@ -27,70 +22,12 @@ const SHOP_TABLE = {
 	bar: 'bar', fastfood: 'fastfood', takeout: 'fastfood', bakery: 'fastfood', laundromat: 'trash', nails: 'trash', barber: 'trash', insurance: 'office',
 	phone: 'office', vacant: 'trash',
 };
-const BIG_SHELVES = { grocery: 1, hardware: 1, market: 1, convenience: 1, pharmacy: 1, sports: 1, gas: 1 };
+const HOMEY = { house: 1, walkup: 1 };
+// pictures on the walls by building (art atlas cells, data.js ART)
+const ART_HOME = [ 0, 1, 2, 3, 4, 5, 6, 7 ], ART_OFFICE = [ 0, 2, 5, 13, 14, 11 ], ART_POLICE = [ 10, 10, 11, 14, 13 ], ART_CARE = [ 11, 0, 2, 4, 13 ];
+const ART_FOOD = [ 8, 9, 3, 12, 1 ], ART_HOTEL = [ 0, 1, 2, 3, 5 ], ART_SCHOOL = [ 14, 15, 13, 11 ];
 
-// ---- a local frame for one piece -------------------------------------------------------------------------------
-
-function frame( O, x, y, z, rot ) {
-	const cr = Math.cos( rot ), sr = Math.sin( rot );
-	const T = ( lx, lz ) => [ x + lx * cr + lz * sr, z - lx * sr + lz * cr ];
-	const g = O.g;
-	const F = {
-		O, x, y, z, rot, T,
-		box( x0, y0, z0, x1, y1, z1, m, skip = 0 ) { g.push().translate( x, y, z ).rotY( rot ); g.box( x0, y0, z0, x1, y1, z1, m, skip ); g.pop(); return F; },
-		cyl( cx, y0, cz, r, h, seg, m, caps = 3, r1 = r ) { g.push().translate( x, y, z ).rotY( rot ); g.cyl( cx, y0, cz, r, h, seg, m, caps, r1 ); g.pop(); return F; },
-		// tilted box (tipped chairs, leaning boards): rotation about local x then z around the box centre
-		tilt( cx, cy, cz, hx, hy, hz, ax, az, m ) { g.push().translate( x, y, z ).rotY( rot ).translate( cx, cy, cz ).rotX( ax ).rotZ( az ); g.box( - hx, - hy, - hz, hx, hy, hz, m ); g.pop(); return F; },
-		col( x0, y0, z0, x1, y1, z1, mat = 1, kind = 0 ) {
-			const [ cx, cz ] = T( ( x0 + x1 ) / 2, ( z0 + z1 ) / 2 );
-			O.colR( cx, y + ( y0 + y1 ) / 2, cz, Math.abs( x1 - x0 ) / 2, Math.abs( y1 - y0 ) / 2, Math.abs( z1 - z0 ) / 2, rot, mat, kind );
-			return F;
-		},
-		// a searchable container over the local box
-		container( x0, y0, z0, x1, y1, z1, label, table, cap = 12, o = {} ) {
-			if ( ! table ) return F;
-			const [ cx, cz ] = T( ( x0 + x1 ) / 2, ( z0 + z1 ) / 2 );
-			O.containers.push( {
-				key: `${O.P.bid}:${O.si}:c${O.containers.length}`, label, table, cap, locked: o.locked || 0, n: o.n ?? null, empty: o.empty ?? 0.22,
-				cx, cy: y + ( y0 + y1 ) / 2, cz, hx: Math.abs( x1 - x0 ) / 2 + 0.03, hy: Math.abs( y1 - y0 ) / 2 + 0.03, hz: Math.abs( z1 - z0 ) / 2 + 0.03, yaw: rot,
-			} );
-			return F;
-		},
-		// a place where a loose item may lie (chance p)
-		spot( lx, ly, lz, table, p = 0.5 ) {
-			if ( ! table || O.R() > p || ( O.roomSpots || 0 ) >= MAX_SPOTS ) return F;
-			O.roomSpots = ( O.roomSpots || 0 ) + 1;
-			const [ sx, sz ] = T( lx, lz );
-			O.spots.push( { key: `${O.P.bid}:${O.si}:s${O.spots.length}`, x: sx, y: y + ly, z: sz, yaw: O.R() * Math.PI * 2, table } );
-			return F;
-		},
-		bed( x0, y0, z0, x1, y1, z1, q = 1, label = 'Sleep' ) {
-			const [ cx, cz ] = T( ( x0 + x1 ) / 2, ( z0 + z1 ) / 2 );
-			O.beds.push( { key: `${O.P.bid}:${O.si}:b${O.beds.length}`, q, label, cx, cy: y + ( y0 + y1 ) / 2, cz, hx: Math.abs( x1 - x0 ) / 2, hy: Math.abs( y1 - y0 ) / 2 + 0.05, hz: Math.abs( z1 - z0 ) / 2, yaw: rot } );
-			return F;
-		},
-		tap( lx, ly, lz ) {
-			const [ tx, tz ] = T( lx, lz );
-			O.taps.push( { key: `${O.P.bid}:${O.si}:t${O.taps.length}`, x: tx, y: y + ly, z: tz } );
-			return F;
-		},
-		light( lx, ly, lz, kind = 'candle' ) {
-			const [ lxw, lzw ] = T( lx, lz );
-			const wax = M( L.plain, [ 240, 230, 200 ], 1, F_IN );
-			const flame = M( L.plain, [ 255, 170, 70 ], 1, F_IN | F_GLOW );
-			if ( kind === 'lantern' ) {
-				F.cyl( lx, ly, lz, 0.08, 0.04, 8, DARK ).cyl( lx, ly + 0.04, lz, 0.06, 0.16, 8, flame ).cyl( lx, ly + 0.2, lz, 0.07, 0.05, 8, DARK, 1, 0.02 );
-			} else {
-				F.cyl( lx, ly, lz, 0.035, 0.12, 6, wax ).cyl( lx, ly + 0.12, lz, 0.012, 0.035, 4, flame, 1, 0.002 );
-			}
-			O.lights.push( { x: lxw, y: y + ly + 0.15, z: lzw, kind } );
-			return F;
-		},
-	};
-	return F;
-}
-
-// ---- the room: usable rect, walls, openings ---------------------------------------------------------------------
+// ---- the room: usable rect, walls, openings, windows ---------------------------------------------------------------
 
 function roomCtx( O, P, st, rm ) {
 	const inset = [ 0.07, 0.07, 0.07, 0.07 ];
@@ -102,36 +39,49 @@ function roomCtx( O, P, st, rm ) {
 	const C = {
 		rm, st, P, O,
 		x0: rm.x0 + inset[ 3 ], x1: rm.x1 - inset[ 1 ], z0: rm.z0 + inset[ 0 ], z1: rm.z1 - inset[ 2 ],
-		blocked: [ [], [], [], [] ], // per side: [ a0, a1, maxH ] (maxH = Infinity: nothing fits)
+		blocked: [ [], [], [], [] ], // per side: [ a0, a1, maxH ] (maxH < 0: nothing fits)
 		clear: [], // rects kept free in the room (door swings, walkways)
 		used: [], // footprints of placed pieces
+		windows: [], // { side, a0, a1, y0, y1, key, state }
+		doors: [], // { side, a0, a1, ext, kind }
+		open: [ 0, 0, 0, 0 ], // sides open to a neighbour (no wall)
+		ceil: st.h - slabT( P ),
 	};
 	C.w = C.x1 - C.x0; C.d = C.z1 - C.z0;
-	const addOpening = ( side, a0, a1, deep = 1.0 ) => {
+	const addOpening = ( side, a0, a1, deep = 1.0, door = null ) => {
 		C.blocked[ side ].push( [ a0 - 0.18, a1 + 0.18, - 1 ] );
 		if ( side === 0 ) C.clear.push( [ a0 - 0.1, C.z0, a1 + 0.1, C.z0 + deep ] );
 		else if ( side === 2 ) C.clear.push( [ a0 - 0.1, C.z1 - deep, a1 + 0.1, C.z1 ] );
 		else if ( side === 3 ) C.clear.push( [ C.x0, a0 - 0.1, C.x0 + deep, a1 + 0.1 ] );
 		else C.clear.push( [ C.x1 - deep, a0 - 0.1, C.x1, a1 + 0.1 ] );
+		if ( door ) C.doors.push( { side, a0, a1, ...door } );
 	};
 	for ( const w of st.walls ) {
 		const side = w.A === rm ? ( w.axis === 'x' ? 2 : 1 ) : w.B === rm ? ( w.axis === 'x' ? 0 : 3 ) : - 1;
 		if ( side < 0 ) continue;
 		const base = w.axis === 'x' ? w.x0 : w.z0;
-		for ( const op of w.ops ) addOpening( side, base + op.c - op.w / 2, base + op.c + op.w / 2, op.w + 0.3 );
+		for ( const op of w.ops ) addOpening( side, base + op.c - op.w / 2, base + op.c + op.w / 2, op.w + 0.3, { ext: false, kind: op.kind } );
 	}
 	for ( const f of st.facades ) {
 		if ( f.inside !== rm ) continue;
 		const tx = ( f.bx - f.ax ) / f.len, tz = ( f.bz - f.az ) / f.len;
-		const along = ( u ) => Math.abs( tx ) > 0.5 ? f.ax + tx * u : f.az + tz * u;
+		const alongX = Math.abs( tx ) > 0.5;
+		const along = ( u ) => alongX ? f.ax + tx * u : f.az + tz * u;
 		for ( const p of f.pieces ) {
-			if ( p.door ) { const a = along( p.door.u - p.door.w / 2 ), b = along( p.door.u + p.door.w / 2 ); addOpening( f.side, Math.min( a, b ), Math.max( a, b ), Math.min( 1.6, p.door.w + 0.4 ) ); continue; }
-			if ( ! p.win ) continue;
-			const n = Math.max( 1, Math.round( ( p.a1 - p.a0 ) / p.win.bay ) );
+			if ( p.door ) { const a = along( p.door.u - p.door.w / 2 ), b = along( p.door.u + p.door.w / 2 ); addOpening( f.side, Math.min( a, b ), Math.max( a, b ), Math.min( 1.6, p.door.w + 0.4 ), { ext: true, kind: p.door.kind } ); continue; }
+			const w = p.win;
+			if ( ! w ) continue;
+			const n = Math.max( 1, Math.round( ( p.a1 - p.a0 ) / w.bay ) );
+			const style = w.style & 31;
 			for ( let bi = 0; bi < n; bi ++ ) {
-				const u = p.a0 + ( bi + 0.5 ) * p.win.bay;
-				const a = along( u - p.win.w / 2 ), b = along( u + p.win.w / 2 );
-				C.blocked[ f.side ].push( [ Math.min( a, b ) - 0.05, Math.max( a, b ) + 0.05, p.win.sill - 0.04 ] );
+				const u = p.a0 + ( bi + 0.5 ) * w.bay;
+				const a = along( u - w.w / 2 ), b = along( u + w.w / 2 );
+				C.blocked[ f.side ].push( [ Math.min( a, b ) - 0.05, Math.max( a, b ) + 0.05, w.sill - 0.04 ] );
+				const h = Math.min( w.h, st.h - 0.12 - w.sill );
+				C.windows.push( {
+					side: f.side, a0: Math.min( a, b ), a1: Math.max( a, b ), y0: st.y + w.sill, y1: st.y + w.sill + h, style,
+					key: winKey( f.ax + tx * u, f.az + tz * u, st.y + w.sill + h / 2 ), state: style === 6 || style === 11 || style === 13 ? 0 : winState( w.seed, bi ),
+				} );
 			}
 		}
 	}
@@ -139,15 +89,16 @@ function roomCtx( O, P, st, rm ) {
 	for ( const l of st.links ) {
 		if ( l.kind !== 'open' || ( l.a !== rm && l.b !== rm ) ) continue;
 		const o = l.a === rm ? l.b : l.a;
-		if ( Math.abs( o.z1 - rm.z0 ) < 0.05 ) addOpening( 0, Math.max( rm.x0, o.x0 ), Math.min( rm.x1, o.x1 ), 0.9 );
-		if ( Math.abs( o.z0 - rm.z1 ) < 0.05 ) addOpening( 2, Math.max( rm.x0, o.x0 ), Math.min( rm.x1, o.x1 ), 0.9 );
-		if ( Math.abs( o.x1 - rm.x0 ) < 0.05 ) addOpening( 3, Math.max( rm.z0, o.z0 ), Math.min( rm.z1, o.z1 ), 0.9 );
-		if ( Math.abs( o.x0 - rm.x1 ) < 0.05 ) addOpening( 1, Math.max( rm.z0, o.z0 ), Math.min( rm.z1, o.z1 ), 0.9 );
+		if ( Math.abs( o.z1 - rm.z0 ) < 0.05 ) { addOpening( 0, Math.max( rm.x0, o.x0 ), Math.min( rm.x1, o.x1 ), 0.9 ); C.open[ 0 ] = 1; }
+		if ( Math.abs( o.z0 - rm.z1 ) < 0.05 ) { addOpening( 2, Math.max( rm.x0, o.x0 ), Math.min( rm.x1, o.x1 ), 0.9 ); C.open[ 2 ] = 1; }
+		if ( Math.abs( o.x1 - rm.x0 ) < 0.05 ) { addOpening( 3, Math.max( rm.z0, o.z0 ), Math.min( rm.z1, o.z1 ), 0.9 ); C.open[ 3 ] = 1; }
+		if ( Math.abs( o.x0 - rm.x1 ) < 0.05 ) { addOpening( 1, Math.max( rm.z0, o.z0 ), Math.min( rm.z1, o.z1 ), 0.9 ); C.open[ 1 ] = 1; }
 	}
 	return C;
 }
 
 const overlaps = ( a, b ) => a[ 0 ] < b[ 2 ] && a[ 2 ] > b[ 0 ] && a[ 1 ] < b[ 3 ] && a[ 3 ] > b[ 1 ];
+const free = ( C, r ) => r[ 0 ] >= C.x0 - 0.01 && r[ 2 ] <= C.x1 + 0.01 && r[ 1 ] >= C.z0 - 0.01 && r[ 3 ] <= C.z1 + 0.01 && ! C.used.some( u => overlaps( u, r ) ) && ! C.clear.some( u => overlaps( u, r ) );
 
 // footprint rect [ x0, z0, x1, z1 ] of a wall piece
 function wallRect( C, side, a, w, d ) {
@@ -158,16 +109,16 @@ function wallRect( C, side, a, w, d ) {
 }
 
 // find room for a piece against a wall: w wide, d deep, h high. sides in order of preference.
-// Returns a frame or null. at: 'corner' | 'centre' | 'any'
+// Returns a frame (with .side and .a) or null. at: 'corner' | 'centre' | 'any'
 function onWall( C, w, d, h, sides = [ 0, 1, 2, 3 ], at = 'any' ) {
 	const R = C.O.R;
 	for ( const side of sides ) {
+		if ( C.open[ side ] ) continue;
 		const lo = side === 0 || side === 2 ? C.x0 : C.z0, hi = side === 0 || side === 2 ? C.x1 : C.z1;
 		const depthMax = side === 0 || side === 2 ? C.d : C.w;
 		if ( d > depthMax - 0.6 || w > hi - lo ) continue;
-		// candidate positions along the wall
 		const cands = [];
-		const n = Math.max( 1, Math.floor( ( hi - lo - w ) / 0.25 ) );
+		const n = Math.max( 1, Math.floor( ( hi - lo - w ) / 0.2 ) );
 		for ( let k = 0; k <= n; k ++ ) cands.push( lo + w / 2 + ( hi - lo - w ) * ( n ? k / n : 0.5 ) );
 		if ( at === 'centre' ) cands.sort( ( p, q ) => Math.abs( p - ( lo + hi ) / 2 ) - Math.abs( q - ( lo + hi ) / 2 ) );
 		else if ( at === 'corner' ) cands.sort( ( p, q ) => Math.min( p - lo, hi - p ) - Math.min( q - lo, hi - q ) );
@@ -184,23 +135,21 @@ function onWall( C, w, d, h, sides = [ 0, 1, 2, 3 ], at = 'any' ) {
 	return null;
 }
 
-function frameOnWall( C, side, a ) {
-	const y = C.st.y;
-	if ( side === 0 ) return frame( C.O, a, y, C.z0, 0 );
-	if ( side === 2 ) return frame( C.O, a, y, C.z1, Math.PI );
-	if ( side === 3 ) return frame( C.O, C.x0, y, a, Math.PI / 2 );
-	return frame( C.O, C.x1, y, a, - Math.PI / 2 );
+function frameOnWall( C, side, a, g ) {
+	const F = X.wallFrame( C, side, a, g );
+	F.side = side; F.a = a;
+	return F;
 }
 
-// a free spot for a free-standing piece (w along its local x, d along local z), anywhere in the room
+// a free spot for a free-standing piece (w along its local x, d along local z, centred), anywhere in the room
 function inRoom( C, w, d, margin = 0.6, tries = 24, rotFree = true ) {
 	const R = C.O.R;
 	for ( let t = 0; t < tries; t ++ ) {
 		const rot = rotFree && R() < 0.5 ? Math.PI / 2 : 0;
 		const ew = rot ? d : w, ed = rot ? w : d;
+		if ( ew + 2 * margin > C.w + 0.01 || ed + 2 * margin > C.d + 0.01 ) return null;
 		const x = C.x0 + margin + ew / 2 + R() * Math.max( 0, C.w - 2 * margin - ew );
 		const z = C.z0 + margin + ed / 2 + R() * Math.max( 0, C.d - 2 * margin - ed );
-		if ( ew + 2 * margin > C.w + 0.01 || ed + 2 * margin > C.d + 0.01 ) return null;
 		const r = [ x - ew / 2, z - ed / 2, x + ew / 2, z + ed / 2 ];
 		const rr = [ r[ 0 ] - 0.3, r[ 1 ] - 0.3, r[ 2 ] + 0.3, r[ 3 ] + 0.3 ];
 		if ( C.used.some( u => overlaps( u, rr ) ) || C.clear.some( u => overlaps( u, r ) ) ) continue;
@@ -210,284 +159,84 @@ function inRoom( C, w, d, margin = 0.6, tries = 24, rotFree = true ) {
 	return null;
 }
 // the room centre (tables, beds in the middle)
-function centre( C, w, d, rot = 0 ) {
-	const x = ( C.x0 + C.x1 ) / 2, z = ( C.z0 + C.z1 ) / 2;
+function centre( C, w, d, rot = 0, dx = 0, dz = 0 ) {
+	const x = ( C.x0 + C.x1 ) / 2 + dx, z = ( C.z0 + C.z1 ) / 2 + dz;
 	const ew = rot ? d : w, ed = rot ? w : d;
 	const r = [ x - ew / 2, z - ed / 2, x + ew / 2, z + ed / 2 ];
 	if ( ew > C.w - 1.0 || ed > C.d - 1.0 || C.used.some( u => overlaps( u, r ) ) || C.clear.some( u => overlaps( u, r ) ) ) return null;
 	C.used.push( r );
 	return frame( C.O, x, C.st.y, z, rot );
 }
-
-// ---- pieces (local frame: x along the wall, z into the room, y up) ------------------------------------------------
-
-function legs( F, x0, z0, x1, z1, h, m, t = 0.05 ) {
-	F.box( x0, 0, z0, x0 + t, h, z0 + t, m, 12 ).box( x1 - t, 0, z0, x1, h, z0 + t, m, 12 ).box( x0, 0, z1 - t, x0 + t, h, z1, m, 12 ).box( x1 - t, 0, z1 - t, x1, h, z1, m, 12 );
+// a frame relative to another at (lx, lz) turned by a, if its local footprint [ x0, z0, x1, z1 ] is free
+function nextTo( C, F, lx, lz, a, fp ) {
+	const G = F.at( lx, 0, lz, a );
+	let x0 = Infinity, z0 = Infinity, x1 = - Infinity, z1 = - Infinity;
+	for ( const [ px, pz ] of [ [ fp[ 0 ], fp[ 1 ] ], [ fp[ 2 ], fp[ 1 ] ], [ fp[ 2 ], fp[ 3 ] ], [ fp[ 0 ], fp[ 3 ] ] ] ) {
+		const [ x, z ] = G.T( px, pz );
+		x0 = Math.min( x0, x ); x1 = Math.max( x1, x ); z0 = Math.min( z0, z ); z1 = Math.max( z1, z );
+	}
+	const r = [ x0, z0, x1, z1 ];
+	if ( ! free( C, r ) ) return null;
+	C.used.push( r );
+	return G;
 }
+const opposite = ( s ) => ( s + 2 ) % 4;
+// sides by the free length of wall, longest first
+function sidesByLength( C ) {
+	const len = ( s ) => {
+		const L0 = s === 0 || s === 2 ? C.w : C.d;
+		return C.open[ s ] ? - 1 : L0 - C.blocked[ s ].reduce( ( t, b ) => t + ( b[ 2 ] < 0 ? b[ 1 ] - b[ 0 ] : ( b[ 1 ] - b[ 0 ] ) * 0.5 ), 0 );
+	};
+	return [ 0, 1, 2, 3 ].sort( ( a, b ) => len( b ) - len( a ) );
+}
+
+// ---- small pieces kept here ------------------------------------------------------------------------------------------
 
 function table( F, w, d, h = 0.75, m = wood( WOODS[ 0 ] ), lootTable = null, p = 0.5 ) {
 	F.box( - w / 2, h - 0.04, 0, w / 2, h, d, m );
 	legs( F, - w / 2 + 0.04, 0.04, w / 2 - 0.04, d - 0.04, h - 0.04, m );
 	F.col( - w / 2, 0, 0, w / 2, h, d, 1, 2 );
-	if ( lootTable ) { F.spot( ( F.O.R() - 0.5 ) * w * 0.6, h, d * ( 0.3 + F.O.R() * 0.4 ), lootTable, p ); }
+	if ( lootTable ) F.spot( ( F.O.R() - 0.5 ) * w * 0.6, h, d * ( 0.3 + F.O.R() * 0.4 ), lootTable, p );
 	return F;
 }
 
-function chair( F, m = wood( WOODS[ 1 ] ), tipped = false ) {
-	if ( tipped ) {
-		// knocked over on its back
-		F.tilt( 0, 0.24, 0.25, 0.22, 0.02, 0.22, Math.PI / 2, 0, m );
-		F.tilt( 0, 0.02, 0.55, 0.22, 0.02, 0.25, 0, 0, m );
-		F.box( - 0.2, 0.02, 0.1, - 0.16, 0.46, 0.14, m ).box( 0.16, 0.02, 0.1, 0.2, 0.46, 0.14, m );
-		return F;
-	}
-	F.box( - 0.22, 0.44, - 0.22, 0.22, 0.48, 0.22, m );
-	legs( F, - 0.22, - 0.22, 0.22, 0.22, 0.44, m, 0.04 );
-	F.box( - 0.22, 0.48, - 0.24, 0.22, 0.95, - 0.2, m );
-	F.col( - 0.22, 0, - 0.24, 0.22, 0.5, 0.22, 1, 2 );
+function counter( F, w, d = 0.6, h = 1.0, m = gloss( [ 200, 196, 186 ] ), topM = M( L.terrazzo, [ 230, 226, 216 ], 1.5, F_IN ) ) {
+	F.box( - w / 2, 0.06, 0, w / 2, h - 0.04, d, m, 8 ).box( - w / 2 + 0.03, 0, 0.03, w / 2 - 0.03, 0.06, d - 0.03, BLACK, 8 );
+	F.box( - w / 2 - 0.02, h - 0.04, - 0.02, w / 2 + 0.02, h, d + 0.04, topM );
+	F.col( - w / 2, 0, 0, w / 2, h, d, 1 );
+	F.shadow( - w / 2, 0, w / 2, d, 0.6 );
 	return F;
 }
 
-function sofa( F, w, c ) {
-	const m = cloth( c ), base = cloth( [ c[ 0 ] * 0.8, c[ 1 ] * 0.8, c[ 2 ] * 0.8 ] );
-	F.box( - w / 2, 0.08, 0, w / 2, 0.42, 0.88, base );
-	F.box( - w / 2, 0.42, 0, w / 2, 0.85, 0.22, m );
-	F.box( - w / 2, 0.42, 0.22, - w / 2 + 0.18, 0.62, 0.88, m ).box( w / 2 - 0.18, 0.42, 0.22, w / 2, 0.62, 0.88, m );
-	const n = Math.max( 1, Math.round( ( w - 0.36 ) / 0.62 ) );
-	for ( let i = 0; i < n; i ++ ) {
-		const a = - w / 2 + 0.18 + ( w - 0.36 ) * i / n, b = a + ( w - 0.36 ) / n;
-		F.box( a + 0.01, 0.42, 0.22, b - 0.01, 0.52, 0.86, m );
-	}
-	F.box( - w / 2 + 0.05, 0, 0.05, - w / 2 + 0.1, 0.08, 0.1, DARK ).box( w / 2 - 0.1, 0, 0.05, w / 2 - 0.05, 0.08, 0.1, DARK );
-	F.col( - w / 2, 0, 0, w / 2, 0.52, 0.88, 1, 2 ).col( - w / 2, 0.52, 0, w / 2, 0.85, 0.22, 1, 2 );
-	F.bed( - w / 2, 0, 0, w / 2, 0.55, 0.88, 0.65, 'Sleep' );
-	F.spot( ( F.O.R() - 0.5 ) * w * 0.5, 0.52, 0.55, 'house_living', 0.2 );
-	return F;
-}
-
-function bed( F, w, len, c, frameM = wood( WOODS[ ( F.O.R() * 4 ) | 0 ] ), q = 1 ) {
-	const blanket = cloth( c ), sheet = cloth( [ 238, 236, 228 ] );
-	F.box( - w / 2 - 0.04, 0, 0, w / 2 + 0.04, 1.0, 0.06, frameM ); // headboard
-	F.box( - w / 2, 0.12, 0.06, w / 2, 0.32, len, frameM );
-	F.box( - w / 2 + 0.03, 0.32, 0.08, w / 2 - 0.03, 0.52, len - 0.02, sheet );
-	// blanket, turned back at the head, slept in (a little crumpled)
-	const t = F.O.R() * 0.3;
-	F.box( - w / 2 + 0.01, 0.46 + t * 0.05, 0.5 + t, w / 2 - 0.01, 0.55, len, blanket );
-	const np = w > 1.2 ? 2 : 1;
-	for ( let i = 0; i < np; i ++ ) {
-		const cx = np === 1 ? 0 : ( i ? w / 4 : - w / 4 );
-		F.box( cx - 0.3, 0.52, 0.12, cx + 0.3, 0.64, 0.45, sheet );
-	}
-	F.col( - w / 2, 0, 0, w / 2, 0.55, len, 1, 2 );
-	F.bed( - w / 2, 0, 0, w / 2, 0.6, len, q, 'Sleep' );
-	return F;
-}
-
-function nightstand( F, loot = 'house_bedroom' ) {
-	const m = wood( WOODS[ 2 ] );
-	F.box( - 0.23, 0, 0, 0.23, 0.55, 0.42, m );
-	F.box( - 0.19, 0.3, 0.42, 0.19, 0.31, 0.425, DARK ).box( - 0.04, 0.4, 0.42, 0.04, 0.42, 0.44, CHROME );
-	F.col( - 0.23, 0, 0, 0.23, 0.55, 0.42, 1, 2 );
-	F.container( - 0.23, 0, 0, 0.23, 0.55, 0.42, 'Nightstand', loot, 6, { n: 1, empty: 0.35 } );
-	// a lamp
-	F.cyl( - 0.08, 0.55, 0.2, 0.06, 0.25, 8, CHROME ).cyl( - 0.08, 0.8, 0.2, 0.15, 0.18, 10, cloth( [ 230, 220, 190 ] ), 0, 0.1 );
-	F.spot( 0.1, 0.55, 0.22, loot, 0.25 );
-	return F;
-}
-
-function wardrobe( F, w = 1.2, loot = 'wardrobe', label = 'Wardrobe' ) {
-	const m = wood( WOODS[ ( F.O.R() * 4 ) | 0 ] );
-	F.box( - w / 2, 0, 0, w / 2, 2.0, 0.6, m );
-	F.box( - 0.005, 0.1, 0.6, 0.005, 1.95, 0.605, DARK );
-	F.box( - 0.08, 1.0, 0.6, - 0.05, 1.2, 0.63, CHROME ).box( 0.05, 1.0, 0.6, 0.08, 1.2, 0.63, CHROME );
-	F.col( - w / 2, 0, 0, w / 2, 2.0, 0.6, 1 );
-	F.container( - w / 2, 0, 0, w / 2, 2.0, 0.6, label, loot, 40 );
-	return F;
-}
-
-function dresser( F, w = 1.1, loot = 'house_bedroom' ) {
-	const m = wood( WOODS[ ( F.O.R() * 4 ) | 0 ] );
-	F.box( - w / 2, 0, 0, w / 2, 0.85, 0.48, m );
-	for ( let k = 0; k < 3; k ++ ) {
-		const y = 0.1 + k * 0.25;
-		F.box( - w / 2 + 0.04, y + 0.22, 0.48, w / 2 - 0.04, y + 0.23, 0.485, DARK );
-		F.box( - 0.08, y + 0.1, 0.48, 0.08, y + 0.12, 0.5, CHROME );
-	}
-	F.col( - w / 2, 0, 0, w / 2, 0.85, 0.48, 1, 2 );
-	F.container( - w / 2, 0, 0, w / 2, 0.85, 0.48, 'Drawers', loot, 16 );
-	F.spot( ( F.O.R() - 0.5 ) * w * 0.6, 0.85, 0.25, loot, 0.35 );
-	return F;
-}
-
-function desk( F, w = 1.3, loot = 'desk', withChair = true, pc = true ) {
-	const m = wood( WOODS[ ( F.O.R() * 4 ) | 0 ] );
-	F.box( - w / 2, 0.72, 0, w / 2, 0.76, 0.7, m );
-	F.box( w / 2 - 0.42, 0, 0.02, w / 2 - 0.02, 0.72, 0.68, m );
-	F.box( - w / 2 + 0.02, 0, 0.02, - w / 2 + 0.06, 0.72, 0.68, m );
-	for ( let k = 0; k < 3; k ++ ) F.box( w / 2 - 0.4, 0.08 + k * 0.21, 0.68, w / 2 - 0.04, 0.09 + k * 0.21, 0.685, DARK );
-	F.col( - w / 2, 0, 0, w / 2, 0.76, 0.7, 1, 2 );
-	F.container( w / 2 - 0.42, 0, 0, w / 2, 0.72, 0.7, 'Desk', loot, 12, { n: 1 } );
-	if ( pc ) {
-		F.box( - 0.25, 0.76, 0.1, 0.25, 1.08, 0.13, BLACK ).box( - 0.04, 0.76, 0.13, 0.04, 0.9, 0.2, BLACK );
-		F.box( - 0.22, 0.76, 0.35, 0.22, 0.78, 0.5, paint( [ 60, 60, 64 ] ) );
-	}
-	// papers
-	F.box( - w / 2 + 0.1, 0.76, 0.3, - w / 2 + 0.4, 0.77, 0.6, WHITE );
-	F.spot( - w / 2 + 0.3, 0.76, 0.45, loot === 'desk' ? 'office' : loot, 0.3 );
-	if ( withChair ) {
-		// an office chair pushed back (sometimes knocked over)
-		const cm = cloth( [ 50, 52, 58 ] );
-		const cx = ( F.O.R() - 0.5 ) * 0.3, cz = 0.95 + F.O.R() * 0.2;
-		if ( F.O.R() < 0.12 ) F.tilt( cx, 0.28, cz, 0.25, 0.28, 0.06, Math.PI / 2 - 0.2, 0.3, cm );
-		else {
-			F.box( cx - 0.25, 0.45, cz - 0.25, cx + 0.25, 0.53, cz + 0.25, cm ).box( cx - 0.23, 0.53, cz + 0.2, cx + 0.23, 1.05, cz + 0.27, cm );
-			F.cyl( cx, 0.05, cz, 0.03, 0.4, 6, BLACK ).box( cx - 0.28, 0, cz - 0.03, cx + 0.28, 0.05, cz + 0.03, BLACK ).box( cx - 0.03, 0, cz - 0.28, cx + 0.03, 0.05, cz + 0.28, BLACK );
-			F.col( cx - 0.25, 0, cz - 0.25, cx + 0.25, 0.55, cz + 0.25, 1, 2 );
-		}
-	}
-	return F;
-}
-
-// shelving along a wall: a frame, shelves, and a textured face of products or books
-function shelves( F, w, h = 1.9, d = 0.45, face = 'products', loot = null, label = 'Shelf', cont = true, pSpot = 0.25 ) {
-	const fm = face === 'books' ? wood( WOODS[ 3 ] ) : metal( [ 196, 198, 200 ] );
-	const n = Math.max( 2, Math.round( h / 0.42 ) );
-	F.box( - w / 2, 0, 0, w / 2, h, 0.02, fm );
-	F.box( - w / 2, 0, 0, - w / 2 + 0.03, h, d, fm ).box( w / 2 - 0.03, 0, 0, w / 2, h, d, fm );
-	for ( let k = 0; k <= n; k ++ ) F.box( - w / 2 + 0.03, k * h / n - 0.02, 0, w / 2 - 0.03, k * h / n + 0.01, d, fm, 0 );
-	if ( face ) {
-		// the goods: a slab of texture set back a little from the shelf edge
-		const L2 = face === 'books' ? L.books : L.products;
-		const tm = M( L2, [ 255, 255, 255 ], 1, F_IN, { fit: [ 0, 0, w / 1.2, h / 1.6 ] } );
-		F.box( - w / 2 + 0.04, 0.02, 0.03, w / 2 - 0.04, h - 0.06, d - 0.08, { pz: tm }, 1 + 2 + 4 + 8 + 32 );
-	}
-	// the collider stops short of the shelf edge so loose items on the boards stay reachable
-	F.col( - w / 2, 0, 0, w / 2, h, d - 0.13, face === 'books' ? 1 : 2 );
-	if ( cont && loot ) F.container( - w / 2, 0, 0, w / 2, h, d - 0.16, label, loot, 30 );
-	if ( loot ) for ( let k = 1; k < n; k ++ ) F.spot( ( F.O.R() - 0.5 ) * ( w - 0.3 ), k * h / n + 0.01, d - 0.06, loot, pSpot );
-	return F;
-}
-
-function kitchenRun( F, len, withUpper = true, loot = 'house_kitchen', steel = false ) {
-	const body = steel ? STEEL : paint( [ [ 238, 236, 228 ], [ 150, 110, 76 ], [ 90, 110, 100 ], [ 200, 190, 170 ] ][ ( F.O.R() * 4 ) | 0 ] );
-	const top = steel ? STEEL : M( L.terrazzo, [ 220, 214, 204 ], 1.5, F_IN );
-	F.box( - len / 2, 0.1, 0, len / 2, 0.88, 0.58, body );
-	F.box( - len / 2, 0, 0.05, len / 2, 0.1, 0.52, BLACK );
-	F.box( - len / 2, 0.88, 0, len / 2, 0.92, 0.62, top );
-	F.col( - len / 2, 0, 0, len / 2, 0.92, 0.62, 1, 2 );
-	const n = Math.max( 1, Math.round( len / 0.6 ) ), cw = len / n;
-	// the sink sits a third along, the stove further on
-	const si = Math.min( n - 1, Math.floor( n / 3 ) ), so = n > 2 ? Math.min( n - 1, si + 2 ) : - 1;
-	for ( let i = 0; i < n; i ++ ) {
-		const a = - len / 2 + i * cw, b = a + cw;
-		F.box( a + 0.005, 0.12, 0.58, a + 0.01, 0.86, 0.585, DARK );
-		F.box( ( a + b ) / 2 - 0.08, 0.75, 0.58, ( a + b ) / 2 + 0.08, 0.77, 0.6, CHROME );
-		if ( i === si ) {
-			F.box( a + 0.06, 0.8, 0.12, b - 0.06, 0.925, 0.5, STEEL, 4 );
-			F.box( a + 0.08, 0.8, 0.14, b - 0.08, 0.81, 0.48, paint( [ 90, 92, 96 ] ) );
-			F.cyl( ( a + b ) / 2, 0.92, 0.07, 0.02, 0.25, 6, CHROME ).box( ( a + b ) / 2 - 0.015, 1.12, 0.07, ( a + b ) / 2 + 0.015, 1.15, 0.25, CHROME );
-			F.tap( ( a + b ) / 2, 1.0, 0.3 );
-		} else if ( i === so ) {
-			F.box( a + 0.02, 0.92, 0.04, b - 0.02, 0.94, 0.58, BLACK );
-			for ( const [ bx, bz ] of [ [ 0.3, 0.18 ], [ 0.7, 0.18 ], [ 0.3, 0.42 ], [ 0.7, 0.42 ] ] ) F.cyl( a + cw * bx, 0.94, bz, 0.08, 0.01, 10, DARK );
-			F.box( a + 0.04, 0.2, 0.58, b - 0.04, 0.7, 0.59, BLACK ).box( a + 0.06, 0.72, 0.585, b - 0.06, 0.74, 0.61, CHROME );
-		} else if ( i % 2 === 0 || n <= 2 ) {
-			F.container( a, 0.1, 0, b, 0.88, 0.58, steel ? 'Cabinet' : 'Cabinet', loot, 20 );
-			F.spot( ( a + b ) / 2, 0.92, 0.3, loot, 0.3 );
-		}
-	}
-	if ( withUpper ) {
-		F.box( - len / 2, 1.45, 0, len / 2, 2.15, 0.34, body );
-		for ( let i = 0; i < n; i ++ ) F.box( - len / 2 + i * cw + 0.005, 1.47, 0.34, - len / 2 + i * cw + 0.01, 2.13, 0.345, DARK );
-		F.col( - len / 2, 1.45, 0, len / 2, 2.15, 0.34, 1, 2 );
-		if ( n >= 3 ) F.container( - len / 2, 1.45, 0, - len / 2 + cw * 2, 2.15, 0.34, 'Cabinet', loot, 10, { n: 1 } );
-	}
-	return F;
-}
-
-function fridge( F, loot = 'fridge', steel = false ) {
-	const m = steel ? STEEL : paint( F.O.R() < 0.5 ? [ 238, 238, 234 ] : [ 190, 192, 194 ] );
-	F.box( - 0.38, 0, 0, 0.38, 1.8, 0.72, m );
-	F.box( - 0.36, 1.18, 0.72, 0.36, 1.19, 0.725, DARK );
-	F.box( 0.28, 0.8, 0.72, 0.31, 1.1, 0.76, CHROME ).box( 0.28, 1.3, 0.72, 0.31, 1.6, 0.76, CHROME );
-	F.col( - 0.38, 0, 0, 0.38, 1.8, 0.72, 2 );
-	F.container( - 0.38, 0, 0, 0.38, 1.8, 0.72, 'Fridge', loot, 30 );
-	return F;
-}
-
-function toilet( F ) {
-	F.box( - 0.2, 0, 0, 0.2, 0.75, 0.2, PORCELAIN );
-	F.box( - 0.18, 0, 0.2, 0.18, 0.4, 0.62, PORCELAIN );
-	F.box( - 0.19, 0.4, 0.22, 0.19, 0.43, 0.66, WHITE );
-	F.col( - 0.2, 0, 0, 0.2, 0.45, 0.66, 1, 2 );
-	return F;
-}
-
-function basin( F, loot = 'medicine_cabinet', mirror = true ) {
-	F.box( - 0.3, 0.72, 0, 0.3, 0.86, 0.48, PORCELAIN );
-	F.box( - 0.25, 0.8, 0.05, 0.25, 0.87, 0.42, paint( [ 200, 204, 206 ] ), 4 );
-	F.box( - 0.06, 0, 0.1, 0.06, 0.72, 0.22, PORCELAIN );
-	F.cyl( 0, 0.86, 0.06, 0.02, 0.16, 6, CHROME ).box( - 0.015, 0.99, 0.06, 0.015, 1.02, 0.2, CHROME );
-	F.tap( 0, 0.95, 0.2 );
-	F.col( - 0.3, 0, 0, 0.3, 0.86, 0.48, 1, 2 );
-	if ( mirror ) {
-		F.box( - 0.3, 1.15, 0, 0.3, 1.8, 0.12, paint( [ 230, 230, 226 ] ) );
-		F.box( - 0.27, 1.18, 0.12, 0.27, 1.77, 0.125, metal( [ 200, 214, 220 ] ) );
-		if ( loot ) F.container( - 0.3, 1.15, 0, 0.3, 1.8, 0.14, 'Medicine cabinet', loot, 6 );
-	}
-	F.spot( 0.18, 0.86, 0.3, loot === 'medicine_cabinet' ? 'house_bathroom' : loot, 0.25 );
-	return F;
-}
-
-function bathtub( F, len = 1.6 ) {
-	F.box( - len / 2, 0, 0, len / 2, 0.55, 0.75, PORCELAIN, 4 );
-	F.box( - len / 2 + 0.06, 0.1, 0.06, len / 2 - 0.06, 0.55, 0.69, paint( [ 220, 224, 226 ] ), 4 );
-	F.box( - len / 2, 0.52, 0, len / 2, 0.55, 0.06, PORCELAIN ).box( - len / 2, 0.52, 0.69, len / 2, 0.55, 0.75, PORCELAIN );
-	F.box( - len / 2, 0.52, 0, - len / 2 + 0.06, 0.55, 0.75, PORCELAIN ).box( len / 2 - 0.06, 0.52, 0, len / 2, 0.55, 0.75, PORCELAIN );
-	F.cyl( - len / 2 + 0.15, 0.55, 0.05, 0.02, 0.35, 6, CHROME );
-	F.tap( - len / 2 + 0.15, 0.7, 0.2 );
-	F.col( - len / 2, 0, 0, len / 2, 0.55, 0.75, 1, 2 );
-	return F;
-}
-
-function tv( F, w = 1.4 ) {
-	const m = wood( WOODS[ 3 ] );
-	F.box( - w / 2, 0, 0, w / 2, 0.5, 0.45, m );
-	F.box( - 0.55, 0.5, 0.15, 0.55, 1.15, 0.2, BLACK ).box( - 0.1, 0.5, 0.12, 0.1, 0.53, 0.3, BLACK );
-	F.col( - w / 2, 0, 0, w / 2, 0.5, 0.45, 1, 2 );
-	F.container( - w / 2, 0, 0, w / 2, 0.5, 0.45, 'Cabinet', 'house_living', 8, { n: 1, empty: 0.4 } );
-	return F;
-}
-
-function lockers( F, n, loot, label = 'Locker', c = [ 90, 110, 130 ] ) {
-	const m = metal( c ), w = n * 0.42;
-	F.box( - w / 2, 0, 0, w / 2, 1.9, 0.5, m );
-	for ( let i = 0; i < n; i ++ ) {
-		const a = - w / 2 + i * 0.42;
-		F.box( a + 0.005, 0.05, 0.5, a + 0.01, 1.85, 0.505, DARK );
-		for ( let k = 0; k < 4; k ++ ) F.box( a + 0.12, 1.6 + k * 0.04, 0.5, a + 0.3, 1.615 + k * 0.04, 0.505, DARK );
-		F.box( a + 0.33, 0.95, 0.5, a + 0.36, 1.05, 0.52, CHROME );
-	}
-	F.col( - w / 2, 0, 0, w / 2, 1.9, 0.5, 2 );
-	for ( let i = 0; i < n; i += 2 ) F.container( - w / 2 + i * 0.42, 0, 0, - w / 2 + Math.min( n, i + 2 ) * 0.42, 1.9, 0.5, label, loot, 30, { n: 1 } );
+function register( F, x, h, z, loot = 'convenience' ) {
+	F.box( x - 0.2, h, z - 0.18, x + 0.2, h + 0.12, z + 0.18, paint( [ 50, 50, 54 ] ) );
+	F.rbox( x, h + 0.25, z - 0.08, 0.15, 0.1, 0.012, gloss( [ 20, 20, 22 ] ), 0, 0.3 );
+	F.container( x - 0.2, h, z - 0.18, x + 0.2, h + 0.32, z + 0.18, 'Register', loot, 4, { n: 1, empty: 0.5 } );
 	return F;
 }
 
 function bunk( F, loot = 'military_locker', double = true ) {
-	const fm = metal( [ 70, 84, 64 ] ), mat = cloth( [ 110, 116, 90 ] ), sheet = cloth( [ 214, 210, 196 ] );
+	const R = F.O.R;
+	const fm = metal( [ 70, 84, 64 ] ), mat = cloth( [ 110, 116, 90 ] ), sheet = cloth( [ 214, 210, 196 ] ), blanket = cloth( pickOf( R, [ [ 90, 96, 70 ], [ 60, 70, 90 ], [ 120, 50, 40 ] ] ) );
 	const L2 = 2.0, w = 0.9;
-	for ( const [ px, pz ] of [ [ - w / 2, 0 ], [ w / 2 - 0.05, 0 ], [ - w / 2, L2 - 0.05 ], [ w / 2 - 0.05, L2 - 0.05 ] ] ) F.box( px, 0, pz, px + 0.05, double ? 1.7 : 0.8, pz + 0.05, fm );
+	for ( const [ px, pz ] of [ [ - w / 2, 0 ], [ w / 2 - 0.05, 0 ], [ - w / 2, L2 - 0.05 ], [ w / 2 - 0.05, L2 - 0.05 ] ] ) F.box( px, 0, pz, px + 0.05, double ? 1.75 : 0.8, pz + 0.05, fm );
 	for ( const y of double ? [ 0.35, 1.3 ] : [ 0.35 ] ) {
 		F.box( - w / 2, y, 0, w / 2, y + 0.06, L2, fm );
 		F.box( - w / 2 + 0.03, y + 0.06, 0.02, w / 2 - 0.03, y + 0.2, L2 - 0.02, mat );
-		F.box( - w / 2 + 0.03, y + 0.2, 0.9, w / 2 - 0.03, y + 0.23, L2 - 0.02, sheet );
+		F.rbox( 0, y + 0.22, L2 * 0.6, w / 2 - 0.02, 0.02, L2 * 0.38, blanket, R() * 0.1 - 0.05 );
+		F.box( - 0.28, y + 0.2, 0.08, 0.28, y + 0.28, 0.4, sheet );
 	}
+	if ( double ) for ( let k = 0; k < 4; k ++ ) F.box( w / 2 - 0.05, 0.5 + k * 0.28, L2 - 0.05, w / 2, 0.52 + k * 0.28, L2, fm );
 	F.col( - w / 2, 0, 0, w / 2, 0.6, L2, 2, 2 );
 	F.bed( - w / 2, 0, 0, w / 2, 0.6, L2, 0.85, 'Sleep' );
-	// footlocker at the foot
-	F.box( - 0.35, 0, L2 + 0.05, 0.35, 0.4, L2 + 0.45, M( L.wood, [ 90, 100, 70 ], 1, F_IN ) );
-	F.col( - 0.35, 0, L2 + 0.05, 0.35, 0.4, L2 + 0.45, 1, 2 );
-	F.container( - 0.35, 0, L2 + 0.05, 0.35, 0.4, L2 + 0.45, 'Footlocker', loot, 30 );
+	// footlocker at the foot, a helmet or a bag on the bunk sometimes
+	F.box( - 0.35, 0, L2 + 0.05, 0.35, 0.4, L2 + 0.45, M( L.wood, [ 90, 100, 70 ], 1, F_IN ) ).box( - 0.36, 0.38, L2 + 0.04, 0.36, 0.42, L2 + 0.46, M( L.wood, [ 80, 90, 60 ], 1, F_IN ) );
+	F.col( - 0.35, 0, L2 + 0.05, 0.35, 0.42, L2 + 0.45, 1, 2 );
+	F.container( - 0.35, 0, L2 + 0.05, 0.35, 0.42, L2 + 0.45, 'Footlocker', loot, 30 );
+	const f = F.fine();
+	if ( R() < 0.4 ) f.cyl( ( R() - 0.5 ) * 0.4, 0.61, 1.2, 0.14, 0.12, 10, paint( [ 80, 90, 60 ] ), 3, 0.1 );
+	if ( R() < 0.3 ) f.rbox( 0, 0.7, 1.5, 0.2, 0.12, 0.28, cloth( [ 90, 96, 70 ] ), R() );
+	F.shadow( - w / 2, 0, w / 2, L2 + 0.45, 0.6 );
 	return F;
 }
 
@@ -499,18 +248,35 @@ function crate( F, s = 1, loot = 'warehouse', label = 'Crate', mil = false ) {
 	if ( mil ) F.box( - w / 4, h * 0.65, d, w / 4, h * 0.85, d + 0.005, paint( [ 220, 220, 200 ] ) );
 	F.col( - w / 2, 0, 0, w / 2, h, d, 1 );
 	F.container( - w / 2, 0, 0, w / 2, h, d, label, loot, 50 );
+	F.shadow( - w / 2, 0, w / 2, d, 0.7 );
+	return F;
+}
+// a stack of cardboard cartons (searchable)
+function cartons( F, loot, label = 'Boxes' ) {
+	const R = F.O.R;
+	const n = 1 + ( R() * 3 | 0 );
+	let y = 0;
+	for ( let k = 0; k < n; k ++ ) {
+		const w = 0.45 + R() * 0.2, d = 0.35 + R() * 0.15, h = 0.28 + R() * 0.15;
+		F.rbox( ( R() - 0.5 ) * 0.1, y + h / 2, 0.3 + ( R() - 0.5 ) * 0.1, w / 2, h / 2, d / 2, card(), ( R() - 0.5 ) * 0.4 );
+		y += h;
+	}
+	F.col( - 0.35, 0, 0.05, 0.35, y, 0.55, 1, 2 );
+	F.container( - 0.35, 0, 0.05, 0.35, y, 0.55, label, loot, 30 );
+	F.shadow( - 0.35, 0.05, 0.35, 0.55, 0.6 );
 	return F;
 }
 
 function palletRack( F, len, loot = 'warehouse', levels = 3 ) {
+	const R = F.O.R;
 	const up = paint( [ 40, 80, 150 ] ), beam = paint( [ 230, 120, 30 ] );
 	const d = 1.1, h = levels * 1.5;
 	const bays = Math.max( 1, Math.round( len / 2.7 ) ), bw = len / bays;
 	for ( let i = 0; i <= bays; i ++ ) {
 		const x = - len / 2 + i * bw;
 		F.box( x - 0.05, 0, 0, x + 0.05, h, 0.08, up ).box( x - 0.05, 0, d - 0.08, x + 0.05, h, d, up );
+		for ( let k = 0; k < levels * 2; k ++ ) F.rbox( x, 0.4 + k * 0.7, d / 2, 0.015, 0.015, d / 2, up );
 	}
-	const R = F.O.R;
 	for ( let k = 1; k <= levels; k ++ ) {
 		const y = k * 1.5 - 0.1;
 		F.box( - len / 2, y - 0.12, 0, len / 2, y, 0.06, beam ).box( - len / 2, y - 0.12, d - 0.06, len / 2, y, d, beam );
@@ -521,112 +287,11 @@ function palletRack( F, len, loot = 'warehouse', levels = 3 ) {
 		// a pallet with a wrapped load of boxes
 		F.box( a, y, 0.08, a + bw - 0.3, y + 0.14, d - 0.08, M( L.wood, [ 190, 160, 120 ], 1, F_IN ) );
 		const bh = 0.5 + R() * 0.7;
-		F.box( a + 0.05, y + 0.14, 0.12, a + bw - 0.35, y + 0.14 + bh, d - 0.12, M( L.plain, [ [ 190, 150, 100 ], [ 200, 170, 120 ], [ 170, 170, 170 ], [ 60, 90, 140 ] ][ ( R() * 4 ) | 0 ], 1, F_IN ) );
+		F.box( a + 0.05, y + 0.14, 0.12, a + bw - 0.35, y + 0.14 + bh, d - 0.12, R() < 0.7 ? card() : M( L.plain, [ [ 170, 170, 170 ], [ 60, 90, 140 ], [ 200, 190, 170 ] ][ ( R() * 3 ) | 0 ], 1, F_IN ) );
 	}
 	F.col( - len / 2, 0, 0, len / 2, h, d, 2 );
 	for ( let i = 0; i < bays; i += 2 ) F.container( - len / 2 + i * bw, 0, 0, - len / 2 + ( i + 1 ) * bw, 1.4, d, 'Pallet', loot, 80 );
-	return F;
-}
-
-function workbench( F, w = 1.8, loot = 'toolbox', table = 'house_garage' ) {
-	const m = wood( [ 150, 120, 80 ] );
-	F.box( - w / 2, 0.86, 0, w / 2, 0.92, 0.7, m );
-	legs( F, - w / 2, 0.02, w / 2, 0.68, 0.86, metal( [ 90, 90, 90 ] ), 0.06 );
-	F.box( - w / 2, 0.15, 0.02, w / 2, 0.18, 0.68, m );
-	// pegboard with tools
-	F.box( - w / 2, 1.0, 0, w / 2, 1.9, 0.02, M( L.plain, [ 170, 140, 100 ], 1, F_IN ) );
-	for ( let i = 0; i < 6; i ++ ) F.box( - w / 2 + 0.2 + i * ( w - 0.4 ) / 6, 1.3 + ( i % 2 ) * 0.2, 0.02, - w / 2 + 0.26 + i * ( w - 0.4 ) / 6, 1.6 + ( i % 2 ) * 0.2, 0.04, DARK );
-	// a red toolbox on top
-	F.box( 0.1, 0.92, 0.15, 0.6, 1.14, 0.45, paint( [ 180, 30, 26 ] ) );
-	F.col( - w / 2, 0, 0, w / 2, 0.92, 0.7, 2, 2 );
-	F.container( 0.1, 0.92, 0.15, 0.6, 1.14, 0.45, 'Toolbox', loot, 16 );
-	F.spot( - w / 4, 0.92, 0.35, table, 0.5 );
-	return F;
-}
-
-function gunRack( F, w, loot, label = 'Gun rack' ) {
-	const m = wood( [ 120, 84, 52 ] );
-	F.box( - w / 2, 0.9, 0, w / 2, 2.1, 0.05, m );
-	F.box( - w / 2, 0.9, 0.05, w / 2, 0.98, 0.25, m );
-	const n = Math.floor( w / 0.22 );
-	for ( let i = 0; i < n; i ++ ) {
-		if ( F.O.R() < 0.35 ) continue; // gaps: taken already
-		const x = - w / 2 + 0.11 + i * 0.22;
-		F.box( x - 0.025, 0.98, 0.12, x + 0.025, 1.95, 0.17, BLACK ).box( x - 0.03, 0.98, 0.1, x + 0.03, 1.2, 0.2, wood( [ 90, 60, 40 ] ) );
-	}
-	F.col( - w / 2, 0.9, 0, w / 2, 2.1, 0.25, 1 );
-	F.container( - w / 2, 0.9, 0, w / 2, 2.1, 0.3, label, loot, 60 );
-	return F;
-}
-
-function gunSafe( F, loot = 'gun_safe' ) {
-	const m = metal( [ 60, 64, 62 ] );
-	F.box( - 0.4, 0, 0, 0.4, 1.5, 0.6, m );
-	F.box( - 0.36, 0.05, 0.6, 0.36, 1.45, 0.61, paint( [ 40, 42, 40 ] ) );
-	F.cyl( 0.15, 0.8, 0.61, 0.09, 0.03, 12, CHROME );
-	F.col( - 0.4, 0, 0, 0.4, 1.5, 0.6, 2 );
-	F.container( - 0.4, 0, 0, 0.4, 1.5, 0.61, 'Gun safe', loot, 50, { locked: 2, empty: 0.1 } );
-	return F;
-}
-
-function counter( F, w, d = 0.6, h = 1.0, m = paint( [ 200, 196, 186 ] ), topM = M( L.terrazzo, [ 230, 226, 216 ], 1.5, F_IN ) ) {
-	F.box( - w / 2, 0, 0, w / 2, h - 0.04, d, m );
-	F.box( - w / 2 - 0.02, h - 0.04, - 0.02, w / 2 + 0.02, h, d + 0.04, topM );
-	F.col( - w / 2, 0, 0, w / 2, h, d, 1 );
-	return F;
-}
-
-function register( F, x, h, z, loot = 'convenience' ) {
-	F.box( x - 0.2, h, z - 0.18, x + 0.2, h + 0.12, z + 0.18, paint( [ 50, 50, 54 ] ) );
-	F.box( x - 0.15, h + 0.12, z - 0.1, x + 0.15, h + 0.32, z - 0.08, BLACK );
-	F.container( x - 0.2, h, z - 0.18, x + 0.2, h + 0.32, z + 0.18, 'Register', loot, 4, { n: 1, empty: 0.5 } );
-	return F;
-}
-
-function coolers( F, w, loot = 'fridge' ) {
-	const n = Math.max( 1, Math.round( w / 0.8 ) ), cw = w / n;
-	F.box( - w / 2, 0, 0, w / 2, 2.1, 0.75, metal( [ 200, 200, 202 ] ) );
-	const drinks = M( L.products, [ 255, 255, 255 ], 1, F_IN, { fit: [ 0, 0, cw / 1.2 * n, 1.8 / 1.6 ] } );
-	F.box( - w / 2 + 0.03, 0.1, 0.2, w / 2 - 0.03, 1.95, 0.7, { pz: drinks }, 1 + 2 + 4 + 8 + 32 );
-	for ( let i = 0; i < n; i ++ ) {
-		const a = - w / 2 + i * cw;
-		F.box( a, 0.05, 0.75, a + 0.04, 2.0, 0.78, STEEL ).box( a + cw - 0.04, 0.05, 0.75, a + cw, 2.0, 0.78, STEEL );
-		F.box( a + cw - 0.12, 0.9, 0.78, a + cw - 0.09, 1.3, 0.82, CHROME );
-		F.O.glass.setMatrix( null );
-		const p = ( lx, ly ) => { const [ gx, gz ] = F.T( lx, 0.77 ); return [ gx, F.y + ly, gz ]; };
-		F.O.glass.quad( p( a + 0.04, 0.05 ), p( a + cw - 0.04, 0.05 ), p( a + cw - 0.04, 2.0 ), p( a + 0.04, 2.0 ), [ Math.sin( F.rot ), 0, Math.cos( F.rot ) ] );
-	}
-	F.col( - w / 2, 0, 0, w / 2, 2.1, 0.8, 2 );
-	for ( let i = 0; i < n; i += 2 ) F.container( - w / 2 + i * cw, 0, 0, - w / 2 + Math.min( n, i + 2 ) * cw, 2.1, 0.8, 'Cooler', loot, 30 );
-	return F;
-}
-
-function displayCase( F, w, loot ) {
-	const m = paint( [ 60, 50, 44 ] );
-	F.box( - w / 2, 0, 0, w / 2, 0.55, 0.6, m );
-	F.box( - w / 2, 0.55, 0, w / 2, 0.58, 0.6, paint( [ 230, 230, 226 ] ) );
-	F.box( - w / 2, 0.58, 0, - w / 2 + 0.03, 1.0, 0.6, CHROME ).box( w / 2 - 0.03, 0.58, 0, w / 2, 1.0, 0.6, CHROME );
-	F.box( - w / 2, 0.98, 0, w / 2, 1.0, 0.6, CHROME, 4 );
-	const p = ( lx, ly, lz ) => { const [ gx, gz ] = F.T( lx, lz ); return [ gx, F.y + ly, gz ]; };
-	F.O.glass.quad( p( - w / 2, 0.58, 0.6 ), p( w / 2, 0.58, 0.6 ), p( w / 2, 0.98, 0.6 ), p( - w / 2, 0.98, 0.6 ), [ Math.sin( F.rot ), 0, Math.cos( F.rot ) ] );
-	F.O.glass.quad( p( - w / 2, 0.99, 0 ), p( - w / 2, 0.99, 0.6 ), p( w / 2, 0.99, 0.6 ), p( w / 2, 0.99, 0 ), [ 0, 1, 0 ] );
-	F.col( - w / 2, 0, 0, w / 2, 1.0, 0.6, 3 );
-	F.container( - w / 2, 0, 0, w / 2, 1.0, 0.6, 'Display case', loot, 24 );
-	return F;
-}
-
-function hospitalBed( F, loot = 'hospital' ) {
-	const fm = metal( [ 210, 212, 214 ] );
-	bed( F, 0.95, 2.05, [ 170, 200, 210 ], fm, 0.9 );
-	F.box( - 0.5, 0.55, 0.3, - 0.47, 0.8, 1.7, fm ).box( 0.47, 0.55, 0.3, 0.5, 0.8, 1.7, fm );
-	// curtain rail and a half-drawn curtain
-	F.box( - 0.7, 2.3, 0, - 0.68, 2.33, 2.3, CHROME );
-	F.box( - 0.72, 0.35, 0.2, - 0.69, 2.28, 0.2 + 0.8 + F.O.R() * 1.2, cloth( [ 150, 190, 200 ] ) );
-	// bedside cabinet and an IV stand
-	F.box( 0.6, 0, 0.1, 1.05, 0.8, 0.55, WHITE );
-	F.col( 0.6, 0, 0.1, 1.05, 0.8, 0.55, 2, 2 );
-	F.container( 0.6, 0, 0.1, 1.05, 0.8, 0.55, 'Cabinet', loot, 8, { n: 1 } );
-	F.cyl( - 0.6, 0, 1.2, 0.02, 1.9, 6, CHROME ).box( - 0.7, 1.85, 1.18, - 0.5, 1.87, 1.22, CHROME );
+	F.shadow( - len / 2, 0, len / 2, d, 0.6 );
 	return F;
 }
 
@@ -636,33 +301,18 @@ function pew( F, w ) {
 	F.box( - w / 2, 0.46, 0.38, w / 2, 0.95, 0.43, m );
 	F.box( - w / 2, 0, 0, - w / 2 + 0.05, 0.95, 0.45, m ).box( w / 2 - 0.05, 0, 0, w / 2, 0.95, 0.45, m );
 	F.col( - w / 2, 0, 0, w / 2, 0.95, 0.45, 1, 2 );
+	if ( F.O.R() < 0.3 ) { const f = F.fine(); book( f, ( F.O.R() - 0.5 ) * w * 0.8, 0.46, 0.2, F.O.R() * 3, [ 30, 30, 60 ] ); }
 	return F;
 }
 
 function schoolDesk( F ) {
+	const R = F.O.R;
 	const m = wood( [ 200, 170, 120 ] ), fm = metal( [ 70, 90, 120 ] );
 	F.box( - 0.35, 0.7, 0, 0.35, 0.73, 0.5, m );
 	legs( F, - 0.33, 0.02, 0.33, 0.48, 0.7, fm, 0.03 );
 	F.col( - 0.35, 0, 0, 0.35, 0.73, 0.5, 1, 2 );
-	chair( frame( F.O, ...rotOffset( F, 0, - 0.3 ), F.rot ), wood( [ 200, 170, 120 ] ), F.O.R() < 0.08 );
-	return F;
-}
-const rotOffset = ( F, lx, lz ) => { const [ x, z ] = F.T( lx, lz ); return [ x, F.y, z ]; };
-
-function cubicle( F, w = 2.4, d = 2.2 ) {
-	const pm = cloth( [ 120, 124, 130 ] );
-	F.box( - w / 2, 0, 0, w / 2, 1.4, 0.05, pm ).box( - w / 2, 0, 0.05, - w / 2 + 0.05, 1.4, d, pm );
-	F.col( - w / 2, 0, 0, w / 2, 1.4, 0.05, 1 ).col( - w / 2, 0, 0.05, - w / 2 + 0.05, 1.4, d, 1 );
-	const D = frame( F.O, ...rotOffset( F, 0.1, 0.05 ), F.rot );
-	desk( D, Math.min( 1.6, w - 0.4 ), 'desk', true, true );
-	return F;
-}
-
-function plant( F ) {
-	F.cyl( 0, 0, 0, 0.2, 0.4, 8, paint( [ 150, 90, 60 ] ), 1, 0.16 );
-	const g = M( L.plain, [ 60, 110, 50 ], 1, F_IN );
-	for ( let i = 0; i < 5; i ++ ) { const a = i * 1.3; F.tilt( Math.cos( a ) * 0.12, 0.7, Math.sin( a ) * 0.12, 0.1, 0.35, 0.02, 0.3 * Math.sin( a ), 0.3 * Math.cos( a ), g ); }
-	F.col( - 0.2, 0, - 0.2, 0.2, 0.9, 0.2, 6, 2 );
+	if ( R() < 0.5 ) { const f = F.fine(); book( f, ( R() - 0.5 ) * 0.3, 0.73, 0.25, R(), pickOf( R, [ [ 200, 60, 40 ], [ 40, 90, 160 ], [ 60, 140, 60 ] ] ), 0.2, 0.26, 0.012 ); }
+	H.chair( F.at( 0, 0, - 0.3, 0 ), wood( [ 200, 170, 120 ] ), R() < 0.1 );
 	return F;
 }
 
@@ -670,22 +320,11 @@ function washer( F, n ) {
 	const w = n * 0.7;
 	for ( let i = 0; i < n; i ++ ) {
 		const a = - w / 2 + i * 0.7;
-		F.box( a + 0.02, 0, 0, a + 0.68, 0.9, 0.65, WHITE );
-		F.cyl( a + 0.35, 0.45, 0.65, 0.2, 0.02, 14, paint( [ 60, 70, 80 ] ) );
+		F.box( a + 0.02, 0, 0, a + 0.68, 0.9, 0.65, gloss( [ 236, 236, 232 ] ) ).box( a + 0.04, 0.9, 0.02, a + 0.66, 0.98, 0.12, gloss( [ 220, 220, 216 ] ) );
+		F.cyl( a + 0.35, 0.45, 0.65, 0.2, 0.02, 14, gloss( [ 60, 70, 80 ] ) ).cyl( a + 0.35, 0.45, 0.67, 0.22, 0.01, 14, CHROME, 0 );
 	}
-	F.col( - w / 2, 0, 0, w / 2, 0.9, 0.65, 2 );
-	return F;
-}
-
-function drum( F, c = [ 40, 80, 150 ] ) {
-	F.cyl( 0, 0, 0.3, 0.29, 0.88, 12, M( L.spandrel, c, 1, F_IN ) );
-	F.col( - 0.29, 0, 0.01, 0.29, 0.88, 0.59, 2 );
-	return F;
-}
-
-function tires( F ) {
-	for ( let i = 0; i < 4; i ++ ) F.cyl( 0, i * 0.22, 0.35, 0.34, 0.2, 12, BLACK ), F.cyl( 0, i * 0.22 + 0.2, 0.35, 0.2, 0.005, 10, paint( [ 90, 90, 90 ] ) );
-	F.col( - 0.34, 0, 0.01, 0.34, 0.9, 0.69, 5 );
+	F.col( - w / 2, 0, 0, w / 2, 0.98, 0.65, 2 );
+	F.shadow( - w / 2, 0, w / 2, 0.65, 0.7 );
 	return F;
 }
 
@@ -716,36 +355,17 @@ function cellBars( C, x0, z0, x1, z1, y ) {
 		if ( alongX ) O.g.box( t - 0.015, y, z0 - 0.015, t + 0.015, y + 2.3, z0 + 0.015, m, 12 );
 		else O.g.box( x0 - 0.015, y, t - 0.015, x0 + 0.015, y + 2.3, t + 0.015, m, 12 );
 	}
+	for ( const hy of [ 0.1, 1.05, 2.25 ] ) {
+		if ( alongX ) O.g.box( x0, y + hy, z0 - 0.02, x1, y + hy + 0.05, z0 + 0.02, m );
+		else O.g.box( x0 - 0.02, y + hy, z0, x0 + 0.02, y + hy + 0.05, z1, m );
+	}
 	O.col( x0 - 0.03, y, z0 - 0.03, alongX ? x1 : x0 + 0.03, y + 2.3, alongX ? z0 + 0.03 : z1, 2, 2 );
 }
 
-// ---- outbreak dressing ---------------------------------------------------------------------------------------------
-
-function dressing( C, kind ) {
-	const O = C.O, R = O.R, y = C.st.y + 0.006;
-	const px = () => C.x0 + 0.4 + R() * Math.max( 0, C.w - 0.8 ), pz = () => C.z0 + 0.4 + R() * Math.max( 0, C.d - 0.8 );
-	const area = C.w * C.d;
-	const violent = { ward: 2, exam: 1.5, waiting: 1.5, cells: 1.5, lobby: 1.2, corridor: 1.2, bedroom: 1, living: 1, sales: 1, bunk: 1 }[ kind ] || 0.6;
-	if ( R() < 0.1 * violent ) O.decalFloor( px(), y, pz(), 1.2 + R() * 1.2, DECAL.blood[ ( R() * 4 ) | 0 ], R() * 6.3 );
-	if ( R() < 0.07 * violent ) O.decalFloor( px(), y, pz(), 2 + R() * 1.5, DECAL.smear[ ( R() * 3 ) | 0 ], R() * 6.3 );
-	if ( R() < 0.05 * violent && C.w > 1.5 ) {
-		// bloody hand prints on a wall
-		const side = ( R() * 4 ) | 0;
-		const wx = side === 1 ? C.x1 : side === 3 ? C.x0 : C.x0 + 0.5 + R() * ( C.w - 1 ), wz = side === 0 ? C.z0 : side === 2 ? C.z1 : C.z0 + 0.5 + R() * ( C.d - 1 );
-		const n = [ [ 0, 1 ], [ - 1, 0 ], [ 0, - 1 ], [ 1, 0 ] ][ side ];
-		O.decalWall( wx, C.st.y + 1.1 + R() * 0.3, wz, n[ 0 ], n[ 1 ], 1.0, 1.0, DECAL.hands );
-	}
-	const papers = { office: 3, openoffice: 4, classroom: 3, briefing: 2, meeting: 2, lobby: 1, waiting: 2, corridor: 1, sorting: 4, teller: 2 }[ kind ] || 0;
-	for ( let i = 0; i < papers; i ++ ) if ( R() < 0.6 ) O.decalFloor( px(), y + 0.001, pz(), 0.9 + R() * 0.6, DECAL.paper[ ( R() * 4 ) | 0 ], R() * 6.3 );
-	if ( R() < 0.15 && area > 6 ) O.decalFloor( px(), y, pz(), 1.5, DECAL.dirt, R() * 6.3 );
-	if ( R() < 0.08 * violent ) O.decalFloor( px(), y + 0.002, pz(), 1.4, DECAL.steps, R() * 6.3 );
-}
-
-// ---- recipes -------------------------------------------------------------------------------------------------------
-
-const HOMEY = { house: 1, walkup: 1 };
+// ---- recipes -----------------------------------------------------------------------------------------------------------
 
 export function furnishRoom( O, P, st, rm, fin ) {
+	void fin;
 	if ( rm.k === 'stair' || rm.k === 'elevator' || rm.roofOnly ) return;
 	const C = roomCtx( O, P, st, rm );
 	if ( C.w < 0.8 || C.d < 0.8 ) return;
@@ -754,508 +374,936 @@ export function furnishRoom( O, P, st, rm, fin ) {
 	const t = P.S.type, arch = P.S.arch;
 	const shop = rm.shop || P.S.shop || t;
 	const mil = t === 'barracks' || t === 'mil_hq' || t === 'armory' || t === 'mil_tent';
-	void fin;
+	const home = !! HOMEY[ arch ] || rm.unit !== undefined;
+	C.home = home; C.mil = mil;
+	// a house someone held out in: windows boarded from inside, the back door blocked, a camp in the living room
+	const fort = home && P.boarded > 0.2 && ! rm.open;
+	if ( fort ) barricades( C );
+	let violence = 1, deadP = 0.05;
 	switch ( rm.k ) {
-		case 'living': case 'dayroom': {
-			const sw = Math.min( 2.2, C.w - 0.8 );
-			const sf = sw > 1.2 && onWall( C, sw, 0.9, 0.9, [ 2, 1, 3, 0 ], 'centre' );
-			if ( sf ) sofa( sf, sw, SOFA[ ( R() * SOFA.length ) | 0 ] );
-			const tvF = onWall( C, 1.4, 0.45, 0.6, [ 0, 3, 1, 2 ], 'centre' );
-			if ( tvF ) tv( tvF );
-			const ct = centre( C, 1.0, 0.55 );
-			if ( ct ) table( ct, 1.0, 0.55, 0.42, wood( WOODS[ 2 ] ), 'house_living', 0.6 );
-			const bs = onWall( C, 0.9, 0.35, 1.9, [ 1, 3, 2, 0 ] );
-			if ( bs ) shelves( bs, 0.9, 1.9, 0.35, 'books', 'house_living', 'Bookshelf', false, 0.3 );
-			const ac = onWall( C, 0.9, 0.9, 0.9, [ 3, 1, 2, 0 ], 'corner' );
-			if ( ac ) { sofa( ac, 0.9, SOFA[ ( R() * SOFA.length ) | 0 ] ); }
-			if ( rm.k === 'dayroom' ) { const k = onWall( C, Math.min( 3, C.w * 0.5 ), 0.62, 2.2, [ 2, 1, 3, 0 ] ); if ( k ) kitchenRun( k, Math.min( 3, C.w * 0.5 ), true, 'fire_station' ); }
-			if ( R() < 0.5 ) { const p = onWall( C, 0.45, 0.45, 1.0, [ 0, 1, 2, 3 ], 'corner' ); if ( p ) plant( p ); }
-			rug( C );
-			candle( C, 0.12 );
-			break;
-		}
-		case 'bedroom': case 'hotelroom': {
-			const hotel = rm.k === 'hotelroom';
-			const bw = hotel ? 1.6 : C.w > 3.2 && C.d > 3.2 ? ( R() < 0.6 ? 1.5 : 1.0 ) : 0.95;
-			const b = onWall( C, bw + 0.02, 2.05, 1.0, [ 2, 1, 3, 0 ], 'centre' );
-			if ( b ) {
-				bed( b, bw, 2.0, BLANKET[ ( R() * BLANKET.length ) | 0 ] );
-				for ( const s of [ - 1, 1 ] ) {
-					if ( R() < 0.3 && ! hotel ) continue;
-					const [ nx, nz ] = b.T( s * ( bw / 2 + 0.3 ), 0 );
-					const r = [ nx - 0.25, nz - 0.25, nx + 0.25, nz + 0.25 ];
-					if ( nx < C.x0 || nx > C.x1 || nz < C.z0 || nz > C.z1 || C.clear.some( u => overlaps( u, r ) ) ) continue;
-					C.used.push( r );
-					nightstand( frame( O, nx, st.y, nz, b.rot ), hotel ? 'hotel_room' : 'house_bedroom' );
-				}
-			}
-			const wr = onWall( C, 1.2, 0.6, 2.0, [ 3, 1, 0, 2 ], 'corner' );
-			if ( wr ) wardrobe( wr, 1.2, hotel ? 'hotel_room' : 'wardrobe' );
-			const dr = onWall( C, 1.1, 0.5, 0.85, [ 0, 1, 3, 2 ] );
-			if ( dr ) dresser( dr, 1.1, hotel ? 'hotel_room' : 'house_bedroom' );
-			if ( hotel ) { const tv2 = onWall( C, 1.2, 0.45, 0.6, [ 0, 1, 3 ] ); if ( tv2 ) tv( tv2, 1.2 ); const ch = inRoom( C, 0.9, 0.9 ); if ( ch ) sofa( ch, 0.9, SOFA[ ( R() * SOFA.length ) | 0 ] ); }
-			else if ( R() < 0.4 ) { const d = onWall( C, 1.1, 0.7, 0.8, [ 0, 1, 3 ] ); if ( d ) desk( d, 1.1, 'house_bedroom', true, R() < 0.3 ); }
-			if ( R() < 0.12 ) { const ch = inRoom( C, 0.5, 0.5 ); if ( ch ) chair( ch, wood(), true ); }
-			candle( C, 0.1 );
-			break;
-		}
-		case 'kitchen': case 'breakroom': {
-			const len = Math.min( C.w > C.d ? C.w - 0.4 : C.d - 0.4, 3.6 );
-			const loot = rm.k === 'breakroom' ? 'office' : 'house_kitchen';
-			let kl = len, upper = true;
-			let k = onWall( C, kl, 0.62, 2.2, [ 2, 1, 3, 0 ], 'corner' );
-			if ( ! k ) { kl = Math.min( len, 1.8 ); upper = false; k = onWall( C, kl, 0.62, 0.95, [ 2, 1, 3, 0 ] ); }
-			if ( k ) kitchenRun( k, kl, upper, loot );
-			const f = onWall( C, 0.78, 0.74, 1.8, [ 1, 3, 2, 0 ], 'corner' );
-			if ( f ) fridge( f );
-			const tb = centre( C, 1.2, 0.8 ) || inRoom( C, 1.0, 0.7, 0.5 );
-			if ( tb ) {
-				table( tb, 1.2, 0.8, 0.75, wood( WOODS[ ( R() * 4 ) | 0 ] ), rm.k === 'breakroom' ? 'office' : 'house_kitchen', 0.6 );
-				for ( const [ cx, cz, r ] of [ [ - 0.35, - 0.35, 0 ], [ 0.35, 1.15, Math.PI ] ] ) {
-					const [ wx, wz ] = tb.T( cx, cz );
-					chair( frame( O, wx, st.y, wz, tb.rot + r ), wood( WOODS[ 1 ] ), R() < 0.15 );
-				}
-			}
-			candle( C, 0.08 );
-			break;
-		}
-		case 'bath': case 'hbath': {
-			const tl = onWall( C, 0.45, 0.7, 0.8, [ 2, 1, 3, 0 ], 'corner' );
-			if ( tl ) toilet( tl );
-			const b = onWall( C, 0.62, 0.5, 1.0, [ 0, 1, 3, 2 ] ) || onWall( C, 0.62, 0.5, 2.0, [ 0, 1, 3, 2 ] );
-			if ( b ) basin( b, 'medicine_cabinet', true );
-			if ( C.w > 1.6 || C.d > 1.6 ) { const tb = onWall( C, 1.6, 0.76, 0.6, [ 2, 3, 1, 0 ] ); if ( tb ) bathtub( tb, 1.6 ); }
-			break;
-		}
-		case 'restroom': case 'latrine': {
-			const n = Math.max( 1, Math.min( 5, Math.floor( ( Math.max( C.w, C.d ) - 1.2 ) / 1.0 ) ) );
-			const alongX = C.w >= C.d;
-			for ( let i = 0; i < n; i ++ ) {
-				const f = onWall( C, 0.9, 0.7, 0.8, alongX ? [ 2, 0 ] : [ 1, 3 ] );
-				if ( ! f ) break;
-				toilet( f );
-				f.box( 0.45, 0, 0, 0.48, 1.9, 1.3, paint( [ 190, 200, 196 ] ) ).col( 0.45, 0, 0, 0.48, 1.9, 1.3, 2 );
-			}
-			for ( let i = 0; i < Math.min( 3, n ); i ++ ) { const b = onWall( C, 0.62, 0.5, 1.0, alongX ? [ 0, 2 ] : [ 3, 1 ] ); if ( b ) basin( b, null, i === 0 ); }
-			break;
-		}
-		case 'hall': case 'entry': {
-			if ( C.w > 1.4 && C.d > 1.4 && R() < 0.5 ) { const f = onWall( C, 0.9, 0.35, 0.8, [ 0, 1, 2, 3 ] ); if ( f ) { counter( f, 0.9, 0.35, 0.8, wood( WOODS[ 2 ] ), wood( WOODS[ 2 ] ) ); f.spot( 0, 0.8, 0.18, 'house_living', 0.35 ); f.container( - 0.45, 0, 0, 0.45, 0.8, 0.35, 'Drawers', 'house_living', 8, { n: 1 } ); } }
-			break;
-		}
-		case 'garage': case 'workshop': {
-			const garageShop = t === 'garage' || t === 'hangar' || arch === 'hangar';
-			const table = garageShop ? ( t === 'hangar' ? 'hangar' : 'garage_shop' ) : 'house_garage';
-			const wb = onWall( C, 1.8, 0.72, 1.9, [ 2, 1, 3 ] );
-			if ( wb ) workbench( wb, 1.8, 'toolbox', table );
-			const sh = onWall( C, 1.8, 0.5, 1.9, [ 1, 3, 2 ] );
-			if ( sh ) shelves( sh, 1.8, 1.9, 0.5, 'products', table, 'Shelf', true, 0.3 );
-			if ( garageShop ) {
-				for ( let i = 0; i < 3; i ++ ) { const f = onWall( C, 0.7, 0.7, 1.0, [ 3, 1, 2 ] ); if ( f ) ( i ? drum( f, [ 150, 40, 30 ] ) : tires( f ) ); }
-				const tb = onWall( C, 0.7, 0.5, 1.1, [ 2, 3, 1 ] );
-				if ( tb ) { tb.box( - 0.35, 0, 0, 0.35, 1.05, 0.5, paint( [ 180, 30, 26 ] ) ); for ( let k = 0; k < 5; k ++ ) tb.box( - 0.33, 0.1 + k * 0.19, 0.5, 0.33, 0.11 + k * 0.19, 0.505, DARK ); tb.col( - 0.35, 0, 0, 0.35, 1.05, 0.5, 2 ); tb.container( - 0.35, 0, 0, 0.35, 1.05, 0.5, 'Tool chest', 'toolbox', 30 ); }
-			}
-			break;
-		}
-		case 'dining': {
-			const food = shop === 'bar' ? 'bar' : SHOP_TABLE[ shop ] || 'restaurant';
-			// a counter at the back with a register, tables in rows
-			const ct = onWall( C, Math.min( 4, C.w - 1.5 ), 0.62, 1.1, [ 2, 1, 3 ] );
-			if ( ct ) { counter( ct, Math.min( 4, C.w - 1.5 ), 0.6, 1.05, paint( [ 150, 100, 60 ] ) ); register( ct, 0.6, 1.05, 0.3, food ); ct.spot( - 0.6, 1.05, 0.3, food, 0.5 ); }
-			tableGrid( C, 0.8, 0.8, 1.9, food );
-			candle( C, 0.06 );
-			break;
-		}
-		case 'bar': {
-			const len = Math.min( 5, Math.max( C.w, C.d ) - 1.6 );
-			const bb = onWall( C, len, 0.45, 2.0, [ 2, 1, 3 ] );
-			if ( bb ) {
-				// back bar: bottles on shelves
-				bb.box( - len / 2, 0, 0, len / 2, 0.9, 0.45, wood( [ 90, 60, 40 ] ) ).col( - len / 2, 0, 0, len / 2, 0.9, 0.45, 1 );
-				for ( let k = 0; k < 3; k ++ ) {
-					bb.box( - len / 2, 1.2 + k * 0.35, 0, len / 2, 1.23 + k * 0.35, 0.25, wood( [ 90, 60, 40 ] ) );
-					for ( let i = 0; i < len / 0.12; i ++ ) if ( R() < 0.7 ) bb.cyl( - len / 2 + 0.06 + i * 0.12, 1.23 + k * 0.35, 0.12, 0.035, 0.24, 6, M( L.plain, [ [ 60, 110, 50 ], [ 120, 70, 30 ], [ 220, 220, 210 ], [ 40, 40, 30 ] ][ ( R() * 4 ) | 0 ], 1, F_IN ), 1, 0.012 );
-				}
-				bb.container( - len / 2, 0, 0, len / 2, 0.9, 0.45, 'Cabinet', 'bar', 12 );
-				bb.spot( 0.5, 0.9, 0.25, 'bar', 0.6 );
-				// the bar counter in front of it
-				const [ fx, fz ] = bb.T( 0, 1.4 );
-				const fc = frame( O, fx, st.y, fz, bb.rot );
-				counter( fc, len, 0.6, 1.1, wood( [ 120, 80, 50 ] ), wood( [ 70, 40, 24 ] ) );
-				C.used.push( [ fx - len / 2 - 0.5, fz - 0.8, fx + len / 2 + 0.5, fz + 0.8 ] );
-				fc.spot( 0, 1.1, 0.3, 'bar', 0.5 );
-				for ( let i = 0; i < Math.floor( len / 0.7 ); i ++ ) { const sx = - len / 2 + 0.35 + i * 0.7; fc.cyl( sx, 0, 0.95, 0.03, 0.72, 6, CHROME ).cyl( sx, 0.72, 0.95, 0.18, 0.06, 10, cloth( [ 130, 30, 30 ] ) ); }
-			}
-			tableGrid( C, 0.7, 0.7, 2.0, 'bar' );
-			candle( C, 0.15 );
-			break;
-		}
-		case 'rkitchen': {
-			const len = Math.max( C.w, C.d ) - 1.2;
-			const a = onWall( C, Math.min( len, 4 ), 0.62, 2.2, [ 2, 1, 3, 0 ] );
-			if ( a ) kitchenRun( a, Math.min( len, 4 ), false, 'restaurant_kitchen', true );
-			const f = onWall( C, 0.78, 0.74, 1.8, [ 1, 3, 0, 2 ], 'corner' );
-			if ( f ) fridge( f, 'restaurant_kitchen', true );
-			const s = onWall( C, 1.2, 0.45, 1.9, [ 3, 1, 0 ] );
-			if ( s ) shelves( s, 1.2, 1.9, 0.45, 'products', 'restaurant_kitchen', 'Shelf', true, 0.3 );
-			const isl = centre( C, 1.8, 0.8 );
-			if ( isl ) { counter( isl, 1.8, 0.8, 0.92, STEEL, STEEL ); isl.spot( 0, 0.92, 0.4, 'restaurant_kitchen', 0.5 ); }
-			break;
-		}
-		case 'sales': salesFloor( C, shop ); break;
-		case 'teller': {
-			const len = C.w - 1.0;
-			const f = onWall( C, len, 0.7, 1.2, [ 2 ], 'centre' );
-			if ( f ) {
-				counter( f, len, 0.7, 1.1, wood( [ 120, 90, 60 ] ) );
-				f.box( - len / 2, 1.1, 0.3, len / 2, 2.3, 0.33, paint( [ 150, 150, 150 ] ) );
-				for ( let i = 0; i < Math.floor( len / 1.5 ); i ++ ) register( f, - len / 2 + 0.75 + i * 1.5, 1.1, 0.15, 'bank' );
-			}
-			const tb = inRoom( C, 1.2, 0.6 ); if ( tb ) table( tb, 1.2, 0.6, 1.0, wood(), 'bank', 0.4 );
-			for ( let i = 0; i < 2; i ++ ) { const p = onWall( C, 0.45, 0.45, 1.0, [ 0, 1, 3 ], 'corner' ); if ( p ) plant( p ); }
-			break;
-		}
-		case 'vault': {
-			const f = onWall( C, Math.min( 3, C.w - 0.6 ), 0.45, 2.0, [ 2, 1, 3 ] );
-			if ( f ) {
-				const w = Math.min( 3, C.w - 0.6 );
-				f.box( - w / 2, 0, 0, w / 2, 2.0, 0.45, metal( [ 170, 150, 110 ] ) );
-				for ( let i = 0; i < w / 0.3; i ++ ) for ( let k = 0; k < 6; k ++ ) f.box( - w / 2 + i * 0.3 + 0.02, 0.1 + k * 0.31, 0.45, - w / 2 + i * 0.3 + 0.28, 0.38 + k * 0.31, 0.455, metal( [ 190, 170, 120 ] ) );
-				f.col( - w / 2, 0, 0, w / 2, 2.0, 0.45, 2 );
-				f.container( - w / 2, 0, 0, w / 2, 2.0, 0.46, 'Deposit boxes', 'bank', 20, { locked: 1 } );
-			}
-			const s = onWall( C, 0.8, 0.6, 1.5, [ 1, 3, 0 ] ); if ( s ) gunSafe( s, 'bank' );
-			break;
-		}
-		case 'storage': case 'utility': case 'sorting': case 'rx': {
-			const loot = rm.k === 'rx' ? 'pharmacy' : rm.k === 'sorting' ? 'post' : storageTable( P, shop, mil );
-			if ( rm.k === 'utility' && R() < 0.6 ) { const wh = onWall( C, 0.6, 0.6, 1.6, [ 2, 1, 3, 0 ], 'corner' ); if ( wh ) { wh.cyl( 0, 0, 0.3, 0.28, 1.5, 12, WHITE ); wh.col( - 0.28, 0, 0.02, 0.28, 1.5, 0.58, 2 ); } }
-			const n = rm.k === 'utility' ? 1 : 4;
-			for ( let i = 0; i < n; i ++ ) {
-				const w = Math.min( 2.4, Math.max( C.w, C.d ) - 1.0 );
-				const s = onWall( C, w, 0.5, 1.9, [ 2, 1, 3, 0 ] );
-				if ( ! s ) break;
-				shelves( s, w, 1.9, 0.5, rm.k === 'sorting' ? null : 'products', loot, 'Shelf', true, 0.3 );
-			}
-			if ( rm.k === 'sorting' ) tableGrid( C, 1.6, 0.8, 1.2, 'post', 4 );
-			for ( let i = 0; i < 3; i ++ ) { const c = inRoom( C, 0.8, 0.6, 0.4 ); if ( c ) crate( c, 0.8 + R() * 0.3, loot, 'Box' ); }
-			break;
-		}
-		case 'office': case 'meeting': case 'briefing': {
-			const loot = t === 'police' ? 'police' : t === 'school' ? 'school' : t === 'hospital' || t === 'clinic' ? 'clinic' : t === 'church' ? 'church' : mil ? 'military' : t === 'fire' ? 'fire_station' : 'office';
-			if ( rm.k === 'meeting' ) {
-				const tb = centre( C, Math.min( 3.2, C.w - 1.6 ), Math.min( 1.2, C.d - 1.6 ) );
-				if ( tb ) { const w = Math.min( 3.2, C.w - 1.6 ); table( tb, w, Math.min( 1.2, C.d - 1.6 ), 0.75, wood( [ 90, 64, 44 ] ), loot, 0.5 ); }
-			} else if ( rm.k === 'briefing' ) {
-				rows( C, 0.5, 0.5, 0.9, 0.9, ( F ) => chair( F, metal( [ 60, 60, 66 ] ), R() < 0.1 ) );
-				const lec = onWall( C, 0.6, 0.5, 1.2, [ 2, 0 ], 'centre' ); if ( lec ) { lec.box( - 0.3, 0, 0, 0.3, 1.15, 0.5, wood() ).col( - 0.3, 0, 0, 0.3, 1.15, 0.5, 1 ); }
-			} else {
-				const d = onWall( C, 1.4, 0.72, 0.8, [ 2, 1, 3, 0 ] );
-				if ( d ) desk( d, 1.4, t === 'police' ? 'police' : 'desk' );
-				if ( C.w * C.d > 12 ) { const d2 = onWall( C, 1.4, 0.72, 0.8, [ 0, 1, 3 ] ); if ( d2 ) desk( d2, 1.4 ); }
-			}
-			const fc = onWall( C, 0.5, 0.62, 1.35, [ 1, 3, 2, 0 ], 'corner' );
-			if ( fc ) filing( fc, loot );
-			const bs = onWall( C, 0.9, 0.35, 1.9, [ 3, 1, 0, 2 ] );
-			if ( bs ) shelves( bs, 0.9, 1.9, 0.35, 'books', loot, 'Bookshelf', false, 0.2 );
-			if ( R() < 0.5 ) { const p = onWall( C, 0.45, 0.45, 1.0, [ 0, 1, 2, 3 ], 'corner' ); if ( p ) plant( p ); }
-			break;
-		}
-		case 'openoffice': {
-			const loot = t === 'police' ? 'police' : 'office';
-			rows( C, 2.4, 2.2, 0.4, 0.9, ( F ) => cubicle( F ) );
-			const fc = onWall( C, 0.5, 0.62, 1.35, [ 1, 3, 2, 0 ] ); if ( fc ) filing( fc, loot );
-			break;
-		}
-		case 'lobby': case 'waiting': {
-			const rec = onWall( C, Math.min( 3, C.w - 1.4 ), 0.7, 1.1, [ 2, 1, 3 ], 'centre' );
-			if ( rec ) { counter( rec, Math.min( 3, C.w - 1.4 ), 0.7, 1.1, wood( [ 150, 110, 80 ] ) ); rec.container( - 0.6, 0, 0, 0.6, 1.1, 0.7, 'Desk', t === 'hospital' || t === 'clinic' ? 'clinic' : t === 'police' ? 'police' : t === 'hotel' ? 'hotel_room' : 'desk', 8, { n: 1 } ); rec.spot( 0.5, 1.1, 0.35, 'office', 0.3 ); }
-			for ( let i = 0; i < ( rm.k === 'waiting' ? 4 : 2 ); i ++ ) {
-				const bench = onWall( C, 1.8, 0.55, 0.9, [ 0, 1, 3 ] );
-				if ( bench ) { for ( let k = 0; k < 3; k ++ ) bench.box( - 0.9 + k * 0.6 + 0.03, 0.42, 0.05, - 0.3 + k * 0.6 - 0.03, 0.46, 0.5, cloth( [ 70, 90, 120 ] ) ).box( - 0.9 + k * 0.6 + 0.03, 0.46, 0.02, - 0.3 + k * 0.6 - 0.03, 0.85, 0.07, cloth( [ 70, 90, 120 ] ) ); bench.box( - 0.9, 0, 0.2, 0.9, 0.42, 0.3, metal() ).col( - 0.9, 0, 0, 0.9, 0.5, 0.55, 2, 2 ); }
-			}
-			for ( let i = 0; i < 2; i ++ ) { const p = onWall( C, 0.45, 0.45, 1.0, [ 0, 1, 3 ], 'corner' ); if ( p ) plant( p ); }
-			break;
-		}
-		case 'corridor': {
-			if ( R() < 0.3 ) { const f = onWall( C, 0.2, 0.2, 1.0, [ 0, 1, 2, 3 ] ); if ( f ) f.cyl( 0, 0.2, 0.12, 0.08, 0.5, 8, paint( [ 190, 30, 26 ] ) ); }
-			break;
-		}
-		case 'cells': {
-			// two or three cells along the back with bars facing the room
-			const n = Math.max( 1, Math.min( 3, Math.floor( C.w / 2.2 ) ) );
-			const cd = Math.min( 2.4, C.d - 1.4 );
-			for ( let i = 0; i < n; i ++ ) {
-				const x0 = C.x0 + C.w * i / n, x1 = C.x0 + C.w * ( i + 1 ) / n;
-				const zb = C.z1 - cd;
-				cellBars( C, x0, zb, x1 - 0.05, zb, st.y );
-				if ( i < n - 1 ) { O.g.box( x1 - 0.06, st.y, zb, x1, st.y + 2.4, C.z1, paint( [ 200, 200, 196 ] ) ); O.col( x1 - 0.06, st.y, zb, x1, st.y + 2.4, C.z1, 0 ); }
-				const b = frame( O, x0 + 0.5, st.y, C.z1, Math.PI );
-				b.box( - 0.4, 0.4, 0, 0.4, 0.5, 1.9, metal( [ 120, 124, 128 ] ) ).box( - 0.38, 0.5, 0.05, 0.38, 0.6, 1.85, cloth( [ 90, 110, 100 ] ) ).col( - 0.4, 0, 0, 0.4, 0.6, 1.9, 2, 2 ).bed( - 0.4, 0, 0, 0.4, 0.6, 1.9, 0.6 );
-				const tl = frame( O, x1 - 0.5, st.y, C.z1, Math.PI );
-				toilet( tl );
-			}
-			C.used.push( [ C.x0, C.z1 - cd, C.x1, C.z1 ] );
-			break;
-		}
-		case 'armory': {
-			const loot = mil ? 'military_armory' : 'police';
-			for ( let i = 0; i < 4; i ++ ) { const w = Math.min( 2.4, Math.max( C.w, C.d ) - 1.2 ); const f = onWall( C, w, 0.3, 2.1, [ 2, 1, 3, 0 ] ); if ( f ) gunRack( f, w, loot ); }
-			for ( let i = 0; i < 2; i ++ ) { const s = onWall( C, 0.8, 0.6, 1.5, [ 1, 3, 0, 2 ] ); if ( s ) gunSafe( s, mil ? 'military_armory' : 'gun_safe' ); }
-			for ( let i = 0; i < 3; i ++ ) { const c = inRoom( C, 0.8, 0.6, 0.5 ); if ( c ) crate( c, 1, mil ? 'military' : 'police', 'Crate', mil ); }
-			break;
-		}
-		case 'lockers': {
-			const loot = t === 'police' ? 'police_locker' : t === 'fire' ? 'fire_station' : mil ? 'military_locker' : 'office';
-			for ( let i = 0; i < 4; i ++ ) { const n = Math.min( 8, Math.floor( ( Math.max( C.w, C.d ) - 1.0 ) / 0.42 ) ); if ( n < 2 ) break; const f = onWall( C, n * 0.42, 0.5, 1.9, [ 2, 0, 1, 3 ] ); if ( f ) lockers( f, n, loot, 'Locker', t === 'fire' ? [ 170, 40, 30 ] : [ 90, 110, 130 ] ); }
-			const b = centre( C, 1.8, 0.35 ); if ( b ) b.box( - 0.9, 0.4, 0, 0.9, 0.45, 0.35, wood() ).box( - 0.8, 0, 0.1, - 0.75, 0.4, 0.25, metal() ).box( 0.75, 0, 0.1, 0.8, 0.4, 0.25, metal() ).col( - 0.9, 0, 0, 0.9, 0.45, 0.35, 1, 2 );
-			break;
-		}
-		case 'bay': {
-			// fire station apparatus bay: turnout gear lockers along the walls, hose racks
-			for ( let i = 0; i < 3; i ++ ) { const f = onWall( C, 3.4, 0.5, 1.9, [ 2, 1, 3 ] ); if ( f ) lockers( f, 8, 'fire_station', 'Gear locker', [ 170, 40, 30 ] ); }
-			for ( let i = 0; i < 2; i ++ ) { const d = onWall( C, 0.6, 0.6, 1.0, [ 1, 3 ] ); if ( d ) drum( d, [ 170, 40, 30 ] ); }
-			break;
-		}
-		case 'ward': {
-			const n = Math.max( 1, Math.floor( Math.max( C.w, C.d ) / 2.4 ) );
-			for ( let i = 0; i < n * 2; i ++ ) { const f = onWall( C, 1.9, 2.1, 1.0, C.w > C.d ? [ 2, 0 ] : [ 1, 3 ] ); if ( f ) hospitalBed( f ); }
-			break;
-		}
-		case 'exam': {
-			const f = onWall( C, 0.8, 2.0, 1.0, [ 2, 1, 3 ], 'centre' );
-			if ( f ) { f.box( - 0.35, 0, 0, 0.35, 0.8, 1.9, WHITE ).box( - 0.35, 0.8, 0, 0.35, 0.88, 1.9, cloth( [ 90, 120, 130 ] ) ).box( - 0.3, 0.88, 0.1, 0.3, 0.9, 1.8, WHITE ).col( - 0.35, 0, 0, 0.35, 0.9, 1.9, 2, 2 ); }
-			const c = onWall( C, 1.2, 0.5, 1.0, [ 0, 1, 3 ] );
-			if ( c ) { counter( c, 1.2, 0.5, 0.9, WHITE ); c.container( - 0.6, 0, 0, 0.6, 0.9, 0.5, 'Cabinet', t === 'hospital' ? 'hospital' : 'clinic', 10 ); c.spot( 0.3, 0.9, 0.25, 'clinic', 0.6 ); basin( frame( O, ...rotOffset( c, - 0.9, 0 ), c.rot ), 'medicine_cabinet', false ); }
-			const d = onWall( C, 1.1, 0.7, 0.8, [ 0, 1, 3 ] ); if ( d ) desk( d, 1.1, 'clinic', true, false );
-			break;
-		}
-		case 'classroom': {
-			const cb = onWall( C, Math.min( 4, C.w - 1.5 ), 0.1, 2.2, [ 2, 1, 3 ], 'centre' );
-			if ( cb ) chalkboard( cb, Math.min( 4, C.w - 1.5 ) );
-			const td = onWall( C, 1.3, 0.72, 0.8, [ 3, 1, 0 ] ) || inRoom( C, 1.3, 0.72 );
-			if ( td ) desk( td, 1.3, 'school', true, false );
-			rows( C, 0.7, 1.35, 0.35, 0.9, ( F ) => schoolDesk( F ) );
-			break;
-		}
-		case 'nave': {
-			const alt = onWall( C, 2.0, 1.0, 1.1, [ 2 ], 'centre' );
-			if ( alt ) { alt.box( - 1.0, 0, 0.2, 1.0, 1.0, 1.0, cloth( [ 240, 236, 226 ] ) ).col( - 1.0, 0, 0.2, 1.0, 1.0, 1.0, 1 ); alt.light( - 0.7, 1.0, 0.6, 'candle' ).light( 0.7, 1.0, 0.6, 'candle' ); alt.spot( 0, 1.0, 0.6, 'church', 0.6 ); alt.box( - 0.04, 1.6, 0.02, 0.04, 2.8, 0.06, wood( [ 90, 60, 40 ] ) ).box( - 0.4, 2.3, 0.02, 0.4, 2.38, 0.06, wood( [ 90, 60, 40 ] ) ); }
-			const pw = Math.min( 3.2, ( C.w - 1.6 ) / 2 );
-			for ( let r = 0; r < 20; r ++ ) {
-				const z = C.z0 + 1.2 + r * 1.0;
-				if ( z > C.z1 - 2.5 ) break;
-				for ( const s of [ - 1, 1 ] ) {
-					const x = ( C.x0 + C.x1 ) / 2 + s * ( pw / 2 + 0.6 );
-					const rr = [ x - pw / 2, z, x + pw / 2, z + 0.45 ];
-					if ( C.clear.some( u => overlaps( u, rr ) ) ) continue;
-					pew( frame( O, x, st.y, z, 0 ), pw );
-				}
-			}
-			break;
-		}
-		case 'vestry': { const w = onWall( C, 1.2, 0.6, 2.0, [ 2, 1, 3 ] ); if ( w ) wardrobe( w, 1.2, 'church', 'Cabinet' ); const d = onWall( C, 1.2, 0.7, 0.8, [ 1, 3, 0 ] ); if ( d ) desk( d, 1.2, 'church', true, false ); break; }
-		case 'hallbig': {
-			if ( t === 'warehouse' ) {
-				// pallet racks in rows with aisles between
-				const alongX = C.w >= C.d;
-				const len = ( alongX ? C.w : C.d ) - 5;
-				const n = Math.floor( ( ( alongX ? C.d : C.w ) - 4 ) / 3.6 );
-				for ( let i = 0; i < n; i ++ ) {
-					const c = ( alongX ? C.z0 : C.x0 ) + 2.5 + i * 3.6;
-					const F = alongX ? frame( O, ( C.x0 + C.x1 ) / 2, st.y, c, 0 ) : frame( O, c, st.y, ( C.z0 + C.z1 ) / 2, Math.PI / 2 );
-					if ( len > 3 ) palletRack( F, len, 'warehouse', 2 );
-				}
-			} else {
-				const loot = t === 'hangar' ? 'hangar' : storageTable( P, shop, mil );
-				for ( let i = 0; i < 3; i ++ ) { const f = onWall( C, 1.8, 0.72, 1.9, [ 2, 1, 3 ] ); if ( f ) workbench( f, 1.8, 'toolbox', loot ); }
-				for ( let i = 0; i < 8; i ++ ) { const c = inRoom( C, 0.8, 0.6, 1.0 ); if ( c ) ( R() < 0.3 ? drum( c ) : crate( c, 1 + R() * 0.4, loot, 'Crate', mil ) ); }
-			}
-			break;
-		}
-		case 'dorm': case 'bunk': {
-			const dbl = rm.k === 'bunk' || mil;
-			for ( let i = 0; i < 10; i ++ ) { const f = onWall( C, 1.1, 2.5, 1.8, C.w > C.d ? [ 2, 0 ] : [ 1, 3 ] ); if ( f ) bunk( f, mil ? 'military_locker' : 'fire_station', dbl ); else break; }
-			const l = onWall( C, 1.7, 0.5, 1.9, [ 3, 1, 0, 2 ] ); if ( l ) lockers( l, 4, mil ? 'military_locker' : 'fire_station' );
-			break;
-		}
-		case 'tent': {
-			const cz = ( C.z0 + C.z1 ) / 2;
-			for ( let i = 0; i < 6; i ++ ) {
-				const x = C.x0 + 0.5 + i * 1.1;
-				if ( x + 0.4 > C.x1 - 0.8 ) break;
-				for ( const s of [ - 1, 1 ] ) {
-					const F = frame( O, x + 0.35, st.y, s < 0 ? C.z0 + 0.1 : C.z1 - 0.1, s < 0 ? 0 : Math.PI );
-					F.box( - 0.35, 0.35, 0, 0.35, 0.4, 1.9, cloth( [ 100, 104, 70 ] ) ).box( - 0.35, 0, 0.1, - 0.32, 0.35, 0.13, metal( [ 60, 60, 50 ] ) ).box( 0.32, 0, 1.75, 0.35, 0.35, 1.78, metal( [ 60, 60, 50 ] ) ).col( - 0.35, 0, 0, 0.35, 0.4, 1.9, 1, 2 ).bed( - 0.35, 0, 0, 0.35, 0.45, 1.9, 0.7 );
-				}
-			}
-			const cr = frame( O, C.x1 - 0.9, st.y, cz - 0.3, - Math.PI / 2 );
-			crate( cr, 1, 'military', 'Crate', true );
-			void cz;
-			break;
-		}
-		case 'observatory': {
-			const tc = frame( O, ( C.x0 + C.x1 ) / 2, st.y, ( C.z0 + C.z1 ) / 2, 0 );
-			telescope( tc );
-			C.used.push( [ tc.x - 1.2, tc.z - 1.2, tc.x + 1.2, tc.z + 1.2 ] );
-			const r = Math.min( C.w, C.d ) / 2 - 1.2;
-			for ( let i = 0; i < 3; i ++ ) {
-				const a = Math.PI * 0.25 + i * Math.PI * 0.5;
-				const F = frame( O, tc.x + Math.cos( a ) * r, st.y, tc.z + Math.sin( a ) * r, Math.atan2( - Math.cos( a ), - Math.sin( a ) ) + Math.PI );
-				desk( F, 1.4, 'observatory', true, true );
-			}
-			break;
-		}
-		case 'checkin': {
-			// check-in desks in a row across the hall, the bag belt behind them, a few abandoned suitcases
-			const n = Math.max( 1, Math.min( 4, Math.floor( ( C.w - 4 ) / 5.5 ) ) );
-			const cz = C.z0 + Math.min( 6.5, C.d * 0.55 );
-			for ( let i = 0; i < n; i ++ ) {
-				const x = ( C.x0 + C.x1 ) / 2 + ( i - ( n - 1 ) / 2 ) * 5.5;
-				const r = [ x - 2.1, cz, x + 2.1, cz + 2.0 ];
-				if ( C.used.some( u => overlaps( u, r ) ) || C.clear.some( u => overlaps( u, r ) ) ) continue;
-				C.used.push( r );
-				const F = frame( O, x, st.y, cz, 0 );
-				checkinDesk( F, 3.8 );
-			}
-			for ( let i = 0; i < 4; i ++ ) { const f = inRoom( C, 0.5, 0.35, 0.8 ); if ( f ) suitcase( f ); }
-			for ( let i = 0; i < 3; i ++ ) { const b = onWall( C, 1.8, 0.55, 0.9, [ 0, 1, 3 ] ); if ( b ) seats( b, 3, [ 60, 80, 110 ] ); }
-			for ( let i = 0; i < 2; i ++ ) { const p = onWall( C, 0.45, 0.45, 1.0, [ 0, 1, 3 ], 'corner' ); if ( p ) plant( p ); }
-			break;
-		}
-		case 'gate': {
-			// rows of joined seats facing the apron windows, the gate desk by the doors
-			const gd = onWall( C, 2.2, 0.7, 1.1, [ 3, 1 ], 'centre' );
-			if ( gd ) { counter( gd, 2.2, 0.7, 1.05, paint( [ 60, 70, 90 ] ) ); gd.container( - 0.6, 0, 0, 0.6, 1.05, 0.7, 'Desk', 'office', 8, { n: 1 } ); gd.box( - 0.25, 1.05, 0.1, 0.25, 1.37, 0.13, BLACK ); }
-			const m = [ [ 50, 70, 110 ], [ 40, 44, 50 ], [ 120, 40, 40 ] ][ ( R() * 3 ) | 0 ];
-			// back-to-back pairs of rows with an aisle between the pairs
-			for ( let z = C.z0 + 1.6; z + 1.15 < C.z1 - 2.2; z += 2.75 ) {
-				for ( let x = C.x0 + 1.4; x + 3.0 < C.x1 - 1.0; x += 4.2 ) {
-					const r = [ x, z, x + 3.0, z + 1.15 ];
-					if ( C.used.some( u => overlaps( u, r ) ) || C.clear.some( u => overlaps( u, r ) ) ) continue;
-					C.used.push( r );
-					seats( frame( O, x + 1.5, st.y, z + 0.55, Math.PI ), 5, m );
-					seats( frame( O, x + 1.5, st.y, z + 0.6, 0 ), 5, m );
-				}
-			}
-			for ( let i = 0; i < 3; i ++ ) { const f = inRoom( C, 0.5, 0.35, 0.6 ); if ( f ) suitcase( f ); }
-			break;
-		}
-		case 'claim': {
-			// the baggage carousel with what nobody came back for
-			const lw = Math.min( 7, C.w - 2.6 ), ld = Math.min( 2.2, C.d - 3 );
-			const F = centre( C, lw, ld );
-			if ( F ) carousel( F, lw, ld );
-			for ( let i = 0; i < 3; i ++ ) { const f = inRoom( C, 0.5, 0.35, 0.6 ); if ( f ) suitcase( f ); }
-			const b = onWall( C, 1.8, 0.55, 0.9, [ 1, 3, 0 ] ); if ( b ) seats( b, 3, [ 60, 80, 110 ] );
-			break;
-		}
-		case 'cab': {
-			// radar and radio consoles under the windows
-			for ( let i = 0; i < 4; i ++ ) {
-				const w = Math.min( 2.4, Math.max( C.w, C.d ) - 1.2 );
-				const f = onWall( C, w, 0.75, 0.9, [ 0, 1, 2, 3 ] );
-				if ( ! f ) break;
-				console_( f, w );
-			}
-			for ( let i = 0; i < 2; i ++ ) { const c = inRoom( C, 0.6, 0.6, 0.4 ); if ( c ) chair( c, cloth( [ 50, 52, 58 ] ), R() < 0.3 ); }
-			break;
-		}
-		case 'porch': {
-			if ( R() < 0.6 ) { const f = inRoom( C, 0.7, 0.7, 0.3 ); if ( f ) chair( f, wood( [ 120, 90, 60 ] ), R() < 0.2 ); }
-			break;
-		}
-		case 'loggia': {
-			if ( R() < 0.5 ) { const f = inRoom( C, 0.6, 0.6, 0.2 ); if ( f ) { table( f, 0.6, 0.6, 0.7, metal( [ 230, 230, 226 ] ) ); } }
-			break;
-		}
+		case 'living': case 'dayroom': living( C, rm.k === 'dayroom' ? 'fire_station' : 'house_living', fort ); break;
+		case 'bedroom': bedroom( C, false ); break;
+		case 'hotelroom': bedroom( C, true ); deadP = 0.08; break;
+		case 'kitchen': kitchen( C, 'house_kitchen' ); break;
+		case 'breakroom': breakroom( C, t === 'police' ? 'police' : 'office' ); break;
+		case 'bath': case 'hbath': bathroom( C ); deadP = 0.04; break;
+		case 'restroom': case 'latrine': restroom( C ); break;
+		case 'hall': case 'entry': hall( C ); deadP = 0.03; break;
+		case 'garage': case 'workshop': workshop( C, t, arch ); break;
+		case 'dining': dining( C, shop ); break;
+		case 'bar': barRoom( C ); break;
+		case 'rkitchen': restaurantKitchen( C ); break;
+		case 'sales': salesFloor( C, shop ); deadP = 0.07; break;
+		case 'teller': teller( C ); break;
+		case 'vault': vault( C ); break;
+		case 'storage': case 'utility': case 'sorting': case 'rx': storage( C, shop, mil ); deadP = 0.03; break;
+		case 'office': case 'meeting': case 'briefing': office( C, t, mil ); break;
+		case 'openoffice': openOffice( C, t ); break;
+		case 'lobby': case 'waiting': lobby( C, t ); deadP = 0.08; break;
+		case 'corridor': corridor( C, t ); deadP = 0.07; break;
+		case 'cells': cells( C ); deadP = 0.15; violence = 1.5; break;
+		case 'armory': armory( C, mil ); break;
+		case 'lockers': lockerRoom( C, t, mil ); break;
+		case 'bay': apparatusBay( C ); break;
+		case 'ward': ward( C ); deadP = 0.25; violence = 1.5; break;
+		case 'exam': exam( C, t ); deadP = 0.12; break;
+		case 'classroom': classroom( C ); break;
+		case 'nave': nave( C ); deadP = 0.12; break;
+		case 'vestry': { const w = onWall( C, 1.2, 0.6, 2.0, [ 2, 1, 3 ] ); if ( w ) H.wardrobe( w, 1.2, 'church', { label: 'Cabinet' } ); const d = onWall( C, 1.2, 0.7, 0.8, [ 1, 3, 0 ] ); if ( d ) H.desk( d, 1.2, 'church', { pc: false } ); break; }
+		case 'hallbig': hallBig( C, t, shop, mil ); break;
+		case 'dorm': case 'bunk': dorm( C, rm.k, mil ); break;
+		case 'tent': tent( C ); break;
+		case 'observatory': observatory( C ); break;
+		case 'checkin': checkin( C ); break;
+		case 'gate': gate( C ); break;
+		case 'claim': claim( C ); break;
+		case 'cab': cab( C ); break;
+		case 'porch': { if ( R() < 0.6 ) { const f = inRoom( C, 0.7, 0.7, 0.3 ); if ( f ) H.chair( f, wood( [ 120, 90, 60 ] ), R() < 0.2 ); } if ( R() < 0.4 ) { const p = inRoom( C, 0.5, 0.5, 0.2 ); if ( p ) H.pottedPlant( p.at( 0, 0, 0 ), { big: false } ); } break; }
+		case 'loggia': loggia( C ); break;
 	}
-	if ( ! rm.open ) { dressing( C, rm.k ); barricade( C ); }
-	const art = ART[ rm.k ];
-	if ( art && ! rm.open ) wallArt( C, art, HOMEY[ arch ] || rm.k === 'hotelroom' );
+	if ( ! rm.open ) {
+		X.dressRoom( C, rm.k, { violence } );
+		X.deadOf( C, { p: deadP * ( fort ? 1.5 : 1 ), sheet: t === 'hospital' || t === 'clinic', bag: t === 'hospital' } );
+		if ( R() < ( home ? 0.1 : 0.05 ) ) { const b = inRoom( C, 0.6, 0.5, 0.5, 8 ); if ( b ) X.bag( b, home ? 'house_bedroom' : rm.k === 'hotelroom' || t === 'hotel' ? 'hotel_room' : 'zombie_civilian' ); }
+		fixtures( C, t, arch );
+		const art = ART_N[ rm.k ];
+		if ( art ) wallArt( C, art, artSet( C, t, rm.k ), home || rm.k === 'hotelroom' );
+		candle( C, fort ? 0.5 : { living: 0.1, bedroom: 0.08, kitchen: 0.06, hotelroom: 0.06, dining: 0.05, bar: 0.1, nave: 0.3, dayroom: 0.1 }[ rm.k ] || 0.02 );
+	}
 }
 
-// pictures on the walls, clear of doors and windows: seascapes, sunsets and green valleys (a sea band under a sky
-// band reads as a painting from across the room); some hang crooked or lie on the floor
-const ART = { living: 2, bedroom: 1, hotelroom: 2, lobby: 2, office: 1, meeting: 1, dining: 2, hall: 1, entry: 1, waiting: 2, dayroom: 1, vestry: 1 };
-const ART_SKY = [ [ 150, 190, 220 ], [ 236, 160, 110 ], [ 200, 210, 220 ], [ 250, 210, 150 ], [ 120, 150, 190 ] ];
-const ART_LAND = [ [ 40, 110, 140 ], [ 60, 120, 70 ], [ 30, 80, 120 ], [ 120, 90, 60 ], [ 70, 140, 150 ] ];
-function wallArt( C, n, home ) {
+// ---- homes ---------------------------------------------------------------------------------------------------------------
+
+function living( C, loot, fort ) {
 	const O = C.O, R = O.R;
-	const frameM = paint( home ? WOODS[ ( R() * 4 ) | 0 ] : [ 40, 40, 42 ] );
-	for ( let k = 0, tries = 0; k < n && tries < 14; tries ++ ) {
-		const side = ( R() * 4 ) | 0;
-		const lo = side === 0 || side === 2 ? C.x0 : C.z0, hi = side === 0 || side === 2 ? C.x1 : C.z1;
-		const w = 0.5 + R() * 0.55, h = 0.38 + R() * 0.32;
-		if ( hi - lo < w + 0.7 ) continue;
-		const a = lo + 0.35 + w / 2 + R() * ( hi - lo - w - 0.7 );
-		// no window or door behind it
-		if ( C.blocked[ side ].some( b => b[ 0 ] < a + w / 2 + 0.15 && b[ 1 ] > a - w / 2 - 0.15 ) ) continue;
-		const F = frameOnWall( C, side, a );
-		const y0 = 1.3 + R() * 0.25;
-		if ( R() < 0.12 ) {
-			// knocked off the wall
-			F.box( - w / 2, 0.004, 0.25, w / 2, 0.03, 0.25 + h, frameM );
-		} else {
-			const sky = paint( ART_SKY[ ( R() * ART_SKY.length ) | 0 ] ), land = paint( ART_LAND[ ( R() * ART_LAND.length ) | 0 ] );
-			const hz = y0 + h * ( 0.35 + R() * 0.3 );
-			F.box( - w / 2, y0, 0.004, w / 2, y0 + h, 0.028, frameM );
-			F.box( - w / 2 + 0.035, y0 + 0.035, 0.028, w / 2 - 0.035, hz, 0.032, land );
-			F.box( - w / 2 + 0.035, hz, 0.028, w / 2 - 0.035, y0 + h - 0.035, 0.032, sky );
+	const long = Math.max( C.w, C.d );
+	const sw = Math.min( 2.3, long - 1.4 );
+	const c = pickOf( R, SOFA );
+	let sf = sw > 1.3 ? onWall( C, sw, 0.95, 0.9, sidesByLength( C ), 'centre' ) : null;
+	if ( ! sf && sw > 1.3 ) sf = onWall( C, 1.6, 0.95, 0.9, [ 0, 1, 2, 3 ] );
+	let tvF = null;
+	if ( sf ) {
+		const w = C.used[ C.used.length - 1 ];
+		const realW = sf.side === 0 || sf.side === 2 ? w[ 2 ] - w[ 0 ] : w[ 3 ] - w[ 1 ];
+		H.sofa( sf, realW, c, { loot } );
+		// coffee table in front, an armchair at the end turned in, a side table with a lamp
+		const depth = sf.side === 0 || sf.side === 2 ? C.d : C.w;
+		const ctw = Math.min( 1.1, realW - 0.5 ), ctz = Math.min( 1.45, depth * 0.4 );
+		const ct = nextTo( C, sf, 0, ctz, 0, [ - ctw / 2, - 0.28, ctw / 2, 0.28 ] );
+		if ( ct ) { H.coffeeTable( ct, ctw, 0.56, { loot } ); if ( R() < 0.75 ) { const [ rx, rz ] = ct.T( 0, 0 ); H.rugOn( C, Math.min( 2.6, realW + 0.4 ), Math.min( 1.8, depth - 1.8 ), rx, rz, sf.rot, pickOf( R, [ [ 255, 255, 255 ], [ 200, 220, 255 ], [ 255, 230, 200 ], [ 220, 255, 220 ] ] ) ); } }
+		for ( const s of R() < 0.5 ? [ 1, - 1 ] : [ - 1, 1 ] ) {
+			const ac = nextTo( C, sf, s * ( realW / 2 + 0.75 ), 0.7, - s * 0.9, [ - 0.5, - 0.05, 0.5, 0.95 ] );
+			if ( ac ) { H.sofa( ac.at( 0, 0, 0, 0 ), 1.0, R() < 0.5 ? c : pickOf( R, SOFA ), { loot } ); break; }
 		}
-		k ++;
+		for ( const s of [ - 1, 1 ] ) { const st2 = nextTo( C, sf, s * ( realW / 2 + 0.3 ), 0.02, 0, [ - 0.25, 0, 0.25, 0.45 ] ); if ( st2 ) { H.sideTable( st2 ); break; } }
+		tvF = onWall( C, 1.5, 0.45, 0.6, [ opposite( sf.side ) ], 'centre' ) || onWall( C, 1.2, 0.45, 0.6, [ opposite( sf.side ) ] );
+	}
+	if ( ! tvF ) tvF = onWall( C, 1.4, 0.45, 0.6, [ 0, 1, 2, 3 ] );
+	if ( tvF ) H.tvUnit( tvF, 1.4 + ( R() < 0.5 ? 0.2 : 0 ), { loot, old: R() < 0.15 } );
+	const bc = onWall( C, 0.9, 0.34, 1.9, [ 1, 3, 2, 0 ] );
+	if ( bc ) H.bookcase( bc, 0.9, 1.9, { loot } );
+	if ( long > 5 && R() < 0.6 ) { const bc2 = onWall( C, 0.8, 0.34, 1.9, [ 1, 3, 2, 0 ] ); if ( bc2 ) H.bookcase( bc2, 0.8, 1.9, { loot } ); }
+	const fl = onWall( C, 0.35, 0.35, 1.6, [ 0, 1, 2, 3 ], 'corner' );
+	if ( fl ) H.floorLamp( fl.at( 0, 0, 0.2 ) );
+	for ( let i = 0; i < 1 + ( R() < 0.5 ? 1 : 0 ); i ++ ) { const p = onWall( C, 0.45, 0.45, 1.0, [ 0, 1, 2, 3 ], 'corner' ); if ( p ) H.pottedPlant( p.at( 0, 0, 0.24 ) ); }
+	if ( C.rm.k === 'dayroom' ) { const k = onWall( C, Math.min( 3, C.w * 0.5 ), 0.62, 2.2, [ 2, 1, 3, 0 ] ); if ( k ) H.kitchenRun( k, Math.min( 3, C.w * 0.5 ), { loot: 'fire_station' } ); const tb = inRoom( C, 1.6, 0.9, 0.8 ); if ( tb ) H.diningSet( tb.at( 0, 0, 0 ), 1.6, 0.9, { loot: 'fire_station' } ); }
+	// shoes and a bag by the front door
+	const d = C.doors.find( x => x.ext );
+	if ( d ) { const F = frameOnWall( C, d.side, ( d.a0 + d.a1 ) / 2 ); H.shoes( F, ( d.a1 - d.a0 ) / 2 + 0.35, 0.2, R() ); if ( R() < 0.5 ) H.shoes( F, - ( d.a1 - d.a0 ) / 2 - 0.35, 0.25, R() ); }
+	floorClutter( C, 1 + ( R() * 3 | 0 ), [ SMALL.paper, SMALL.book, SMALL.can, SMALL.remote, SMALL.box ] );
+	if ( fort ) camp( C );
+	if ( R() < 0.7 ) ceilingFan( C );
+}
+
+// someone lived in here after it started: a mattress on the floor, candles, empty cans, water bottles
+function camp( C ) {
+	const R = C.O.R;
+	const F = inRoom( C, 1.9, 0.9, 0.5 );
+	if ( ! F ) return;
+	F.box( - 0.95, 0, - 0.45, 0.95, 0.16, 0.45, cloth( [ 214, 210, 196 ] ) ).rbox( 0.1, 0.19, 0, 0.8, 0.03, 0.44, cloth( pickOf( R, BLANKET ) ), R() * 0.2 - 0.1 );
+	F.bed( - 0.95, 0, - 0.45, 0.95, 0.2, 0.45, 0.7, 'Sleep' );
+	F.col( - 0.95, 0, - 0.45, 0.95, 0.16, 0.45, 1, 2 );
+	const f = F.fine();
+	for ( let k = 0; k < 6; k ++ ) { const x = - 1.2 + R() * 0.5, z = - 0.6 + R() * 1.2; R() < 0.5 ? f.cylH( x, 0.033, z, 0.033, 0.11, 8, metal( pickOf( R, [ [ 200, 40, 36 ], [ 220, 180, 60 ] ] ) ), R() < 0.5 ? 'x' : 'z' ) : f.cyl( x, 0, z, 0.035, 0.25, 8, gloss( [ 170, 200, 220 ] ) ); }
+	F.light( 1.15, 0, 0.3, R() < 0.5 ? 'lantern' : 'candle' );
+	F.container( - 1.4, 0, - 0.5, - 0.95, 0.3, 0.5, 'Supplies', 'house_kitchen', 12, { n: 2, empty: 0.2 } );
+}
+
+function bedroom( C, hotel ) {
+	const O = C.O, R = O.R;
+	const loot = hotel ? 'hotel_room' : 'house_bedroom';
+	const two = hotel && C.w > 4.6 && C.d > 3.6;
+	const bw = hotel ? ( two ? 1.35 : 1.8 ) : C.w > 3.2 && C.d > 3.2 ? ( R() < 0.6 ? 1.55 : 1.35 ) : 0.95;
+	const span = two ? bw * 2 + 0.7 : bw + 1.0;
+	const cover = pickOf( R, BLANKET ), frameM = wood( pickOf( R, WOODS ) );
+	let b = onWall( C, span, 2.05, 1.0, [ 2, 1, 3, 0 ], 'centre' );
+	let tight = false;
+	if ( ! b ) { b = onWall( C, bw + 0.04, 2.05, 1.0, [ 2, 1, 3, 0 ], 'centre' ); tight = true; }
+	if ( b ) {
+		const beds = two ? [ - ( bw / 2 + 0.35 ), bw / 2 + 0.35 ] : [ 0 ];
+		for ( const x of beds ) H.bed( b.at( x, 0, 0 ), bw, 2.0, { cover: hotel ? [ 240, 240, 236 ] : cover, frameM, style: hotel ? 2 : undefined, messy: ! hotel || R() < 0.5 } );
+		// nightstands on both sides (between the beds too)
+		const ns = two ? [ 0, - ( bw + 0.65 ), bw + 0.65 ] : tight ? [] : [ - ( bw / 2 + 0.26 ), bw / 2 + 0.26 ];
+		for ( const x of ns ) if ( hotel || R() < 0.8 ) H.nightstand( b.at( x, 0, 0 ), loot, { m: hotel ? wood( WOODS[ 3 ] ) : frameM } );
+		// a suitcase on the bed, half packed
+		if ( R() < ( hotel ? 0.35 : 0.15 ) ) H.openSuitcase( b, beds[ 0 ] + ( R() - 0.5 ) * 0.3, 0.56, 1.3, R() * 0.6 - 0.3, loot );
+		if ( R() < 0.5 ) { const [ rx, rz ] = b.T( ( R() < 0.5 ? - 1 : 1 ) * ( span / 2 - 0.2 ), 1.2 ); if ( ! hotel ) H.rugOn( C, 0.8, 1.5, rx, rz, b.rot, pickOf( R, [ [ 255, 255, 255 ], [ 220, 220, 255 ] ] ) ); }
+	}
+	if ( hotel ) {
+		const dr = onWall( C, 1.5, 0.5, 0.85, b ? [ opposite( b.side ), 1, 3, 0 ] : [ 0, 1, 3 ], 'centre' );
+		if ( dr ) { H.dresser( dr, 1.5, loot, { mirror: false } ); dr.box( - 0.5, 0.88, 0.14, 0.5, 1.45, 0.18, BLACK ).box( - 0.48, 0.9, 0.18, 0.48, 1.43, 0.182, gloss( [ 12, 13, 15 ] ) ); }
+		const d = onWall( C, 1.2, 0.6, 0.8, [ 1, 3, 0 ] );
+		if ( d ) { H.desk( d, 1.2, loot, { pc: false, laptop: R() < 0.3, phone: true } ); }
+		const ac = inRoom( C, 1.0, 1.0, 0.6 );
+		if ( ac ) { H.sofa( ac.at( 0, 0, - 0.45, R() * 0.8 - 0.4 ), 0.95, pickOf( R, SOFA ), { loot } ); }
+		const lr = onWall( C, 0.7, 0.45, 0.6, [ 0, 1, 3, 2 ] );
+		if ( lr ) { lr.box( - 0.35, 0.45, 0.02, 0.35, 0.48, 0.44, gloss( [ 190, 160, 90 ] ) ); legs( lr, - 0.33, 0.04, 0.33, 0.42, 0.45, gloss( [ 190, 160, 90 ] ), 0.025 ); lr.col( - 0.35, 0, 0, 0.35, 0.48, 0.45, 1, 2 ); if ( R() < 0.7 ) H.openSuitcase( lr, 0, 0.48, 0.22, 0, loot ); }
+		const fl = onWall( C, 0.35, 0.35, 1.6, [ 0, 1, 2, 3 ], 'corner' );
+		if ( fl ) H.floorLamp( fl.at( 0, 0, 0.2 ) );
+	} else {
+		const wr = onWall( C, 1.2, 0.6, 2.0, [ 3, 1, 0, 2 ], 'corner' );
+		if ( wr ) H.wardrobe( wr, 1.2, 'wardrobe' );
+		const dr = onWall( C, 1.1, 0.5, 0.85, [ 0, 1, 3, 2 ] );
+		if ( dr ) H.dresser( dr, 1.1, loot );
+		if ( R() < 0.4 ) { const d = onWall( C, 1.1, 0.7, 0.8, [ 0, 1, 3 ] ); if ( d ) H.desk( d, 1.1, loot, { pc: R() < 0.3 } ); }
+		if ( R() < 0.3 ) { const p = onWall( C, 0.4, 0.4, 1.0, [ 0, 1, 2, 3 ], 'corner' ); if ( p ) H.pottedPlant( p.at( 0, 0, 0.22 ), { big: false } ); }
+		// clothes dropped on the floor, shoes, a laundry basket
+		for ( let k = 0; k < 1 + ( R() * 3 | 0 ); k ++ ) { const f = inRoom( C, 0.5, 0.5, 0.4, 6 ); if ( f ) { C.used.pop(); H.clothesPile( f, 0, 0 ); } }
+		const sh = inRoom( C, 0.3, 0.3, 0.3, 6 ); if ( sh ) { C.used.pop(); H.shoes( sh, 0, 0, R() * 3 ); }
+		if ( R() < 0.4 ) { const lb = onWall( C, 0.45, 0.4, 0.6, [ 0, 1, 2, 3 ], 'corner' ); if ( lb ) { lb.cyl( 0, 0, 0.22, 0.18, 0.5, 10, gloss( pickOf( R, [ [ 240, 240, 236 ], [ 90, 140, 190 ] ] ) ), 2, 0.2 ); lb.fine().box( - 0.12, 0.45, 0.1, 0.14, 0.56, 0.32, cloth( pickOf( R, CLOTHES ) ) ); lb.col( - 0.2, 0, 0.02, 0.2, 0.5, 0.42, 1, 2 ); } }
+		if ( R() < 0.12 ) { const ch = inRoom( C, 0.5, 0.5 ); if ( ch ) H.chair( ch, wood(), true ); }
+	}
+	if ( R() < 0.6 ) ceilingFan( C );
+}
+
+function kitchen( C, loot ) {
+	const O = C.O, R = O.R;
+	const sides = sidesByLength( C );
+	const len = Math.min( 4.2, Math.max( C.w, C.d ) - 0.9 );
+	let kl = Math.round( len / 0.6 ) * 0.6, upper = true;
+	let k = null;
+	for ( const s of sides ) { const l = Math.min( kl, ( s === 0 || s === 2 ? C.w : C.d ) - 0.9 ); if ( l < 1.2 ) continue; k = onWall( C, l, 0.62, 2.2, [ s ], 'corner' ); if ( k ) { kl = l; break; } }
+	if ( ! k ) { kl = Math.min( len, 1.8 ); upper = false; k = onWall( C, kl, 0.62, 0.93, sides ); }
+	const body = pickOf( R, [ [ 238, 236, 228 ], [ 150, 110, 76 ], [ 90, 110, 100 ], [ 200, 190, 170 ], [ 120, 140, 160 ], [ 70, 60, 54 ] ] );
+	if ( k ) {
+		H.kitchenRun( k, kl, { loot, upper, body } );
+		// an L round the corner in a big kitchen
+		const side2 = [ ( k.side + 1 ) % 4, ( k.side + 3 ) % 4 ].find( s => ! C.open[ s ] );
+		if ( side2 !== undefined && Math.min( C.w, C.d ) > 2.8 && R() < 0.6 ) { const k2 = onWall( C, 1.8, 0.62, 2.2, [ side2 ], 'corner' ); if ( k2 ) H.kitchenRun( k2, 1.8, { loot, upper: R() < 0.5, body } ); }
+	}
+	const f = onWall( C, 0.78, 0.74, 1.8, [ 1, 3, 2, 0 ], 'corner' );
+	if ( f ) H.fridge( f, 'fridge' );
+	const tw = Math.min( 1.4, C.w - 1.8, C.d - 1.8 );
+	if ( tw >= 0.8 ) { const tb = centre( C, tw + 0.9, 1.7 ) || inRoom( C, tw + 0.9, 1.7, 0.2 ); if ( tb ) H.diningSet( tb.at( 0, 0, 0 ), tw, 0.8, { loot } ); }
+	// a bin, a mop and bucket, a broom against the wall
+	const bn = onWall( C, 0.35, 0.35, 0.6, [ 0, 1, 2, 3 ] );
+	if ( bn ) { bn.cyl( 0, 0, 0.18, 0.15, 0.55, 10, gloss( pickOf( R, [ [ 200, 200, 204 ], [ 40, 40, 42 ], [ 240, 240, 236 ] ] ) ) ); bn.col( - 0.16, 0, 0.02, 0.16, 0.55, 0.34, 2, 2 ); if ( R() < 0.5 ) bn.fine().rbox( 0.3, 0.14, 0.3, 0.15, 0.14, 0.12, gloss( [ 30, 30, 32 ] ), R() ); }
+	floorClutter( C, R() * 3 | 0, [ SMALL.can, SMALL.tin, SMALL.box, SMALL.bottle, SMALL.plate ] );
+}
+
+function breakroom( C, loot ) {
+	const R = C.O.R;
+	const k = onWall( C, Math.min( 3, Math.max( C.w, C.d ) - 1.2 ), 0.62, 2.2, sidesByLength( C ), 'corner' );
+	if ( k ) H.kitchenRun( k, Math.min( 3, Math.max( C.w, C.d ) - 1.2 ), { loot, body: [ 200, 200, 196 ] } );
+	const f = onWall( C, 0.78, 0.74, 1.8, [ 1, 3, 2, 0 ], 'corner' ); if ( f ) H.fridge( f, 'fridge' );
+	const v = onWall( C, 0.9, 0.82, 1.9, [ 0, 1, 3, 2 ] ); if ( v ) T.vending( v, 'convenience' );
+	const wc = onWall( C, 0.34, 0.34, 1.4, [ 0, 1, 3, 2 ] ); if ( wc ) T.waterCooler( wc );
+	const tb = centre( C, 2.0, 1.8 ) || inRoom( C, 1.8, 1.7, 0.2 ); if ( tb ) H.diningSet( tb.at( 0, 0, 0 ), 1.2, 0.8, { loot, chair: metal( [ 60, 64, 70 ] ) } );
+	void R;
+}
+
+function bathroom( C ) {
+	const O = C.O, R = O.R;
+	const long = Math.max( C.w, C.d );
+	const tl = onWall( C, 0.5, 0.7, 0.8, [ 2, 1, 3, 0 ], 'corner' );
+	if ( tl ) H.toilet( tl );
+	const vw = C.w > 2 || C.d > 2 ? 0.8 : 0.62;
+	const b = onWall( C, vw, 0.5, 1.0, [ 0, 1, 3, 2 ] ) || onWall( C, vw, 0.5, 2.0, [ 0, 1, 3, 2 ] );
+	if ( b ) H.vanity( b, vw, 'medicine_cabinet' );
+	const tubL = Math.min( 1.7, ( C.w > C.d ? C.w : C.d ) - 0.02 );
+	let tub = null;
+	if ( long > 1.65 && Math.min( C.w, C.d ) > 1.5 ) tub = onWall( C, tubL, 0.76, 2.1, [ 2, 3, 1, 0 ], 'corner' );
+	if ( tub ) H.bathtub( tub, tubL );
+	else { const sh = onWall( C, 0.9, 0.95, 2.1, [ 2, 3, 1, 0 ], 'corner' ); if ( sh ) H.showerStall( sh, 0.9 ); }
+	const tr = onWall( C, 0.6, 0.12, 1.3, [ 1, 3, 0, 2 ] );
+	if ( tr ) { H.towelRail( tr, 0.6 ); C.used.pop(); }
+	const mat = inRoom( C, 0.8, 0.5, 0.3, 6 );
+	if ( mat ) { C.used.pop(); mat.fine().box( - 0.4, 0, - 0.25, 0.4, 0.012, 0.25, cloth( pickOf( R, [ [ 90, 150, 190 ], [ 240, 240, 236 ], [ 200, 120, 110 ], [ 150, 200, 170 ] ] ) ), 8 ); }
+	if ( R() < 0.5 ) { const bn = onWall( C, 0.25, 0.25, 0.5, [ 0, 1, 2, 3 ] ); if ( bn ) bn.cyl( 0, 0, 0.13, 0.11, 0.3, 10, gloss( [ 236, 236, 232 ] ) ); }
+}
+
+function restroom( C ) {
+	const R = C.O.R;
+	const n = Math.max( 1, Math.min( 5, Math.floor( ( Math.max( C.w, C.d ) - 1.2 ) / 1.0 ) ) );
+	const alongX = C.w >= C.d;
+	const part = gloss( pickOf( R, [ [ 190, 200, 196 ], [ 150, 170, 190 ], [ 200, 190, 170 ] ] ) );
+	for ( let i = 0; i < n; i ++ ) {
+		const f = onWall( C, 0.9, 0.7, 0.8, alongX ? [ 2, 0 ] : [ 1, 3 ] );
+		if ( ! f ) break;
+		H.toilet( f, { roll: true } );
+		// stall partitions and a door left open
+		f.box( 0.45, 0.15, 0, 0.48, 1.9, 1.35, part ).box( - 0.48, 0.15, 0, - 0.45, 1.9, 1.35, part ).col( 0.45, 0, 0, 0.48, 1.9, 1.35, 2 ).col( - 0.48, 0, 0, - 0.45, 1.9, 1.35, 2 );
+		const a = 0.5 + R() * 1.1;
+		f.rbox( - 0.45 + Math.cos( a ) * 0.42, 1.02, 1.35 + Math.sin( a ) * 0.42, 0.42, 0.87, 0.015, part, - a );
+	}
+	for ( let i = 0; i < Math.min( 3, n ); i ++ ) { const b = onWall( C, 0.62, 0.5, 1.0, alongX ? [ 0, 2 ] : [ 3, 1 ] ); if ( b ) H.vanity( b, 0.62, null, { mirror: i === 0 } ); }
+	if ( R() < 0.5 ) { const bn = onWall( C, 0.4, 0.4, 0.9, [ 0, 1, 2, 3 ] ); if ( bn ) bn.box( - 0.18, 0, 0.02, 0.18, 0.75, 0.38, gloss( [ 200, 200, 204 ] ) ).col( - 0.18, 0, 0.02, 0.18, 0.75, 0.38, 2, 2 ); }
+}
+
+function hall( C ) {
+	const R = C.O.R;
+	if ( C.w > 1.3 && C.d > 1.3 && R() < 0.6 ) {
+		const f = onWall( C, 1.0, 0.36, 0.85, [ 0, 1, 2, 3 ] );
+		if ( f ) {
+			const m = wood( pickOf( R, WOODS ) );
+			f.box( - 0.5, 0.78, 0, 0.5, 0.82, 0.36, m ); legs( f, - 0.48, 0.02, 0.48, 0.34, 0.78, m, 0.035 );
+			f.col( - 0.5, 0, 0, 0.5, 0.82, 0.36, 1, 2 ).container( - 0.5, 0.6, 0, 0.5, 0.82, 0.36, 'Drawers', 'house_living', 8, { n: 1 } );
+			const ff = f.fine(); H.tableLamp( f, 0.3, 0.82, 0.18 ); SMALL.bowl( ff, - 0.15, 0.82, 0.18, R ); ff.box( - 0.1, 0.82, 0.12, - 0.02, 0.83, 0.18, CHROME );
+			f.spot( 0, 0.82, 0.18, 'house_living', 0.35 );
+		}
+	}
+	// coat hooks with a jacket or two, shoes below
+	const hk = onWall( C, 0.8, 0.2, 1.9, [ 1, 3, 0, 2 ] );
+	if ( hk ) { const f = hk.fine(); f.box( - 0.4, 1.6, 0, 0.4, 1.68, 0.03, wood( WOODS[ 3 ] ) ); for ( let k = 0; k < 2 + ( R() * 2 | 0 ); k ++ ) f.box( - 0.3 + k * 0.22, 0.95 + R() * 0.2, 0.03, - 0.12 + k * 0.22, 1.62, 0.16, cloth( pickOf( R, CLOTHES ) ) ); H.shoes( hk, ( R() - 0.5 ) * 0.4, 0.2, R() ); }
+	floorClutter( C, R() * 2 | 0, [ SMALL.paper, SMALL.box ] );
+}
+
+function ceilingFan( C ) {
+	const F = frame( C.O, ( C.x0 + C.x1 ) / 2, C.st.y, ( C.z0 + C.z1 ) / 2, C.O.R() * 3 );
+	H.ceilingFan( F, C.ceil );
+	C.fixture = true;
+}
+
+// small things dropped on the floor, clear of doors
+function floorClutter( C, n, makers ) {
+	const R = C.O.R;
+	for ( let i = 0; i < n; i ++ ) {
+		const x = C.x0 + 0.3 + R() * Math.max( 0, C.w - 0.6 ), z = C.z0 + 0.3 + R() * Math.max( 0, C.d - 0.6 );
+		const r = [ x - 0.15, z - 0.15, x + 0.15, z + 0.15 ];
+		if ( C.used.some( u => overlaps( u, r ) ) || C.clear.some( u => overlaps( u, r ) ) ) continue;
+		pickOf( R, makers )( frame( C.O, x, C.st.y, z, 0, C.O.gd ), 0, 0, 0, R );
 	}
 }
 
-// someone tried to hold the place: planks and a door leaning by the entrance, a table on its side
-function barricade( C ) {
-	const O = C.O, R = O.R, P = C.P;
-	if ( R() > ( P.boarded > 0 ? 0.45 : 0.07 ) ) return;
-	const pm = M( L.oldplanks, [ 190, 165, 130 ], 2.4, F_IN );
-	for ( const f of C.st.facades ) {
-		if ( f.inside !== C.rm ) continue;
-		for ( const p of f.pieces ) {
-			if ( ! p.door || ! p.door.ext || p.door.kind === 'roll' || p.door.kind === 'hangar' ) continue;
-			const tx = ( f.bx - f.ax ) / f.len, tz = ( f.bz - f.az ) / f.len;
-			const side = R() < 0.5 ? 1 : - 1;
-			const u = p.door.u + side * ( p.door.w / 2 + 0.55 );
-			if ( u < 0.4 || u > f.len - 0.4 ) continue;
-			const x = f.ax + tx * u - f.nx * ( WALL_T + 0.02 ), z = f.az + tz * u - f.nz * ( WALL_T + 0.02 );
-			// local x along the wall, local +z into the room
-			const F = frame( O, x, C.st.y, z, Math.atan2( - tz, tx ) + Math.PI );
-			for ( let k = 0; k < 4; k ++ ) F.tilt( - 0.35 + k * 0.22, 0.98, 0.22, 0.09, 1.0, 0.014, - 0.22, ( R() - 0.5 ) * 0.12, pm );
-			F.col( - 0.5, 0, 0, 0.5, 1.9, 0.45, 1, 2 );
-			const [ ax, az ] = F.T( 0, 0.2 );
-			C.used.push( [ ax - 0.55, az - 0.55, ax + 0.55, az + 0.55 ] );
-			if ( R() < 0.5 ) {
-				// a table tipped on its side as cover
-				const T2 = frame( O, ...rotOffset( F, side * - 0.1, 1.3 ), F.rot );
-				const tm = wood( WOODS[ ( R() * 4 ) | 0 ] );
-				T2.tilt( 0, 0.45, 0, 0.6, 0.02, 0.4, Math.PI / 2, 0, tm );
-				T2.tilt( - 0.55, 0.45, 0.35, 0.025, 0.025, 0.36, 0, 0, tm ).tilt( 0.55, 0.45, 0.35, 0.025, 0.025, 0.36, 0, 0, tm );
-				T2.tilt( - 0.55, 0.05, 0.35, 0.025, 0.025, 0.36, 0, 0, tm ).tilt( 0.55, 0.05, 0.35, 0.025, 0.025, 0.36, 0, 0, tm );
-				T2.col( - 0.6, 0, - 0.03, 0.6, 0.85, 0.03, 1, 2 );
+// ---- garages and workshops ---------------------------------------------------------------------------------------------------
+
+function workshop( C, t, arch ) {
+	const O = C.O, R = O.R;
+	const shopFloor = t === 'garage' || t === 'hangar' || arch === 'hangar';
+	const loot = shopFloor ? ( t === 'hangar' ? 'hangar' : 'garage_shop' ) : 'house_garage';
+	// the cars: one up on a lift, one on the floor with its bonnet up (a big workshop)
+	if ( shopFloor && C.w > 6 && C.d > 7 ) {
+		const alongZ = C.d > C.w;
+		const lanes = Math.max( 1, Math.min( 3, Math.floor( ( alongZ ? C.w : C.d ) / 4.2 ) ) );
+		for ( let i = 0; i < lanes; i ++ ) {
+			const across = ( alongZ ? C.x0 : C.z0 ) + ( i + 0.5 ) * ( alongZ ? C.w : C.d ) / lanes;
+			const mid = alongZ ? ( C.z0 + C.z1 ) / 2 + 0.8 : ( C.x0 + C.x1 ) / 2 + 0.8;
+			// the car's local x runs along the bay, its body centred 1.19 m from the frame's z = 0
+			const F = alongZ ? frame( O, across + 1.19, C.st.y, mid, - Math.PI / 2 ) : frame( O, mid, C.st.y, across - 1.19, 0 );
+			const r = alongZ ? [ across - 1.6, mid - 2.5, across + 1.6, mid + 2.5 ] : [ mid - 2.5, across - 1.6, mid + 2.5, across + 1.6 ];
+			if ( ! free( C, r ) ) continue;
+			C.used.push( r );
+			if ( i === 0 || R() < 0.4 ) H.carLift( F, 4.6, 1.5 + R() * 0.3 );
+			else if ( R() < 0.7 ) H.car( F, { hood: R() < 0.6 } );
+			O.decalAt( F, ( R() - 0.5 ) * 2, 1.2, 1.4, 'oil' );
+		}
+	} else if ( C.w > 3.2 && C.d > 5.2 && R() < 0.5 ) {
+		const F = C.d > C.w ? frame( O, ( C.x0 + C.x1 ) / 2 + 1.19, C.st.y, ( C.z0 + C.z1 ) / 2, - Math.PI / 2 ) : frame( O, ( C.x0 + C.x1 ) / 2, C.st.y, ( C.z0 + C.z1 ) / 2 - 1.19, 0 );
+		const r = C.d > C.w ? [ ( C.x0 + C.x1 ) / 2 - 1.3, ( C.z0 + C.z1 ) / 2 - 2.4, ( C.x0 + C.x1 ) / 2 + 1.3, ( C.z0 + C.z1 ) / 2 + 2.4 ] : [ ( C.x0 + C.x1 ) / 2 - 2.4, ( C.z0 + C.z1 ) / 2 - 1.3, ( C.x0 + C.x1 ) / 2 + 2.4, ( C.z0 + C.z1 ) / 2 + 1.3 ];
+		if ( free( C, r ) ) { C.used.push( r ); H.car( F, { hood: R() < 0.3 } ); }
+	}
+	const nb = shopFloor ? 3 : 1;
+	for ( let i = 0; i < nb; i ++ ) { const wb = onWall( C, 1.8, 0.72, 1.95, [ 2, 1, 3 ] ); if ( wb ) H.workbench( wb, 1.8, 'toolbox', loot ); }
+	for ( let i = 0; i < ( shopFloor ? 3 : 1 ); i ++ ) { const sh = onWall( C, 1.8, 0.5, 1.9, [ 1, 3, 2 ] ); if ( sh ) H.storageShelf( sh, 1.8, 1.9, 0.5, loot ); }
+	const tc = onWall( C, 0.8, 0.5, 1.35, [ 2, 1, 3 ] ); if ( tc ) H.toolChest( tc, 'toolbox' );
+	for ( let i = 0; i < ( shopFloor ? 4 : 2 ); i ++ ) { const f = onWall( C, 0.7, 0.72, 1.0, [ 3, 1, 2 ] ); if ( f ) ( i % 2 ? H.drum( f, pickOf( R, [ [ 150, 40, 30 ], [ 40, 80, 150 ], [ 60, 90, 60 ] ] ) ) : H.tyreStack( f, 2 + ( R() * 4 | 0 ) ) ); }
+	for ( let i = 0; i < 2; i ++ ) { const j = inRoom( C, 0.4, 0.3, 0.3, 8 ); if ( j ) { C.used.pop(); H.jerryCan( j, 0, 0, R() * 3 ); } }
+	if ( ! shopFloor && R() < 0.5 ) { const b = onWall( C, 1.2, 0.4, 1.1, [ 1, 3, 0, 2 ] ); if ( b ) H.bicycle( b, 0, 0.2, 0 ); }
+	for ( let i = 0; i < 2; i ++ ) if ( R() < 0.7 ) O.decalFloor( C.x0 + 1 + R() * Math.max( 0, C.w - 2 ), C.st.y + 0.006, C.z0 + 1 + R() * Math.max( 0, C.d - 2 ), 1.2 + R(), DECAL.oil, R() * 6 );
+	floorClutter( C, 2, [ SMALL.can, SMALL.bottle, SMALL.box ] );
+}
+
+// ---- food and drink --------------------------------------------------------------------------------------------------------------
+
+function dining( C, shop ) {
+	const R = C.O.R;
+	const food = shop === 'bar' ? 'bar' : SHOP_TABLE[ shop ] || 'restaurant';
+	const ctw = Math.min( 4, C.w - 1.5 );
+	const ct = ctw > 1.5 ? onWall( C, ctw, 0.64, 2.2, [ 2, 1, 3 ] ) : null;
+	if ( ct ) { counter( ct, ctw, 0.6, 1.05, wood( [ 150, 100, 60 ] ) ); register( ct, ctw / 2 - 0.4, 1.05, 0.3, food ); ct.spot( - 0.6, 1.05, 0.3, food, 0.5 ); T.menuBoard( ct, ctw, 1.9 ); }
+	// booths down a side wall
+	for ( const s of [ 1, 3 ] ) for ( let i = 0; i < 4; i ++ ) { const b = onWall( C, 2.0, 1.25, 1.2, [ s ] ); if ( b ) T.booth( b, food ); }
+	tableGrid( C, 0.8, 0.8, 1.9, food );
+	for ( let i = 0; i < 2; i ++ ) { const p = onWall( C, 0.45, 0.45, 1.0, [ 0, 1, 3 ], 'corner' ); if ( p ) H.pottedPlant( p.at( 0, 0, 0.24 ) ); }
+}
+
+function barRoom( C ) {
+	const O = C.O, R = O.R;
+	const len = Math.min( 5, Math.max( C.w, C.d ) - 1.6 );
+	const bb = onWall( C, len, 0.45, 2.2, [ 2, 1, 3 ] );
+	if ( bb ) {
+		// the back bar: bottles on shelves before a mirror, a cabinet under
+		bb.box( - len / 2, 0, 0, len / 2, 0.9, 0.45, wood( [ 90, 60, 40 ] ) ).col( - len / 2, 0, 0, len / 2, 0.9, 0.45, 1 );
+		bb.box( - len / 2 + 0.1, 1.15, 0.005, len / 2 - 0.1, 2.2, 0.01, gloss( [ 150, 160, 166 ] ) );
+		const f = bb.fine();
+		for ( let k = 0; k < 3; k ++ ) {
+			bb.box( - len / 2, 1.2 + k * 0.35, 0, len / 2, 1.23 + k * 0.35, 0.25, wood( [ 90, 60, 40 ] ) );
+			for ( let i = 0; i < len / 0.11; i ++ ) if ( R() < 0.65 ) f.cyl( - len / 2 + 0.06 + i * 0.11, 1.23 + k * 0.35, 0.12, 0.035, 0.18, 6, gloss( pickOf( R, [ [ 60, 110, 50 ], [ 120, 70, 30 ], [ 220, 220, 210 ], [ 40, 40, 30 ], [ 170, 40, 30 ] ] ) ), 1, 0.012 ).cyl( - len / 2 + 0.06 + i * 0.11, 1.41 + k * 0.35, 0.12, 0.012, 0.07, 4, BLACK );
+		}
+		bb.container( - len / 2, 0, 0, len / 2, 0.9, 0.45, 'Cabinet', 'bar', 12 );
+		bb.spot( 0.5, 0.9, 0.25, 'bar', 0.6 );
+		const fc = bb.at( 0, 0, 1.4, 0 );
+		counter( fc, len, 0.6, 1.1, wood( [ 120, 80, 50 ] ), wood( [ 70, 40, 24 ] ) );
+		const [ cx, cz ] = fc.T( 0, 0.3 );
+		C.used.push( [ cx - len / 2 - 0.5, cz - 1.0, cx + len / 2 + 0.5, cz + 1.0 ] );
+		fc.spot( 0, 1.1, 0.3, 'bar', 0.5 );
+		for ( let i = 0; i < Math.floor( len / 0.7 ); i ++ ) { const sx = - len / 2 + 0.35 + i * 0.7; if ( R() < 0.15 ) fc.rbox( sx, 0.2, 1.1, 0.19, 0.2, 0.19, CHROME, 0, 1.4 ); else T.barStool( fc.at( sx, 0, 0.95 ) ); }
+		scatter( fc, - len / 2 + 0.2, 0.1, len / 2 - 0.2, 0.5, 1.1, 3 + ( R() * 4 | 0 ), [ SMALL.glass, SMALL.bottle, SMALL.ashtray, SMALL.glass ] );
+	}
+	if ( C.w > 5 && C.d > 5 ) { const p = centre( C, 3.4, 2.4, 0, 0, 0.5 ); if ( p ) T.poolTable( p ); }
+	tableGrid( C, 0.7, 0.7, 2.0, 'bar' );
+	void O;
+}
+
+function restaurantKitchen( C ) {
+	const R = C.O.R;
+	const len = Math.max( C.w, C.d ) - 1.2;
+	const a = onWall( C, Math.min( len, 4.2 ), 0.62, 2.2, sidesByLength( C ) );
+	if ( a ) H.kitchenRun( a, Math.min( len, 4.2 ), { loot: 'restaurant_kitchen', steel: true } );
+	const f = onWall( C, 0.78, 0.74, 1.8, [ 1, 3, 0, 2 ], 'corner' ); if ( f ) H.fridge( f, 'restaurant_kitchen', { steel: true } );
+	for ( let i = 0; i < 2; i ++ ) { const s = onWall( C, 1.2, 0.45, 1.9, [ 3, 1, 0 ] ); if ( s ) H.storageShelf( s, 1.2, 1.9, 0.45, 'restaurant_kitchen', 'Shelf', { m: STEEL } ); }
+	const isl = centre( C, 1.8, 0.8 );
+	if ( isl ) { counter( isl.at( 0, 0, - 0.4 ), 1.8, 0.8, 0.92, STEEL, STEEL ); isl.spot( 0, 0.92, 0, 'restaurant_kitchen', 0.5 ); scatter( isl, - 0.8, - 0.3, 0.8, 0.3, 0.92, 3 + ( R() * 3 | 0 ), [ SMALL.bowl, SMALL.plate, SMALL.tin, SMALL.bottle ] ); }
+}
+
+// ---- shops ------------------------------------------------------------------------------------------------------------------------
+
+function storageTable( P, shop, mil ) {
+	if ( mil ) return 'military';
+	const t = P.S.type;
+	if ( t === 'police' ) return 'police';
+	if ( t === 'hospital' ) return 'hospital';
+	if ( t === 'clinic' ) return 'clinic';
+	if ( t === 'fire' ) return 'fire_station';
+	if ( t === 'school' ) return 'school';
+	if ( t === 'warehouse' ) return 'warehouse';
+	if ( t === 'garage' ) return 'garage_shop';
+	if ( t === 'hangar' ) return 'hangar';
+	if ( t === 'church' ) return 'church';
+	if ( t === 'hotel' ) return 'hotel_room';
+	if ( t === 'office' ) return 'office';
+	if ( t === 'house' || t === 'apartment' ) return 'house_garage';
+	return SHOP_TABLE[ shop ] || 'warehouse';
+}
+
+function salesFloor( C, shop ) {
+	const O = C.O, R = O.R, st = C.st;
+	const loot = SHOP_TABLE[ shop ] || 'convenience';
+	const ext = C.doors.find( d => d.ext );
+	// the till near the front door
+	const tillSides = ext ? [ ( ext.side + 1 ) % 4, ( ext.side + 3 ) % 4, ext.side ] : [ 3, 1 ];
+	const big = shop === 'grocery' || shop === 'market' || shop === 'hardware';
+	switch ( shop ) {
+		case 'gunstore': case 'pawn': return gunShop( C, shop, loot );
+		case 'clothing': case 'surf': case 'sports': return clothesShop( C, shop, loot, tillSides );
+		case 'laundromat': {
+			for ( let i = 0; i < 3; i ++ ) { const f = onWall( C, 2.8, 0.65, 1.0, [ 2, 1, 3 ] ); if ( f ) washer( f, 4 ); }
+			const b = centre( C, 2.4, 0.9 ); if ( b ) { table( b.at( 0, 0, - 0.45 ), 2.4, 0.9, 0.9, wood( WOODS[ 4 ] ), 'trash', 0.4 ); scatter( b, - 1, - 0.3, 1, 0.3, 0.9, 3, [ ( f, x, y, z, R2 ) => f.rbox( x, y + 0.03, z, 0.18, 0.03, 0.14, cloth( pickOf( R2, CLOTHES ) ), R2() ) ] ); }
+			for ( let i = 0; i < 2; i ++ ) { const s = onWall( C, 1.8, 0.55, 0.9, [ 0, 1, 3 ] ); if ( s ) T.seats( s, 3, [ 190, 60, 50 ] ); }
+			return;
+		}
+		case 'nails': case 'barber': {
+			for ( let i = 0; i < 4; i ++ ) { const f = onWall( C, 0.95, 0.9, 1.9, [ 2, 1, 3 ] ); if ( f ) { H.sofa( f, 0.8, [ 60, 60, 64 ], { loot: 'trash' } ); f.box( - 0.45, 1.05, 0, 0.45, 1.9, 0.03, gloss( [ 160, 176, 184 ] ) ).box( - 0.45, 0.9, 0, 0.45, 0.95, 0.25, gloss( [ 236, 236, 232 ] ) ); } }
+			const co = onWall( C, 1.4, 0.6, 1.1, tillSides, 'corner' ); if ( co ) { counter( co, 1.4, 0.6, 1.0 ); register( co, 0.3, 1.0, 0.3, 'convenience' ); }
+			return;
+		}
+		case 'vacant': { for ( let i = 0; i < 3; i ++ ) { const c = inRoom( C, 0.7, 0.55, 0.6 ); if ( c ) cartons( c.at( 0, 0, - 0.3 ), 'trash' ); } return; }
+		case 'insurance': case 'phone': case 'bank': case 'post': {
+			const f = onWall( C, Math.min( 3.4, C.w - 1.5 ), 0.7, 1.2, [ 2 ], 'centre' );
+			if ( f ) { counter( f, Math.min( 3.4, C.w - 1.5 ), 0.7, 1.05, wood( [ 150, 110, 80 ] ) ); f.container( - 0.6, 0, 0, 0.6, 1.05, 0.7, 'Desk', shop === 'post' ? 'post' : shop === 'bank' ? 'bank' : 'desk', 8 ); scatter( f, - 1, 0.1, 1, 0.6, 1.05, 3, [ SMALL.paper, SMALL.phone, SMALL.mug ] ); }
+			for ( let i = 0; i < 2; i ++ ) { const d = onWall( C, 1.3, 0.72, 0.8, [ 1, 3 ] ); if ( d ) H.desk( d, 1.3, 'desk' ); }
+			const s = onWall( C, 1.8, 0.55, 0.9, [ 0, 1, 3 ] ); if ( s ) T.seats( s, 3, [ 60, 80, 110 ] );
+			return;
+		}
+		case 'restaurant': case 'fastfood': case 'takeout': case 'bakery': case 'bar': {
+			const cw = Math.min( 4.4, C.w - 1.5 );
+			const ct = cw > 1.5 ? onWall( C, cw, 0.64, 2.3, [ 2 ] ) : null;
+			if ( ct ) {
+				counter( ct, cw, 0.62, 1.05, gloss( pickOf( R, [ [ 200, 40, 30 ], [ 236, 236, 232 ], [ 60, 60, 64 ], [ 150, 100, 60 ] ] ) ) );
+				register( ct, cw / 2 - 0.4, 1.05, 0.3, loot ); ct.spot( 0, 1.05, 0.3, loot, 0.6 );
+				T.menuBoard( ct, cw, 1.85 );
+				if ( shop === 'fastfood' || shop === 'takeout' ) T.sodaFountain( ct.at( - cw / 2 + 0.5, 0, 0, 0 ) );
+				if ( shop === 'bakery' ) { const f = ct.fine(); for ( let k = 0; k < 6; k ++ ) f.cyl( - cw / 2 + 0.4 + k * 0.3, 1.05, 0.35, 0.09, 0.05, 8, paint( [ 200, 150, 90 ] ), 1, 0.07 ); }
 			}
+			for ( const s of [ 1, 3 ] ) for ( let i = 0; i < 3; i ++ ) { const b = onWall( C, 2.0, 1.25, 1.2, [ s ] ); if ( b ) T.booth( b, loot ); }
+			tableGrid( C, 0.8, 0.8, 1.9, loot, 8 );
+			const bn = onWall( C, 0.45, 0.45, 1.1, [ 0, 1, 3 ] ); if ( bn ) bn.box( - 0.22, 0, 0.02, 0.22, 1.0, 0.44, gloss( [ 90, 60, 40 ] ) ).col( - 0.22, 0, 0.02, 0.22, 1.0, 0.44, 1, 2 );
 			return;
 		}
 	}
+	// general merchandise: checkouts by the door, coolers along the back wall, gondola aisles, shelves on the side walls
+	const nCheck = big ? Math.max( 1, Math.min( 4, Math.floor( ( C.w - 5 ) / 3.2 ) ) ) : 1;
+	if ( big && ext && ext.side === 0 && C.d > 12 ) {
+		// checkout lanes across the front, running back from the doors
+		for ( let i = 0; i < nCheck; i ++ ) {
+			const x = C.x0 + 1.4 + i * 3.2 + ( ext.a1 < C.x0 + 4 ? 3.5 : 0 );
+			const z = C.z0 + 2.6;
+			const r = [ x - 0.4, z - 1.3, x + 0.8, z + 1.3 ];
+			if ( x > C.x1 - 1.5 || ! free( C, r ) ) continue;
+			C.used.push( r );
+			T.checkout( frame( O, x, st.y, z, - Math.PI / 2 ), 2.4, loot );
+		}
+		// carts and baskets by the door
+		for ( let i = 0; i < 3; i ++ ) { const c = inRoom( C, 0.6, 1.0, 0.8, 10 ); if ( c ) T.cart( c.at( 0, 0, 0, R() * 0.6 ), R() < 0.25 ); }
+	} else {
+		const co = onWall( C, 1.8, 0.7, 1.1, tillSides, 'corner' );
+		if ( co ) { counter( co, 1.8, 0.7, 1.0, gloss( [ 200, 196, 186 ] ) ); register( co, 0.3, 1.0, 0.35, loot === 'trash' ? 'convenience' : loot ); co.spot( - 0.5, 1.0, 0.35, loot, 0.4 ); scatter( co, - 0.8, 0.05, - 0.1, 0.6, 1.0, 2, [ SMALL.box, SMALL.paper ] ); if ( shop === 'convenience' || shop === 'gas' ) { const cg = onWall( C, 1.4, 0.3, 2.0, [ co.side ] ); if ( cg ) T.shelves( cg, 1.4, 1.8, 0.3, 'products', loot, 'Shelf', false, 0.3, { mess: 0.2 } ); } }
+	}
+	if ( shop !== 'hardware' ) {
+		const cw = Math.min( 8, C.w - 1.6 );
+		if ( cw > 1.6 ) { const cf = onWall( C, cw, 0.82, 2.2, [ 2 ], 'centre' ); if ( cf ) T.coolers( cf, cw, shop === 'grocery' || shop === 'market' ? 'grocery' : 'fridge' ); }
+	} else {
+		for ( const s of [ 2, 1, 3 ] ) { const len = Math.min( 8, ( s === 2 ? C.w : C.d ) - 2.4 ); if ( len > 3 ) { const f = onWall( C, len, 1.12, 4.6, [ s ] ); if ( f ) palletRack( f, len, 'hardware', 2 ); } }
+	}
+	for ( const side of [ 1, 3 ] ) { const w = Math.min( 6, C.d - 2.4 ); if ( w > 1.2 ) { const f = onWall( C, w, 0.5, 1.9, [ side ] ); if ( f ) T.shelves( f, w, 1.9, 0.5, 'products', loot, 'Shelf', false, 0.3, shop === 'pharmacy' ? { small: [ 'box', 'pills' ], tint: [ 240, 250, 255 ] } : {} ); } }
+	// the aisles: double-sided gondolas running front to back
+	const alongZ = C.d >= C.w * 0.7;
+	const len = ( alongZ ? C.d : C.w ) - ( big ? 7.5 : 4.4 );
+	const span = alongZ ? C.w : C.d;
+	const pitch = big ? 2.9 : 2.5;
+	const n = Math.max( 1, Math.floor( ( span - 3.2 ) / pitch ) );
+	if ( len > 1.5 ) {
+		const h = shop === 'hardware' ? 2.2 : big ? 1.8 : 1.55;
+		for ( let i = 0; i < n; i ++ ) {
+			const c = ( alongZ ? C.x0 : C.z0 ) + ( span - ( n - 1 ) * pitch ) / 2 + i * pitch;
+			const mid = alongZ ? ( C.z0 + C.z1 ) / 2 + ( big ? 1.0 : 0.3 ) : ( C.x0 + C.x1 ) / 2;
+			const r = alongZ ? [ c - 0.5, mid - len / 2 - 0.6, c + 0.5, mid + len / 2 + 0.6 ] : [ mid - len / 2 - 0.6, c - 0.5, mid + len / 2 + 0.6, c + 0.5 ];
+			if ( C.used.some( u => overlaps( u, r ) ) || C.clear.some( u => overlaps( u, r ) ) ) continue;
+			C.used.push( r );
+			const F = alongZ ? frame( O, c, st.y, mid, Math.PI / 2 ) : frame( O, mid, st.y, c, 0 );
+			T.gondola( F, len, h, loot, shop === 'pharmacy' ? { small: [ 'box', 'pills' ], tint: [ 240, 250, 255 ] } : shop === 'hardware' ? { small: [ 'box', 'tin' ] } : {} );
+			// a hanging aisle sign
+			const sg = F.fine();
+			sg.cyl( - len / 4, 2.6, 0, 0.006, C.ceil - 2.6, 4, CHROME ).cyl( len / 4, 2.6, 0, 0.006, C.ceil - 2.6, 4, CHROME ).box( - len / 4 - 0.3, 2.3, - 0.02, len / 4 + 0.3, 2.6, 0.02, gloss( pickOf( R, [ [ 30, 90, 170 ], [ 200, 40, 30 ], [ 40, 120, 70 ] ] ) ) );
+		}
+	}
+	if ( ( shop === 'grocery' || shop === 'market' ) && C.w > 12 ) { for ( let i = 0; i < 2; i ++ ) { const fz = inRoom( C, 2.0, 0.9, 1.4 ); if ( fz ) T.chestFreezer( fz, 2.0, 'grocery' ); } }
+	if ( shop === 'pharmacy' ) { const f = onWall( C, 2.6, 0.72, 1.2, [ 2, 1 ] ); if ( f ) { counter( f, 2.6, 0.7, 1.05, gloss( [ 236, 236, 232 ] ) ); f.container( - 1.3, 0, 0, 1.3, 1.05, 0.7, 'Cabinet', 'pharmacy', 12, { locked: 1 } ); register( f, 0.8, 1.05, 0.35, 'pharmacy' ); scatter( f, - 1.1, 0.1, 0.4, 0.6, 1.05, 3, [ SMALL.pills, SMALL.paper ] ); } }
+	if ( ! big ) { const v = onWall( C, 0.9, 0.82, 1.9, [ 0, 1, 3 ] ); if ( v && R() < 0.5 ) T.vending( v, loot ); }
+	if ( R() < 0.5 ) { const c = inRoom( C, 0.6, 1.0, 1.0, 8 ); if ( c && big ) T.cart( c, true ); }
 }
 
-// ---- the airport ----------------------------------------------------------------------------------------------------
+function gunShop( C, shop, loot ) {
+	const O = C.O, R = O.R;
+	// racks of long guns on the walls behind a U of glass counters
+	for ( const s of [ 2, 1, 3 ] ) { const w = Math.min( 3.4, ( s === 2 ? C.w : C.d ) - 2 ); if ( w > 1 ) { const f = onWall( C, w, 0.3, 2.3, [ s ] ); if ( f ) T.rifleRack( f, w, loot ); } }
+	const cw = Math.min( 3.2, C.w - 3.2 );
+	if ( cw > 1.2 ) {
+		const cz = C.z1 - 1.6;
+		const F = frame( O, ( C.x0 + C.x1 ) / 2, C.st.y, cz, Math.PI );
+		const r = [ ( C.x0 + C.x1 ) / 2 - cw / 2 - 0.7, cz - 0.7, ( C.x0 + C.x1 ) / 2 + cw / 2 + 0.7, cz + 0.2 ];
+		if ( free( C, r ) ) {
+			C.used.push( r );
+			T.gunCase( F.at( 0, 0, 0 ), cw, loot );
+			for ( const s of [ - 1, 1 ] ) if ( C.d > 7 ) { const G = F.at( s * ( cw / 2 + 0.31 ), 0, - 0.9, s * Math.PI / 2 ); T.gunCase( G, 1.6, loot ); C.used.push( [ ...( ( () => { const [ gx, gz ] = G.T( 0, 0.31 ); return [ gx - 0.9, gz - 0.9, gx + 0.9, gz + 0.9 ]; } )() ) ] ); }
+			register( F, - cw / 2 + 0.3, 1.0, 0.3, loot );
+		}
+	}
+	for ( let i = 0; i < 2; i ++ ) { const a = onWall( C, 1.6, 0.42, 1.8, [ 0, 1, 3 ] ); if ( a ) T.ammoShelf( a, 1.6, shop === 'gunstore' ? 'gunstore' : loot ); }
+	if ( shop === 'gunstore' ) {
+		const s = onWall( C, 0.8, 0.62, 1.55, [ 1, 3, 0 ], 'corner' ); if ( s ) T.gunSafe( s, 'gun_safe' );
+		const fl = onWall( C, 0.4, 0.5, 2.4, [ 0, 1, 3 ], 'corner' ); if ( fl ) T.flag( fl.at( 0, 0, 0 ) );
+		const m = inRoom( C, 0.5, 0.4, 0.8, 8 ); if ( m ) T.mannequin( m );
+		const cr = onWall( C, 1.4, 0.45, 1.5, [ 0, 1, 3 ] ); if ( cr ) T.clothesRail( cr, 1.4, 'sports' );
+	} else {
+		for ( let i = 0; i < 2; i ++ ) { const w = onWall( C, 1.8, 0.45, 1.9, [ 0, 1, 3 ] ); if ( w ) T.shelves( w, 1.8, 1.9, 0.45, 'products', 'pawn', 'Shelf', true, 0.3 ); }
+		const d = inRoom( C, 2.0, 0.62, 1.0 ); if ( d ) T.gunCase( d.at( 0, 0, - 0.31 ), 2.0, 'pawn' );
+	}
+	// spent cases on the floor where someone held the shop
+	if ( R() < 0.5 ) { const f = O.gd; for ( let k = 0; k < 14; k ++ ) { const x = C.x0 + 1 + R() * Math.max( 0, C.w - 2 ), z = C.z0 + 1 + R() * Math.max( 0, C.d - 2 ); frame( O, x, C.st.y, z, R() * 3, f ).cylH( 0, 0.006, 0, 0.006, 0.03, 5, gloss( [ 200, 160, 70 ] ), 'x' ); } }
+}
 
-// a check-in desk (passengers in front, -z) with the scale and the bag belt behind
+function clothesShop( C, shop, loot, tillSides ) {
+	const O = C.O, R = O.R;
+	const co = onWall( C, 1.8, 0.7, 1.1, tillSides, 'corner' );
+	if ( co ) { counter( co, 1.8, 0.7, 1.0, wood( WOODS[ 4 ] ) ); register( co, 0.3, 1.0, 0.35, loot ); }
+	for ( let i = 0; i < 3; i ++ ) { const w = Math.min( 2.4, C.w - 1.5 ); const f = onWall( C, w, 0.45, 2.0, [ 2, 1, 3 ] ); if ( f ) T.foldedShelf( f, w, loot ); }
+	// fitting rooms: booths with curtains along the back
+	if ( C.w > 6 ) { const fr = onWall( C, 2.4, 1.2, 2.2, [ 2, 1, 3 ] ); if ( fr ) { const pm = wood( WOODS[ 4 ] ); for ( const x of [ - 1.2, 0, 1.2 ] ) fr.box( x - 0.03, 0, 0, x + 0.03, 2.1, 1.2, pm ).col( x - 0.03, 0, 0, x + 0.03, 2.1, 1.2, 1 ); for ( const x of [ - 0.6, 0.6 ] ) { fr.box( x - 0.57, 2.0, 1.17, x + 0.57, 2.02, 1.19, CHROME ); const cl = 0.3 + R() * 0.6; fr.box( x - 0.57, 0.15, 1.16, x - 0.57 + cl, 2.0, 1.2, cloth( [ 120, 40, 50 ] ) ); } } }
+	for ( let i = 0; i < 8; i ++ ) { const f = inRoom( C, 1.3, 1.3, 0.8 ); if ( ! f ) break; T.roundRack( f.at( 0, 0, 0 ), loot ); }
+	for ( let i = 0; i < 3; i ++ ) { const f = inRoom( C, 1.5, 0.5, 0.8 ); if ( ! f ) break; T.clothesRail( f.at( 0, 0, - 0.22 ), 1.5, loot ); }
+	for ( let i = 0; i < 3; i ++ ) { const m = inRoom( C, 0.5, 0.4, 0.6, 8 ); if ( m ) T.mannequin( m ); }
+	if ( shop === 'surf' ) {
+		// boards on a wall rack
+		const f = onWall( C, 2.6, 0.5, 2.3, [ 1, 3, 2 ] );
+		if ( f ) { for ( let k = 0; k < 7; k ++ ) { const c = pickOf( R, BLANKET ); f.rbox( - 1.15 + k * 0.38, 1.12, 0.2, 0.26, 1.05, 0.035, gloss( c ), 0, - 0.12 ); f.box( - 1.15 + k * 0.38 - 0.01, 0.2, 0.235, - 1.15 + k * 0.38 + 0.01, 2.0, 0.24, WHITE ); } f.col( - 1.3, 0, 0, 1.3, 2.2, 0.35, 1 ); f.container( - 1.3, 0, 0, 1.3, 2.2, 0.35, 'Rack', 'surf', 20 ); }
+	}
+	if ( shop === 'sports' ) {
+		const b = onWall( C, 1.4, 0.5, 1.2, [ 1, 3, 0 ] ); if ( b ) H.bicycle( b, 0, 0.25, 0 );
+		const bn = inRoom( C, 0.8, 0.8, 0.8 ); if ( bn ) { bn.box( - 0.4, 0, - 0.4, 0.4, 0.7, 0.4, metal( [ 60, 60, 64 ] ) ); const f = bn.fine(); for ( let k = 0; k < 8; k ++ ) f.cyl( ( R() - 0.5 ) * 0.5, 0.6 + ( k % 2 ) * 0.1, ( R() - 0.5 ) * 0.5, 0.11, 0.2, 8, gloss( pickOf( R, [ [ 240, 120, 30 ], [ 240, 240, 236 ], [ 60, 90, 170 ] ] ) ), 3, 0.06 ); bn.col( - 0.4, 0, - 0.4, 0.4, 0.8, 0.4, 2, 2 ); bn.container( - 0.4, 0, - 0.4, 0.4, 0.8, 0.4, 'Bin', 'sports', 20 ); }
+	}
+	floorClutter( C, 2 + ( R() * 4 | 0 ), [ ( F ) => H.clothesPile( F, 0, 0 ), ( F ) => H.shoes( F, 0, 0, R() * 3 ) ] );
+}
+
+function teller( C ) {
+	const len = C.w - 1.0;
+	const f = onWall( C, len, 0.7, 1.2, [ 2 ], 'centre' );
+	if ( f ) {
+		T.frontDesk( f, len, 'bank', { glass: true, m: wood( [ 120, 90, 60 ] ), chair: false } );
+		for ( let i = 0; i < Math.floor( len / 1.5 ); i ++ ) register( f, - len / 2 + 0.75 + i * 1.5, 1.14, 0.15, 'bank' );
+	}
+	const tb = inRoom( C, 1.2, 0.6 ); if ( tb ) table( tb, 1.2, 0.6, 1.0, wood(), 'bank', 0.4 );
+	for ( let i = 0; i < 2; i ++ ) { const p = onWall( C, 0.45, 0.45, 1.0, [ 0, 1, 3 ], 'corner' ); if ( p ) H.pottedPlant( p.at( 0, 0, 0.24 ) ); }
+	const s = onWall( C, 1.8, 0.55, 0.9, [ 0, 1, 3 ] ); if ( s ) T.seats( s, 3, [ 60, 80, 110 ] );
+}
+
+function vault( C ) {
+	const f = onWall( C, Math.min( 3, C.w - 0.6 ), 0.45, 2.0, [ 2, 1, 3 ] );
+	if ( f ) {
+		const w = Math.min( 3, C.w - 0.6 );
+		f.box( - w / 2, 0, 0, w / 2, 2.0, 0.45, metal( [ 170, 150, 110 ] ) );
+		for ( let i = 0; i < w / 0.3; i ++ ) for ( let k = 0; k < 6; k ++ ) f.box( - w / 2 + i * 0.3 + 0.02, 0.1 + k * 0.31, 0.45, - w / 2 + i * 0.3 + 0.28, 0.38 + k * 0.31, 0.455, metal( [ 190, 170, 120 ] ) );
+		f.col( - w / 2, 0, 0, w / 2, 2.0, 0.45, 2 );
+		f.container( - w / 2, 0, 0, w / 2, 2.0, 0.46, 'Deposit boxes', 'bank', 20, { locked: 1 } );
+	}
+	const s = onWall( C, 0.8, 0.62, 1.55, [ 1, 3, 0 ] ); if ( s ) T.gunSafe( s, 'bank' );
+}
+
+function storage( C, shop, mil ) {
+	const R = C.O.R, P = C.P, k = C.rm.k;
+	const loot = k === 'rx' ? 'pharmacy' : k === 'sorting' ? 'post' : storageTable( P, shop, mil );
+	if ( k === 'utility' ) {
+		if ( R() < 0.6 ) { const wh = onWall( C, 0.6, 0.6, 1.6, [ 2, 1, 3, 0 ], 'corner' ); if ( wh ) { wh.cyl( 0, 0, 0.3, 0.28, 1.5, 12, gloss( [ 236, 236, 232 ] ) ).cyl( 0, 1.5, 0.3, 0.05, 0.3, 6, CHROME ); wh.col( - 0.28, 0, 0.02, 0.28, 1.5, 0.58, 2 ); } }
+		const mb = inRoom( C, 0.4, 0.4, 0.3, 6 ); if ( mb ) { mb.cyl( 0, 0, 0, 0.17, 0.3, 10, gloss( [ 230, 200, 40 ] ), 2, 0.19 ).fine().rbox( 0.05, 0.6, 0, 0.012, 0.6, 0.012, wood( WOODS[ 2 ] ), 0, 0, 0.2 ); }
+	}
+	const n = k === 'utility' ? 1 : 4;
+	for ( let i = 0; i < n; i ++ ) {
+		const w = Math.min( 2.4, Math.max( C.w, C.d ) - 1.0 );
+		const s = onWall( C, w, 0.5, 1.9, [ 2, 1, 3, 0 ] );
+		if ( ! s ) break;
+		if ( k === 'rx' ) T.shelves( s, w, 1.9, 0.5, 'products', loot, 'Shelf', true, 0.3, { small: [ 'pills', 'box' ], tint: [ 240, 250, 255 ] } );
+		else H.storageShelf( s, w, 1.9, 0.5, loot, 'Shelf' );
+	}
+	if ( k === 'sorting' ) tableGrid( C, 1.6, 0.8, 1.2, 'post', 4 );
+	for ( let i = 0; i < 3; i ++ ) { const c = inRoom( C, 0.7, 0.55, 0.4 ); if ( c ) cartons( c.at( 0, 0, - 0.3 ), loot ); }
+	if ( R() < 0.3 ) { const c = inRoom( C, 0.8, 0.6, 0.4 ); if ( c ) crate( c, 0.8 + R() * 0.3, loot, 'Crate', mil ); }
+}
+
+// ---- offices and the civic buildings ----------------------------------------------------------------------------------------
+
+function office( C, t, mil ) {
+	const R = C.O.R, k = C.rm.k;
+	const loot = t === 'police' ? 'police' : t === 'school' ? 'school' : t === 'hospital' || t === 'clinic' ? 'clinic' : t === 'church' ? 'church' : mil ? 'military' : t === 'fire' ? 'fire_station' : 'office';
+	if ( k === 'meeting' ) {
+		const w = Math.min( 3.6, C.w - 2.2, C.d - 2.2 > 1.6 ? 3.6 : C.w - 2.2 );
+		const d = Math.min( 1.2, C.d - 2.2 );
+		if ( w > 1.2 && d > 0.7 ) { const tb = centre( C, w + 1.2, d + 1.4 ); if ( tb ) T.meetingTable( tb, w, d, loot ); }
+		const wb = onWall( C, 1.8, 0.1, 2.1, [ 2, 0, 1, 3 ], 'centre' ); if ( wb ) T.whiteboard( wb, 1.8 );
+		const tv = onWall( C, 1.3, 0.12, 2.0, [ 0, 1, 3 ], 'centre' ); if ( tv ) tv.box( - 0.65, 1.2, 0.02, 0.65, 1.95, 0.07, BLACK ).box( - 0.63, 1.22, 0.07, 0.63, 1.93, 0.072, gloss( [ 12, 13, 15 ] ) );
+	} else if ( k === 'briefing' ) {
+		rows( C, 0.5, 0.5, 0.35, 0.8, ( F ) => H.chair( F.at( 0, 0, 0.25, Math.PI ), metal( [ 60, 60, 66 ] ), R() < 0.12 ) );
+		const lec = onWall( C, 0.6, 0.5, 1.2, [ 2, 0 ], 'centre' ); if ( lec ) { lec.box( - 0.3, 0, 0.05, 0.3, 1.1, 0.5, wood() ).rbox( 0, 1.15, 0.25, 0.32, 0.03, 0.25, wood(), 0, 0.25 ).col( - 0.3, 0, 0, 0.3, 1.15, 0.5, 1 ); }
+		const wb = onWall( C, 2.4, 0.1, 2.1, [ 2, 0 ] ); if ( wb ) T.whiteboard( wb, 2.4 );
+		const mp = onWall( C, 1.2, 0.05, 2.0, [ 1, 3 ] ); if ( mp ) mp.box( - 0.6, 1.1, 0.01, 0.6, 1.9, 0.03, art( 14 ) );
+		if ( mil || t === 'police' ) { const fl = onWall( C, 0.4, 0.5, 2.4, [ 2, 1, 3 ], 'corner' ); if ( fl ) T.flag( fl ); }
+	} else {
+		const d = onWall( C, 1.5, 0.72, 0.8, [ 2, 1, 3, 0 ] );
+		if ( d ) {
+			H.desk( d, 1.5, t === 'police' ? 'police' : 'desk', { phone: true } );
+			// visitor chairs across the desk
+			for ( const s of [ - 1, 1 ] ) { const vc = nextTo( C, d, s * 0.35, 1.9, 0, [ - 0.25, - 0.25, 0.25, 0.25 ] ); if ( vc ) H.chair( vc.at( 0, 0, 0, R() * 0.4 - 0.2 ), cloth( [ 60, 64, 80 ] ), R() < 0.1 ); }
+		}
+		if ( C.w * C.d > 12 ) { const d2 = onWall( C, 1.4, 0.72, 0.8, [ 0, 1, 3 ] ); if ( d2 ) H.desk( d2, 1.4, 'desk' ); }
+		if ( t === 'police' && R() < 0.5 ) { const s = onWall( C, 0.8, 0.62, 1.55, [ 1, 3, 0 ], 'corner' ); if ( s ) T.gunSafe( s, 'gun_safe' ); }
+		if ( mil ) { const r = onWall( C, 1.2, 0.6, 1.0, [ 1, 3, 0 ] ); if ( r ) { table( r, 1.2, 0.6, 0.75, metal( [ 90, 100, 70 ] ) ); r.box( - 0.4, 0.75, 0.1, 0.1, 1.05, 0.45, paint( [ 70, 80, 50 ] ) ).box( - 0.35, 0.8, 0.45, 0.05, 1.0, 0.452, DARK ); } const mp = onWall( C, 1.4, 0.05, 2.0, [ 1, 3, 2 ] ); if ( mp ) mp.box( - 0.7, 1.1, 0.01, 0.7, 1.95, 0.03, art( 14 ) ); }
+	}
+	for ( let i = 0; i < ( C.w * C.d > 16 ? 2 : 1 ); i ++ ) { const fc = onWall( C, 0.5, 0.62, 1.35, [ 1, 3, 2, 0 ], 'corner' ); if ( fc ) T.filing( fc, loot ); }
+	const bs = onWall( C, 0.9, 0.34, 1.9, [ 3, 1, 0, 2 ] ); if ( bs ) H.bookcase( bs, 0.9, 1.9, { loot, mess: 0.4 } );
+	if ( R() < 0.6 ) { const p = onWall( C, 0.45, 0.45, 1.0, [ 0, 1, 2, 3 ], 'corner' ); if ( p ) H.pottedPlant( p.at( 0, 0, 0.24 ) ); }
+	if ( R() < 0.35 ) { const wc = onWall( C, 0.34, 0.34, 1.4, [ 0, 1, 3, 2 ] ); if ( wc ) T.waterCooler( wc ); }
+	floorClutter( C, R() * 3 | 0, [ SMALL.paper, SMALL.paper, SMALL.box, SMALL.mug ] );
+}
+
+function openOffice( C, t ) {
+	const R = C.O.R;
+	const loot = t === 'police' ? 'police' : 'office';
+	if ( t === 'police' ) {
+		// a bullpen: desks in facing pairs
+		rows( C, 1.5, 1.6, 0.9, 0.9, ( F ) => { H.desk( F.at( 0, 0, 0.75, 0 ), 1.4, 'police', { phone: true } ); } );
+	} else rows( C, 2.4, 2.2, 0.35, 0.95, ( F ) => T.cubicle( F, 2.4, 2.2, ( G, w ) => H.desk( G, w, 'desk', {} ) ) );
+	for ( let i = 0; i < 3; i ++ ) { const fc = onWall( C, 0.5, 0.62, 1.35, [ 1, 3, 2, 0 ] ); if ( fc ) T.filing( fc, loot ); }
+	const cp = onWall( C, 1.1, 0.7, 1.1, [ 1, 3, 0, 2 ] ); if ( cp ) T.copier( cp, loot );
+	const wc = onWall( C, 0.34, 0.34, 1.4, [ 0, 1, 3, 2 ] ); if ( wc ) T.waterCooler( wc );
+	for ( let i = 0; i < 2; i ++ ) { const p = onWall( C, 0.45, 0.45, 1.0, [ 0, 1, 2, 3 ], 'corner' ); if ( p ) H.pottedPlant( p.at( 0, 0, 0.24 ) ); }
+	const wb = onWall( C, 1.8, 0.1, 2.1, [ 1, 3, 2, 0 ] ); if ( wb ) T.whiteboard( wb, 1.8 );
+	floorClutter( C, 3 + ( R() * 4 | 0 ), [ SMALL.paper, SMALL.paper, SMALL.box, SMALL.mug, SMALL.phone ] );
+}
+
+function lobby( C, t ) {
+	const R = C.O.R, k = C.rm.k;
+	const deskLoot = t === 'hospital' || t === 'clinic' ? 'clinic' : t === 'police' ? 'police' : t === 'hotel' ? 'hotel_room' : 'desk';
+	const narrow = Math.min( C.w, C.d ) < 3.2;
+	if ( ! narrow ) {
+		const rw = Math.min( 3.2, Math.max( C.w, C.d ) - 2 );
+		const rec = onWall( C, rw, 1.25, 1.2, [ 2, 1, 3 ], 'centre' );
+		if ( rec ) T.frontDesk( rec.at( 0, 0, 0.5, 0 ), rw, deskLoot, { glass: t === 'police', m: t === 'hotel' ? wood( [ 110, 70, 40 ] ) : t === 'hospital' || t === 'clinic' ? gloss( [ 236, 236, 232 ] ) : wood( [ 150, 110, 80 ] ) } );
+	}
+	if ( t === 'hotel' || t === 'apartment' ) {
+		// a lounge: sofas and armchairs round a low table, a luggage trolley
+		const sf = onWall( C, 2.1, 0.95, 0.9, [ 1, 3, 0 ] );
+		if ( sf ) { H.sofa( sf, 2.1, pickOf( R, SOFA ), { loot: 'hotel_room' } ); const ct = nextTo( C, sf, 0, 1.45, 0, [ - 0.55, - 0.3, 0.55, 0.3 ] ); if ( ct ) H.coffeeTable( ct, 1.1, 0.6, { loot: 'hotel_room' } ); }
+		if ( t === 'hotel' && ! narrow ) { const lc = inRoom( C, 1.2, 0.7, 0.8, 8 ); if ( lc ) T.luggageCart( lc ); }
+	} else {
+		for ( let i = 0; i < ( k === 'waiting' ? 4 : 2 ); i ++ ) { const s = onWall( C, 1.8, 0.55, 0.9, [ 0, 1, 3, 2 ] ); if ( s ) T.seats( s, 3, t === 'hospital' || t === 'clinic' ? [ 80, 120, 150 ] : [ 70, 90, 120 ] ); }
+		if ( k === 'waiting' && ! narrow ) { const mt = centre( C, 1.0, 0.6 ); if ( mt ) { table( mt.at( 0, 0, - 0.3 ), 1.0, 0.6, 0.45, wood( WOODS[ 4 ] ) ); scatter( mt, - 0.4, - 0.2, 0.4, 0.2, 0.45, 3, [ ( f, x, y, z, R2 ) => f.rbox( x, y + 0.003, z, 0.11, 0.003, 0.14, art( pickOf( R2, [ 8, 9, 2, 5 ] ) ), R2() ) ] ); } }
+		if ( k === 'waiting' ) { const tv = onWall( C, 1.2, 0.12, 2.3, [ 0, 1, 3, 2 ] ); if ( tv ) tv.box( - 0.6, 1.6, 0.02, 0.6, 2.28, 0.08, BLACK ).box( - 0.58, 1.62, 0.08, 0.58, 2.26, 0.082, gloss( [ 12, 13, 15 ] ) ); }
+		if ( R() < 0.6 ) { const v = onWall( C, 0.9, 0.82, 1.9, [ 0, 1, 3 ] ); if ( v ) T.vending( v, 'convenience' ); }
+		if ( R() < 0.5 ) { const wc = onWall( C, 0.34, 0.34, 1.4, [ 0, 1, 3 ] ); if ( wc ) T.waterCooler( wc ); }
+	}
+	if ( t === 'police' ) { const fl = onWall( C, 0.4, 0.5, 2.4, [ 2, 1, 3 ], 'corner' ); if ( fl ) T.flag( fl ); }
+	for ( let i = 0; i < 2; i ++ ) { const p = onWall( C, 0.45, 0.45, 1.0, [ 0, 1, 3 ], 'corner' ); if ( p ) H.pottedPlant( p.at( 0, 0, 0.24 ), { big: true } ); }
+	if ( t === 'hospital' || t === 'clinic' ) { for ( let i = 0; i < 2; i ++ ) { const g = onWall( C, 2.0, 0.7, 1.0, [ 0, 1, 3, 2 ] ); if ( g ) T.gurney( g, { table: 'zombie_medic' } ); } const wh = inRoom( C, 0.7, 0.7, 0.8, 8 ); if ( wh ) T.wheelchair( wh ); }
+}
+
+function corridor( C, t ) {
+	const O = C.O, R = O.R;
+	const along = C.w > C.d ? [ 0, 2 ] : [ 1, 3 ];
+	const narrow = Math.min( C.w, C.d ) < 2.1;
+	const len = Math.max( C.w, C.d );
+	if ( t === 'hospital' || t === 'clinic' ) {
+		for ( let i = 0; i < Math.floor( len / 7 ); i ++ ) { const g = onWall( C, 2.0, 0.7, 1.0, along ); if ( g ) T.gurney( g, { table: 'zombie_medic' } ); }
+		for ( let i = 0; i < Math.floor( len / 12 ); i ++ ) { const w = onWall( C, 0.7, 0.7, 1.0, along ); if ( w ) T.wheelchair( w.at( 0, 0, 0.35, R() * 3 ) ); }
+		for ( let i = 0; i < Math.floor( len / 10 ); i ++ ) { const s = onWall( C, 0.6, 0.46, 1.1, along ); if ( s ) T.supplyCart( s, 'hospital' ); }
+		for ( let i = 0; i < 2; i ++ ) { const f = inRoom( C, 0.3, 0.3, 0.3, 8 ); if ( f ) { C.used.pop(); T.ivPole( f, 0, 0 ); } }
+	} else if ( t === 'hotel' ) {
+		for ( let i = 0; i < Math.floor( len / 4 ); i ++ ) { const s = onWall( C, 0.2, 0.15, 2.0, along ); if ( s ) { T.sconce( s, 1.75 ); C.used.pop(); } }
+		if ( R() < 0.6 ) { const hk = onWall( C, 1.8, 0.52, 1.3, along ); if ( hk ) T.housekeeping( hk.at( - 0.2, 0, 0 ) ); }
+		if ( R() < 0.4 && ! narrow ) { const lc = onWall( C, 1.2, 0.62, 1.9, along ); if ( lc ) T.luggageCart( lc.at( 0, 0, 0.31 ) ); }
+		for ( let i = 0; i < 2; i ++ ) if ( R() < 0.5 ) { const d = C.doors[ ( R() * C.doors.length ) | 0 ]; if ( d && ! d.ext ) { const F = frameOnWall( C, d.side, d.a1 + 0.35 ); T.tray( F, 0, 0.3 ); } }
+	} else if ( t === 'police' ) {
+		for ( let i = 0; i < 2; i ++ ) { const b = onWall( C, 1.8, 0.36, 0.5, along ); if ( b ) T.bench( b, 1.8, wood( WOODS[ 2 ] ) ); }
+		if ( R() < 0.5 ) { const wc = onWall( C, 0.34, 0.34, 1.4, along ); if ( wc ) T.waterCooler( wc ); }
+	} else if ( t === 'apartment' || t === 'walkup' ) {
+		for ( let i = 0; i < 3; i ++ ) if ( R() < 0.5 ) { const d = C.doors[ ( R() * C.doors.length ) | 0 ]; if ( d && ! d.ext ) { const F = frameOnWall( C, d.side, d.a0 - 0.35 ); if ( R() < 0.5 ) H.shoes( F, 0, 0.18, 0 ); else F.fine().box( - 0.15, 0, 0.05, 0.15, 0.012, 0.4, cloth( pickOf( R, BLANKET ) ), 8 ); } }
+	} else {
+		if ( R() < 0.5 ) { const wc = onWall( C, 0.34, 0.34, 1.4, along ); if ( wc ) T.waterCooler( wc ); }
+		if ( R() < 0.5 ) { const p = onWall( C, 0.45, 0.45, 1.0, along ); if ( p ) H.pottedPlant( p.at( 0, 0, 0.24 ) ); }
+	}
+	// a fire extinguisher
+	if ( R() < 0.5 ) { const f = onWall( C, 0.2, 0.15, 1.0, along ); if ( f ) { f.cyl( 0, 0.5, 0.1, 0.075, 0.45, 8, gloss( [ 190, 30, 26 ] ) ).box( - 0.02, 0.95, 0.07, 0.02, 1.02, 0.13, BLACK ); C.used.pop(); } }
+}
+
+function cells( C ) {
+	const O = C.O, R = O.R, st = C.st;
+	// cells along the back with bars facing the room
+	const n = Math.max( 1, Math.min( 3, Math.floor( C.w / 2.2 ) ) );
+	const cd = Math.min( 2.4, C.d - 1.4 );
+	for ( let i = 0; i < n; i ++ ) {
+		const x0 = C.x0 + C.w * i / n, x1 = C.x0 + C.w * ( i + 1 ) / n;
+		const zb = C.z1 - cd;
+		// a barred front with its door ajar in some
+		const open = R() < 0.4;
+		cellBars( C, x0, zb, open ? ( x0 + x1 ) / 2 - 0.1 : x1 - 0.05, zb, st.y );
+		if ( open ) { const F = frame( O, ( x0 + x1 ) / 2 + 0.35, st.y, zb, - 0.9 ); F.box( 0, 0, - 0.015, x1 - ( x0 + x1 ) / 2 - 0.05, 2.3, 0.015, metal( [ 120, 124, 128 ] ), 0 ); }
+		if ( i < n - 1 ) { O.g.box( x1 - 0.06, st.y, zb, x1, st.y + 2.4, C.z1, paint( [ 200, 200, 196 ] ) ); O.col( x1 - 0.06, st.y, zb, x1, st.y + 2.4, C.z1, 0 ); }
+		const b = frame( O, x0 + 0.5, st.y, C.z1, Math.PI );
+		b.box( - 0.4, 0.4, 0, 0.4, 0.5, 1.9, metal( [ 120, 124, 128 ] ) ).box( - 0.38, 0.5, 0.05, 0.38, 0.6, 1.85, cloth( [ 90, 110, 100 ] ) ).box( - 0.4, 0, 0.1, - 0.36, 0.4, 0.14, metal( [ 120, 124, 128 ] ) ).box( 0.36, 0, 1.76, 0.4, 0.4, 1.8, metal( [ 120, 124, 128 ] ) );
+		b.col( - 0.4, 0, 0, 0.4, 0.6, 1.9, 2, 2 ).bed( - 0.4, 0, 0, 0.4, 0.6, 1.9, 0.6 );
+		if ( R() < 0.5 ) b.rbox( 0, 0.63, 1.1, 0.35, 0.03, 0.5, cloth( [ 140, 130, 110 ] ), R() * 0.3 );
+		H.toilet( frame( O, x1 - 0.5, st.y, C.z1, Math.PI ), { roll: false } );
+		if ( R() < 0.4 ) O.decalFloor( ( x0 + x1 ) / 2, st.y + 0.007, C.z1 - cd / 2, 1.4, DECAL.blood[ ( R() * 4 ) | 0 ], R() * 6 );
+	}
+	C.used.push( [ C.x0, C.z1 - cd, C.x1, C.z1 ] );
+	for ( let i = 0; i < 2; i ++ ) { const bn = onWall( C, 1.8, 0.36, 0.5, [ 0, 1, 3 ] ); if ( bn ) T.bench( bn, 1.8, wood( WOODS[ 2 ] ) ); }
+}
+
+function armory( C, mil ) {
+	const R = C.O.R;
+	const loot = mil ? 'military_armory' : 'police';
+	for ( let i = 0; i < 4; i ++ ) { const w = Math.min( 2.4, Math.max( C.w, C.d ) - 1.2 ); const f = onWall( C, w, 0.3, 2.3, [ 2, 1, 3, 0 ] ); if ( f ) T.rifleRack( f, w, loot ); }
+	for ( let i = 0; i < 2; i ++ ) { const s = onWall( C, 0.8, 0.62, 1.55, [ 1, 3, 0, 2 ] ); if ( s ) T.gunSafe( s, mil ? 'military_armory' : 'gun_safe' ); }
+	const a = onWall( C, 1.6, 0.42, 1.8, [ 1, 3, 0, 2 ] ); if ( a ) T.ammoShelf( a, 1.6, loot );
+	for ( let i = 0; i < 3; i ++ ) { const c = inRoom( C, 0.8, 0.6, 0.5 ); if ( c ) crate( c, 1, mil ? 'military' : 'police', 'Crate', mil ); }
+	for ( let i = 0; i < 4; i ++ ) { const f = inRoom( C, 0.35, 0.2, 0.4, 6 ); if ( f ) { C.used.pop(); T.ammoCan( f, 0, 0, R() * 3 ); } }
+}
+
+function lockerRoom( C, t, mil ) {
+	const loot = t === 'police' ? 'police_locker' : t === 'fire' ? 'fire_station' : mil ? 'military_locker' : 'office';
+	for ( let i = 0; i < 4; i ++ ) { const n = Math.min( 8, Math.floor( ( Math.max( C.w, C.d ) - 1.0 ) / 0.42 ) ); if ( n < 2 ) break; const f = onWall( C, n * 0.42, 0.5, 1.9, [ 2, 0, 1, 3 ] ); if ( f ) T.lockers( f, n, loot, 'Locker', t === 'fire' ? [ 170, 40, 30 ] : t === 'police' ? [ 60, 70, 90 ] : [ 90, 110, 130 ] ); }
+	const b = centre( C, 1.8, 0.35 ); if ( b ) T.bench( b.at( 0, 0, - 0.18 ), 1.8, wood() );
+	floorClutter( C, 2, [ ( F ) => H.shoes( F, 0, 0, C.O.R() * 3 ), ( F ) => H.clothesPile( F, 0, 0 ) ] );
+}
+
+function apparatusBay( C ) {
+	const R = C.O.R;
+	for ( let i = 0; i < 3; i ++ ) { const f = onWall( C, 3.4, 0.5, 1.9, [ 2, 1, 3 ] ); if ( f ) T.lockers( f, 8, 'fire_station', 'Gear locker', [ 170, 40, 30 ] ); }
+	for ( let i = 0; i < 2; i ++ ) { const d = onWall( C, 0.6, 0.6, 1.0, [ 1, 3 ] ); if ( d ) H.drum( d, [ 170, 40, 30 ] ); }
+	// hose rolls on a rack, a helmet and boots by the lockers
+	const hr = onWall( C, 1.6, 0.5, 1.6, [ 1, 3, 2 ] ); if ( hr ) { for ( let k = 0; k < 3; k ++ ) hr.cylH( - 0.5 + k * 0.5, 0.6 + ( k % 2 ) * 0.5, 0.25, 0.22, 0.12, 12, cloth( [ 200, 190, 160 ] ), 'z' ); hr.box( - 0.8, 0, 0, 0.8, 1.4, 0.05, metal() ).col( - 0.8, 0, 0, 0.8, 1.4, 0.5, 2 ); }
+	for ( let i = 0; i < 3; i ++ ) if ( R() < 0.6 ) { const f = inRoom( C, 0.4, 0.4, 0.5, 6 ); if ( f ) { C.used.pop(); H.shoes( f, 0, 0, R() * 3 ); } }
+}
+
+function ward( C ) {
+	const R = C.O.R;
+	const n = Math.max( 1, Math.floor( Math.max( C.w, C.d ) / 2.5 ) );
+	for ( let i = 0; i < n * 2; i ++ ) { const f = onWall( C, 2.0, 2.1, 1.0, C.w > C.d ? [ 2, 0 ] : [ 1, 3 ] ); if ( f ) T.hospitalBed( f.at( - 0.2, 0, 0 ) ); }
+	const s = onWall( C, 0.7, 0.5, 1.0, [ 0, 1, 3, 2 ] ); if ( s ) H.vanity( s, 0.62, null, { mirror: false } );
+	const sc = onWall( C, 0.6, 0.46, 1.1, [ 0, 1, 3, 2 ] ); if ( sc ) T.supplyCart( sc, 'hospital' );
+	const wh = inRoom( C, 0.7, 0.7, 0.6, 8 ); if ( wh ) T.wheelchair( wh );
+	floorClutter( C, 2, [ SMALL.pills, SMALL.paper, SMALL.glass ] );
+	void R;
+}
+
+function exam( C, t ) {
+	const loot = t === 'hospital' ? 'hospital' : 'clinic';
+	const f = onWall( C, 0.8, 2.0, 1.0, [ 2, 1, 3 ], 'centre' );
+	if ( f ) { T.examTable( f, loot ); T.ivPole( f, 0.6, 0.6 ); }
+	const c = onWall( C, 1.8, 0.5, 2.1, [ 0, 1, 3 ] );
+	if ( c ) {
+		counter( c.at( 0.3, 0, 0 ), 1.2, 0.5, 0.9, gloss( [ 236, 236, 232 ] ) );
+		c.container( - 0.3, 0, 0, 0.9, 0.9, 0.5, 'Cabinet', loot, 10 );
+		c.box( - 0.3, 1.4, 0, 0.9, 2.0, 0.33, gloss( [ 236, 236, 232 ] ) ).container( - 0.3, 1.4, 0, 0.9, 2.0, 0.35, 'Cabinet', loot, 8, { n: 1 } );
+		c.spot( 0.5, 0.9, 0.25, 'clinic', 0.6 );
+		scatter( c, 0, 0.1, 0.8, 0.4, 0.9, 3, [ SMALL.pills, SMALL.pills, SMALL.glass, SMALL.box ] );
+		H.vanity( c.at( - 0.62, 0, 0 ), 0.6, null, { mirror: false } );
+	}
+	const d = onWall( C, 1.1, 0.7, 0.8, [ 0, 1, 3 ] ); if ( d ) H.desk( d, 1.1, 'clinic', { pc: true } );
+	const sc = onWall( C, 0.6, 0.46, 1.1, [ 0, 1, 3, 2 ] ); if ( sc ) T.supplyCart( sc, loot );
+	// the sharps bin and a stool
+	const st = inRoom( C, 0.4, 0.4, 0.5, 6 ); if ( st ) { st.cyl( 0, 0, 0, 0.2, 0.03, 8, CHROME ).cyl( 0, 0.03, 0, 0.02, 0.5, 6, CHROME ).cyl( 0, 0.53, 0, 0.18, 0.06, 10, cloth( [ 40, 60, 90 ] ) ); st.col( - 0.2, 0, - 0.2, 0.2, 0.6, 0.2, 2, 2 ); }
+}
+
+function classroom( C ) {
+	const cb = onWall( C, Math.min( 4, C.w - 1.5 ), 0.1, 2.2, [ 2, 1, 3 ], 'centre' );
+	if ( cb ) chalkboard( cb, Math.min( 4, C.w - 1.5 ) );
+	const td = onWall( C, 1.3, 0.72, 0.8, [ 3, 1, 0 ] ) || inRoom( C, 1.3, 0.72 );
+	if ( td ) H.desk( td, 1.3, 'school', { pc: false } );
+	rows( C, 0.7, 1.35, 0.35, 0.9, ( F ) => schoolDesk( F ) );
+	for ( let i = 0; i < 2; i ++ ) { const s = onWall( C, 1.8, 0.35, 1.9, [ 0, 1, 3 ] ); if ( s ) H.bookcase( s, 1.8, 1.2, { loot: 'school', mess: 0.4 } ); }
+}
+
+function nave( C ) {
+	const O = C.O, st = C.st;
+	const alt = onWall( C, 2.0, 1.0, 1.1, [ 2 ], 'centre' );
+	if ( alt ) { alt.box( - 1.0, 0, 0.2, 1.0, 1.0, 1.0, cloth( [ 240, 236, 226 ] ) ).col( - 1.0, 0, 0.2, 1.0, 1.0, 1.0, 1 ); alt.light( - 0.7, 1.0, 0.6, 'candle' ).light( 0.7, 1.0, 0.6, 'candle' ); alt.spot( 0, 1.0, 0.6, 'church', 0.6 ); alt.box( - 0.04, 1.6, 0.02, 0.04, 2.8, 0.06, wood( [ 90, 60, 40 ] ) ).box( - 0.4, 2.3, 0.02, 0.4, 2.38, 0.06, wood( [ 90, 60, 40 ] ) ); }
+	const pw = Math.min( 3.2, ( C.w - 1.6 ) / 2 );
+	for ( let r = 0; r < 20; r ++ ) {
+		const z = C.z0 + 1.2 + r * 1.0;
+		if ( z > C.z1 - 2.5 ) break;
+		for ( const s of [ - 1, 1 ] ) {
+			const x = ( C.x0 + C.x1 ) / 2 + s * ( pw / 2 + 0.6 );
+			const rr = [ x - pw / 2, z, x + pw / 2, z + 0.45 ];
+			if ( C.clear.some( u => overlaps( u, rr ) ) ) continue;
+			// people sheltered here: some pews pushed askew
+			pew( frame( O, x, st.y, z, O.R() < 0.15 ? ( O.R() - 0.5 ) * 0.4 : 0 ), pw );
+		}
+	}
+	// bedding on the floor where people slept
+	for ( let i = 0; i < 3; i ++ ) if ( O.R() < 0.4 ) { const f = inRoom( C, 1.9, 0.8, 0.4, 8 ); if ( f ) { f.box( - 0.95, 0, - 0.4, 0.95, 0.04, 0.4, cloth( pickOf( O.R, BLANKET ) ) ).bed( - 0.95, 0, - 0.4, 0.95, 0.1, 0.4, 0.6 ); } }
+}
+
+function hallBig( C, t, shop, mil ) {
+	const O = C.O, R = O.R, st = C.st;
+	if ( t === 'warehouse' ) {
+		// pallet racks in rows with aisles between, a forklift aisle, loose pallets
+		const alongX = C.w >= C.d;
+		const len = ( alongX ? C.w : C.d ) - 5;
+		const n = Math.floor( ( ( alongX ? C.d : C.w ) - 4 ) / 3.6 );
+		for ( let i = 0; i < n; i ++ ) {
+			const c = ( alongX ? C.z0 : C.x0 ) + 2.5 + i * 3.6;
+			const F = alongX ? frame( O, ( C.x0 + C.x1 ) / 2, st.y, c, 0 ) : frame( O, c, st.y, ( C.z0 + C.z1 ) / 2, Math.PI / 2 );
+			if ( len > 3 ) palletRack( F, len, 'warehouse', 2 );
+		}
+		for ( let i = 0; i < 4; i ++ ) { const c = inRoom( C, 1.2, 1.0, 0.6 ); if ( c ) { c.box( - 0.6, 0, - 0.5, 0.6, 0.14, 0.5, M( L.wood, [ 190, 160, 120 ], 1, F_IN ) ); if ( R() < 0.7 ) cartons( c.at( 0, 0.14, - 0.3 ), 'warehouse' ); } }
+	} else {
+		const loot = t === 'hangar' ? 'hangar' : storageTable( C.P, shop, mil );
+		for ( let i = 0; i < 3; i ++ ) { const f = onWall( C, 1.8, 0.72, 1.95, [ 2, 1, 3 ] ); if ( f ) H.workbench( f, 1.8, 'toolbox', loot ); }
+		for ( let i = 0; i < 2; i ++ ) { const f = onWall( C, 1.8, 0.5, 1.9, [ 2, 1, 3 ] ); if ( f ) H.storageShelf( f, 1.8, 1.9, 0.5, loot ); }
+		const tc = onWall( C, 0.8, 0.5, 1.35, [ 2, 1, 3 ] ); if ( tc ) H.toolChest( tc, 'toolbox' );
+		for ( let i = 0; i < 8; i ++ ) { const c = inRoom( C, 0.8, 0.6, 1.0 ); if ( c ) ( R() < 0.3 ? H.drum( c ) : crate( c, 1 + R() * 0.4, loot, 'Crate', mil ) ); }
+		if ( t === 'hangar' && C.w > 12 && C.d > 12 ) { const F = centre( C, 5, 3, 0 ); if ( F ) H.car( F.at( 0, 0, - 1.19 ), { len: 4.8, c: [ 220, 220, 216 ] } ); }
+	}
+}
+
+function dorm( C, k, mil ) {
+	const dbl = k === 'bunk' || mil;
+	for ( let i = 0; i < 10; i ++ ) { const f = onWall( C, 1.1, 2.5, 1.8, C.w > C.d ? [ 2, 0 ] : [ 1, 3 ] ); if ( f ) bunk( f, mil ? 'military_locker' : 'fire_station', dbl ); else break; }
+	const l = onWall( C, 1.7, 0.5, 1.9, [ 3, 1, 0, 2 ] ); if ( l ) T.lockers( l, 4, mil ? 'military_locker' : 'fire_station' );
+	if ( mil ) { const fl = onWall( C, 0.4, 0.5, 2.4, [ 0, 1, 3, 2 ], 'corner' ); if ( fl ) T.flag( fl ); for ( let i = 0; i < 2; i ++ ) { const f = inRoom( C, 0.35, 0.2, 0.4, 6 ); if ( f ) { C.used.pop(); T.ammoCan( f, 0, 0, C.O.R() * 3 ); } } }
+	floorClutter( C, 3, [ ( F ) => H.shoes( F, 0, 0, C.O.R() * 3 ), ( F ) => H.clothesPile( F, 0, 0 ), SMALL.can ] );
+}
+
+function tent( C ) {
+	const O = C.O, st = C.st;
+	const cz = ( C.z0 + C.z1 ) / 2;
+	for ( let i = 0; i < 6; i ++ ) {
+		const x = C.x0 + 0.5 + i * 1.1;
+		if ( x + 0.4 > C.x1 - 0.8 ) break;
+		for ( const s of [ - 1, 1 ] ) {
+			const F = frame( O, x + 0.35, st.y, s < 0 ? C.z0 + 0.1 : C.z1 - 0.1, s < 0 ? 0 : Math.PI );
+			F.box( - 0.35, 0.35, 0, 0.35, 0.4, 1.9, cloth( [ 100, 104, 70 ] ) ).box( - 0.35, 0, 0.1, - 0.32, 0.35, 0.13, metal( [ 60, 60, 50 ] ) ).box( 0.32, 0, 1.75, 0.35, 0.35, 1.78, metal( [ 60, 60, 50 ] ) ).col( - 0.35, 0, 0, 0.35, 0.4, 1.9, 1, 2 ).bed( - 0.35, 0, 0, 0.35, 0.45, 1.9, 0.7 );
+			if ( O.R() < 0.4 ) F.fine().rbox( 0, 0.5, 1.2, 0.2, 0.1, 0.28, cloth( [ 90, 96, 70 ] ), O.R() );
+		}
+	}
+	const cr = frame( O, C.x1 - 0.9, st.y, cz - 0.3, - Math.PI / 2 );
+	crate( cr, 1, 'military', 'Crate', true );
+}
+
+function observatory( C ) {
+	const O = C.O, st = C.st;
+	const tc = frame( O, ( C.x0 + C.x1 ) / 2, st.y, ( C.z0 + C.z1 ) / 2, 0 );
+	telescope( tc );
+	C.used.push( [ tc.x - 1.2, tc.z - 1.2, tc.x + 1.2, tc.z + 1.2 ] );
+	const r = Math.min( C.w, C.d ) / 2 - 1.2;
+	for ( let i = 0; i < 3; i ++ ) {
+		const a = Math.PI * 0.25 + i * Math.PI * 0.5;
+		const F = frame( O, tc.x + Math.cos( a ) * r, st.y, tc.z + Math.sin( a ) * r, Math.atan2( - Math.cos( a ), - Math.sin( a ) ) + Math.PI );
+		H.desk( F, 1.4, 'observatory', { pc: true } );
+	}
+}
+
+function checkin( C ) {
+	const O = C.O, st = C.st;
+	const n = Math.max( 1, Math.min( 4, Math.floor( ( C.w - 4 ) / 5.5 ) ) );
+	const cz = C.z0 + Math.min( 6.5, C.d * 0.55 );
+	for ( let i = 0; i < n; i ++ ) {
+		const x = ( C.x0 + C.x1 ) / 2 + ( i - ( n - 1 ) / 2 ) * 5.5;
+		const r = [ x - 2.1, cz, x + 2.1, cz + 2.0 ];
+		if ( C.used.some( u => overlaps( u, r ) ) || C.clear.some( u => overlaps( u, r ) ) ) continue;
+		C.used.push( r );
+		checkinDesk( frame( O, x, st.y, cz, 0 ), 3.8 );
+	}
+	for ( let i = 0; i < 4; i ++ ) { const f = inRoom( C, 0.5, 0.35, 0.8 ); if ( f ) suitcase( f ); }
+	for ( let i = 0; i < 3; i ++ ) { const b = onWall( C, 1.8, 0.55, 0.9, [ 0, 1, 3 ] ); if ( b ) T.seats( b, 3, [ 60, 80, 110 ] ); }
+	for ( let i = 0; i < 2; i ++ ) { const p = onWall( C, 0.45, 0.45, 1.0, [ 0, 1, 3 ], 'corner' ); if ( p ) H.pottedPlant( p.at( 0, 0, 0.24 ), { big: true } ); }
+	for ( let i = 0; i < 2; i ++ ) { const lc = inRoom( C, 1.2, 0.7, 1.0, 8 ); if ( lc ) T.luggageCart( lc ); }
+}
+
+function gate( C ) {
+	const O = C.O, R = O.R, st = C.st;
+	const gd = onWall( C, 2.2, 0.7, 1.1, [ 3, 1 ], 'centre' );
+	if ( gd ) { counter( gd, 2.2, 0.7, 1.05, gloss( [ 60, 70, 90 ] ) ); gd.container( - 0.6, 0, 0, 0.6, 1.05, 0.7, 'Desk', 'office', 8, { n: 1 } ); gd.box( - 0.25, 1.05, 0.1, 0.25, 1.37, 0.13, BLACK ); }
+	const m = [ [ 50, 70, 110 ], [ 40, 44, 50 ], [ 120, 40, 40 ] ][ ( R() * 3 ) | 0 ];
+	for ( let z = C.z0 + 1.6; z + 1.15 < C.z1 - 2.2; z += 2.75 ) {
+		for ( let x = C.x0 + 1.4; x + 3.0 < C.x1 - 1.0; x += 4.2 ) {
+			const r = [ x, z, x + 3.0, z + 1.15 ];
+			if ( C.used.some( u => overlaps( u, r ) ) || C.clear.some( u => overlaps( u, r ) ) ) continue;
+			C.used.push( r );
+			T.seats( frame( O, x + 1.5, st.y, z + 0.55, Math.PI ), 5, m );
+			T.seats( frame( O, x + 1.5, st.y, z + 0.6, 0 ), 5, m );
+		}
+	}
+	for ( let i = 0; i < 3; i ++ ) { const f = inRoom( C, 0.5, 0.35, 0.6 ); if ( f ) suitcase( f ); }
+	for ( let i = 0; i < 2; i ++ ) { const b = inRoom( C, 0.6, 0.5, 0.6, 8 ); if ( b ) X.bag( b, 'zombie_tourist' ); }
+}
+
+function claim( C ) {
+	const lw = Math.min( 7, C.w - 2.6 ), ld = Math.min( 2.2, C.d - 3 );
+	const F = centre( C, lw, ld );
+	if ( F ) carousel( F.at( 0, 0, - ld / 2 ), lw, ld );
+	for ( let i = 0; i < 3; i ++ ) { const f = inRoom( C, 0.5, 0.35, 0.6 ); if ( f ) suitcase( f ); }
+	const b = onWall( C, 1.8, 0.55, 0.9, [ 1, 3, 0 ] ); if ( b ) T.seats( b, 3, [ 60, 80, 110 ] );
+}
+
+function cab( C ) {
+	const R = C.O.R;
+	for ( let i = 0; i < 4; i ++ ) {
+		const w = Math.min( 2.4, Math.max( C.w, C.d ) - 1.2 );
+		const f = onWall( C, w, 0.75, 0.9, [ 0, 1, 2, 3 ] );
+		if ( ! f ) break;
+		console_( f, w );
+	}
+	for ( let i = 0; i < 2; i ++ ) { const c = inRoom( C, 0.6, 0.6, 0.4 ); if ( c ) H.officeChair( c, R() < 0.3 ); }
+}
+
+function loggia( C ) {
+	const R = C.O.R;
+	// a small table and two chairs, a lounger, a plant
+	if ( R() < 0.75 && C.w > 1.2 && C.d > 1.2 ) {
+		const f = inRoom( C, 1.4, 0.7, 0.15 );
+		if ( f ) {
+			const m = gloss( pickOf( R, [ [ 236, 236, 232 ], [ 60, 60, 64 ], [ 150, 110, 70 ] ] ) );
+			f.cyl( 0, 0, 0, 0.25, 0.02, 10, m ).cyl( 0, 0.02, 0, 0.025, 0.68, 6, m ).cyl( 0, 0.7, 0, 0.3, 0.02, 12, m );
+			f.col( - 0.3, 0, - 0.3, 0.3, 0.72, 0.3, 1, 2 );
+			for ( const s of [ - 1, 1 ] ) H.chair( f.at( s * 0.52, 0, 0, s * Math.PI / 2 ), m, R() < 0.15 );
+			if ( R() < 0.6 ) { const ff = f.fine(); SMALL[ pickOf( R, [ 'glass', 'mug', 'ashtray', 'bottle' ] ) ]( ff, 0.1, 0.72, 0.05, R ); }
+		}
+	}
+	if ( R() < 0.5 ) { const p = inRoom( C, 0.5, 0.5, 0.1 ); if ( p ) H.pottedPlant( p.at( 0, 0, 0 ), { big: R() < 0.5 } ); }
+}
+
+// ---- airport, tower pieces kept here -----------------------------------------------------------------------------------------------
+
 function checkinDesk( F, w ) {
 	const body = paint( [ 70, 80, 96 ] ), top = M( L.terrazzo, [ 230, 226, 216 ], 1.5, F_IN );
 	F.box( - w / 2, 0, 0, w / 2, 1.02, 0.6, body );
 	F.box( - w / 2 - 0.02, 1.02, - 0.04, w / 2 + 0.02, 1.06, 0.62, top );
-	// the scales between the desks
 	F.box( - 0.4, 0, - 0.02, 0.4, 0.28, 0.58, STEEL );
 	for ( const s of [ - 1, 1 ] ) {
 		F.box( s * w / 4 - 0.25, 1.06, 0.3, s * w / 4 + 0.25, 1.38, 0.33, BLACK );
 		F.container( s * w / 4 - 0.5, 0, 0.1, s * w / 4 + 0.5, 1.06, 0.6, 'Desk', 'office', 8, { n: 1 } );
 	}
 	F.col( - w / 2, 0, 0, w / 2, 1.06, 0.62, 1 );
-	// the belt behind, past the agents' walkway
 	F.box( - w / 2, 0, 1.3, w / 2, 0.42, 1.95, STEEL );
 	F.box( - w / 2 + 0.03, 0.42, 1.34, w / 2 - 0.03, 0.44, 1.91, BLACK );
 	F.col( - w / 2, 0, 1.3, w / 2, 0.44, 1.95, 2, 2 );
@@ -1264,32 +1312,15 @@ function checkinDesk( F, w ) {
 	return F;
 }
 
-// joined airport seats on a beam (n seats of 0.6 m), facing +z
-function seats( F, n, c ) {
-	const cm = cloth( c ), w = n * 0.6;
-	for ( let k = 0; k < n; k ++ ) {
-		const a = - w / 2 + k * 0.6 + 0.03, b = a + 0.54;
-		F.box( a, 0.42, 0.05, b, 0.47, 0.5, cm ).box( a, 0.47, 0.02, b, 0.86, 0.08, cm );
-	}
-	F.box( - w / 2, 0.3, 0.2, w / 2, 0.36, 0.3, metal() );
-	F.box( - w / 2 + 0.1, 0, 0.2, - w / 2 + 0.16, 0.3, 0.3, metal() ).box( w / 2 - 0.16, 0, 0.2, w / 2 - 0.1, 0.3, 0.3, metal() );
-	F.col( - w / 2, 0, 0, w / 2, 0.5, 0.55, 2, 2 );
-	F.spot( ( F.O.R() - 0.5 ) * w * 0.8, 0.47, 0.3, 'hotel_room', 0.12 );
-	return F;
-}
-
-// a suitcase left standing or lying on the floor (searchable)
 function suitcase( F ) {
 	const O = F.O, R = O.R;
 	const c = [ [ 40, 44, 52 ], [ 120, 30, 36 ], [ 30, 70, 110 ], [ 60, 90, 70 ], [ 170, 150, 110 ] ][ ( R() * 5 ) | 0 ];
-	const m = paint( c );
+	const m = gloss( c );
 	if ( R() < 0.5 ) {
-		// upright with the handle out
 		F.box( - 0.22, 0.03, - 0.13, 0.22, 0.68, 0.13, m ).box( - 0.12, 0.68, - 0.02, - 0.1, 0.95, 0.0, BLACK ).box( 0.1, 0.68, - 0.02, 0.12, 0.95, 0.0, BLACK ).box( - 0.12, 0.93, - 0.02, 0.12, 0.96, 0.0, BLACK );
 		F.col( - 0.22, 0, - 0.13, 0.22, 0.68, 0.13, 1, 2 );
 		F.container( - 0.22, 0, - 0.13, 0.22, 0.68, 0.13, 'Suitcase', 'hotel_room', 20, { n: 2, empty: 0.3 } );
 	} else {
-		// flat on its back
 		F.box( - 0.34, 0, - 0.22, 0.34, 0.26, 0.22, m ).box( - 0.08, 0.26, - 0.03, 0.08, 0.3, 0.03, BLACK );
 		F.col( - 0.34, 0, - 0.22, 0.34, 0.26, 0.22, 1, 2 );
 		F.container( - 0.34, 0, - 0.22, 0.34, 0.26, 0.22, 'Suitcase', 'hotel_room', 20, { n: 2, empty: 0.3 } );
@@ -1297,14 +1328,12 @@ function suitcase( F ) {
 	return F;
 }
 
-// an oval baggage carousel (a rounded run of metal plates round a central island)
 function carousel( F, w, d ) {
 	const r = d / 2, ex = w / 2 - r;
 	F.box( - ex, 0, 0, ex, 0.45, d, STEEL );
 	F.box( - ex, 0.45, 0.04, ex, 0.47, d - 0.04, BLACK );
 	F.cyl( - ex, 0, r, r, 0.45, 12, STEEL ).cyl( ex, 0, r, r, 0.45, 12, STEEL );
 	F.cyl( - ex, 0.45, r, r - 0.04, 0.02, 12, BLACK ).cyl( ex, 0.45, r, r - 0.04, 0.02, 12, BLACK );
-	// the island in the middle
 	F.box( - ex, 0.47, r - 0.3, ex, 0.9, r + 0.3, metal( [ 150, 152, 156 ] ) );
 	F.col( - w / 2, 0, 0, w / 2, 0.47, d, 2, 2 ).col( - ex, 0.47, r - 0.3, ex, 0.9, r + 0.3, 2, 2 );
 	const O = F.O;
@@ -1317,7 +1346,6 @@ function carousel( F, w, d ) {
 	return F;
 }
 
-// a tower cab console: a sloped desk with screens and radios
 function console_( F, w ) {
 	const body = paint( [ 70, 74, 80 ] );
 	F.box( - w / 2, 0, 0.1, w / 2, 0.78, 0.75, body );
@@ -1325,7 +1353,7 @@ function console_( F, w ) {
 	const n = Math.max( 1, Math.floor( w / 0.7 ) );
 	for ( let k = 0; k < n; k ++ ) {
 		const x = - w / 2 + ( k + 0.5 ) * w / n;
-		F.box( x - 0.26, 0.82, 0.12, x + 0.26, 1.2, 0.16, BLACK );
+		F.box( x - 0.26, 0.82, 0.12, x + 0.26, 1.2, 0.16, BLACK ).box( x - 0.24, 0.84, 0.16, x + 0.24, 1.18, 0.162, gloss( [ 12, 13, 15 ] ) );
 		F.box( x - 0.2, 0.82, 0.35, x + 0.2, 0.86, 0.55, paint( [ 50, 52, 58 ] ) );
 	}
 	F.col( - w / 2, 0, 0.05, w / 2, 0.82, 0.78, 2, 2 );
@@ -1334,21 +1362,84 @@ function console_( F, w ) {
 	return F;
 }
 
-function filing( F, loot ) {
-	const m = metal( [ 150, 154, 150 ] );
-	F.box( - 0.25, 0, 0, 0.25, 1.33, 0.62, m );
-	for ( let k = 0; k < 4; k ++ ) F.box( - 0.22, 0.05 + k * 0.33 + 0.3, 0.62, 0.22, 0.05 + k * 0.33 + 0.31, 0.625, DARK ).box( - 0.07, 0.05 + k * 0.33 + 0.2, 0.62, 0.07, 0.05 + k * 0.33 + 0.22, 0.64, CHROME );
-	F.col( - 0.25, 0, 0, 0.25, 1.33, 0.62, 2 );
-	F.container( - 0.25, 0, 0, 0.25, 1.33, 0.62, 'Filing cabinet', loot, 20 );
-	return F;
+// ---- windows, doors: barricades ---------------------------------------------------------------------------------------------------
+
+function barricades( C ) {
+	const R = C.O.R;
+	for ( const w of C.windows ) {
+		if ( w.state === 1 ) continue; // boarded from outside already
+		const u = R();
+		if ( u < 0.55 ) X.boardWindow( C, w );
+		else if ( u < 0.65 && w.y0 - C.st.y < 1.0 ) X.mattressOverWindow( C, w );
+	}
+	// the back door blocked with furniture (the front door stays usable)
+	for ( const d of C.doors ) if ( d.ext && d.kind === 'back' && R() < 0.6 ) X.doorPile( C, d.side, ( d.a0 + d.a1 ) / 2, d.a1 - d.a0 );
 }
 
-function rug( C ) {
-	if ( C.O.R() > 0.6 ) return;
-	const w = Math.min( 2.4, C.w - 1.2 ), d = Math.min( 1.7, C.d - 1.2 );
-	if ( w < 1 || d < 1 ) return;
-	const x = ( C.x0 + C.x1 ) / 2, z = ( C.z0 + C.z1 ) / 2, y = C.st.y;
-	C.O.g.box( x - w / 2, y, z - d / 2, x + w / 2, y + 0.012, z + d / 2, cloth( BLANKET[ ( C.O.R() * BLANKET.length ) | 0 ] ), 8 );
+// ---- walls and ceilings ---------------------------------------------------------------------------------------------------------------
+
+const ART_N = { living: 3, bedroom: 2, hotelroom: 2, lobby: 2, office: 2, meeting: 1, dining: 3, hall: 1, entry: 1, waiting: 2, dayroom: 2, vestry: 1, corridor: 2, sales: 1, bar: 2, classroom: 2, briefing: 1, ward: 1, exam: 1, openoffice: 2, kitchen: 1, breakroom: 1, lockers: 1 };
+function artSet( C, t, k ) {
+	if ( C.home ) return k === 'kitchen' ? [ 13, 4, 7 ] : ART_HOME;
+	if ( t === 'police' ) return ART_POLICE;
+	if ( t === 'hospital' || t === 'clinic' ) return ART_CARE;
+	if ( t === 'school' ) return ART_SCHOOL;
+	if ( t === 'hotel' ) return ART_HOTEL;
+	if ( k === 'dining' || k === 'bar' || t === 'restaurant' || t === 'fastfood' || t === 'bar' ) return ART_FOOD;
+	if ( t === 'gunstore' ) return [ 10, 11, 14 ];
+	return ART_OFFICE;
+}
+
+// pictures and posters on the walls, clear of doors and windows; some hang crooked or lie on the floor
+function wallArt( C, n, set, home ) {
+	const O = C.O, R = O.R;
+	const frameM = paint( home ? pickOf( R, WOODS ) : [ 40, 40, 42 ] );
+	for ( let k = 0, tries = 0; k < n && tries < 16; tries ++ ) {
+		const side = ( R() * 4 ) | 0;
+		if ( C.open[ side ] ) continue;
+		const lo = side === 0 || side === 2 ? C.x0 : C.z0, hi = side === 0 || side === 2 ? C.x1 : C.z1;
+		const cell = pickOf( R, set );
+		const poster = cell >= 8;
+		const w = poster ? 0.45 + R() * 0.2 : 0.45 + R() * 0.55, h = poster ? w * 1.35 : w * ( 0.65 + R() * 0.3 );
+		if ( hi - lo < w + 0.7 ) continue;
+		const a = lo + 0.35 + w / 2 + R() * ( hi - lo - w - 0.7 );
+		if ( C.blocked[ side ].some( b => b[ 0 ] < a + w / 2 + 0.15 && b[ 1 ] > a - w / 2 - 0.15 ) ) continue;
+		const F = frameOnWall( C, side, a );
+		const y0 = Math.min( C.ceil - h - 0.25, 1.3 + R() * 0.25 );
+		const img = art( cell );
+		if ( R() < 0.1 && ! poster ) {
+			// knocked off the wall, face down
+			F.fine().rbox( 0, 0.02, 0.25 + h / 2, w / 2, 0.015, h / 2, frameM, R() * 0.5 - 0.25 );
+		} else if ( poster ) {
+			F.rbox( 0, y0 + h / 2, 0.006, w / 2, h / 2, 0.002, img, 0, 0, R() < 0.2 ? ( R() - 0.5 ) * 0.1 : 0 );
+		} else {
+			const tilt = R() < 0.2 ? ( R() - 0.5 ) * 0.12 : 0;
+			F.rbox( 0, y0 + h / 2, 0.016, w / 2, h / 2, 0.012, frameM, 0, 0, tilt );
+			F.rbox( 0, y0 + h / 2, 0.029, w / 2 - 0.035, h / 2 - 0.035, 0.002, img, 0, 0, tilt );
+		}
+		k ++;
+	}
+}
+
+// a light fitting on the ceiling (the power is out): fans or domes in homes, tubes in shops and workshops, panels in offices
+function fixtures( C, t, arch ) {
+	if ( C.fixture || C.rm.open ) return;
+	const O = C.O, R = O.R, k = C.rm.k;
+	const kind = C.home || k === 'hotelroom' || k === 'hbath' || k === 'bath' ? 'dome'
+		: k === 'office' || k === 'openoffice' || k === 'meeting' || k === 'lobby' || k === 'corridor' || k === 'waiting' || k === 'ward' || k === 'exam' || k === 'classroom' || k === 'briefing' ? 'panel' : 'tube';
+	if ( kind === 'dome' ) { H.ceilingLight( frame( O, ( C.x0 + C.x1 ) / 2, C.st.y, ( C.z0 + C.z1 ) / 2, 0, O.gd ), C.ceil, 'dome' ); return; }
+	if ( arch === 'tent' || k === 'nave' || k === 'hallbig' && C.ceil > 6 ) return;
+	const pitch = kind === 'panel' ? 2.4 : 3.0;
+	const nx = Math.max( 1, Math.round( C.w / pitch ) ), nz = Math.max( 1, Math.round( C.d / pitch ) );
+	if ( nx * nz > 80 ) return;
+	for ( let i = 0; i < nx; i ++ ) for ( let j = 0; j < nz; j ++ ) {
+		const x = C.x0 + ( i + 0.5 ) * C.w / nx, z = C.z0 + ( j + 0.5 ) * C.d / nz;
+		const F = frame( O, x, C.st.y, z, C.w > C.d ? 0 : Math.PI / 2, O.gd );
+		// one hanging loose
+		if ( kind === 'tube' && R() < 0.04 ) { F.rbox( 0.3, C.ceil - 0.5, 0, 0.62, 0.04, 0.1, WHITE, 0, 0, 0.7 ); continue; }
+		H.ceilingLight( F, C.ceil, kind );
+	}
+	void t;
 }
 
 // a candle or a lantern someone left burning (seen at night through the windows)
@@ -1370,10 +1461,8 @@ function tableGrid( C, tw, td, pitch, loot, maxN = 16 ) {
 			const r = [ x - 0.5, z - 0.5, x + tw + 0.5, z + td + 0.5 ];
 			if ( C.used.some( u => overlaps( u, r ) ) || C.clear.some( u => overlaps( u, r ) ) ) continue;
 			C.used.push( r );
-			const F = frame( O, x + tw / 2, C.st.y, z, 0 );
-			table( F, tw, td, 0.75, wood( WOODS[ n % 4 ] ), loot, 0.25 );
-			chair( frame( O, x + tw / 2, C.st.y, z - 0.35, 0 ), wood( WOODS[ 1 ] ), O.R() < 0.15 );
-			chair( frame( O, x + tw / 2, C.st.y, z + td + 0.35, Math.PI ), wood( WOODS[ 1 ] ), O.R() < 0.15 );
+			const F = frame( O, x + tw / 2, C.st.y, z + td / 2, 0 );
+			H.diningSet( F, tw, td, { loot, tipped: 0.2 } );
 			n ++;
 		}
 	}
@@ -1392,106 +1481,4 @@ function rows( C, w, d, gapX, gapZ, fn ) {
 	}
 }
 
-function storageTable( P, shop, mil ) {
-	if ( mil ) return 'military';
-	const t = P.S.type;
-	if ( t === 'police' ) return 'police';
-	if ( t === 'hospital' ) return 'hospital';
-	if ( t === 'clinic' ) return 'clinic';
-	if ( t === 'fire' ) return 'fire_station';
-	if ( t === 'school' ) return 'school';
-	if ( t === 'warehouse' ) return 'warehouse';
-	if ( t === 'garage' ) return 'garage_shop';
-	if ( t === 'hangar' ) return 'hangar';
-	if ( t === 'church' ) return 'church';
-	if ( t === 'hotel' ) return 'hotel_room';
-	if ( t === 'office' ) return 'office';
-	if ( t === 'house' || t === 'apartment' ) return 'house_garage';
-	return SHOP_TABLE[ shop ] || 'warehouse';
-}
-
-// ---- shop floors ----------------------------------------------------------------------------------------------
-
-function salesFloor( C, shop ) {
-	const O = C.O, R = O.R, st = C.st;
-	const loot = SHOP_TABLE[ shop ] || 'convenience';
-	// checkout near the front door
-	const co = onWall( C, 1.8, 0.7, 1.1, [ 3, 1 ], 'corner' );
-	if ( co ) { counter( co, 1.8, 0.7, 1.0, paint( [ 200, 196, 186 ] ) ); register( co, 0.3, 1.0, 0.35, shop === 'bank' ? 'bank' : loot === 'trash' ? 'convenience' : loot ); co.spot( - 0.5, 1.0, 0.35, loot, 0.4 ); }
-	switch ( shop ) {
-		case 'gunstore': case 'pawn': {
-			for ( let i = 0; i < 3; i ++ ) { const w = Math.min( 3, C.w - 1.5 ); const f = onWall( C, w, 0.3, 2.1, [ 2, 1, 3 ] ); if ( f ) gunRack( f, w, loot ); }
-			for ( let i = 0; i < 3; i ++ ) { const f = inRoom( C, 2.0, 0.6, 1.0 ); if ( f ) displayCase( f, 2.0, loot ); }
-			if ( shop === 'gunstore' ) { const s = onWall( C, 0.8, 0.6, 1.5, [ 1, 3, 0 ] ); if ( s ) gunSafe( s, 'gun_safe' ); }
-			return;
-		}
-		case 'clothing': case 'surf': case 'sports': {
-			for ( let i = 0; i < 6; i ++ ) {
-				const f = inRoom( C, 1.4, 0.5, 0.9 );
-				if ( ! f ) break;
-				// a clothes rail
-				f.box( - 0.7, 0, 0.2, - 0.67, 1.5, 0.23, CHROME ).box( 0.67, 0, 0.2, 0.7, 1.5, 0.23, CHROME ).box( - 0.7, 1.47, 0.2, 0.7, 1.5, 0.23, CHROME );
-				for ( let k = 0; k < 10; k ++ ) if ( R() < 0.7 ) f.box( - 0.62 + k * 0.13, 0.6 + R() * 0.2, 0.05, - 0.58 + k * 0.13, 1.45, 0.4, cloth( BLANKET[ ( R() * BLANKET.length ) | 0 ] ) );
-				f.col( - 0.7, 0, 0, 0.7, 1.5, 0.45, 1, 2 );
-				f.spot( 0, 0.02, 0.8, loot, 0.3 );
-			}
-			for ( let i = 0; i < 3; i ++ ) { const w = Math.min( 2.4, C.w - 1.5 ); const f = onWall( C, w, 0.45, 1.9, [ 2, 1, 3 ] ); if ( f ) shelves( f, w, 1.9, 0.45, 'products', loot, 'Shelf', true, 0.3 ); }
-			if ( shop === 'surf' ) { const f = onWall( C, 2.4, 0.5, 2.2, [ 1, 3, 2 ] ); if ( f ) for ( let k = 0; k < 6; k ++ ) f.tilt( - 1.0 + k * 0.4, 1.1, 0.2, 0.2, 1.0, 0.03, - 0.15, 0, paint( BLANKET[ k % BLANKET.length ] ) ); }
-			return;
-		}
-		case 'laundromat': {
-			for ( let i = 0; i < 3; i ++ ) { const f = onWall( C, 2.8, 0.65, 0.9, [ 2, 1, 3 ] ); if ( f ) washer( f, 4 ); }
-			const b = centre( C, 2.0, 0.5 ); if ( b ) b.box( - 1, 0.42, 0, 1, 0.46, 0.5, wood() ).col( - 1, 0, 0, 1, 0.46, 0.5, 1, 2 );
-			return;
-		}
-		case 'nails': case 'barber': {
-			for ( let i = 0; i < 4; i ++ ) { const f = onWall( C, 0.9, 0.9, 1.0, [ 2, 1, 3 ] ); if ( f ) { sofa( f, 0.8, [ 60, 60, 64 ] ); f.box( - 0.45, 1.1, 0, 0.45, 1.9, 0.03, metal( [ 200, 214, 220 ] ) ); } }
-			return;
-		}
-		case 'vacant': return;
-		case 'insurance': case 'phone': case 'bank': case 'post': {
-			const f = onWall( C, Math.min( 3.4, C.w - 1.5 ), 0.7, 1.2, [ 2 ], 'centre' );
-			if ( f ) { counter( f, Math.min( 3.4, C.w - 1.5 ), 0.7, 1.05, wood( [ 150, 110, 80 ] ) ); f.container( - 0.6, 0, 0, 0.6, 1.05, 0.7, 'Desk', shop === 'post' ? 'post' : shop === 'bank' ? 'bank' : 'desk', 8 ); }
-			for ( let i = 0; i < 2; i ++ ) { const d = inRoom( C, 1.3, 0.72, 0.9 ); if ( d ) desk( d, 1.3, 'desk' ); }
-			return;
-		}
-		case 'restaurant': case 'fastfood': case 'takeout': case 'bakery': case 'bar': {
-			const ct = onWall( C, Math.min( 4, C.w - 1.5 ), 0.62, 1.1, [ 2 ] );
-			if ( ct ) { counter( ct, Math.min( 4, C.w - 1.5 ), 0.6, 1.05 ); ct.spot( 0, 1.05, 0.3, loot, 0.6 ); }
-			tableGrid( C, 0.8, 0.8, 1.9, loot, 8 );
-			return;
-		}
-	}
-	// general merchandise: coolers on the back wall, gondola aisles in the middle, shelves on the side walls
-	const big = BIG_SHELVES[ shop ];
-	const cw = Math.min( 6.4, C.w - 1.6 );
-	if ( shop !== 'hardware' && cw > 1.6 ) { const cf = onWall( C, cw, 0.8, 2.1, [ 2 ], 'centre' ); if ( cf ) coolers( cf, cw, shop === 'grocery' || shop === 'market' ? 'grocery' : 'fridge' ); }
-	for ( const side of [ 1, 3 ] ) { const w = Math.min( 4.8, C.d - 2.0 ); if ( w > 1.2 ) { const f = onWall( C, w, 0.5, 1.9, [ side ] ); if ( f ) shelves( f, w, 1.9, 0.5, 'products', loot, 'Shelf', false, 0.3 ); } }
-	if ( big ) {
-		const alongZ = C.d >= C.w * 0.8;
-		const len = ( alongZ ? C.d : C.w ) - 4.2;
-		const span = alongZ ? C.w : C.d;
-		const n = Math.max( 1, Math.floor( ( span - 3.0 ) / 2.4 ) );
-		if ( len > 1.5 ) {
-			for ( let i = 0; i < n; i ++ ) {
-				const c = ( alongZ ? C.x0 : C.z0 ) + 1.8 + i * 2.4 + 0.45;
-				const mid = alongZ ? ( C.z0 + C.z1 ) / 2 + 0.3 : ( C.x0 + C.x1 ) / 2;
-				const r = alongZ ? [ c - 0.5, mid - len / 2, c + 0.5, mid + len / 2 ] : [ mid - len / 2, c - 0.5, mid + len / 2, c + 0.5 ];
-				if ( C.used.some( u => overlaps( u, r ) ) || C.clear.some( u => overlaps( u, r ) ) ) continue;
-				C.used.push( r );
-				// a double-sided gondola: two shelf faces back to back
-				const h = shop === 'hardware' ? 2.2 : 1.6;
-				const F1 = alongZ ? frame( O, c, st.y, mid, - Math.PI / 2 ) : frame( O, mid, st.y, c, 0 );
-				const F2 = alongZ ? frame( O, c, st.y, mid, Math.PI / 2 ) : frame( O, mid, st.y, c, Math.PI );
-				shelves( F1, len, h, 0.45, 'products', loot, 'Shelf', i % 2 === 0, 0.25 );
-				shelves( F2, len, h, 0.45, 'products', loot, 'Shelf', false, 0.2 );
-				// end caps: a tipped-over display in the aisle sometimes
-				if ( R() < 0.25 ) { const [ ex, ez ] = F1.T( len / 2 + 0.6, 0.2 ); O.decalFloor( ex, st.y + 0.006, ez, 1.3, DECAL.dirt, R() * 6 ); }
-			}
-		}
-	} else {
-		for ( let i = 0; i < 2; i ++ ) { const f = inRoom( C, 2.0, 0.9, 1.0 ); if ( f ) { shelves( f, 2.0, 1.4, 0.45, 'products', loot, 'Shelf', true, 0.3 ); } }
-	}
-	if ( shop === 'pharmacy' ) { const f = onWall( C, 2.4, 0.7, 1.2, [ 2, 1 ] ); if ( f ) { counter( f, 2.4, 0.7, 1.05, WHITE ); f.container( - 1.2, 0, 0, 1.2, 1.05, 0.7, 'Cabinet', 'pharmacy', 12, { locked: 1 } ); } }
-	void hash32;
-}
+export const _unused = [ DARK, PLASTIC, cloth, plate, mug, scatter, CLOTHES ];

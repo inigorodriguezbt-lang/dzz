@@ -93,6 +93,7 @@ window.__show = ( ids, o = {} ) => {
 			const res = buildStorey( P, si, null );
 			const place = ( m ) => { m.position.set( r.x, 0, r.z ); m.rotation.y = - r.angle; group.add( m ); return m; };
 			if ( res.geo ) { const m = place( new THREE.Mesh( geoToBuffer( res.geo ), mats.interior ) ); m.castShadow = m.receiveShadow = true; }
+			if ( res.fine ) { const m = place( new THREE.Mesh( geoToBuffer( res.fine ), mats.interior ) ); m.receiveShadow = true; }
 			if ( res.dec ) place( new THREE.Mesh( decalToBuffer( res.dec ), mats.decal ) );
 			if ( res.glass ) place( new THREE.Mesh( glassToBuffer( res.glass ), mats.glass ) );
 			out.push( { i, si, doors: res.doors.length, containers: res.containers.map( c => c.label ), spots: res.spots.length, beds: res.beds.length, lights: res.lights.length } );
@@ -115,6 +116,7 @@ window.__show = ( ids, o = {} ) => {
 window.__view = ( x, y, z, yaw = 0, pitch = 0 ) => { cam.position.set( x, y, z ); cam.rotation.set( pitch * Math.PI / 180, yaw * Math.PI / 180, 0, 'YXZ' ); cam.updateMatrixWorld(); };
 window.__look = ( x, y, z ) => { cam.lookAt( x, y, z ); cam.updateMatrixWorld(); };
 window.__hour = setHour;
+window.__mats = mats;
 // camera in front of building i (side 0 street), d m away, h high
 window.__front = ( i, d = 20, h = 1.7, side = 0, up = 0.3 ) => {
 	const r = readBuilding( data, i );
