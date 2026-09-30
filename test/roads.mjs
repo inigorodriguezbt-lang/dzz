@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { HeightField } from '../src/world/HeightField.js';
 import { buildStreetCell } from '../src/world/streetgen.js';
-import { buildNetwork, CELL, nearestOnNetwork, roadsideSpots } from '../src/city/roads/network.js';
+import { buildNetwork, CELL, nearestOnNetwork, roadsideSpots, segDist, lotAt, inBuilding, highwayEdgeDist } from '../src/city/roads/network.js';
 
 const meta = JSON.parse( readFileSync( new URL( '../public/data/world.json', import.meta.url ) ) );
 let buf = readFileSync( new URL( '../public/data/terrain.bin.gz', import.meta.url ) );
@@ -46,6 +46,54 @@ check( net.fences.every( f => { const c = meta.cities[ f.city ], mx = ( f.ax + f
 const spotsN = roadsideSpots( net, - 4390, - 10255, 150 );
 check( spotsN.length > 50 && spotsN.every( ( [ x, z, yaw ] ) => Number.isFinite( x + z + yaw ) && Math.hypot( x + 4390, z + 10255 ) <= 150 ), 'roadside spots downtown' );
 console.log( 'roadside spots downtown', spotsN.length );
+// the city frames fitted to the baked street ends (the stored angles are rounded to 0.01 rad)
+{
+	let mx = 0, sum = 0, n = 0;
+	for ( const s of meta.streets ) {
+		const c = meta.cities[ s[ 0 ] ], F = net.frames[ s[ 0 ] ];
+		for ( const [ x, z ] of [ [ s[ 1 ], s[ 2 ] ], [ s[ 4 ], s[ 5 ] ] ] ) {
+			const [ u, v ] = F.toG( x, z ), [ px, pz ] = F.toW( Math.round( u / c.pu ) * c.pu, Math.round( v / c.pv ) * c.pv );
+			const e = Math.hypot( px - x, pz - z ); mx = Math.max( mx, e ); sum += e; n ++;
+		}
+	}
+	console.log( 'grid fit residual mean', ( sum / n ).toFixed( 3 ), 'max', mx.toFixed( 2 ) );
+	check( sum / n < 0.1 && mx < 1, 'city grids fit the baked streets' );
+}
+// parking lots: off the buildings, the streets and the highways, each with a driveway on its street
+{
+	let bad = 0, area = 0;
+	for ( const L of net.lots ) {
+		area += L.la * L.lb;
+		for ( let i = 0; i <= 8; i ++ ) for ( let j = 0; j <= 8; j ++ ) {
+			const a = ( i / 8 - 0.5 ) * ( L.la - 0.4 ), b = ( j / 8 - 0.5 ) * ( L.lb - 0.4 );
+			const x = L.x + L.ax * a + L.bx * b, z = L.z + L.az * a + L.bz * b;
+			let onSt = false;
+			net.shash.query( x, z, 24, ( st ) => { if ( segDist( st, x, z ) < st.w / 2 + st.walk - 0.05 ) { onSt = true; return false; } } );
+			if ( inBuilding( net, x, z, 0.5 ) || onSt || highwayEdgeDist( net, x, z, 20 )[ 0 ] < 1 || lotAt( net, x, z ) !== L ) { bad ++; break; }
+		}
+		const st = L.street;
+		if ( ! ( L.drive[ 0 ] > st.w / 2 + st.walk && L.drive[ 1 ] < st.len - st.w / 2 - st.walk && st.drives.some( d => d[ 0 ] === L.side && d[ 1 ] === L.drive[ 0 ] ) ) ) bad ++;
+	}
+	console.log( 'parking lots', net.lots.length, ( area / 1e4 ).toFixed( 1 ), 'ha' );
+	check( net.lots.length > 100 && bad === 0, 'parking lots clear of buildings / streets / highways (' + bad + ' bad)' );
+	check( lotAt( net, 0, 0 ) === null, 'no lot in the channel' );
+}
+// deterministic: a second build (as every worker does) gives the same lots
+{
+	const net2 = buildNetwork( world, hf );
+	check( net2.lots.length === net.lots.length && net2.lots.every( ( L, i ) => L.x === net.lots[ i ].x && L.z === net.lots[ i ].z && L.la === net.lots[ i ].la && L.driveA === net.lots[ i ].driveA ), 'network deterministic' );
+}
+// nothing of the street furniture, the wrecks or the power lines inside a building (baked or infill)
+{
+	let bad = 0;
+	for ( const [ x0, z0 ] of [ [ - 4390, - 10255 ], [ - 4021, - 10090 ], [ - 3960, - 9824 ], [ 31722, 11967 ], [ 13744, - 4314 ], [ - 2827, - 11438 ] ] ) {
+		const r = buildStreetCell( hf, world, { ci: Math.floor( x0 / CELL ), cj: Math.floor( z0 / CELL ), lod: 0 } );
+		for ( const [ arr, stride, ix, iz ] of [ [ r.props, 8, 1, 3 ], [ r.cars, 12, 1, 3 ], [ r.signs, 10, 2, 4 ], [ r.wires, 3, 0, 2 ] ] ) {
+			for ( let i = 0; i < arr.length; i += stride ) if ( inBuilding( net, arr[ i + ix ] + r.ox, arr[ i + iz ] + r.oz, 0.1 ) ) bad ++;
+		}
+	}
+	check( bad === 0, 'street furniture outside the buildings (' + bad + ' inside)' );
+}
 // every sidewalk collider is a sane box
 {
 	const r = buildStreetCell( hf, world, { ci: Math.floor( - 4390 / CELL ), cj: Math.floor( - 10255 / CELL ), lod: 0 } );
@@ -98,6 +146,19 @@ for ( const [ x, z ] of spots ) {
 			for ( let i = 0; i < m.idx.length; i ++ ) if ( m.idx[ i ] >= n ) { console.log( 'bad index', k ); break; }
 		}
 		for ( const k of [ 'props', 'signs', 'cars', 'decals', 'boxes', 'wires' ] ) for ( let i = 0; i < r[ k ].length; i ++ ) if ( ! Number.isFinite( r[ k ][ i ] ) ) { console.log( 'NaN in', k, i ); break; }
+		// every single-sided triangle is wound to face along its vertex normal (else it is culled: holes)
+		for ( const k of [ 'road', 'walk', 'kit' ] ) {
+			const m = r[ k ];
+			if ( ! m ) continue;
+			const P = m.pos, N = m.nor, I = m.idx;
+			let rev = 0;
+			for ( let t = 0; t < I.length; t += 3 ) {
+				const a = I[ t ] * 3, b = I[ t + 1 ] * 3, c = I[ t + 2 ] * 3;
+				const ux = P[ b ] - P[ a ], uy = P[ b + 1 ] - P[ a + 1 ], uz = P[ b + 2 ] - P[ a + 2 ], vx = P[ c ] - P[ a ], vy = P[ c + 1 ] - P[ a + 1 ], vz = P[ c + 2 ] - P[ a + 2 ];
+				if ( ( uy * vz - uz * vy ) * N[ a ] + ( uz * vx - ux * vz ) * N[ a + 1 ] + ( ux * vy - uy * vx ) * N[ a + 2 ] < 0 ) rev ++;
+			}
+			check( rev === 0, `${x},${z} lod${lod} ${k}: ${rev} triangles wound against their normals` );
+		}
 	}
 }
 

@@ -293,16 +293,17 @@ function booth() {
 
 function trashBag() {
 	const b = new MB();
-	const g = new THREE.IcosahedronGeometry( 0.3, 1 );
+	// a lumpy, sagging sack (merged vertices so the creases shade smoothly), the neck tied off on top
+	const g = mergeVerts( new THREE.IcosahedronGeometry( 0.3, 2 ) );
 	const p = g.attributes.position;
 	for ( let i = 0; i < p.count; i ++ ) {
 		const x = p.getX( i ), y = p.getY( i ), z = p.getZ( i );
-		const n = 1 + 0.12 * Math.sin( x * 17 + z * 9 ) * Math.cos( y * 13 );
-		p.setXYZ( i, x * n, ( y < 0 ? y * 0.55 : y * 0.95 ) * n, z * n * 0.9 );
+		const n = 1 + 0.1 * Math.sin( x * 17 + z * 9 ) * Math.cos( y * 13 ) + 0.05 * Math.sin( x * 31 - y * 23 );
+		p.setXYZ( i, x * n * ( y < 0 ? 1.08 : 1 ), ( y < 0 ? y * 0.5 : y * 0.95 ) * n, z * n * 0.9 );
 	}
 	g.computeVertexNormals();
-	b.add( g, 0x141414, [ 0.32, 0, 0 ], { y: 0.2 } );
-	b.cone( 0.07, 0.14, 6, 0x141414, [ 0.32, 0, 0 ], { y: 0.52 } );
+	b.add( g, 0x141414, [ 0.28, 0, 0 ], { y: 0.16 } );
+	b.cone( 0.07, 0.14, 8, 0x141414, [ 0.3, 0, 0 ], { y: 0.47 } );
 	return b.build();
 }
 
@@ -467,6 +468,22 @@ function tent() {
 	}
 	b.cyl( 0.04, 0.04, RIDGE, 6, 0x333, T.iron, { x: HX + 0.02, y: RIDGE / 2 } );
 	return b.build();
+}
+
+// weld the duplicated vertices of a non-indexed three.js primitive (smooth normals over its facets)
+function mergeVerts( g ) {
+	const P = g.attributes.position, map = new Map(), pos = [], idx = [];
+	for ( let i = 0; i < P.count; i ++ ) {
+		const k = Math.round( P.getX( i ) * 1e4 ) + ',' + Math.round( P.getY( i ) * 1e4 ) + ',' + Math.round( P.getZ( i ) * 1e4 );
+		let j = map.get( k );
+		if ( j === undefined ) { j = pos.length / 3; map.set( k, j ); pos.push( P.getX( i ), P.getY( i ), P.getZ( i ) ); }
+		idx.push( j );
+	}
+	g.dispose();
+	const o = new THREE.BufferGeometry();
+	o.setAttribute( 'position', new THREE.Float32BufferAttribute( pos, 3 ) );
+	o.setIndex( idx );
+	return o;
 }
 
 // ---- registry ---------------------------------------------------------------------------------------------------------

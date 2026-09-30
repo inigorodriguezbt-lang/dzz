@@ -37,6 +37,8 @@ const QUALITY = {
 };
 // the sea state that last rebuilt the spectrum: small drifts of the weather don't
 const SEA_STEP = 0.02;
+// m: lattice of the per-frame height cache (heightAt): bilinear between exact heights 0.5 m apart
+const HEIGHT_STEP = 0.5;
 
 export class Ocean {
 	constructor( renderer, hf, quality = 'high' ) {
@@ -44,6 +46,7 @@ export class Ocean {
 		this.hf = hf;
 		this.seaState = 0.45; // 0 calm .. 1 storm (Weather)
 		this.time = 0;
+		this._hc = { t: NaN, map: new Map() }; // heightAt cache ( time, lattice key -> height )
 		this.quality = QUALITY[ quality ] ? quality : 'high';
 		this.sizes = CASCADE_SIZES.slice();
 		this.attParams = cascadeAttenuationParams( this.sizes );
@@ -311,10 +314,45 @@ export class Ocean {
 	// the ground under the sea (the fine tile, else the coarse bathymetry), as the shaders see it
 	groundAt( x, z ) { return this.tile.groundAt( x, z ); }
 
+	// Water surface height at x, z (time t, default now); -1000 where there is no sea (inland dips). The queries
+	// of a frame (boat hulls over several substeps, swimmers, splashes, floating items) mostly land in the same
+	// few cells: exact heights (heightAtExact) are cached per time on a HEIGHT_STEP lattice and interpolated
+	// bilinearly; a cell with a corner where the water is hidden (land, inland) answers exactly.
+	heightAt( x, z, t = this.time ) {
+		const C = this._hc;
+		if ( t !== C.t || C.map.size > 50000 ) { C.map.clear(); C.t = t; }
+		const fx = x / HEIGHT_STEP, fz = z / HEIGHT_STEP;
+		const i = Math.floor( fx ), j = Math.floor( fz );
+		const a = this._node( i, j, t ), b = this._node( i + 1, j, t ), c = this._node( i, j + 1, t ), d = this._node( i + 1, j + 1, t );
+		if ( a !== a || b !== b || c !== c || d !== d ) return this.heightAtExact( x, z, t );
+		const tx = fx - i, tz = fz - j;
+		return ( a * ( 1 - tx ) + b * tx ) * ( 1 - tz ) + ( c * ( 1 - tx ) + d * tx ) * tz;
+	}
+
+	// many points at once: out[ k ] = heightAt( xs[ k ], zs[ k ], t )
+	heightsAt( xs, zs, out = new Float32Array( xs.length ), t = this.time ) {
+		for ( let k = 0; k < xs.length; k ++ ) out[ k ] = this.heightAt( xs[ k ], zs[ k ], t );
+		return out;
+	}
+
+	// a lattice node of the height cache: the exact height, NaN where the water is hidden
+	_node( i, j, t ) {
+		const map = this._hc.map;
+		const key = ( i + 131072 ) * 262144 + ( j + 131072 );
+		let v = map.get( key );
+		if ( v === undefined ) {
+			const y = this.heightAtExact( i * HEIGHT_STEP, j * HEIGHT_STEP, t );
+			v = this._hidden ? NaN : y;
+			map.set( key, v );
+		}
+		return v;
+	}
+
 	// CPU twin of the rendered surface (Tidewater WaterQuery.waterQueryHeightAtXZ): the displacement is
 	// Lagrangian (x0 -> x0 + D( x0 )), so solve x0 + D( x0 ) = xz with two fixed-point steps. -1000 where
-	// there is no sea (inland dips).
-	heightAt( x, z, t = this.time ) {
+	// there is no sea (inland dips). (this._hidden: the water is hidden there)
+	heightAtExact( x, z, t = this.time ) {
+		this._hidden = true;
 		if ( seaMaskAt( this.hf, this.seaMask, x, z ) < 0.5 ) return - 1000;
 		const ground = this.tile.groundAt( x, z );
 		const depth = - ground;
@@ -332,6 +370,7 @@ export class Ocean {
 		}
 		// hide the water sheet below dry land (as the vertex shader does)
 		if ( y < ground ) y = Math.min( y, depth < - 3 ? Math.min( ground - 2, - 1 ) : ground - 0.06 );
+		else this._hidden = false;
 		return y;
 	}
 

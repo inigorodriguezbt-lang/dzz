@@ -12,14 +12,15 @@ fs.mkdirSync( outdir, { recursive: true } );
 const browser = await launch();
 const page = await browser.newPage( { viewport: { width: 1280, height: 720 } } );
 await lean( page );
-await page.addInitScript( () => {
+// LITE=1: less vegetation, water and view distance (the container's memory is shared with other test pages)
+await page.addInitScript( ( lite ) => {
 	try {
 		localStorage.setItem( 'deadtide.settings.v1', JSON.stringify( {
-			version: 2, quality: 'custom', shadows: 'medium', terrainDetail: 'medium', vegetation: 'medium', clouds: 'low', antialias: 'fxaa',
-			water: 'medium', grass: true, renderDistance: 1100, ao: true, shafts: false, lensFlare: false, bloom: true, tutorial: false, showFps: false,
+			version: 2, quality: 'custom', shadows: 'medium', terrainDetail: 'medium', vegetation: lite ? 'low' : 'medium', clouds: lite ? 'off' : 'low', antialias: 'fxaa',
+			water: lite ? 'low' : 'medium', grass: ! lite, renderDistance: lite ? 900 : 1100, ao: true, shafts: false, lensFlare: false, bloom: true, tutorial: false, showFps: false,
 		} ) );
 	} catch ( e ) { /* ignore */ }
-} );
+}, !! process.env.LITE );
 const logs = [];
 page.on( 'crash', () => { console.log( 'PAGE CRASHED' ); console.log( logs.join( '\n' ) ); process.exit( 2 ); } );
 page.on( 'console', m => { const t = m.text(); if ( ! t.includes( 'vite' ) && ! t.includes( 'ERR_CERT' ) && ! t.includes( 'GPU stall' ) ) logs.push( `[${m.type()}] ${t}` ); } );
@@ -31,9 +32,11 @@ console.log( 'ready after', ( ( Date.now() - t0 ) / 1000 ).toFixed( 0 ), 's' );
 await page.evaluate( () => {
 	const g = window.__app.game;
 	g.timeFrozen = true;
-	window.__pose = ( o ) => {
+	window.__pose = async ( o ) => {
 		const c = g.commands;
 		if ( o.weather ) c.run( '/weather ' + o.weather + ' lock' );
+		// wetness follows the rain only slowly: set it for the shot
+		if ( o.wet !== undefined ) ( await import( '/src/render/Materials.js' ) ).G.uWet.value = o.wet;
 		if ( o.hour !== undefined ) { const h = Math.floor( o.hour ), m = Math.round( ( o.hour - h ) * 60 ); c.run( '/time set ' + h + ':' + String( m ).padStart( 2, '0' ) ); }
 		g.player.flying = o.y !== undefined;
 		if ( o.y !== undefined ) c.teleport( o.x, g.hf.heightAt( o.x, o.z ) + o.y, o.z ); else c.teleport( o.x, null, o.z );
@@ -43,7 +46,7 @@ await page.evaluate( () => {
 		return g.player.pos.toArray().map( v => + v.toFixed( 1 ) );
 	};
 	// wait until no world job is pending for a while (the roads, buildings, vegetation and terrain stream in workers)
-	window.__settle = async ( maxMs = 90000 ) => {
+	window.__settle = async ( maxMs = 45000 ) => {
 		const a = window.__app, t0 = performance.now();
 		let calm = 0;
 		while ( calm < 6 && performance.now() - t0 < maxMs ) {

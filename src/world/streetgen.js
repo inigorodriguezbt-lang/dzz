@@ -5,7 +5,7 @@
 // msg: { ci, cj, lod }  lod 0 = full detail (props, curbs, colliders), 1 = far (surfaces only, coarse)
 // Positions are relative to the cell origin (ci * CELL, 0, cj * CELL).
 import {
-	buildNetwork, CELL, RC, SK, roadPoint, hh, hashStr, mulberry32, segDist, highwayEdgeDist, armDir, MILE,
+	buildNetwork, CELL, RC, SK, roadPoint, hh, hashStr, mulberry32, segDist, highwayEdgeDist, armDir, MILE, LOT, inBuilding,
 } from '../city/roads/network.js';
 import {
 	PROP, CAR, CAR_DIMS, CF, DECAL, SIGN_CELL, MISC, WIDE, MATS,
@@ -14,7 +14,7 @@ import {
 let NET = null;
 
 // surface lifts above the ground: higher classes win where surfaces overlap
-const LIFT = { 4: 0.075, 2: 0.066, 1: 0.058, street: 0.05, walk: 0.05, runway: 0.09, taxi: 0.085, conn: 0.08 };
+const LIFT = { 4: 0.075, 2: 0.066, 1: 0.058, street: 0.05, walk: 0.05, runway: 0.09, taxi: 0.085, conn: 0.08, lot: LOT.LIFT, apron: 0.052 };
 const CURB = 0.15;
 const STUB = [ 3.6, 3.2, 0, 0 ]; // crosswalk length at intersections by street kind
 const CH = 24; // highway chunk length: chunks are assigned to cells by their midpoint
@@ -48,6 +48,8 @@ class Geo {
 }
 
 let OX = 0, OZ = 0, hf = null, net = null;
+// the paved surface the props and cars being placed stand on (its lift above the ground)
+let SURF = 0;
 const E = new Array( 16 ).fill( 0 );
 const P = [ 0, 0, 0, 0, 0 ], P2 = [ 0, 0, 0, 0, 0 ];
 const H = ( x, z ) => hf.heightAt( x, z );
@@ -98,11 +100,14 @@ export function buildStreetCell( _hf, world, msg ) {
 		wires: [], props: [], signs: [], cars: [], decals: [], boxes: [],
 	};
 	const C = { ci, cj, lod, out };
+	SURF = 0;
 	emitHighways( C );
 	emitStreets( C );
 	emitNodes( C );
 	emitRunways( C );
+	emitLots( C );
 	if ( ! lod ) { emitFences( C ); emitEvents( C ); }
+	SURF = 0;
 	const transfer = [];
 	const res = {
 		ci, cj, lod, ox: OX, oz: OZ,
@@ -124,15 +129,20 @@ export function buildStreetCell( _hf, world, msg ) {
 
 // ---- placement helpers --------------------------------------------------------------------------------
 
+// (nothing of the street furniture may stand inside a building: a safety net under the placement rules)
 function prop( C, type, x, z, yaw, param = 0, sx = 1, tilt = 0, y = null ) {
-	C.out.props.push( type, x - OX, y ?? H( x, z ), z - OZ, yaw, sx, tilt, param );
+	if ( inBuilding( net, x, z, 0.25 ) ) return false;
+	C.out.props.push( type, x - OX, y ?? H( x, z ) + SURF, z - OZ, yaw, sx, tilt, param );
+	return true;
 }
 // sign board: cell (static atlas) or -1 - id (dynamic), centre position, facing yaw (front = local +z)
 function sign( C, cell, x, y, z, yaw, w, h, dbl = 0, dyn = 0 ) {
+	if ( inBuilding( net, x, z, 0.25 ) ) return;
 	C.out.signs.push( dyn, cell, x - OX, y, z - OZ, yaw, w, h, dbl, 0 );
 }
 function decal( C, kind, x, z, yaw, sx, sz, alpha = 1, y = null ) {
-	C.out.decals.push( kind, x - OX, y ?? H( x, z ) + 0.1, z - OZ, yaw, sx, sz, alpha );
+	if ( inBuilding( net, x, z ) ) return;
+	C.out.decals.push( kind, x - OX, y ?? H( x, z ) + SURF + 0.05, z - OZ, yaw, sx, sz, alpha );
 }
 function box( C, x, y, z, hx, hy, hz, yaw, mat ) {
 	C.out.boxes.push( x - OX, y, z - OZ, hx, hy, hz, yaw, MATS.indexOf( mat ) );
@@ -147,6 +157,7 @@ const yawFwd = ( dx, dz ) => Math.atan2( - dx, - dz );
 // a wrecked car resting on the ground: pitch / roll from the wheel contact heights
 function car( C, type, x, z, yaw, rnd, o = {} ) {
 	const d = CAR_DIMS[ type ];
+	if ( inBuilding( net, x, z, 0.4 ) ) return;
 	const s = Math.sin( yaw ), c = Math.cos( yaw );
 	// local (lx, lz) -> world: right = (c, -s), back = (s, c)
 	const at = ( lx, lz ) => H( x + c * lx + s * lz, z - s * lx + c * lz );
@@ -172,7 +183,7 @@ function car( C, type, x, z, yaw, rnd, o = {} ) {
 	let roll = Math.atan2( ( hFR + hRR ) / 2 - ( hFL + hRL ) / 2, 2 * d.tr );
 	if ( o.roll ) { roll += o.roll; if ( Math.abs( o.roll ) > 2 ) y += d.H - 0.05; else y += Math.abs( Math.sin( o.roll ) ) * d.W * 0.5; }
 	if ( o.pitch ) pitch += o.pitch;
-	if ( o.lift ) y += o.lift;
+	y += o.lift ?? SURF; // the tyres stand on the pavement, not in it
 	if ( type !== CAR.MTRUCK && type !== CAR.HUMVEE && type !== CAR.BUS && burn < 0.5 && ! o.noLoot ) flags |= CF.LOOT;
 	if ( type === CAR.HUMVEE || type === CAR.MTRUCK ) flags |= CF.LOOT;
 	const color = o.color ?? Math.floor( rnd() * 16 );
@@ -303,14 +314,19 @@ function jersey( C, rows, u, colliders ) {
 		for ( let k = 0; k < R; k ++ ) {
 			const w = rows[ k ];
 			const nx = w.nx * fn, nz = w.nz * fn;
-			E[ 0 ] = 0.64; E[ 1 ] = 0.62; E[ 2 ] = 0.58; E[ 3 ] = 0.9; E[ 4 ] = 0; E[ 5 ] = 1;
+			// light weathered concrete, grimy at the foot (tyre scuffs, road spray)
+			const g0 = 0.72 + 0.28 * Math.min( 1, b0 / 0.35 ), g1 = 0.72 + 0.28 * Math.min( 1, b1 / 0.35 );
+			E[ 3 ] = 0.9; E[ 4 ] = 0; E[ 5 ] = 1;
+			E[ 0 ] = 0.74 * g0; E[ 1 ] = 0.72 * g0; E[ 2 ] = 0.68 * g0;
 			G.v( w.x + w.nx * ( u + a0 ), ys[ k ] + b0, w.z + w.nz * ( u + a0 ), nx, fu, nz, E );
+			E[ 0 ] = 0.74 * g1; E[ 1 ] = 0.72 * g1; E[ 2 ] = 0.68 * g1;
 			G.v( w.x + w.nx * ( u + a1 ), ys[ k ] + b1, w.z + w.nz * ( u + a1 ), nx, fu, nz, E );
 		}
 		for ( let k = 0; k < R - 1; k ++ ) {
 			const a = base + k * 2;
-			// winding: from profile point 0 -> 1 is "right"; rows forward
-			if ( sgn >= 0 ) G.q( a, a + 1, a + 2, a + 3 ); else G.q( a + 1, a, a + 3, a + 2 );
+			// the profile runs round the barrier ( -u foot, over the top, +u foot ) with the rows' right vector as +u:
+			// ( point f -> f + 1 ) x forward faces out of every face
+			G.q( a, a + 1, a + 2, a + 3 );
 		}
 	}
 	if ( colliders ) {
@@ -493,6 +509,7 @@ function highwayProps( C, r, rh, q, chunks ) {
 		}
 	}
 	// scattered wrecks, more close to the towns
+	SURF = LIFT[ r.lanes ];
 	const dens = r.lanes === 4 ? 0.02 : r.lanes === 2 ? 0.011 : 0.004;
 	for ( const [ a, b ] of chunks ) {
 		for ( let s = Math.ceil( a / 6 ) * 6; s < b; s += 6 ) {
@@ -507,8 +524,8 @@ function highwayProps( C, r, rh, q, chunks ) {
 			let u, yawOff = ( rr() - 0.5 ) * 0.35, o = {};
 			const lw = r.lanes === 4 ? 3.5 : 3.6;
 			if ( r.lanes === 1 ) { u = ( rr() - 0.5 ) * 1.5; }
-			else if ( where < 0.45 ) { // on the shoulder, half off the road
-				u = dir * ( hw - 0.4 + rr() * 1.6 );
+			else if ( where < 0.45 ) { // pulled onto the shoulder (kept inside the guardrails)
+				u = dir * ( hw - 1.1 + rr() * 0.8 );
 				yawOff = ( rr() - 0.5 ) * 0.5;
 			} else if ( where < 0.85 ) {
 				u = dir * ( r.lanes === 4 ? 0.9 + lw * ( rr() < 0.5 ? 0.5 : 1.5 ) : lw * 0.5 );
@@ -523,6 +540,7 @@ function highwayProps( C, r, rh, q, chunks ) {
 			if ( rr() < 0.3 ) decal( C, DECAL.SKID, x - w.tx * dir * 9, z - w.tz * dir * 9, yawZ( w.tx, w.tz ) + ( rr() - 0.5 ) * 0.2, 2.2, 14, 0.8 );
 		}
 	}
+	SURF = 0;
 }
 
 function polePos( r, s, u ) {
@@ -611,28 +629,57 @@ function emitStreets( C ) {
 	}
 }
 
-// sidewalk strip along a street side: curb face, top, outer face; broken where a highway crosses
+// driveways across a street side: [ [ a0, a1 ] ] along the street
+function drivesOf( st, side ) {
+	const out = [];
+	if ( st.drives ) for ( const [ s, d0, d1 ] of st.drives ) if ( s === side ) out.push( [ d0, d1 ] );
+	return out.sort( ( p, q ) => p[ 0 ] - q[ 0 ] );
+}
+
+// sidewalk strip along a street side: curb face, top, outer face; cut by the driveways into the parking lots
+// (a concrete apron at street level) and broken where a highway crosses
 function walkStrip( C, st, side, a0, a1 ) {
 	if ( a1 - a0 < 0.5 ) return;
 	const G = C.out.walk;
 	const hw = st.w / 2, wk = st.walk;
 	const nx = - st.dz * side, nz = st.dx * side; // outward from the street centre
-	const n = Math.max( 1, Math.round( ( a1 - a0 ) / 3 ) );
-	const samples = [];
-	for ( let k = 0; k <= n; k ++ ) {
-		const a = a0 + ( a1 - a0 ) * k / n;
-		const bx = st.ax + st.dx * a, bz = st.az + st.dz * a;
-		const ok = ! onHighway( bx + nx * ( hw + wk * 0.5 ), bz + nz * ( hw + wk * 0.5 ), 0.6 ) && ! onHighway( bx + nx * hw, bz + nz * hw, 0.2 ) && ! onHighway( bx + nx * ( hw + wk ), bz + nz * ( hw + wk ), 0.2 );
-		samples.push( { a, bx, bz, ok } );
+	const cuts = drivesOf( st, side );
+	const spans = [];
+	let s = a0;
+	for ( const [ d0, d1 ] of cuts ) { if ( d0 > s ) spans.push( [ s, Math.min( d0, a1 ), s > a0 ] ); s = Math.max( s, d1 ); }
+	if ( s < a1 ) spans.push( [ s, a1, s > a0 ] );
+	for ( const [ s0, s1, cutStart ] of spans ) {
+		if ( s1 - s0 < 0.5 ) continue;
+		const cutEnd = s1 < a1;
+		const n = Math.max( 1, Math.round( ( s1 - s0 ) / 3 ) );
+		const samples = [];
+		for ( let k = 0; k <= n; k ++ ) {
+			const a = s0 + ( s1 - s0 ) * k / n;
+			const bx = st.ax + st.dx * a, bz = st.az + st.dz * a;
+			const ok = ! onHighway( bx + nx * ( hw + wk * 0.5 ), bz + nz * ( hw + wk * 0.5 ), 0.6 ) && ! onHighway( bx + nx * hw, bz + nz * hw, 0.2 ) && ! onHighway( bx + nx * ( hw + wk ), bz + nz * ( hw + wk ), 0.2 );
+			samples.push( { a, bx, bz, ok } );
+		}
+		let k = 0;
+		while ( k < samples.length ) {
+			if ( ! samples[ k ].ok ) { k ++; continue; }
+			let e = k;
+			while ( e + 1 < samples.length && samples[ e + 1 ].ok ) e ++;
+			if ( e > k ) walkPiece( C, G, samples.slice( k, e + 1 ), st, side, nx, nz, k > 0 || cutStart, e < samples.length - 1 || cutEnd );
+			k = e + 1;
+		}
 	}
-	let k = 0;
-	while ( k < samples.length ) {
-		if ( ! samples[ k ].ok ) { k ++; continue; }
-		let e = k;
-		while ( e + 1 < samples.length && samples[ e + 1 ].ok ) e ++;
-		if ( e > k ) walkPiece( C, G, samples.slice( k, e + 1 ), st, side, nx, nz, k > 0, e < samples.length - 1 );
-		k = e + 1;
-	}
+	for ( const [ d0, d1 ] of cuts ) apron( C, st, side, d0, d1 );
+}
+
+// the concrete driveway apron across the sidewalk, flush with the street
+function apron( C, st, side, d0, d1 ) {
+	const hw = st.w / 2, wk = st.walk;
+	const rows = streetRows( st, d0, d1, 1.6 );
+	const cols = side > 0 ? [ hw, hw + wk * 0.5, hw + wk + 0.3 ] : [ - hw - wk - 0.3, - hw - wk * 0.5, - hw ];
+	ribbon( C.out.road, rows, cols, cols.map( () => LIFT.apron ), ( row, c, e ) => {
+		e[ 0 ] = Math.abs( cols[ c ] ) - hw; e[ 1 ] = row.s; e[ 2 ] = RC.APRON; e[ 3 ] = wk;
+		e[ 4 ] = row.s - d0; e[ 5 ] = d1 - d0; e[ 6 ] = 0; e[ 7 ] = 0;
+	} );
 }
 
 function walkPiece( C, G, sm, st, side, nx, nz, capStart, capEnd ) {
@@ -720,7 +767,9 @@ function streetProps( C, st ) {
 	const at = ( a, u ) => [ st.ax + st.dx * a + nx * u, st.az + st.dz * a + nz * u ];
 	const blocked = ( a, u ) => { const [ x, z ] = at( a, u ); return onHighway( x, z, 1.5 ); };
 	const taken = []; // along positions per side used by furniture (keeps parked cars off hydrants)
-	const free = ( a, side, r ) => ! taken.some( t => t[ 1 ] === side && Math.abs( t[ 0 ] - a ) < r );
+	const drives = [ drivesOf( st, - 1 ), null, drivesOf( st, 1 ) ];
+	const onDrive = ( a, side, r ) => drives[ side + 1 ].some( ( [ d0, d1 ] ) => a > d0 - r && a < d1 + r );
+	const free = ( a, side, r ) => ! taken.some( t => t[ 1 ] === side && Math.abs( t[ 0 ] - a ) < r ) && ! onDrive( a, side, r * 0.5 );
 	const curbU = ( side ) => side * ( hw + ( wk > 0 ? 0.55 : 1.2 ) );
 	const onWalk = ( x, z, u ) => H( x, z ) + ( wk > 0 && Math.abs( u ) > hw && Math.abs( u ) < hw + wk ? LIFT.walk + CURB : 0 );
 	// streetlights (towns and resorts), utility poles with lines (villages and one side of town streets)
@@ -730,7 +779,7 @@ function streetProps( C, st ) {
 		for ( let a = a0 + 4 + rnd() * 6; a < a1 - 3; a += SP, k ++ ) {
 			const side = st.kind === SK.METRO ? ( k % 2 ? 1 : - 1 ) : ( st.axis ? 1 : - 1 );
 			const u = curbU( side );
-			if ( blocked( a, u ) ) continue;
+			if ( blocked( a, u ) || onDrive( a, side, 1.2 ) ) continue;
 			const [ x, z ] = at( a, u );
 			const flick = hh( st.id, k, 41 ) < 0.06 ? 1 : 0;
 			// the arm points over the street: local +x towards the centre line
@@ -740,19 +789,23 @@ function streetProps( C, st ) {
 		}
 	}
 	if ( st.kind === SK.VILLAGE || st.kind === SK.TOWN || st.kind === SK.BASE ) {
+		// on the sidewalk by the curb (the crossarm and its conductors over the sidewalk and the parking lane, clear
+		// of the building fronts)
 		const SP = 40;
 		const side = st.axis ? - 1 : 1;
-		const u = side * ( hw + wk + 0.6 );
+		const u = side * ( hw + ( wk > 0 ? 0.42 : 1.2 ) );
 		const poles = [];
 		for ( let a = a0 + 2; a <= a1; a += SP ) {
-			const [ x, z ] = at( a, u );
-			if ( onHighway( x, z, 1.5 ) ) { poles.push( null ); continue; }
-			poles.push( { x, z, y: H( x, z ), yaw: yawX( nx, nz ), nx, nz, a } );
+			let aa = a;
+			for ( const [ d0, d1 ] of drives[ side + 1 ] ) if ( aa > d0 - 1.2 && aa < d1 + 1.2 ) aa = aa - d0 < d1 - aa && d0 - 1.4 > a0 ? d0 - 1.4 : d1 + 1.4;
+			const [ x, z ] = at( aa, u );
+			if ( onHighway( x, z, 1.5 ) || inBuilding( net, x, z, 0.4 ) ) { poles.push( null ); continue; }
+			poles.push( { x, z, y: onWalk( x, z, u ), yaw: yawX( nx, nz ), nx, nz, a: aa } );
 		}
 		poles.forEach( ( p, i ) => {
 			if ( ! p ) return;
 			const lamp = st.kind === SK.VILLAGE && i % 2 === 0;
-			prop( C, hh( st.id, i, 51 ) < 0.1 ? PROP.POLE_T : PROP.POLE, p.x, p.z, p.yaw, lamp ? ( side > 0 ? 2 : 3 ) : 0 );
+			prop( C, hh( st.id, i, 51 ) < 0.1 ? PROP.POLE_T : PROP.POLE, p.x, p.z, p.yaw, lamp ? ( side > 0 ? 2 : 3 ) : 0, 1, 0, p.y );
 			if ( poles[ i + 1 ] ) spanWires( C, p, poles[ i + 1 ] );
 			taken.push( [ p.a, side ] );
 		} );
@@ -772,7 +825,7 @@ function streetProps( C, st ) {
 	// bus stop with shelter (metro) or sign and bench (town)
 	if ( town && wk > 0 && rnd() < ( st.kind === SK.METRO ? 0.3 : 0.16 ) ) {
 		const side = rnd() < 0.5 ? 1 : - 1, a = a0 + ( a1 - a0 ) * ( 0.3 + rnd() * 0.4 );
-		if ( free( a, side, 8 ) && ! blocked( a, curbU( side ) ) ) {
+		if ( free( a, side, 8 ) && ! onDrive( a, side, 5 ) && ! blocked( a, curbU( side ) ) ) {
 			// shelter back against the outer edge of the sidewalk, open to the street
 			const bu = side * ( hw + wk - 0.95 );
 			const [ x, z ] = at( a, bu );
@@ -792,9 +845,11 @@ function streetProps( C, st ) {
 		const [ x, z ] = at( a, u );
 		if ( free( a, side, 5 ) && ! onHighway( x, z, 2 ) ) {
 			const pool = net.cities[ st.city ].island === 3 ? NOTICES_OAHU : NOTICES;
+			SURF = LIFT.street;
 			const dir = rnd() < 0.5 ? 1 : - 1;
 			prop( C, PROP.SAWHORSE, x, z, yawX( nx, nz ) + ( rnd() - 0.5 ) * 0.2 );
-			sign( C, SIGN_CELL.wide( pool[ Math.floor( rnd() * pool.length ) ] ), x, H( x, z ) + 1.27, z, yawZ( st.dx * dir, st.dz * dir ), 1.9, 0.48, 1 );
+			sign( C, SIGN_CELL.wide( pool[ Math.floor( rnd() * pool.length ) ] ), x, H( x, z ) + SURF + 1.27, z, yawZ( st.dx * dir, st.dz * dir ), 1.9, 0.48, 1 );
+			SURF = 0;
 			taken.push( [ a, side ] );
 		}
 	}
@@ -809,10 +864,11 @@ function streetProps( C, st ) {
 	// parked (abandoned) cars along the curbs
 	const pP = [ 0.5, 0.36, 0.24, 0.12 ][ st.kind ];
 	const cu = hw - ( st.kind === SK.VILLAGE ? 1.0 : 1.15 );
+	SURF = LIFT.street;
 	for ( const side of [ - 1, 1 ] ) {
 		for ( let a = a0 + 2 + rnd() * 3; a < a1 - 3; a += 6.3 + rnd() * 0.8 ) {
 			if ( rnd() > pP ) continue;
-			if ( ! free( a, side, 3.5 ) ) continue;
+			if ( ! free( a, side, 3.5 ) || onDrive( a, side, 3.2 ) ) continue;
 			const [ x, z ] = at( a, side * cu );
 			if ( onHighway( x, z, 2 ) ) continue;
 			const dir = side;
@@ -820,6 +876,7 @@ function streetProps( C, st ) {
 			const o = {};
 			if ( st.base ) o.color = type === CAR.PICKUP ? 17 : 16;
 			if ( rnd() < 0.05 ) o.burn = 0.7 + rnd() * 0.3;
+			if ( type === CAR.MTRUCK && onDrive( a, side, 5 ) ) continue;
 			car( C, type, x, z, yawFwd( st.dx * dir, st.dz * dir ) + ( rnd() - 0.5 ) * 0.08, rnd, o );
 			taken.push( [ a, side ] );
 			if ( type === CAR.MTRUCK ) a += 3;
@@ -835,13 +892,14 @@ function streetProps( C, st ) {
 			scatterDebris( C, x, z, 6, rnd, 2 + Math.floor( rnd() * 4 ), 0.8 );
 		}
 	}
+	SURF = 0;
 	// trash bags, boxes and stains along the sidewalks, blood here and there
 	if ( ! st.base ) {
 		const n = Math.floor( rnd() * ( town ? 5 : 3 ) );
 		for ( let k = 0; k < n; k ++ ) {
 			const side = rnd() < 0.5 ? 1 : - 1, a = a0 + rnd() * ( a1 - a0 );
 			const [ x, z ] = at( a, side * ( hw + wk * ( 0.6 + rnd() * 0.35 ) + ( wk ? 0 : 1.5 ) ) );
-			if ( onHighway( x, z, 1 ) ) continue;
+			if ( onHighway( x, z, 1 ) || onDrive( a, side, 1 ) ) continue;
 			const y = H( x, z ) + ( wk > 0 ? LIFT.walk + CURB : 0 );
 			const t = rnd();
 			if ( t < 0.5 ) { for ( let b = 0; b < 1 + rnd() * 3; b ++ ) prop( C, PROP.TRASH_BAG, x + ( rnd() - 0.5 ) * 1.2, z + ( rnd() - 0.5 ) * 1.2, rnd() * 6.3, 0, 0.8 + rnd() * 0.4, 0, y ); }
@@ -852,7 +910,7 @@ function streetProps( C, st ) {
 		}
 		if ( rnd() < 0.35 ) {
 			const [ x, z ] = at( a0 + rnd() * ( a1 - a0 ), ( rnd() - 0.5 ) * st.w * 0.8 );
-			decal( C, [ DECAL.BLOOD_POOL, DECAL.BLOOD_DRAG, DECAL.OIL, DECAL.TIRE_MARKS ][ Math.floor( rnd() * 4 ) ], x, z, rnd() * 6.3, 1.5 + rnd() * 2, 2 + rnd() * 4, 0.85 );
+			decal( C, [ DECAL.BLOOD_POOL, DECAL.BLOOD_DRAG, DECAL.OIL, DECAL.TIRE_MARKS ][ Math.floor( rnd() * 4 ) ], x, z, rnd() * 6.3, 1.5 + rnd() * 2, 2 + rnd() * 4, 0.85, H( x, z ) + LIFT.street + 0.05 );
 		}
 	}
 }
@@ -956,7 +1014,8 @@ function nodeWalks( C, n, toW, eu, ev, has ) {
 				E[ 0 ] = 0;
 				G.v( p[ 0 ], p[ 1 ] + CURB, p[ 2 ], nxw, 0, nzw, E );
 			}
-			for ( let k = 0; k < N; k ++ ) { const a = fb + k * 2; if ( up ) G.q( a + 1, a, a + 3, a + 2 ); else G.q( a, a + 1, a + 2, a + 3 ); }
+			// ( bottom -> top ) x ( along the arc ) faces the street in the quadrants where sa = sb, away from it in the others
+			for ( let k = 0; k < N; k ++ ) { const a = fb + k * 2; if ( up ) G.q( a, a + 1, a + 2, a + 3 ); else G.q( a + 1, a, a + 3, a + 2 ); }
 			// the part of the quarter disc a square slab can cover
 			const q = wk * 0.7;
 			slab( Math.min( ca, ca - sa * q ), Math.max( ca, ca - sa * q ), Math.min( cb, cb - sb * q ), Math.max( cb, cb - sb * q ) );
@@ -1111,6 +1170,7 @@ function nodeProps( C, n, toW, has ) {
 		const a = dir( d1 ), b = dir( d1 + 1 );
 		const t1 = civType( rnd ), t2 = civType( rnd );
 		const burn = rnd() < 0.25 ? 0.8 : 0;
+		SURF = LIFT.street;
 		const x1 = n.x + a[ 0 ] * 2.5 - b[ 0 ] * 1.6, z1 = n.z + a[ 1 ] * 2.5 - b[ 1 ] * 1.6;
 		car( C, t1, x1, z1, yawFwd( - a[ 0 ], - a[ 1 ] ) + ( rnd() - 0.5 ) * 0.6, rnd, { burn } );
 		const x2 = n.x - a[ 0 ] * 1.2 + b[ 0 ] * 1.3, z2 = n.z - a[ 1 ] * 1.2 + b[ 1 ] * 1.3;
@@ -1118,6 +1178,7 @@ function nodeProps( C, n, toW, has ) {
 		decal( C, DECAL.GLASS, n.x, n.z, rnd() * 6.3, 3, 3, 0.9 );
 		decal( C, DECAL.SKID, n.x + a[ 0 ] * 9, n.z + a[ 1 ] * 9, yawZ( a[ 0 ], a[ 1 ] ), 2, 11, 0.8 );
 		scatterDebris( C, n.x, n.z, 7, rnd, 3, 1 );
+		SURF = 0;
 	}
 }
 
@@ -1167,9 +1228,164 @@ function emitRunways( C ) {
 			for ( let k = 0; k < 3; k ++ ) {
 				const v = rnd() * rw.len - rw.len / 2;
 				const x = rw.x + rw.cx * v + rw.nx * ( rnd() - 0.5 ) * rw.w * 0.6, z = rw.z + rw.sx * v + rw.nz * ( rnd() - 0.5 ) * rw.w * 0.6;
-				car( C, civType( rnd ), x, z, rnd() * 6.3, rnd, { burn: rnd() < 0.4 ? 0.9 : 0 } );
+				car( C, civType( rnd ), x, z, rnd() * 6.3, rnd, { burn: rnd() < 0.4 ? 0.9 : 0, lift: LIFT.runway } );
 			}
 		}
+	}
+}
+
+// ---- parking lots ------------------------------------------------------------------------------------------------
+
+// a surface grid over a rectangle: corner P0, unit axes A (length la) and B (depth lb), sample offsets along each;
+// lift( i, j ) per sample, attr( a, b, E ) fills the extras. Normals from the draped heights, faces up.
+function sheet( G, P0, A, B, as, bs, lift, attr ) {
+	const R = as.length, Cn = bs.length;
+	const X = new Float64Array( R * Cn ), Y = new Float64Array( R * Cn ), Z = new Float64Array( R * Cn );
+	for ( let r = 0; r < R; r ++ ) for ( let c = 0; c < Cn; c ++ ) {
+		const x = P0[ 0 ] + A[ 0 ] * as[ r ] + B[ 0 ] * bs[ c ], z = P0[ 1 ] + A[ 1 ] * as[ r ] + B[ 1 ] * bs[ c ];
+		X[ r * Cn + c ] = x; Z[ r * Cn + c ] = z; Y[ r * Cn + c ] = H( x, z ) + lift( r, c );
+	}
+	const base = G.vc;
+	for ( let r = 0; r < R; r ++ ) for ( let c = 0; c < Cn; c ++ ) {
+		const ra = Math.max( 0, r - 1 ) * Cn + c, rb = Math.min( R - 1, r + 1 ) * Cn + c;
+		const ca = r * Cn + Math.max( 0, c - 1 ), cb = r * Cn + Math.min( Cn - 1, c + 1 );
+		const ax = X[ cb ] - X[ ca ], ay = Y[ cb ] - Y[ ca ], az = Z[ cb ] - Z[ ca ];
+		const bx = X[ rb ] - X[ ra ], by = Y[ rb ] - Y[ ra ], bz = Z[ rb ] - Z[ ra ];
+		let nx = ay * bz - az * by, ny = az * bx - ax * bz, nz = ax * by - ay * bx;
+		if ( ny < 0 ) { nx = - nx; ny = - ny; nz = - nz; }
+		const l = Math.hypot( nx, ny, nz ) || 1;
+		attr( as[ r ], bs[ c ], E );
+		G.v( X[ r * Cn + c ], Y[ r * Cn + c ], Z[ r * Cn + c ], nx / l, ny / l, nz / l, E );
+	}
+	// B to the right of A (seen from above) keeps ribbon()'s winding, else mirror it
+	const right = - A[ 1 ] * B[ 0 ] + A[ 0 ] * B[ 1 ] > 0;
+	for ( let r = 0; r < R - 1; r ++ ) for ( let c = 0; c < Cn - 1; c ++ ) {
+		const a = base + r * Cn + c;
+		if ( right ) G.q( a, a + 1, a + Cn, a + Cn + 1 ); else G.q( a + 1, a, a + Cn + 1, a + Cn );
+	}
+}
+
+// evenly spaced samples over [ a, b ] at about `step`, with optional extra end samples
+const spaced = ( a, b, step ) => { const n = Math.max( 1, Math.round( ( b - a ) / step ) ), o = []; for ( let k = 0; k <= n; k ++ ) o.push( a + ( b - a ) * k / n ); return o; };
+
+// the rows of stalls of a lot: [ { bb0 (row back line, from the lot's back), dir (+1: the row reaches towards the
+// front) } ]
+function lotRows( L ) {
+	const rows = [];
+	for ( let p = 0; p < L.periods; p ++ ) rows.push( { bb: p * LOT.PERIOD, dir: 1 }, { bb: ( p + 1 ) * LOT.PERIOD, dir: - 1 } );
+	if ( L.single ) rows.push( { bb: L.periods * LOT.PERIOD, dir: 1 } );
+	return rows;
+}
+
+function emitLots( C ) {
+	const { ci, cj, lod, out } = C;
+	for ( const L of net.lots ) {
+		if ( ! mine( L.x, L.z, ci, cj ) ) continue;
+		const A = [ L.ax, L.az ], B = [ L.bx, L.bz ];
+		// b runs from the street into the block; the corner at a = 0, b = 0
+		const P0 = [ L.x - L.ax * L.la / 2 - L.bx * L.lb / 2, L.z - L.az * L.la / 2 - L.bz * L.lb / 2 ];
+		const at = ( a, b ) => [ P0[ 0 ] + L.ax * a + L.bx * b, P0[ 1 ] + L.az * a + L.bz * b ];
+		const step = lod ? 12 : 3;
+		// the edges tuck under the ground (hidden by the perimeter curb and the sidewalk)
+		const as = [ - 0.35, ...spaced( 0, L.la, step ), L.la + 0.35 ], bs = [ - 0.3, ...spaced( 0, L.lb, step ), L.lb + 0.35 ];
+		const edge = ( r, c ) => r === 0 || r === as.length - 1 || c === 0 || c === bs.length - 1;
+		sheet( out.road, P0, A, B, as, bs, ( r, c ) => edge( r, c ) ? - 0.08 : LOT.LIFT, ( a, b, e ) => {
+			e[ 0 ] = a; e[ 1 ] = L.lb - b; e[ 2 ] = RC.LOT; e[ 3 ] = L.la;
+			e[ 4 ] = L.lb; e[ 5 ] = L.periods + L.single * 0.5; e[ 6 ] = L.stalls; e[ 7 ] = L.driveA;
+		} );
+		if ( lod ) continue;
+		const rnd = mulberry32( L.seed * 7919 + 17 );
+		const kit = out.kit;
+		const Y = ( a, b ) => { const [ x, z ] = at( a, b ); return H( x, z ) + LOT.LIFT; };
+		// a low concrete curb round the three sides away from the street
+		const curb = ( a0, b0, a1, b1 ) => {
+			const n = Math.max( 1, Math.round( Math.hypot( a1 - a0, b1 - b0 ) / 3 ) );
+			for ( let k = 0; k < n; k ++ ) {
+				const ta = a0 + ( a1 - a0 ) * ( k + 0.5 ) / n, tb = b0 + ( b1 - b0 ) * ( k + 0.5 ) / n;
+				const [ x, z ] = at( ta, tb );
+				const [ x0, z0 ] = at( a0 + ( a1 - a0 ) * k / n, b0 + ( b1 - b0 ) * k / n ), [ x1, z1 ] = at( a0 + ( a1 - a0 ) * ( k + 1 ) / n, b0 + ( b1 - b0 ) * ( k + 1 ) / n );
+				const y = Math.min( H( x0, z0 ), H( x1, z1 ) ) + LOT.LIFT;
+				kitBox( kit, x, y + 0.04, z, 0.09, 0.1, Math.hypot( x1 - x0, z1 - z0 ) / 2 + 0.02, yawZ( x1 - x0, z1 - z0 ), [ 0.66, 0.64, 0.6 ], [ 0.9, 0, 1 ] );
+			}
+		};
+		curb( 0, L.lb, L.la, L.lb );
+		curb( 0, 0.2, 0, L.lb );
+		curb( L.la, 0.2, L.la, L.lb );
+		// stalls: wheel stops, parked-and-left cars, light poles on the back lines
+		const rows = lotRows( L );
+		const poles = [];
+		if ( L.la > 24 ) {
+			const lines = [ 0, ...rows.filter( r => r.dir < 0 ).map( r => r.bb ) ];
+			for ( const bb of lines ) {
+				const n = Math.max( 1, Math.round( L.la / 34 ) );
+				for ( let k = 0; k < n; k ++ ) {
+					// between two stalls
+					const a = 0.4 + Math.round( ( ( k + 0.5 ) / n * ( L.la - LOT.CROSS ) - 0.4 ) / LOT.STALL ) * LOT.STALL;
+					if ( a < 1 || a > L.la - LOT.CROSS || ( bb > L.lb - 7 && Math.abs( a - L.driveA ) < LOT.DRIVE ) ) continue;
+					poles.push( [ a, bb ] );
+					const [ x, z ] = at( a, L.lb - bb + ( bb === 0 ? - 0.35 : 0 ) );
+					prop( C, PROP.STREETLIGHT2, x, z, yawX( L.ax, L.az ), hh( L.seed, k, bb | 0 ) < 0.05 ? 1 : 0, 1, 0, Y( a, L.lb - bb ) + 0.02 );
+				}
+			}
+		}
+		const occ = [ 0.3, 0.24, 0.16 ][ L.kind ];
+		for ( const row of rows ) {
+			for ( let k = 0; k < L.stalls; k ++ ) {
+				const a = 0.4 + ( k + 0.5 ) * LOT.STALL;
+				// (a row against the street is cut where the driveway comes through it)
+				if ( Math.abs( a - L.driveA ) < LOT.DRIVE / 2 + 1.3 && Math.max( row.bb, row.bb + row.dir * LOT.ROW ) > L.lb - 6 ) continue;
+				// the concrete wheel stop at the head of the stall
+				const bbStop = row.bb + row.dir * 0.65;
+				if ( rnd() < 0.8 ) {
+					const [ x, z ] = at( a + ( rnd() - 0.5 ) * 0.15, L.lb - bbStop );
+					kitBox( kit, x, H( x, z ) + LOT.LIFT + 0.06, z, 0.85, 0.07, 0.09, yawX( L.ax, L.az ) + ( rnd() - 0.5 ) * 0.06, [ 0.7, 0.68, 0.63 ], [ 0.9, 0, 1 ] );
+				}
+				if ( poles.some( ( [ pa, pb ] ) => Math.abs( pa - a ) < 1.5 && Math.abs( pb - row.bb ) < 0.5 ) ) continue;
+				if ( rnd() > occ ) continue;
+				// nose in (most), towards the row's back line
+				const bbCar = row.bb + row.dir * ( 2.75 + ( rnd() - 0.5 ) * 0.3 );
+				const [ x, z ] = at( a + ( rnd() - 0.5 ) * 0.35, L.lb - bbCar );
+				const into = [ L.bx * row.dir, L.bz * row.dir ]; // world direction towards the back line (-bb is +b)
+				const rev = rnd() < 0.12 ? - 1 : 1;
+				SURF = LOT.LIFT;
+				let type = civType( rnd );
+				if ( type === CAR.PICKUP && rnd() < 0.3 ) type = CAR.SEDAN;
+				car( C, type, x, z, yawFwd( into[ 0 ] * rev, into[ 1 ] * rev ) + ( rnd() - 0.5 ) * 0.1, rnd, { burn: rnd() < 0.04 ? 0.85 : 0 } );
+				SURF = 0;
+			}
+		}
+		// left in a hurry across the aisle, doors open
+		SURF = LOT.LIFT;
+		if ( rnd() < 0.5 && rows.length ) {
+			const row = rows[ Math.floor( rnd() * rows.length ) ];
+			const bb = row.bb + row.dir * ( 5.4 + LOT.AISLE / 2 );
+			if ( bb > 3 && bb < L.lb - 3 ) {
+				const [ x, z ] = at( 3 + rnd() * ( L.la - LOT.CROSS - 6 ), L.lb - bb );
+				car( C, civType( rnd ), x, z, yawFwd( L.ax, L.az ) + ( rnd() - 0.5 ) * 1.4, rnd, { flags: CF.DOOR_FL | ( rnd() < 0.5 ? CF.DOOR_FR : 0 ) | ( rnd() < 0.4 ? CF.TRUNK : 0 ) | ( rnd() < 0.3 ? CF.GLASS_SOME : 0 ) } );
+				scatterDebris( C, x, z, 5, rnd, 2 + Math.floor( rnd() * 3 ), 0.7 );
+			}
+		}
+		// trolleys, bags, bins at a back corner, stains
+		const carts = L.kind < 2 ? Math.floor( rnd() * 5 ) : Math.floor( rnd() * 2 );
+		for ( let k = 0; k < carts; k ++ ) {
+			const [ x, z ] = at( 2 + rnd() * ( L.la - 4 ), 2 + rnd() * ( L.lb - 4 ) );
+			prop( C, PROP.CART, x, z, rnd() * 6.3, 0, 1, rnd() < 0.2 ? 1.4 : 0 );
+		}
+		const ca = rnd() < 0.5 ? 1.2 : L.la - 1.2;
+		for ( let k = 0; k < 1 + Math.floor( rnd() * 2 ); k ++ ) {
+			const [ x, z ] = at( ca + ( ca < 2 ? 1 : - 1 ) * k * 0.9, L.lb - 0.9 );
+			prop( C, PROP.TRASH_CAN, x, z, yawZ( - L.bx, - L.bz ) + ( rnd() - 0.5 ) * 0.2, 1, 1, rnd() < 0.15 ? 1.5708 : 0 );
+		}
+		for ( let k = 0; k < 2 + Math.floor( rnd() * 4 ); k ++ ) {
+			const [ x, z ] = at( 1 + rnd() * ( L.la - 2 ), 1 + rnd() * ( L.lb - 2 ) );
+			const t = rnd();
+			if ( t < 0.35 ) prop( C, PROP.TRASH_BAG, x, z, rnd() * 6.3, 0, 0.8 + rnd() * 0.4 );
+			else if ( t < 0.5 ) prop( C, PROP.CARDBOARD, x, z, rnd() * 6.3, 0, 0.7 + rnd() * 0.5 );
+			else if ( t < 0.75 ) decal( C, DECAL.OIL, x, z, rnd() * 6.3, 1.5 + rnd() * 2, 2 + rnd() * 2, 0.7 );
+			else if ( t < 0.88 ) decal( C, DECAL.PAPERS, x, z, rnd() * 6.3, 2 + rnd() * 2, 2 + rnd() * 2, 0.9 );
+			else decal( C, DECAL.TIRE_MARKS, x, z, rnd() * 6.3, 2, 5 + rnd() * 3, 0.7 );
+		}
+		SURF = 0;
 	}
 }
 
@@ -1241,10 +1457,12 @@ function emitEvents( C ) {
 		if ( ! mine( e.x, e.z, ci, cj ) ) continue;
 		const r = e.road;
 		const rnd = mulberry32( e.seed );
+		SURF = LIFT[ r.lanes ] || 0;
 		if ( e.type === 'jam' ) jam( C, e, r, rnd );
 		else if ( e.type === 'roadblock' ) roadblock( C, e, r, rnd );
 		else if ( e.type === 'checkpoint' ) checkpoint( C, e, r, rnd );
 		else if ( e.type === 'crash' ) crash( C, e, r, rnd );
+		SURF = 0;
 	}
 }
 
@@ -1260,8 +1478,8 @@ function jam( C, e, r, rnd ) {
 	const L = Math.abs( e.s1 - e.s );
 	const outL = lanes( r, dir );
 	let placed = 0;
-	for ( const u0 of [ ...outL, dir * ( r.hw + 0.3 ) ] ) {
-		const shoulder = Math.abs( u0 ) > r.hw - 0.5;
+	for ( const u0 of r.lanes === 4 ? [ ...outL, dir * ( r.hw - 0.95 ) ] : outL ) {
+		const shoulder = Math.abs( u0 ) > r.hw - 1.2;
 		let d = 2 + rnd() * 4;
 		while ( d < L ) {
 			const s = e.s + dir * d;

@@ -82,9 +82,9 @@ export const SPEC = {
 // distance (m). The grass field and the pebbles have their own quality tables (GrassField GRASS_QUALITY,
 // PebbleField PEBBLE_QUALITY).
 const QUALITY = {
-	low: { dist: 0.55, mid: 0.8, density: 0.5, far: 0.6, blend: 0 },
-	medium: { dist: 0.78, mid: 0.88, density: 0.75, far: 0.85, blend: 500 },
-	high: { dist: 1, mid: 1, density: 1, far: 1, blend: 1e5 },
+	low: { dist: 0.55, mid: 0.75, density: 0.5, far: 0.6, blend: 0 },
+	medium: { dist: 0.78, mid: 0.8, density: 0.75, far: 0.85, blend: 500 },
+	high: { dist: 1, mid: 0.85, density: 1, far: 1, blend: 1e5 },
 	ultra: { dist: 1.3, mid: 1, density: 1, far: 1, blend: 1e5 },
 };
 
@@ -170,6 +170,8 @@ export class Vegetation {
 			this.models[ s ] = g0;
 			const make = ( g, name, shadow ) => {
 				const U = vegUniforms( cfg.kind, cfg.tint[ 0 ], cfg.tint[ 1 ], cfg.bark, cfg.mode, cfg.leaf );
+				const bs = g.boundingSphere;
+				U.uBound.value.set( bs.center.x, bs.center.y, bs.center.z, bs.radius );
 				const t = new InstanceTarget( SPECIES[ s ].name + '-' + name, g, makeVegMaterial( U ), shadow ? makeVegDepthMaterial( U ) : null );
 				t.U = U;
 				t.species = s;

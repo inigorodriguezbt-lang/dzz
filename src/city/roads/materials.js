@@ -229,6 +229,14 @@ function makeRoadMaterial() {
 						// gutter grime by the curbs
 						col *= 1.0 - 0.18 * smoothstep( hw - 0.6, hw, au );
 						edgeWet = smoothstep( hw - 0.9, hw - 0.1, au );
+						// the travel lanes: an oil-drip streak down the middle of each, tyre-polished wheel paths either side
+						float lu = au - ( pl > 0.0 ? pl * 0.5 : hw * 0.5 );
+						col *= 1.0 - 0.1 * exp( - lu * lu / 0.12 ) * ( 0.5 + nf.g );
+						col *= 1.0 - 0.05 * exp( - pow( ( abs( lu ) - 0.85 ) / 0.3, 2.0 ) );
+						// utility trenches cut across one half of the street and patched over
+						float tp = s + vRd2.y * 11.0;
+						float th = hash12( vec2( floor( tp / 23.0 ), vRd2.y ) );
+						patchM = max( patchM, step( 0.8, th ) * boxAA( mod( tp, 23.0 ), 9.0, 9.9 ) * boxAA( u * sign( th - 0.9 ), - 0.3, hw ) * 0.85 );
 					} else if ( cls < 4.5 ) {
 						// intersection box and its crosswalk stubs; rd = (a, b) in the node frame
 						float S = vRd2.x, kind = floor( vRd2.z + 0.5 );
@@ -286,11 +294,52 @@ function makeRoadMaterial() {
 						col *= 1.0 - 0.22 * smoothstep( hw - 0.05, hw + 0.2, au );
 						yel *= step( au, hw );
 						edgeWet = smoothstep( hw - 1.5, hw, au );
-					} else {
-						// far sidewalks / aprons
+					} else if ( cls < 7.5 ) {
+						// far sidewalks
 						col = texture2D( tWalk, wp / 3.0 ).rgb * ( 0.9 + 0.2 * nf.r );
 						rRough = 0.85;
 						crackAmt = 0.0;
+					} else if ( cls < 8.5 ) {
+						// driveway apron across the sidewalk: broom-finished concrete, a joint down the middle and one
+						// along the gutter, tyre grime in two wheel paths (rd2 = along from its start, its width)
+						vec3 cc = texture2D( tConc, wp * 0.35 ).rgb;
+						col = cc * vec3( 1.04, 1.02, 0.98 ) * ( 0.95 + 0.12 * nf.r );
+						float mid = vRd2.x - vRd2.y * 0.5;
+						col *= 1.0 - 0.4 * clamp( lineAA( mid, 0.012 ) + lineAA( u - 0.25, 0.012 ), 0.0, 1.0 );
+						col *= 1.0 - 0.2 * nf.g * ( exp( - pow( ( abs( mid ) - 0.8 ) / 0.35, 2.0 ) ) );
+						rRough = 0.88;
+						crackAmt *= 0.3;
+						rNS = 0.3;
+						edgeWet = 1.0 - smoothstep( 0.0, 0.6, u );
+					} else {
+						// parking lot: older, sun-bleached asphalt; stall rows of 5.4 m on both sides of 7 m aisles in
+						// 17.8 m periods from the back (rd.y), one more single row if it fits; a cross aisle at the far
+						// end (rd.x > stalls). rd2 = ( depth, periods + 0.5 single, stalls, driveway position )
+						float la = W, lb = vRd2.x, bb = s, a = u;
+						float nP = floor( vRd2.y + 0.01 ), single = step( 0.25, fract( vRd2.y ) ), nS = vRd2.z, dA = vRd2.w;
+						col = mix( col, col * vec3( 1.1, 1.08, 1.04 ), 0.55 + 0.3 * nz.g );
+						crackAmt = max( crackAmt, 0.3 + 0.45 * nz.b );
+						float p = floor( bb / 17.8 ), f = bb - p * 17.8;
+						float rowF = - 1.0;
+						if ( p < nP ) rowF = f < 5.4 ? f : f > 12.4 ? 17.8 - f : - 1.0;
+						else if ( single > 0.5 && p < nP + 0.5 && f < 5.4 ) rowF = f;
+						float inRow = step( 0.0, rowF );
+						float aS = a - 0.4;
+						float span = boxAA( aS, - 0.1, nS * 2.6 + 0.1 );
+						float sep = stripeAA( aS, 2.6, 0.0, 0.055 ) * boxAA( rowF, 0.0, 5.1 ) * span;
+						float kb = clamp( floor( bb / 17.8 + 0.5 ), 0.0, nP );
+						float back = lineAA( bb - kb * 17.8, 0.055 ) * span;
+						paint += ( sep + back ) * 0.85;
+						// no stall paint where the driveway comes in through a row against the street
+						paint *= 1.0 - boxAA( a, dA - 3.6, dA + 3.6 ) * step( lb - 6.0, bb );
+						// oil dripped in the middle of the stalls, tyre-polished aisles
+						float sf = fract( aS / 2.6 ) - 0.5;
+						float oh = hash12( vec2( floor( aS / 2.6 ), floor( bb / 5.9 ) ) + la * 0.37 );
+						float oil = inRow * span * ( 1.0 - smoothstep( 0.25, 1.0, length( vec2( sf * 2.6 / 0.75, ( rowF - 2.9 ) / 1.25 ) ) ) ) * step( 0.3, oh ) * ( 0.45 + 0.55 * nh.g );
+						col *= 1.0 - 0.5 * oil;
+						rRough = mix( rRough, 0.5, oil * 0.6 );
+						col *= 1.0 - 0.06 * ( 1.0 - inRow ) * nf.g;
+						edgeWet = oil * 0.5;
 					}
 					// cracks and sealed tar snakes
 					col *= 1.0 - cr.r * 0.5 * crackAmt;
@@ -314,24 +363,27 @@ function makeRoadMaterial() {
 					}
 					// puddles in the low spots when it rains (and for a while after)
 					if ( uWet > 0.02 ) {
-						float pn = texture2D( tNoise, wp * 0.031 ).r * 0.62 + nf.g * 0.38 + edgeWet * 0.22;
-						float pud = smoothstep( 0.66 - uWet * 0.14, 0.72 - uWet * 0.14, pn ) * smoothstep( 0.05, 0.5, uWet );
-						col *= 1.0 - 0.5 * pud;
+						// (in the ruts, the gutters and the dips first; the open surface stays mostly just wet)
+						float pn = texture2D( tNoise, wp * 0.031 ).r * 0.6 + nf.g * 0.4 + edgeWet * 0.26;
+						float pud = smoothstep( 0.69 - uWet * 0.1, 0.74 - uWet * 0.1, pn ) * smoothstep( 0.05, 0.5, uWet );
+						col *= 1.0 - 0.55 * pud;
 						// not below ~0.07: a sharper sun highlight overflows the half-float scene target into black specks
 						rRough = mix( rRough, 0.07, pud );
 						rNS *= 1.0 - pud;
 						// the sky dome IBL is dimmer relative to the sunlit ground than the real sky: without a boost the
 						// standing water reads as dark stains instead of mirrors of the sky
-						rEnv = 1.0 + 1.1 * pud;
+						rEnv = 1.0 + 0.6 * pud;
 						// raindrop rings
 						vec2 rp = wp * 2.0;
 						vec2 ci = floor( rp );
 						float rt = fract( uTime * 0.9 + hash12( ci ) );
-						float rr = length( fract( rp ) - 0.5 - ( vec2( hash12( ci + 1.3 ), hash12( ci + 2.7 ) ) - 0.5 ) * 0.4 );
-						// (only while it is really wet, i.e. still raining; subtle so the tilted normals don't pick up the dark ground in the IBL)
+						vec2 rv = fract( rp ) - 0.5 - ( vec2( hash12( ci + 1.3 ), hash12( ci + 2.7 ) ) - 0.5 ) * 0.4;
+						float rr = length( rv );
+						// (only while it is really wet, i.e. still raining; a gentle radial ripple so the tilted normals don't pick up the
+						// dark ground in the IBL as black circles)
 						float ring = ( 1.0 - smoothstep( 0.0, 0.03, abs( rr - rt * 0.45 ) ) ) * ( 1.0 - rt ) * pud * smoothstep( 0.6, 0.9, uWet );
-						rNT.xy += vec2( ring ) * 0.25;
-						rNS = max( rNS, ring );
+						rNT.xy += rv / max( rr, 1e-3 ) * ring * 0.12;
+						rNS = max( rNS, ring * 0.6 );
 					}
 					diffuseColor.rgb = col;
 				}
@@ -441,8 +493,8 @@ function makeKitMaterial() {
 						vec3 t = texture2D( tConc, wp.zy * 0.4 ).rgb * an.x + texture2D( tConc, wp.xz * 0.4 ).rgb * an.y + texture2D( tConc, wp.xy * 0.4 ).rgb * an.z;
 						// the texture is a warm mid-grey (~0.16 linear): normalise it and keep a little of its hue
 						kcol *= mix( vec3( dot( t, vec3( 0.3, 0.59, 0.11 ) ) ), t, 0.35 ) / 0.16;
-						// tyre scuffs and grime near the foot
-						kcol *= 1.0 - 0.35 * smoothstep( 0.35, 0.0, fract( wp.y + 10.0 ) ) * n1.g;
+						// (grime and tyre scuffs at the foot come with the vertex colour)
+						kcol *= 0.9 + 0.2 * n1.g;
 					} else {
 						// galvanised steel with white rust and a few rust streaks
 						kcol *= 0.85 + 0.3 * n1.r;
@@ -841,8 +893,8 @@ export function makeCarMaterial( u ) {
 						if ( hole && part != 9 ) discard;
 						if ( ( fl & 32 ) != 0 && lp.z > uLids.z && lp.z < uLids.w && lp.y > uLidY.y && abs( lp.x ) < uArch.x * 0.9 && part != 3 && part != 4 ) { col = vec3( 0.03, 0.028, 0.026 ); cRough = 1.0; cMetal = 0.2; }
 					}
-					// the inside of the shell (seen through the holes) is dark
-					if ( ! gl_FrontFacing ) { col = vec3( 0.018 ); cRough = 1.0; cMetal = 0.0; }
+					// the inside of the shell (seen through the holes) is dark; an open door or lid shows its trim panel
+					if ( ! gl_FrontFacing ) { col = uPanel > 0.5 ? vec3( 0.07, 0.066, 0.06 ) * ( 0.8 + 0.4 * n2.g ) : vec3( 0.018 ); cRough = 0.9; cMetal = 0.0; }
 					if ( part == 7 ) { cRough = 0.08; }
 					// the sky IBL is dim next to the sun: let glass and clear coat mirror a bit more of it so windows don't read
 					// as black holes and the paint doesn't look like plastic

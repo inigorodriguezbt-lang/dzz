@@ -224,6 +224,7 @@ const VERT_PARS = /* glsl */`
 	uniform float uTime; uniform vec3 uCamPos; uniform vec2 uWind; uniform vec3 uSunDir;
 	uniform vec4 uLod; uniform float uKind; uniform vec3 uThin; uniform float uShrinkEnd;
 	uniform float uWindStr; uniform float uDensity; uniform vec3 uPlayer; uniform float uShadowFar;
+	uniform vec4 uBound;
 	uniform sampler2D tDetail; uniform float uDetailOn; uniform vec4 uGustOff;
 	varying vec2 vVegUv; varying vec4 vVegMat; varying vec3 vVegCol; varying vec2 vVegFade; varying vec4 vVegInst; varying vec4 vVegGround;
 	varying vec4 vVegX; // x height fraction (aVeg.x), y under the rain-forest canopy (understory), z base height (world), w -
@@ -246,6 +247,26 @@ const VERT_PARS = /* glsl */`
 	// rotation taking +y to the unit vector T
 	vec3 vegRotUpTo( vec3 v, vec3 T ) { vec3 k = vec3( T.z, 0.0, - T.x ); vec3 c1 = cross( k, v ); return v + c1 + cross( k, c1 ) / ( T.y + 1.0 ); }
 	vec3 vegRotY( vec3 v, float c, float s ) { return vec3( v.x * c + v.z * s, v.y, - v.x * s + v.z * c ); }
+
+	// (ours) the plant's bounding sphere (uBound: model centre, radius; times the scale, widened for the
+	// wind) is outside the view of this pass: the camera's frustum, or a sun cascade's box in the shadow
+	// passes. The CPU refills the instances only when the camera moves (all around it, and the shadows
+	// need the plants behind it), so most instances of a pass are off its view: they skip all the work.
+	bool vegOutside( vec3 wbase, float s ) {
+		vec3 c = wbase + vec3( 0.0, uBound.y * s, 0.0 );
+		float r = ( uBound.w + length( uBound.xz ) ) * s * 1.15 + 1.0;
+		vec3 v = ( viewMatrix * vec4( c, 1.0 ) ).xyz;
+		if ( projectionMatrix[ 3 ][ 3 ] > 0.5 ) {
+			vec2 q = vec2( projectionMatrix[ 0 ][ 0 ] * v.x + projectionMatrix[ 3 ][ 0 ], projectionMatrix[ 1 ][ 1 ] * v.y + projectionMatrix[ 3 ][ 1 ] );
+			return abs( q.x ) > 1.0 + r * projectionMatrix[ 0 ][ 0 ] || abs( q.y ) > 1.0 + r * projectionMatrix[ 1 ][ 1 ];
+		}
+		// perspective: behind the camera, or further than the radius past a side plane
+		float z = - v.z;
+		if ( z < - r ) return true;
+		vec2 t = vec2( 1.0 / projectionMatrix[ 0 ][ 0 ], 1.0 / projectionMatrix[ 1 ][ 1 ] );
+		vec2 m = r * sqrt( 1.0 + t * t ) + abs( vec2( projectionMatrix[ 2 ][ 0 ], projectionMatrix[ 2 ][ 1 ] ) ) * t * max( z, 0.0 );
+		return abs( v.x ) > z * t.x + m.x || abs( v.y ) > z * t.y + m.y;
+	}
 
 	vec3 vegP; vec3 vegN;
 	void vegDeform( vec3 p, vec3 n ) {
@@ -281,7 +302,7 @@ const VERT_PARS = /* glsl */`
 		vVegCol = aCol;
 		vVegUv = uv;
 		vVegGround = vec4( 0.0 );
-		if ( vVegFade.x <= 0.0 || fout >= 1.0 || vis <= 0.0 ) { vegP = base; vegN = vec3( 0.0, 1.0, 0.0 ); return; }
+		if ( vVegFade.x <= 0.0 || fout >= 1.0 || vis <= 0.0 || vegOutside( wbase, s ) ) { vegP = base; vegN = vec3( 0.0, 1.0, 0.0 ); return; }
 		float grow = ( 1.0 + thinK * ( 1.0 - uThin.z ) * 0.35 ) * vis;
 
 		float cy = cos( yaw ), sy = sin( yaw );
@@ -633,6 +654,8 @@ export function vegUniforms( kind, tintA, tintB, barkTint, mode = [ 0, 0, 0, 0 ]
 		uShrinkEnd: { value: 0 },
 		uKind: { value: kind },
 		uThin: { value: new THREE.Vector3( 0, 0, 1 ) },
+		// bounding sphere of the model ( centre, radius ), set per mesh (the default never culls)
+		uBound: { value: new THREE.Vector4( 0, 0, 0, 1e5 ) },
 		uTintA: { value: new THREE.Color( ...tintA ) },
 		uTintB: { value: new THREE.Color( ...tintB ) },
 		uBarkTint: { value: new THREE.Color( ...( barkTint || [ 1, 1, 1 ] ) ) },

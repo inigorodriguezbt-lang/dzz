@@ -40,6 +40,7 @@ const game = {
 	app: { ui: { openContainer( c ) { console.log( 'open', c.label, c.items.length ); } } },
 };
 window.__game = game;
+window.__renderer = renderer;
 // jump the camera (used by test/roads-shots.mjs): x, z, height above ground, yaw, pitch, fov, hour, wet
 window.__view = ( x, z, h = 1.7, yaw = 0, pitch = 0, fov = 0, hr = 10, wet = 0 ) => {
 	cam.position.set( x, Math.max( world.hf.heightAt( x, z ), 0 ) + h, z );
