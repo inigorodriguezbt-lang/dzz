@@ -122,7 +122,7 @@ function evaluateCode( name, mode ) {
 			// a few metres from the camera the ~0.6 m octave (and the ~1.4 m one further out) aliased into a
 			// field of single-vertex spikes over the whole bore
 			float w1 = smoothstep( 0.8, 0.4, shoreLumpSpacing ) * 0.7;
-			float w2 = smoothstep( 0.4, 0.2, shoreLumpSpacing ) * 0.3;
+			float w2 = smoothstep( 0.45, 0.25, shoreLumpSpacing ) * 0.3;
 			if ( roller != 0.0 ) {
 				float lumpy = sSat( perlin2( vec2( along * 0.045, mW * 3.7 ) ) * 1.2 + 0.55 );
 				float amp = roller * mix( 0.25, 0.7, lumpy );
@@ -638,7 +638,7 @@ function fieldTexture( data, res ) {
 export class ShoreWaves {
 	constructor() {
 		this.P = { period: 9.0, amplitude: 0.34, variation: 0.55, gamma: 0.78, breakSpan: 0.13, curl: 1.0, runup: 1.0, enabled: 1.0, turbidity: 0.16 };
-		this.field = null; // { data, res, x0, z0, size, swellDir }
+		this.field = null; // { data, psi, gpu, res, x0, z0, size, swellDir } (ShoreField.js)
 		this.texture = fieldTexture( new Uint32Array( new Float32Array( [ 1e5, 0, 0, 1e5 ] ).buffer ), 1 );
 		this.rect = new THREE.Vector4( 0, 0, 1, 1 );
 		this.fade = 0; // 0..1 (the tile swap fade)
