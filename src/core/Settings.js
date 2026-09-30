@@ -29,10 +29,13 @@ export const BINDING_LABELS = {
 
 export const DEFAULTS = {
 	// display
-	fov: 80, guiScale: 1, renderDistance: 1400, renderScale: 1, showFps: true, crosshair: 'dot', headBob: 1,
-	// graphics
-	quality: 'high', shadows: 'high', terrainDetail: 'high', vegetation: 'high', clouds: 'high', antialias: 'msaa',
-	bloom: true, water: 'high', grass: true, nightBrightness: 1,
+	// (vertical degrees; Tidewater's 62: less wide-angle distortion than the old 80)
+	fov: 62, guiScale: 1, renderDistance: 1400, renderScale: 1, showFps: true, crosshair: 'dot', headBob: 1,
+	// graphics. exposure: EV bias on the auto exposure (-2..2); ao: ambient occlusion (GTAO); shafts: sun
+	// shafts and god rays; antialias: off / fxaa / msaa / taa (temporal, also resolves shadow and AO noise)
+	quality: 'high', shadows: 'high', terrainDetail: 'high', vegetation: 'high', clouds: 'high', antialias: 'taa',
+	bloom: true, water: 'high', grass: true, nightBrightness: 1, exposure: 0, ao: true, shafts: true, lensFlare: true,
+	motionBlur: false,
 	// audio
 	masterVolume: 0.8, sfxVolume: 1, ambientVolume: 0.8, musicVolume: 0.5, uiVolume: 0.7,
 	// controls
@@ -42,20 +45,37 @@ export const DEFAULTS = {
 	showInteractHints: true, compass: true, minimap: true, units: 'metric', tutorial: true,
 };
 
+// the heavy passes (GTAO, the shaft march, TAA) are off on low; medium keeps the half resolution AO
 export const QUALITY_PRESETS = {
-	low: { shadows: 'off', terrainDetail: 'low', vegetation: 'low', clouds: 'off', antialias: 'fxaa', bloom: false, water: 'low', grass: false, renderScale: 0.75, renderDistance: 800 },
-	medium: { shadows: 'medium', terrainDetail: 'medium', vegetation: 'medium', clouds: 'low', antialias: 'fxaa', bloom: true, water: 'medium', grass: true, renderScale: 1, renderDistance: 1100 },
-	high: { shadows: 'high', terrainDetail: 'high', vegetation: 'high', clouds: 'high', antialias: 'msaa', bloom: true, water: 'high', grass: true, renderScale: 1, renderDistance: 1400 },
-	ultra: { shadows: 'ultra', terrainDetail: 'ultra', vegetation: 'ultra', clouds: 'high', antialias: 'msaa', bloom: true, water: 'high', grass: true, renderScale: 1, renderDistance: 2200 },
+	low: { shadows: 'off', terrainDetail: 'low', vegetation: 'low', clouds: 'off', antialias: 'fxaa', bloom: false, water: 'low', grass: false, renderScale: 0.75, renderDistance: 800, ao: false, shafts: false, lensFlare: false },
+	medium: { shadows: 'medium', terrainDetail: 'medium', vegetation: 'medium', clouds: 'low', antialias: 'fxaa', bloom: true, water: 'medium', grass: true, renderScale: 1, renderDistance: 1100, ao: true, shafts: false, lensFlare: true },
+	high: { shadows: 'high', terrainDetail: 'high', vegetation: 'high', clouds: 'high', antialias: 'taa', bloom: true, water: 'high', grass: true, renderScale: 1, renderDistance: 1400, ao: true, shafts: true, lensFlare: true },
+	ultra: { shadows: 'ultra', terrainDetail: 'ultra', vegetation: 'ultra', clouds: 'high', antialias: 'taa', bloom: true, water: 'high', grass: true, renderScale: 1, renderDistance: 2200, ao: true, shafts: true, lensFlare: true },
 };
+
+// settings saved before the rendering port: the old default FOV (80) becomes 62, the high / ultra presets'
+// MSAA becomes TAA, and keys new to a saved preset take that preset's value (so it isn't shown as custom)
+const VERSION = 2;
+function migrate( s ) {
+	if ( ( s.version ?? 1 ) >= VERSION ) return;
+	if ( s.fov === 80 ) s.fov = 62;
+	const p = QUALITY_PRESETS[ s.quality ];
+	if ( p ) {
+		if ( p.antialias === 'taa' && s.antialias === 'msaa' ) s.antialias = 'taa';
+		for ( const k in p ) if ( ! ( k in s ) ) s[ k ] = p[ k ];
+	}
+	s.version = VERSION;
+}
 
 export class Settings {
 	constructor() {
 		this.values = structuredClone( DEFAULTS );
+		this.values.version = VERSION;
 		this.listeners = new Map();
 		try {
 			const s = JSON.parse( localStorage.getItem( KEY ) || 'null' );
 			if ( s ) {
+				migrate( s );
 				Object.assign( this.values, s );
 				this.values.bindings = { ...structuredClone( DEFAULT_BINDINGS ), ...( s.bindings || {} ) };
 			}
@@ -85,6 +105,7 @@ export class Settings {
 	resetAll() {
 		const b = this.values.bindings;
 		this.values = structuredClone( DEFAULTS );
+		this.values.version = VERSION;
 		this.values.bindings = b;
 		for ( const k in this.values ) for ( const fn of this.listeners.get( k ) || [] ) fn( this.values[ k ] );
 		this.save();

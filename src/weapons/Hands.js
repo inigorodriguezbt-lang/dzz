@@ -21,11 +21,14 @@ import { Ballistics, hitEntity, coneDir } from './Ballistics.js';
 import { Throwables } from './Throwables.js';
 import { FX } from '../render/FX.js';
 import { ensureWeaponSounds } from './Sounds.js';
-import { printTex } from '../game/items/models/lib.js';
 
-// the worn top's fabric on the sleeves (a tiling print from the items module), cached per print
+// the worn top's fabric on the sleeves (a tiling print from the items module), cached per print. The items module's
+// print helper isn't a documented API: it is loaded lazily, and until (or unless) it loads the sleeves stay plain.
+let printTex = null;
+const printTexReady = import( '../game/items/models/lib.js' ).then( m => { printTex = m.printTex || null; } ).catch( () => {} );
 const PRINTS = new Map();
 function sleevePrint( m ) {
+	if ( ! printTex ) return null;
 	const k = `${m.print}:${m.color}:${m.color2}:${m.color3}`;
 	if ( PRINTS.has( k ) ) return PRINTS.get( k );
 	let t = null;
@@ -37,11 +40,25 @@ function sleevePrint( m ) {
 	return t;
 }
 
+// take a stack out of a list of items (nested containers included)
+function pull( items, stack ) {
+	const i = items.indexOf( stack );
+	if ( i >= 0 ) { items.splice( i, 1 ); return true; }
+	for ( const s of items ) if ( s.data?.items && pull( s.data.items, stack ) ) return true;
+	return false;
+}
+function holds( items, stack ) {
+	for ( const s of items ) if ( s === stack || ( s.data?.items && holds( s.data.items, stack ) ) ) return true;
+	return false;
+}
+
 const PI = Math.PI;
 const clamp = THREE.MathUtils.clamp;
 const rnd = Math.random;
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3(), _q = new THREE.Quaternion(), _e = new THREE.Euler( 0, 0, 0, 'YXZ' );
 const LIVING = new Set( [ 'zombie', 'animal', 'npc' ] );
+// a physics hit on something that moves (a door leaf, a vehicle's box): a world-space decal would be left hanging
+const movingBox = ( h ) => h?.box && ( h.box.kind === 'door' || h.box.dynamic || h.box.owner?.type === 'vehicle' );
 const CONSUMABLE = new Set( [ 'food', 'drink', 'medical' ] );
 
 export function install( game ) {
@@ -98,16 +115,34 @@ export class Hands {
 		try {
 			const gl = game.renderer?.gl;
 			if ( gl ) {
-				const pm = new THREE.PMREMGenerator( gl );
-				this.envTex = pm.fromScene( new RoomEnvironment(), 0.04 ).texture;
+				const pm = new THREE.PMREMGenerator( gl ), room = new RoomEnvironment();
+				this.envTex = pm.fromScene( room, 0.04 ).texture;
 				pm.dispose();
+				room.dispose();
 				this.vm.setEnvironment( this.envTex );
 			}
 		} catch ( e ) { console.warn( 'view env', e ); }
 		this._offs = [
-			game.events.on( 'playerDeath', () => { this._cancelAct(); this.adsWant = false; this.game.player.aimFov = 1; } ),
+			game.events.on( 'playerDeath', () => this._onDeath() ),
 		];
+		// the sleeve print helper arrives late: dress the arms again when it does
+		printTexReady.then( () => { this._invVer = - 1; } );
 		this._warmUp();
+		// the modelled arms arrive a moment later: compile their materials then, not on the first draw
+		this.vm.onArms = () => this._warmArms();
+	}
+
+	_warmArms() {
+		const g = this.game, gl = g.renderer?.gl, vm = this.vm;
+		if ( ! gl?.compile ) return;
+		try {
+			const wasVis = vm.root.visible, vis = [ vm.armR.visible, vm.armL.visible ];
+			vm.root.visible = true; vm.armL.visible = true;
+			vm.armL.warm( true );
+			gl.compile( g.viewScene, g.viewCamera );
+			vm.armL.warm( false );
+			vm.root.visible = wasVis; [ vm.armR.visible, vm.armL.visible ] = vis;
+		} catch ( e ) { console.warn( 'arms warm-up', e ); }
 	}
 
 	// Compile every shader the hands and the effects will need while the world is still loading, so the first
@@ -124,12 +159,12 @@ export class Hands {
 			const red = getItem( 'optic_reddot' );
 			if ( red ) warm.add( reticleLens( red, { lensR: 0.012, axisH: 0.03 } ) );
 			vm.root.add( warm );
-			// both arms, one of them gloved
-			const wasVis = vm.root.visible, mats = vm.armL.skin.material;
+			// both arms, one of them with every clothing material on
+			const wasVis = vm.root.visible;
 			vm.root.visible = true;
-			vm.armL.skin.material = [ vm.armL.mSkin, vm.armL.mGlove, vm.armL.mGlove ];
+			vm.armL.warm( true );
 			gl.compile( g.viewScene, g.viewCamera );
-			vm.armL.skin.material = mats;
+			vm.armL.warm( false );
 			vm.root.visible = wasVis;
 			vm.root.remove( warm );
 			box.dispose();
@@ -143,6 +178,19 @@ export class Hands {
 				for ( const o of objs ) g.scene.add( o );
 			}
 		} catch ( e ) { console.warn( 'weapons warm-up', e ); }
+	}
+
+	// a grenade in hand falls with the body: a pulled pin or a lit wick goes off where the player died, never later at
+	// the next spawn
+	_onDeath() {
+		this._cancelAct();
+		this.adsWant = false;
+		this.game.player.aimFov = 1;
+		const T = this.throwing;
+		if ( T && ! T.launched && ( T.pin || T.lit ) && this._owned( T.stack ) ) this._launch( T, true );
+		this.throwing = null;
+		this.quickReturn = null;
+		this._ammoPref = null;
 	}
 
 	// build the view models of the carried weapons ahead of time (one per call), so switching never waits on it
@@ -190,7 +238,8 @@ export class Hands {
 		const def = getItem( stack.id );
 		if ( def?.cat === 'firearm' ) ops.sanitizeGun( stack );
 		this._cancelAct();
-		this._endThrow( false );
+		// switching away from a cooking frag drops it live at the feet
+		this._endThrow();
 		this.lastUid = inv.hands || this.lastUid;
 		inv.hands = stack.uid;
 		inv.changed();
@@ -208,7 +257,7 @@ export class Hands {
 		const inv = this.inv;
 		if ( ! inv.hands ) return;
 		this._cancelAct();
-		this._endThrow( false );
+		this._endThrow();
 		this.lastUid = inv.hands;
 		inv.hands = null;
 		inv.changed();
@@ -240,6 +289,8 @@ export class Hands {
 		if ( this.frame % 20 === 0 ) this._prefetch();
 		// the held uid must still be in the inventory (dropped, eaten, traded away): holster quietly
 		if ( inv.hands && ! inv.findUid( inv.hands ) ) { inv.hands = null; inv.changed(); this._cancelAct(); }
+		// an item whose definition is gone (an old save, a removed mod item) can't be held
+		if ( inv.hands && ! getItem( this.held?.id ) ) { inv.hands = null; inv.changed(); this._cancelAct(); }
 		const held = this.held;
 		const def = held ? getItem( held.id ) : null;
 		const kind = this.kindOf( def );
@@ -369,7 +420,7 @@ export class Hands {
 			if ( I.pressed( 'fire' ) ) this._startThrow( false, false );
 			else if ( I.pressed( 'aim' ) && ! this.throwing ) this._startThrow( true, false );
 			if ( this.throwing && ! this.throwing.byKey && ( I.released( 'fire' ) || I.released( 'aim' ) ) ) this._releaseThrow();
-		} else if ( I.pressed( 'fire' ) && ready ) {
+		} else if ( I.pressed( 'fire' ) && ready && def ) {
 			// tools and items: use them
 			if ( def.tool?.kind === 'flashlight' || def.tool?.kind === 'headlamp' ) this._toggleLight( held, def );
 			else if ( def.tool?.kind === 'binoculars' ) this.adsWant = ! this.adsWant;
@@ -648,7 +699,10 @@ export class Hands {
 			if ( ! best ) {
 				if ( ops.canChamber( gun ) ) { this._rack( gun, def ); return true; }
 				if ( gun.data.mag && gun.data.mag.data.rounds >= getItem( gun.data.mag.id ).magazine.capacity ) this._inspect();
-				else g.toast( ops.spareMags( inv, gun ).length ? 'Magazines empty' : 'No magazine', 'warn' );
+				else {
+					const spare = ops.spareMags( inv, gun );
+					g.toast( ! spare.length ? 'No magazine' : spare.every( m => ! ( m.data.rounds > 0 ) ) ? 'Magazines empty' : 'No fuller magazine', 'warn' );
+				}
 				return false;
 			}
 			const empty = ! gun.data.chamber && f.action !== 'open';
@@ -674,7 +728,7 @@ export class Hands {
 			return true;
 		}
 		// internal feeds
-		const ammo = ops.findAmmo( inv, f.caliber, gun.data.ammo );
+		const ammo = this._ammoFor( gun, f );
 		const room = ops.internalRoom( gun );
 		if ( f.action === 'bow' || f.action === 'crossbow' ) {
 			if ( gun.data.rounds > 0 ) return false;
@@ -693,7 +747,7 @@ export class Hands {
 		if ( f.clip && room >= f.clip && ammo.qty >= f.clip && ! gun.data.chamber ) {
 			this._startAct( 'shells_open', 0.4 * speed, {}, [ [ 0.3, () => this._sfx( 'bolt', 0.5, 1.1 ) ] ], () => {
 				this._startAct( 'clip', f.reload * 0.8 * speed, { port: 'top' }, [
-					[ 0.5, () => { const a = ops.findAmmo( inv, f.caliber, gun.data.ammo ); if ( a ) { ops.loadInternal( gun, a, f.clip ); this._spend( a ); } this._sfx( 'shell_in', 0.7, 0.8 ); this._sfx( 'mag_in', 0.4, 1.3 ); } ],
+					[ 0.5, () => { const a = this._ammoFor( gun, f ); if ( a ) { ops.loadInternal( gun, a, f.clip ); this._spend( a ); } this._sfx( 'shell_in', 0.7, 0.8 ); this._sfx( 'mag_in', 0.4, 1.3 ); } ],
 				], () => this._closeLoop( gun, def, 'shells' ) );
 			} );
 			return true;
@@ -708,12 +762,12 @@ export class Hands {
 		const openSnd = kind === 'revolver' ? 'cylinder_open' : kind === 'break' ? 'break_open' : f.action === 'bolt' ? 'bolt' : null;
 		const port = f.action === 'pump' ? 'bottom' : 'top';
 		const insert = () => {
-			const a = ops.findAmmo( inv, f.caliber, gun.data.ammo );
+			const a = this._ammoFor( gun, f );
 			if ( ! a || ops.internalRoom( gun ) <= 0 ) return this._closeLoop( gun, def, kind );
 			const p = { loop: true, port };
 			this._startAct( kind === 'shells' ? 'shells_insert' : kind + '_insert', f.perRound * speed, p, [
 				[ 0.5, () => {
-					const a2 = ops.findAmmo( inv, f.caliber, gun.data.ammo );
+					const a2 = this._ammoFor( gun, f );
 					if ( a2 && ops.loadInternal( gun, a2, 1 ) ) { this._spend( a2 ); this._sfx( 'shell_in', 0.7, 0.95 + rnd() * 0.1 ); if ( kind === 'revolver' ) this.vm.cylAngle = ( this.vm.cylAngle || 0 ) + PI / 3; }
 					inv.changed();
 				} ],
@@ -733,6 +787,7 @@ export class Hands {
 
 	_closeLoop( gun, def, kind ) {
 		const f = def.firearm;
+		this._ammoPref = null;
 		const needRack = ! gun.data.chamber && ! ops.roundsOnly( f ) && ops.canChamber( gun );
 		const snd = kind === 'revolver' ? 'cylinder_close' : kind === 'break' ? 'break_close' : f.action === 'pump' ? 'pump' : f.action === 'bolt' || f.action === 'lever' || f.action === 'semi' ? 'bolt' : null;
 		this._startAct( kind === 'shells' ? 'shells_close' : kind + '_close', ( needRack ? 0.6 : 0.4 ) * ( this.creative ? 0.8 : 1 ), { rack: needRack }, [
@@ -755,13 +810,40 @@ export class Hands {
 		return true;
 	}
 
-	// an ammo stack went down: remove it when empty (wherever it is)
+	// an ammo stack went down: remove it when empty (wherever it is), else let an open container show the new count
 	_spend( ammo ) {
-		if ( ammo.qty > 0 ) return;
-		if ( ! this.inv.remove( ammo ) ) {
-			const w = this.game.items3d?.near?.( this.game.player.pos, 6 )?.find( x => x.stack === ammo );
-			if ( w ) this.game.items3d.remove( w, { taken: true } );
-		}
+		if ( ammo.qty <= 0 ) this._take( ammo );
+		else { const c = this._containerOf( ammo ); if ( c ) this._containerChanged( c ); }
+	}
+
+	// the open world container (locker, trunk, body) holding a stack, if any
+	_containerOf( stack ) {
+		const o = this.game.app?.ui?.inventory?.other;
+		return o?.items && holds( o.items, stack ) ? o : null;
+	}
+	_containerChanged( c ) {
+		c.dirty = true;
+		this.game.events.emit( 'container:changed', { container: c } );
+	}
+
+	// take a stack from wherever the inventory UI found it: the player's inventory, the open world container or the
+	// ground. false when it is nowhere (it must not be duplicated onto a gun then)
+	_take( stack ) {
+		const g = this.game;
+		if ( this.inv.remove( stack ) ) return true;
+		const c = this._containerOf( stack );
+		if ( c && pull( c.items, stack ) ) { this._containerChanged( c ); return true; }
+		const w = g.items3d?.byStack?.( stack ) || g.items3d?.near?.( g.player.pos, 6 )?.find( x => x.stack === stack );
+		if ( w ) { g.items3d.remove( w, { taken: true } ); return true; }
+		return false;
+	}
+
+	// loose rounds for an internal feed: the stack dropped on the gun in the inventory UI first (wherever it lies),
+	// else the inventory's
+	_ammoFor( gun, f ) {
+		const P = this._ammoPref;
+		if ( P && P.gun === gun && P.stack.qty > 0 && getItem( P.stack.id )?.ammo?.caliber === f.caliber && ( this._owned( P.stack ) || this._containerOf( P.stack ) || this.game.items3d?.byStack?.( P.stack ) ) ) return P.stack;
+		return ops.findAmmo( this.inv, f.caliber, P?.gun === gun ? P.stack.id : gun.data.ammo );
 	}
 
 	_inspect() {
@@ -893,17 +975,17 @@ export class Hands {
 			if ( living ) {
 				if ( o.kind !== 'fist' ) g.fx?.blood( point, dir, o.kind === 'blade' || o.kind === 'axe' || o.kind === 'spear' ? 1.2 : 0.6 );
 				this._sfx( o.kind === 'blade' || o.kind === 'axe' || o.kind === 'spear' ? 'hit_blade' : o.kind === 'fist' ? 'punch' : 'hit_flesh', 0.8, 0.9 + rnd() * 0.2 );
-			} else g.fx?.impact( point, _v2.copy( dir ).negate(), target.type === 'vehicle' ? 'metal' : 'wood', { kind: 'melee' } );
+			} else g.fx?.impact( point, _v2.copy( dir ).negate(), target.type === 'vehicle' ? 'metal' : 'wood', { kind: 'melee', decal: false } );
 			P.shake = Math.max( P.shake, o.heavy ? 0.2 : 0.1 );
 			g.events.emit( 'noise', { pos: point.clone(), radius: 10, source: P, kind: 'melee' } );
 			this._wear( stack, def, o.wear );
 			return true;
 		}
 		if ( wall ) {
-			g.fx?.impact( wall.point, wall.normal, wall.mat === 'dirt' ? 'dirt' : wall.mat, { kind: 'melee', sound: true, decal: o.kind !== 'fist' } );
+			g.fx?.impact( wall.point, wall.normal, wall.mat === 'dirt' ? 'dirt' : wall.mat, { kind: 'melee', sound: true, decal: o.kind !== 'fist' && ! movingBox( wall ) } );
 			// doors give way to axes and hammers
 			const door = g.city?.doorAt?.( wall.point, 1.4 );
-			if ( door?.bash && o.door ) door.bash( o.damage * o.door, { source: P, kind: 'melee' } );
+			if ( door?.bash && o.door ) door.bash( o.damage * o.door, P );
 			g.events.emit( 'noise', { pos: wall.point.clone(), radius: 14, source: P, kind: 'melee' } );
 			P.shake = Math.max( P.shake, 0.12 );
 			this._wear( stack, def, ( o.wear || 0 ) * 0.6 );
@@ -1019,8 +1101,9 @@ export class Hands {
 	_endThrow( launchIfCooked ) {
 		const T = this.throwing;
 		if ( ! T ) return;
-		// a cooking frag doesn't just disappear when you switch away: drop it at your feet
-		if ( launchIfCooked !== false && T.pin && T.def.throwable.kind === 'frag' && ! T.launched ) this._launch( T, true );
+		// a cooking frag doesn't just disappear when you switch away: drop it at your feet (only while it is still
+		// ours: after a death and a respawn it belongs to the body)
+		if ( launchIfCooked !== false && T.pin && T.def.throwable.kind === 'frag' && ! T.launched && this._owned( T.stack ) ) this._launch( T, true );
 		this.throwing = null;
 	}
 
@@ -1300,7 +1383,7 @@ export class Hands {
 		if ( ! ops.magFits( def, mag.id ) ) { g.toast( 'Does not fit', 'warn' ); return false; }
 		ops.sanitizeGun( gun );
 		// in hand: the full animation does the swap
-		if ( gun === this.held && this.shown === gun && ! this.act && this._owned( mag ) ) {
+		if ( gun === this.held && this.shown === gun && ! this.act ) {
 			const had = gun.data.mag;
 			const best = mag;
 			const p = { magOut: 0.3, magIn: 0.66, charge: 0, hadMag: !! had, newMag: best.id };
@@ -1316,11 +1399,8 @@ export class Hands {
 	_swapMag( gun, mag ) {
 		const g = this.game, inv = this.inv;
 		const old = gun.data.mag;
-		if ( ! inv.remove( mag ) ) {
-			// from the ground / a container on screen
-			const w = g.items3d?.near?.( g.player.pos, 6 )?.find( x => x.stack === mag );
-			if ( w ) g.items3d.remove( w, { taken: true } );
-		}
+		// from the inventory, the ground or an open container: it must leave where it was
+		if ( ! this._take( mag ) ) { g.toast( 'Magazine missing', 'warn' ); return false; }
 		gun.data.mag = mag;
 		if ( old && inv.add( old, { autoEquip: false } ) > 0 ) g.dropStack( old );
 		this._sfx( 'mag_in', 0.7 );
@@ -1361,7 +1441,13 @@ export class Hands {
 		if ( f.feed !== 'internal' ) { g.toast( 'Takes magazines', 'info' ); return false; }
 		if ( f.caliber !== ad.caliber ) { g.toast( 'Wrong ammo', 'warn' ); return false; }
 		ops.sanitizeGun( gun );
-		if ( gun === this.held && this.shown === gun ) return this.reload();
+		if ( gun === this.held && this.shown === gun ) {
+			// the reload loop takes this stack first, wherever it lies
+			this._ammoPref = { gun, stack: ammo };
+			if ( this.reload() ) return true;
+			this._ammoPref = null;
+			return false;
+		}
 		const n = Math.min( ops.internalRoom( gun ), ammo.qty );
 		if ( n <= 0 ) { g.toast( 'Full', 'info' ); return false; }
 		let loaded = 0;
@@ -1381,10 +1467,7 @@ export class Hands {
 		if ( ! fit.ok ) { g.toast( fit.reason, 'warn' ); return false; }
 		ops.sanitizeGun( gun );
 		const slot = fit.slot;
-		if ( ! inv.remove( att ) ) {
-			const w = g.items3d?.near?.( g.player.pos, 6 )?.find( x => x.stack === att );
-			if ( w ) g.items3d.remove( w, { taken: true } );
-		}
+		if ( ! this._take( att ) ) return false;
 		const old = gun.data.att[ slot ];
 		gun.data.att[ slot ] = att;
 		if ( old && inv.add( old, { autoEquip: false } ) > 0 ) g.dropStack( old );

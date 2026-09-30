@@ -157,7 +157,7 @@ export class Throwables {
 			if ( A?.ctx && A.bus?.sfx ) {
 				A.bus.sfx.gain.setTargetAtTime( g.settings.get( 'sfxVolume' ) * ( 1 - deaf * 0.85 ), A.ctx.currentTime, 0.02 );
 				clearTimeout( this._deafT );
-				this._deafT = setTimeout( () => { try { A.bus.sfx.gain.setTargetAtTime( g.settings.get( 'sfxVolume' ), A.ctx.currentTime, 1.2 ); } catch ( e ) { /* closed */ } }, 1500 + deaf * 3000 );
+				this._deafT = setTimeout( () => { this._deafT = null; try { A.bus.sfx.gain.setTargetAtTime( g.settings.get( 'sfxVolume' ), A.ctx.currentTime, 1.2 ); } catch ( e ) { /* closed */ } }, 1500 + deaf * 3000 );
 			}
 		}
 		P.shake = Math.max( P.shake || 0, 0.4 * deaf );
@@ -211,7 +211,17 @@ export class Throwables {
 	dispose() {
 		for ( const o of this.list ) o.mesh.parent?.remove( o.mesh );
 		this.list.length = 0; this.zones.length = 0;
-		clearTimeout( this._deafT );
+		// deafened when the game ends: the sound effects come back now, not after the next volume change
+		if ( this._deafT ) {
+			clearTimeout( this._deafT );
+			this._deafT = null;
+			const A = this.game.audio;
+			try {
+				const gain = A.bus.sfx.gain, t = A.ctx.currentTime;
+				gain.cancelScheduledValues( t );
+				gain.setValueAtTime( this.game.settings.get( 'sfxVolume' ), t );
+			} catch ( e ) { A?.applyVolumes?.(); }
+		}
 		this.game.flash = 0;
 	}
 }

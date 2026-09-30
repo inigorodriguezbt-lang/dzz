@@ -234,7 +234,8 @@ export class Ballistics {
 				g.audio?.play( zone === 'head' ? 'headshot' : 'hit_flesh', { pos: point, vol: zone === 'head' ? 0.9 : 0.6, max: 60 } );
 			} else g.audio?.play( 'hit_flesh', { pos: point, vol: 0.5, max: 40 } );
 		} else {
-			g.fx?.impact( point, _v2.copy( _d ).negate(), e.type === 'vehicle' ? 'metal' : 'wood', { size: Math.min( 1.5, dmg / 40 ), dir: _d } );
+			// no decal: a world-space mark would hang in the air once the vehicle drives off
+			g.fx?.impact( point, _v2.copy( _d ).negate(), e.type === 'vehicle' ? 'metal' : 'wood', { size: Math.min( 1.5, dmg / 40 ), dir: _d, decal: false } );
 		}
 		// arrows stop in the body; some can be pulled out of the carcass later
 		if ( p.kind === 'arrow' || p.kind === 'bolt' ) {
@@ -263,6 +264,8 @@ export class Ballistics {
 		if ( s.kind === 'ground' ) mat = this._groundMat( point );
 		const n = s.normal;
 		const isBox = s.kind === 'box';
+		// door leaves swing open: marks on them would be left behind in world space
+		const moving = isBox && ( s.box.kind === 'door' || s.box.dynamic || s.box.owner?.type === 'vehicle' );
 		if ( s.kind === 'water' ) {
 			g.fx?.impact( point, n, 'water', { size: p.kind === 'pellet' ? 0.3 : 1 } );
 			return false;
@@ -287,11 +290,11 @@ export class Ballistics {
 				let cap = mat === 'wood' ? p.pen : mat === 'foliage' ? p.pen * 8 : mat === 'metal' ? p.pen * 0.04 : mat === 'concrete' || mat === 'rock' ? p.concrete : 0;
 				if ( glass ) cap = 10;
 				if ( thick <= cap ) {
-					g.fx?.impact( point, n, glass ? 'glass' : mat, { size, dir: _d, sound: p.player || ! glass } );
+					g.fx?.impact( point, n, glass ? 'glass' : mat, { size, dir: _d, sound: p.player || ! glass, decal: moving ? false : undefined } );
 					if ( glass ) g.events.emit( 'noise', { pos: point.clone(), radius: 25, source: p.source, kind: 'glass' } );
 					box.onHit?.( { point, dir: _d.clone(), damage: dmg, kind: 'bullet', source: p.source } );
 					const exit = point.clone().addScaledVector( _d, thick + 0.01 );
-					if ( ! glass && mat !== 'foliage' ) g.fx?.impact( exit, _d, mat, { size: size * 0.6, dir: _d, sound: false } );
+					if ( ! glass && mat !== 'foliage' ) g.fx?.impact( exit, _d, mat, { size: size * 0.6, dir: _d, sound: false, decal: moving ? false : undefined } );
 					const lose = glass ? 0.12 : mat === 'foliage' ? 0.05 : 0.2 + 0.6 * thick / Math.max( cap, 1e-3 );
 					p.dmg *= 1 - lose;
 					if ( ! glass && mat !== 'foliage' ) p.pen -= thick;
@@ -313,7 +316,7 @@ export class Ballistics {
 			p.pos.copy( point ).addScaledVector( n, 0.01 );
 			return true;
 		}
-		g.fx?.impact( point, n, mat, { size, dir: _d, sound: p.kind !== 'pellet' || rnd() < 0.3 } );
+		g.fx?.impact( point, n, mat, { size, dir: _d, sound: p.kind !== 'pellet' || rnd() < 0.3, decal: moving ? false : undefined } );
 		if ( isBox ) s.box.onHit?.( { point, dir: _d.clone(), damage: dmg, kind: 'bullet', source: p.source } );
 		if ( p.player && p.kind !== 'pellet' ) g.events.emit( 'noise', { pos: point.clone(), radius: 9, source: p.source, kind: 'impact' } );
 		return false;
@@ -463,7 +466,7 @@ export class Ballistics {
 		}
 		// doors near the blast
 		const door = g.city?.doorAt?.( pos, R * 0.5 );
-		door?.bash?.( D, { source: o.source, kind: 'explosion' } );
+		door?.bash?.( D, o.source || null );
 		g.events.emit( 'noise', { pos: pos.clone(), radius: o.noise ?? 700, source: o.source, kind: 'explosion' } );
 	}
 
@@ -472,6 +475,12 @@ export class Ballistics {
 		for ( const p of this.list ) p.mesh?.parent?.remove( p.mesh );
 		for ( const a of this.arrows ) a.mesh.parent?.remove( a.mesh );
 		this.list.length = 0; this.arrows.length = 0; this.flares.length = 0;
+		if ( this._arrowGeo ) {
+			const A = this._arrowGeo;
+			for ( const geo of [ A.shaft, A.tip, ...A.vanes ] ) geo.dispose();
+			for ( const m of Object.values( this._arrowMat ) ) m.dispose();
+			this._arrowGeo = this._arrowMat = null;
+		}
 	}
 }
 

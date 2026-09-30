@@ -35,7 +35,8 @@
 .kvlist a { color: var(--accent); }
 
 /* ---- worlds ------------------------------------------------------------------------------------------ */
-.worlds-panel { width: min(calc(880 * var(--u)), calc(100vw - 32px)); height: min(calc(640 * var(--u)), 90vh); transition: box-shadow var(--d-2) var(--ease-out); }
+/* sized to its rows, up to 640u; then the list scrolls */
+.worlds-panel { width: min(calc(880 * var(--u)), calc(100vw - 32px)); max-height: min(calc(640 * var(--u)), 90vh); transition: box-shadow var(--d-2) var(--ease-out); }
 /* a world file dragged over the screen */
 .worlds-panel.drop { box-shadow: inset 0 0 0 1.5px var(--accent), var(--sh-panel); }
 .worlds-panel .panel-head .btn:not(.icon) { flex: none; }
@@ -52,6 +53,10 @@
 .wrow.dead .thumb > img { filter: grayscale(1); }
 .wrow .acts .del:hover { color: var(--alarm); background: var(--tint-alarm); }
 .wempty { flex: 1; display: flex; align-items: center; justify-content: center; }
+/* no worlds yet: the panel shrinks to its head and one centred New world button */
+.worlds-panel.empty { width: min(calc(560 * var(--u)), calc(100vw - 32px)); }
+.worlds-panel.empty .panel-head .new, .worlds-panel.empty .panel-foot { display: none; }
+.worlds-panel.empty .wbody { padding: calc(48 * var(--u)) var(--s-5); }
 
 /* ---- new world, world details ------------------------------------------------------------------------ */
 .form-panel { width: min(calc(560 * var(--u)), calc(100vw - 32px)); }
@@ -67,8 +72,8 @@
 /* ---- options ------------------------------------------------------------------------------------------- */
 .opt-panel { width: min(calc(800 * var(--u)), calc(100vw - 32px)); height: min(calc(640 * var(--u)), calc(100vh - 48 * var(--u))); }
 .opt-body { flex: 1; min-height: 0; display: grid; grid-template-columns: calc(176 * var(--u)) 1fr; }
-/* the rail starts focused (arrow keys switch tabs): an inset ring stays inside the tab instead of crossing the rail edge */
-.opt-panel .rail > button:focus-visible { outline-offset: -2px; }
+/* the rail starts focused (arrow keys switch tabs): a light inset ring, since the selected tab already has a fill */
+.opt-panel .rail > button:focus-visible { outline: 1px solid var(--accent-line); outline-offset: -1px; }
 .opt-content { min-height: 0; overflow: auto; padding: var(--s-2) var(--s-5) var(--s-4); }
 .opt-content > .sec-head:not(:first-child) { margin-top: var(--s-3); }
 .keys-list > .sec-head:not(:first-child) { margin-top: var(--s-3); }
@@ -76,6 +81,11 @@
 .opt-content .row > .ctl { width: calc(320 * var(--u)); flex: none; }
 .opt-content .row > .ctl > .slider { flex: none; }
 .foot-l { display: flex; align-items: center; }
+/* key reference (Controls tab): two columns of key caps + verb */
+.keyref { display: grid; grid-template-columns: 1fr 1fr; column-gap: var(--s-5); padding: var(--s-1) 0 var(--s-2); }
+.keyref .hint { height: calc(32 * var(--u)); color: var(--ink-2); }
+.keyref .caps { display: inline-flex; gap: var(--s-1); }
+.keyref .suf { margin-left: calc(-4 * var(--u)); color: var(--ink-3); font-weight: 600; }
 .foot-hints { display: flex; align-items: center; gap: var(--s-4); color: var(--ink-2); animation: fade-in var(--d-2) var(--ease-out); }
 
 /* keys: the search bar stays put above its own scrolling list */
@@ -110,8 +120,9 @@
 .death .btns .btn { min-width: calc(140 * var(--u)); }
 
 /* ---- loader (outside .tw-root) ------------------------------------------------------------------------- */
-#loader { position: fixed; inset: 0; z-index: 200; overflow: hidden; background: var(--bg-0); color: var(--ink-1); font: 500 calc(13 * var(--u)) / calc(18 * var(--u)) var(--font); letter-spacing: -0.003em; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; transition: opacity 600ms var(--ease-out), visibility 600ms; }
-#loader.tw-hidden { opacity: 0; visibility: hidden; pointer-events: none; }
+/* the curtain drops at once (a fade-in would stall behind the world build that follows) and lifts over 600 ms */
+#loader { position: fixed; inset: 0; z-index: 200; overflow: hidden; background: var(--bg-0); color: var(--ink-1); font: 500 calc(13 * var(--u)) / calc(18 * var(--u)) var(--font); letter-spacing: -0.003em; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+#loader.tw-hidden { opacity: 0; visibility: hidden; pointer-events: none; transition: opacity 600ms var(--ease-out), visibility 600ms; }
 .loader-art-fallback { position: absolute; inset: 0; background: var(--bg-0); }
 .loader-art { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity 600ms var(--ease-out); }
 .loader-art.is-in { opacity: 1; }

@@ -110,8 +110,9 @@ export function placePop( el, x, y, { flipX = x, flipY = y } = {} ) {
 
 let openMenu = null;
 
-// Context menu / popover list. items: [ { label, hint?, icon?, run, def?, danger?, disabled?, on? } | null ]
-// (null draws a separator; hint is text or a key-cap label: { key: 'Shift' }). at: { x, y } for a context
+// Context menu / popover list. items: [ { label, meta?, hint?, icon?, run, def?, danger?, disabled?, on? } | null ]
+// (null draws a separator; meta is a short state shown right of the label, like a portion count '3/3'; hint is
+// text or a key-cap label: { key: 'Shift' }). at: { x, y } for a context
 // menu, or an anchor element for a popover (opens under it, right-aligned; { align: 'left' } for a select).
 // Up / Down move, Enter runs, Esc or a pointerdown outside closes. Returns close(), or null when the call
 // only closed the popover already open on that anchor.
@@ -127,7 +128,7 @@ export function popMenu( items, at, { parent = document.getElementById( 'ui' ), 
 		const hint = it.hint == null ? null : typeof it.hint === 'object' && it.hint.key ? kc( it.hint.key, 'out' ) : h( 'span.h', { text: it.hint } );
 		const b = h( 'button', { type: 'button', role: 'menuitem', tabIndex: - 1, disabled: !! it.disabled, class: [ it.def && 'def', it.danger && 'danger', it.on && 'on' ].filter( Boolean ).join( ' ' ) || null,
 			onclick: () => { close(); audio?.ui?.(); it.run?.(); } },
-		it.icon ? icon( it.icon ) : null, h( 'span', { text: it.label } ), hint );
+		it.icon ? icon( it.icon ) : null, h( 'span', { text: it.label } ), it.meta ? h( 'span.h', { text: it.meta } ) : null, hint );
 		rows.push( b );
 		el.appendChild( b );
 	}

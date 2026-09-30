@@ -45,7 +45,7 @@ const AMMO_DESC = {
 	'.357': 'Magnum revolver round.',
 	'.44mag': 'Magnum revolver round. Heavy recoil.',
 	'.50ae': 'Desert Eagle round.',
-	'.22lr': 'Small rimfire round. Quiet, weak.',
+	'.22lr': 'Rimfire round. Quiet, low damage.',
 	'9x18': 'Makarov pistol round.',
 	'5.56': 'NATO rifle round.',
 	'5.45': 'AK-74 rifle round.',
@@ -189,11 +189,11 @@ const firearmDefs = [
 		weight: 0.73, size: 2, rarity: 'uncommon', tags: [ 'civilian', 'gunstore' ],
 		firearm: { cls: 'pistol', caliber: '9x18', feed: 'mag', mags: [ 'mag_makarov' ], rpm: 450, modes: [ 'semi' ], action: 'semi', damage: 27, velocity: 315, range: 40, spread: 0.004, recoil: 0.5, noise: 210, reload: 1.8, rails: [ 'muzzle' ], muzzles: PISTOL_M, sound: 'gun_pistol2', pitch: 1.12 },
 		model: { arch: 'pistol', v: 'makarov' } } ),
-	gun( 'ruger_mk4', 'Ruger Mark IV .22', '.22 LR pistol. 10 rounds. Quiet, weak.', {
+	gun( 'ruger_mk4', 'Ruger Mark IV .22', '.22 LR pistol. 10 rounds. Quiet, low damage.', {
 		weight: 0.9, size: 3, rarity: 'common', tags: [ 'civilian', 'hunting', 'gunstore' ],
 		firearm: { cls: 'pistol', caliber: '.22lr', feed: 'mag', mags: [ 'mag_ruger22' ], rpm: 520, modes: [ 'semi' ], action: 'semi', damage: 26, velocity: 330, range: 50, spread: 0.002, recoil: 0.18, noise: 90, reload: 1.7, rails: [ 'muzzle' ], muzzles: PISTOL_M, sound: 'gun_pistol2', pitch: 1.45 },
 		model: { arch: 'pistol', v: 'ruger' } } ),
-	gun( 'flare_gun', 'Flare gun', 'Signal pistol. Single shot. Very loud and bright.', {
+	gun( 'flare_gun', 'Flare gun', 'Signal pistol. Single shot. Loud and bright.', {
 		weight: 0.5, size: 3, rarity: 'common', tags: [ 'civilian', 'boat', 'gas_station' ],
 		firearm: { cls: 'pistol', caliber: 'flare', feed: 'internal', capacity: 1, rpm: 60, modes: [ 'single' ], action: 'break', damage: 30, velocity: 70, range: 60, spread: 0.01, recoil: 0.7, noise: 200, reload: 1.8, perRound: 1.8, zero: 20, sound: 'flare_fire', pitch: 1 },
 		model: { arch: 'flare' } } ),
@@ -345,11 +345,11 @@ const firearmDefs = [
 		model: { arch: 'pkm' } } ),
 
 	// ---- bows ----
-	gun( 'compound_bow', 'Compound bow', 'Silent hunting bow. Arrows can be recovered.', {
+	gun( 'compound_bow', 'Compound bow', 'Silent. Arrows can be recovered.', {
 		weight: 1.9, size: 12, rarity: 'uncommon', tags: [ 'hunting', 'sports' ],
 		firearm: { cls: 'bow', caliber: 'arrow', feed: 'internal', capacity: 1, rpm: 60, modes: [ 'single' ], action: 'bow', damage: 78, velocity: 95, range: 60, spread: 0.002, recoil: 0.15, noise: 8, reload: 0.7, perRound: 0.7, handling: 0.75, zero: 25, sound: 'bow_release', pitch: 1 },
 		model: { arch: 'bow' } } ),
-	gun( 'crossbow', 'Crossbow', 'Hunting crossbow. Silent. Slow to reload.', {
+	gun( 'crossbow', 'Crossbow', 'Silent. Slow to reload. Bolts can be recovered.', {
 		weight: 3.2, size: 13, rarity: 'uncommon', tags: [ 'hunting', 'sports' ],
 		firearm: { cls: 'bow', caliber: 'bolt', feed: 'internal', capacity: 1, rpm: 60, modes: [ 'single' ], action: 'crossbow', damage: 88, velocity: 110, range: 80, spread: 0.0015, recoil: 0.35, noise: 12, reload: 2.6, perRound: 2.6, handling: 0.6, zero: 30, rails: [ 'optic' ], sound: 'crossbow', pitch: 1 },
 		model: { arch: 'crossbow' } } ),
@@ -390,28 +390,28 @@ const MELEE = [
 	// id, name, desc, damage, speed, reach, stamina, kind, twoHanded, wear, tools, weight, size, rarity, tags
 	[ 'kitchen_knife', 'Kitchen knife', 'Cuts, skins game, opens cans.', 24, 2.1, 1.35, 4, 'blade', false, 0.012, [ 'cut', 'open_can', 'skin' ], 0.2, 1, 'common', [ 'kitchen', 'civilian' ] ],
 	[ 'hunting_knife', 'Hunting knife', 'Fixed blade. Cuts, skins game, opens cans.', 30, 2.0, 1.4, 4, 'blade', false, 0.006, [ 'cut', 'skin', 'open_can' ], 0.3, 1, 'uncommon', [ 'hunting', 'sports' ] ],
-	[ 'combat_knife', 'Combat knife', 'Fast, quiet, durable. Cuts and skins.', 34, 2.1, 1.4, 4, 'blade', false, 0.004, [ 'cut', 'skin', 'open_can' ], 0.32, 1, 'rare', [ 'military' ] ],
-	[ 'machete', 'Machete', 'Long blade. Cuts, chops, skins.', 46, 1.35, 1.85, 8, 'blade', false, 0.005, [ 'cut', 'chop', 'skin', 'open_can' ], 0.6, 3, 'common', [ 'farm', 'hardware', 'civilian' ] ],
+	[ 'combat_knife', 'Combat knife', 'Fast. Durable. Cuts, skins game, opens cans.', 34, 2.1, 1.4, 4, 'blade', false, 0.004, [ 'cut', 'skin', 'open_can' ], 0.32, 1, 'rare', [ 'military' ] ],
+	[ 'machete', 'Machete', 'Long blade. Cuts, chops, skins game.', 46, 1.35, 1.85, 8, 'blade', false, 0.005, [ 'cut', 'chop', 'skin', 'open_can' ], 0.6, 3, 'common', [ 'farm', 'hardware', 'civilian' ] ],
 	[ 'cane_knife', 'Cane knife', 'Hooked blade. Cuts and chops.', 44, 1.35, 1.8, 8, 'blade', false, 0.006, [ 'cut', 'chop' ], 0.65, 3, 'uncommon', [ 'farm' ] ],
 	[ 'hatchet', 'Hatchet', 'Small axe. Chops wood.', 50, 1.25, 1.6, 9, 'axe', false, 0.004, [ 'chop', 'cut' ], 0.8, 2, 'common', [ 'hardware', 'farm', 'civilian' ] ],
 	[ 'fire_axe', 'Fire axe', 'Two-handed axe. Chops, pries, breaks doors.', 85, 0.75, 2.1, 17, 'axe', true, 0.003, [ 'chop', 'pry' ], 2.6, 5, 'uncommon', [ 'fire_station', 'hardware' ] ],
 	[ 'baseball_bat', 'Baseball bat', 'Two-handed. Blunt.', 42, 1.05, 2.0, 11, 'blunt', true, 0.006, [], 1.0, 4, 'common', [ 'sports', 'civilian' ] ],
 	[ 'nailed_bat', 'Nailed bat', 'Two-handed. Blunt, spiked.', 56, 1.0, 2.0, 11, 'blunt', true, 0.012, [], 1.1, 4, 'uncommon', [ 'crafted' ] ],
 	[ 'crowbar', 'Crowbar', 'Blunt. Pries doors and crates.', 44, 1.1, 1.8, 10, 'blunt', false, 0.002, [ 'pry' ], 1.5, 3, 'uncommon', [ 'hardware', 'garage' ] ],
-	[ 'lead_pipe', 'Lead pipe', 'Heavy and blunt.', 40, 1.05, 1.8, 10, 'blunt', false, 0.003, [], 1.4, 3, 'common', [ 'hardware', 'street' ] ],
+	[ 'lead_pipe', 'Lead pipe', 'Blunt.', 40, 1.05, 1.8, 10, 'blunt', false, 0.003, [], 1.4, 3, 'common', [ 'hardware', 'street' ] ],
 	[ 'sledgehammer', 'Sledgehammer', 'Two-handed. Slow, very heavy hits. Breaks doors.', 95, 0.55, 2.0, 22, 'blunt', true, 0.002, [ 'break' ], 4.5, 6, 'uncommon', [ 'hardware', 'garage' ] ],
 	[ 'shovel', 'Shovel', 'Two-handed. Digs.', 48, 0.85, 2.05, 14, 'blunt', true, 0.004, [ 'dig' ], 1.8, 5, 'common', [ 'farm', 'hardware', 'garage' ] ],
-	[ 'golf_club', 'Golf club', 'Light and blunt. Wears quickly.', 34, 1.3, 2.0, 8, 'blunt', false, 0.015, [], 0.45, 4, 'common', [ 'sports', 'hotel' ] ],
+	[ 'golf_club', 'Golf club', 'Blunt. Light. Wears quickly.', 34, 1.3, 2.0, 8, 'blunt', false, 0.015, [], 0.45, 4, 'common', [ 'sports', 'hotel' ] ],
 	[ 'katana', 'Katana', 'Two-handed blade. Long reach.', 72, 1.35, 2.1, 10, 'blade', true, 0.004, [ 'cut' ], 1.2, 5, 'rare', [ 'pawn', 'civilian' ] ],
 	[ 'tire_iron', 'Tire iron', 'Blunt. Pries, loosens wheel nuts.', 38, 1.2, 1.7, 9, 'blunt', false, 0.002, [ 'pry', 'wrench' ], 1.0, 2, 'common', [ 'garage', 'car_trunk' ] ],
-	[ 'frying_pan', 'Frying pan', 'Blunt. Cooks.', 32, 1.15, 1.5, 9, 'blunt', false, 0.003, [ 'pan' ], 1.6, 3, 'common', [ 'kitchen' ] ],
+	[ 'frying_pan', 'Frying pan', 'Blunt. Works as a cooking pan.', 32, 1.15, 1.5, 9, 'blunt', false, 0.003, [ 'pan' ], 1.6, 3, 'common', [ 'kitchen' ] ],
 	[ 'hammer', 'Hammer', 'Blunt. Builds and pries.', 30, 1.6, 1.4, 6, 'blunt', false, 0.004, [ 'hammer', 'pry' ], 0.6, 2, 'common', [ 'hardware', 'toolbox', 'garage' ] ],
-	[ 'wrench', 'Pipe wrench', 'Blunt. Also a wrench.', 32, 1.35, 1.5, 7, 'blunt', false, 0.003, [ 'wrench' ], 1.2, 2, 'common', [ 'hardware', 'toolbox', 'garage' ] ],
+	[ 'wrench', 'Pipe wrench', 'Blunt. Works as a wrench.', 32, 1.35, 1.5, 7, 'blunt', false, 0.003, [ 'wrench' ], 1.2, 2, 'common', [ 'hardware', 'toolbox', 'garage' ] ],
 	[ 'pickaxe', 'Pickaxe', 'Two-handed. Digs and breaks rock.', 72, 0.65, 2.0, 17, 'axe', true, 0.003, [ 'dig', 'pry', 'mine' ], 2.8, 6, 'uncommon', [ 'hardware', 'farm' ] ],
 	[ 'fishing_spear', 'Fishing spear', 'Long reach. Spears fish.', 40, 1.0, 2.6, 9, 'spear', true, 0.006, [ 'fish' ], 1.1, 5, 'common', [ 'beach', 'surf' ] ],
-	[ 'canoe_paddle', 'Canoe paddle', 'Two-handed. Also a paddle.', 28, 1.0, 2.2, 10, 'blunt', true, 0.01, [ 'paddle' ], 1.0, 5, 'common', [ 'beach', 'surf' ] ],
-	[ 'police_baton', 'Police baton', 'Fast and blunt.', 30, 1.75, 1.6, 6, 'blunt', false, 0.002, [], 0.5, 2, 'uncommon', [ 'police' ] ],
-	[ 'broken_bottle', 'Broken bottle', 'Jagged glass. Breaks quickly.', 20, 2.0, 1.2, 4, 'blade', false, 0.12, [ 'cut' ], 0.3, 1, 'common', [ 'trash', 'bar' ] ],
+	[ 'canoe_paddle', 'Canoe paddle', 'Two-handed. Blunt. Works as a paddle.', 28, 1.0, 2.2, 10, 'blunt', true, 0.01, [ 'paddle' ], 1.0, 5, 'common', [ 'beach', 'surf' ] ],
+	[ 'police_baton', 'Police baton', 'Blunt. Fast.', 30, 1.75, 1.6, 6, 'blunt', false, 0.002, [], 0.5, 2, 'uncommon', [ 'police' ] ],
+	[ 'broken_bottle', 'Broken bottle', 'Blade. Breaks quickly.', 20, 2.0, 1.2, 4, 'blade', false, 0.12, [ 'cut' ], 0.3, 1, 'common', [ 'trash', 'bar' ] ],
 ];
 
 const meleeDefs = MELEE.map( ( [ id, name, desc, damage, speed, reach, stamina, kind, twoHanded, wear, tools, weight, size, rarity, tags ] ) => ( {

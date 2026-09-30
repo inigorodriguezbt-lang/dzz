@@ -12,17 +12,19 @@ const VERSION = '0.1';
 const TABS = [ [ 'graphics', 'Graphics' ], [ 'interface', 'Interface' ], [ 'audio', 'Audio' ], [ 'controls', 'Controls' ], [ 'keys', 'Keys' ], [ 'gameplay', 'Gameplay' ] ];
 // keys each tab's `Reset tab` restores (Graphics also goes back to the default preset)
 const TAB_KEYS = {
-	graphics: [ 'fov', 'nightBrightness' ],
+	graphics: [ 'fov', 'nightBrightness', 'exposure', 'motionBlur' ],
 	interface: [ 'guiScale', 'hudMode', 'crosshair', 'compass', 'minimap', 'hitMarkers', 'damageIndicators', 'showInteractHints', 'tutorial', 'showFps' ],
 	audio: [ 'masterVolume', 'sfxVolume', 'ambientVolume', 'musicVolume', 'uiVolume' ],
 	controls: [ 'sensitivity', 'invertY', 'toggleCrouch', 'toggleAim', 'toggleSprint', 'headBob' ],
 	gameplay: [ 'autoPickupAmmo', 'realisticMap' ],
 };
-// hudMode is UI-only and has no entry in DEFAULTS
-const defOf = k => k === 'hudMode' ? 'auto' : DEFAULTS[ k ];
+// hudMode is UI-only; the rendering keys fall back to these if a Settings.js without them is loaded
+const UI_DEFAULTS = { hudMode: 'auto', exposure: 0, ao: true, shafts: true, lensFlare: true, motionBlur: false };
+const defOf = k => DEFAULTS[ k ] ?? UI_DEFAULTS[ k ];
 const LEVELS = [ [ 'low', 'Low' ], [ 'medium', 'Medium' ], [ 'high', 'High' ], [ 'ultra', 'Ultra' ] ];
 const HOLD = [ [ false, 'Hold' ], [ true, 'Toggle' ] ];
 const pct = v => Math.round( v * 100 ) + '%';
+const ev = v => ( v > 0.001 ? '+' : v < - 0.001 ? '−' : '' ) + Math.abs( v ).toFixed( 1 ) + ' EV';
 
 // Keys tab: groups and rows. 'hotbar' is one row of nine caps; 'pause' is fixed (Esc releases the pointer lock);
 // 'gestures' is left out because nothing reads it.
@@ -37,11 +39,23 @@ const SLOTS = [ 1, 2, 3, 4, 5, 6, 7, 8, 9 ].map( i => 'slot' + i );
 const KEY_LABELS = {
 	forward: 'Forward', back: 'Back', left: 'Left', right: 'Right', jump: 'Jump', walk: 'Walk', interact: 'Interact', fire: 'Fire', aim: 'Aim',
 	melee: 'Melee', zoom: 'Hold breath', freelook: 'Free look', camera: 'Camera', vehicleUp: 'Climb', vehicleDown: 'Descend', log: 'Status',
-	debug: 'Debug', craft: 'Craft', hotbar: 'Hotbar',
+	debug: 'Debug', craft: 'Craft', hotbar: 'Hotbar', headlights: 'Lights',
+	// Q / E also roll a helicopter and work a plane's rudder
+	leanLeft: 'Lean left / roll', leanRight: 'Lean right / roll',
 };
 const keyLabel = a => KEY_LABELS[ a ] || BINDING_LABELS[ a ] || a;
 // driving actions may share keys with on-foot ones
 const VEHICLE = new Set( [ 'horn', 'headlights', 'handbrake', 'vehicleUp', 'vehicleDown' ] );
+// pairs that share a key by design: the handbrake (cars) and climb (aircraft, boats) are both Space
+const SHARED = [ [ 'handbrake', 'vehicleUp' ] ];
+const shares = ( a, b ) => SHARED.some( ( [ x, y ] ) => ( a === x && b === y ) || ( a === y && b === x ) );
+// Controls tab: the vehicle keys at a glance, from the current bindings. [ actions, verb, suffix ]
+const VEHICLE_REF = [
+	[ [ 'camera' ], 'Camera' ], [ [ 'headlights' ], 'Lights' ],
+	[ [ 'horn' ], 'Horn' ], [ [ 'horn' ], 'Siren', '×2' ],
+	[ [ 'handbrake' ], 'Handbrake' ], [ [ 'vehicleUp', 'vehicleDown' ], 'Climb / descend' ],
+	[ [ 'leanLeft', 'leanRight' ], 'Roll' ],
+];
 
 const SPAWNS = [ [ 'random', 'Random' ], [ 'oahu', 'Oʻahu' ], [ 'kauai', 'Kauaʻi' ], [ 'maui', 'Maui' ], [ 'bigisland', 'Hawaiʻi' ], [ 'molokai', 'Molokaʻi' ], [ 'lanai', 'Lānaʻi' ], [ 'niihau', 'Niʻihau' ] ];
 
@@ -209,7 +223,20 @@ export class Menus {
 	async _play( id ) {
 		const w = await this.app.saves.load( id );
 		if ( ! w || w.dead ) return this.worlds( id );
+		await this._curtain();
 		await this.app.startGame( w );
+	}
+
+	// the loader, drawn before the (blocking) world build starts, so the click answers at once
+	async _curtain() {
+		const el = document.getElementById( 'loader' );
+		if ( ! el ) return;
+		el.querySelector( '.loader-status' ).textContent = 'Entering world';
+		el.querySelector( '.loader-pct' ).textContent = '0%';
+		el.querySelector( '.loader-fill' ).style.transform = 'scaleX(0.02)';
+		el.classList.remove( 'tw-hidden', 'tw-error' );
+		await nextFrame( () => {} );
+		await nextFrame( () => {} );
 	}
 
 	about() {
@@ -295,14 +322,17 @@ export class Menus {
 		const render = () => {
 			rows.clear();
 			clear( listEl );
+			// no worlds: one New world button in the middle, no second one in the head, no footer
+			panel?.classList.toggle( 'empty', ! list.length );
 			if ( ! list.length ) listEl.append( h( 'div.wempty', {}, this._btn( 'New world', () => this.createWorld(), 'primary', 'plus' ) ) );
 			for ( const w of list ) listEl.append( row( w ) );
 			paint();
 		};
+		let panel = null;
 		render();
-		const panel = this._panel( 'Worlds', h( 'div.panel-body.wbody', {}, listEl, fileIn ), h( 'div.panel-foot', {}, playBtn ), {
-			cls: '.worlds-panel', onClose: back,
-			head: [ this._btn( 'Import', () => fileIn.click(), '', 'import' ), this._btn( 'New world', () => this.createWorld(), '', 'plus' ) ],
+		panel = this._panel( 'Worlds', h( 'div.panel-body.wbody', {}, listEl, fileIn ), h( 'div.panel-foot', {}, playBtn ), {
+			cls: '.worlds-panel' + ( list.length ? '' : '.empty' ), onClose: back,
+			head: [ this._btn( 'Import', () => fileIn.click(), '', 'import' ), this._btn( 'New world', () => this.createWorld(), 'new', 'plus' ) ],
 		} );
 		const el = this._screen( panel, back );
 		// a world file dropped anywhere on the screen imports it
@@ -355,6 +385,7 @@ export class Menus {
 			if ( busy ) return;
 			busy = true;
 			const w = SaveSystem.newWorld( { ...opt, name: opt.name.trim() || nm } );
+			await this._curtain();
 			await this.app.startGame( w );
 			busy = false;
 		};
@@ -457,21 +488,21 @@ export class Menus {
 		};
 		const set = ( key, v ) => { S.set( key, v ); refresh(); };
 		// preset-controlled keys compare against the chosen preset, so picking Low doesn't mark every row
-		const presetDef = key => () => QUALITY_PRESETS[ S.get( 'quality' ) ]?.[ key ] ?? DEFAULTS[ key ];
-		const sl = ( label, key, min, max, step, fmt, { commit = false, def } = {} ) => {
-			const [ inp, val ] = slider( { min, max, step, value: S.get( key ), fmt, onInput: commit ? null : v => set( key, v ), onChange: commit ? v => set( key, v ) : null } );
+		const presetDef = key => () => QUALITY_PRESETS[ S.get( 'quality' ) ]?.[ key ] ?? defOf( key );
+		const sl = ( label, key, min, max, step, fmt, { commit = false, def, get = () => S.get( key ) ?? defOf( key ) } = {} ) => {
+			const [ inp, val ] = slider( { min, max, step, value: get(), fmt, onInput: commit ? null : v => set( key, v ), onChange: commit ? v => set( key, v ) : null } );
 			inp.setAttribute( 'aria-label', label );
-			return row( label, [ inp, val ], { key, def, paint: () => inp.set( S.get( key ) ) } );
+			return row( label, [ inp, val ], { key, def, get, paint: () => inp.set( get() ) } );
 		};
 		const sg = ( label, key, opts, { def, get } = {} ) => {
 			const el = seg( opts, ( get || ( () => S.get( key ) ) )(), v => set( key, v ), { audio } );
 			el.setAttribute( 'aria-label', label );
 			return row( label, el, { key, def, get, paint: () => el.set( ( get || ( () => S.get( key ) ) )() ) } );
 		};
-		const tg = ( label, key, { def } = {} ) => {
-			const el = toggle( !! S.get( key ), v => set( key, v ), { audio } );
+		const tg = ( label, key, { def, get = () => S.get( key ) ?? defOf( key ) } = {} ) => {
+			const el = toggle( !! get(), v => set( key, v ), { audio } );
 			el.setAttribute( 'aria-label', label );
-			return row( label, el, { key, def, paint: () => el.set( !! S.get( key ) ) } );
+			return row( label, el, { key, def, get, paint: () => el.set( !! get() ) } );
 		};
 		const sec = t => h( 'div.sec-head', {}, h( 'span.t-label', { text: t } ) );
 		const presetOf = () => {
@@ -489,7 +520,7 @@ export class Menus {
 					sec( 'View' ),
 					// the expensive ones apply when the slider is released
 					sl( 'Render distance', 'renderDistance', 400, 4000, 100, v => ( v / 1000 ).toFixed( 1 ) + ' km', { commit: true, def: presetDef( 'renderDistance' ) } ),
-					sl( 'Field of view', 'fov', 60, 110, 1, v => v + '°' ),
+					sl( 'Field of view', 'fov', 50, 90, 1, v => v + '°' ),
 					sl( 'Resolution', 'renderScale', 0.5, 1.5, 0.05, pct, { commit: true, def: presetDef( 'renderScale' ) } ),
 					sec( 'Detail' ),
 					sg( 'Shadows', 'shadows', [ [ 'off', 'Off' ], [ 'medium', 'Medium' ], [ 'high', 'High' ], [ 'ultra', 'Ultra' ] ], { def: presetDef( 'shadows' ) } ),
@@ -499,8 +530,13 @@ export class Menus {
 					sg( 'Clouds', 'clouds', [ [ 'off', 'Off' ], [ 'low', 'Low' ], [ 'high', 'High' ] ], { def: presetDef( 'clouds' ) } ),
 					sg( 'Water', 'water', [ [ 'low', 'Low' ], [ 'medium', 'Medium' ], [ 'high', 'High' ] ], { def: presetDef( 'water' ) } ),
 					sec( 'Image' ),
-					sg( 'Anti-aliasing', 'antialias', [ [ 'off', 'Off' ], [ 'fxaa', 'FXAA' ], [ 'msaa', 'MSAA' ] ], { def: presetDef( 'antialias' ) } ),
+					sg( 'Anti-aliasing', 'antialias', [ [ 'off', 'Off' ], [ 'fxaa', 'FXAA' ], [ 'msaa', 'MSAA' ], [ 'taa', 'TAA' ] ], { def: presetDef( 'antialias' ) } ),
+					tg( 'Ambient occlusion', 'ao', { def: presetDef( 'ao' ) } ),
 					tg( 'Bloom', 'bloom', { def: presetDef( 'bloom' ) } ),
+					tg( 'Sun shafts', 'shafts', { def: presetDef( 'shafts' ) } ),
+					tg( 'Lens flare', 'lensFlare', { def: presetDef( 'lensFlare' ) } ),
+					tg( 'Motion blur', 'motionBlur' ),
+					sl( 'Exposure', 'exposure', - 2, 2, 0.1, ev ),
 					sl( 'Night brightness', 'nightBrightness', 0.3, 2, 0.05, pct ),
 				];
 			},
@@ -531,6 +567,8 @@ export class Menus {
 				sg( 'Aim', 'toggleAim', HOLD ),
 				sg( 'Sprint', 'toggleSprint', HOLD ),
 				sl( 'Head bob', 'headBob', 0, 1, 0.05, pct ),
+				sec( 'Vehicles' ),
+				this._keyRef( VEHICLE_REF ),
 			],
 			keys: () => this._keysTab( { S, audio, row: ( label, ctl, o ) => row( label, ctl, o ), refresh, footL, resetBtn, onListen: f => { stopListen = f; }, onKey: f => { keysKey = f; } } ),
 			gameplay: () => [
@@ -573,6 +611,13 @@ export class Menus {
 		tabs.querySelector( '.on' )?.focus( { preventScroll: true } );
 	}
 
+	// A compact key reference: [ key caps ] verb pairs in two columns, from the current bindings (Controls tab)
+	_keyRef( list ) {
+		const input = this.app.input;
+		return h( 'div.keyref', {}, list.map( ( [ acts, verb, suf ] ) => h( 'div.hint', {},
+			h( 'span.caps', {}, acts.map( a => kc( input.label( a ), 'out' ) ) ), suf ? h( 'span.suf', { text: suf } ) : null, h( 'span', { text: verb } ) ) ) );
+	}
+
 	// Keys tab (12.3): search, groups of rows with two bind buttons, the hotbar as nine caps. Click a bind to
 	// listen: the next key or mouse button binds it, Esc cancels, Backspace / Delete clears.
 	_keysTab( { S, audio, row, refresh, footL, resetBtn, onListen, onKey } ) {
@@ -587,7 +632,7 @@ export class Menus {
 		const clashes = ( binds ) => {
 			const users = {};
 			for ( const a of shown ) for ( const c of binds[ a ] || [] ) ( users[ c ] ||= [] ).push( a );
-			return ( a, code ) => ( users[ code ] || [] ).filter( o => o !== a && VEHICLE.has( o ) === VEHICLE.has( a ) && ! ( DEFAULT_BINDINGS[ o ]?.includes( code ) && DEFAULT_BINDINGS[ a ]?.includes( code ) ) );
+			return ( a, code ) => ( users[ code ] || [] ).filter( o => o !== a && VEHICLE.has( o ) === VEHICLE.has( a ) && ! shares( a, o ) && ! ( DEFAULT_BINDINGS[ o ]?.includes( code ) && DEFAULT_BINDINGS[ a ]?.includes( code ) ) );
 		};
 		const paintCell = ( c, binds, clash ) => {
 			const code = binds[ c.a ]?.[ c.k ];

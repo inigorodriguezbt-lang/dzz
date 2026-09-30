@@ -41,7 +41,8 @@
 .sect.open .sect-h .chev { transform: rotate(90deg); }
 .sect-h .nm { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sect-h .cap { flex: none; color: var(--ink-2); font-variant-numeric: tabular-nums; }
-.sect-h .cap.full { color: var(--alarm); }
+.sect-h .cap.full { color: var(--ink-1); } .sect-h .cap.over { color: var(--alarm); }
+.sect > .meter.full > i { background: var(--ink-1); }
 .sect-h .btn { flex: none; }
 .sect > .meter { margin-bottom: var(--s-2); }
 .sect.can { outline: 1px solid var(--accent-line); outline-offset: calc(4 * var(--u)); }
@@ -105,8 +106,12 @@
 .recipe .nm .x { color: var(--ink-3); font-weight: 500; margin-left: var(--s-1); font-variant-numeric: tabular-nums; }
 .recipe .reqs { display: flex; flex-wrap: wrap; gap: var(--s-1); margin-top: var(--s-1); }
 .recipe .chip.req { font-variant-numeric: tabular-nums; }
-.recipe .chip.req.txt { padding-left: calc(6 * var(--u)); }
-.recipe .chip.req > .i { margin-left: calc(2 * var(--u)); }
+.recipe .chip.req.txt { padding-left: var(--s-2); }
+.recipe .chip.req > .i { margin-left: calc(4 * var(--u)); }
+/* ingredient: render, name (ellipsis), have/need; short -> the count turns red */
+.recipe .chip.ing .nm { max-width: calc(112 * var(--u)); overflow: hidden; text-overflow: ellipsis; }
+.recipe .chip.ing .n { color: var(--ink-1); }
+.recipe .chip.ing.short .n { color: var(--alarm); }
 .recipe.no { opacity: 0.55; }
 
 /* catalog tab (creative): search with the count inside, one scrolling row of categories, the cell grid */

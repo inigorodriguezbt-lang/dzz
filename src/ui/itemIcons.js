@@ -27,16 +27,30 @@ export function glyphFor( id ) {
 	return 'data:image/svg+xml;utf8,' + encodeURIComponent( `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-4.5 -4.5 33 33" fill="none" stroke="#B6BAC1" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round">${g}</svg>` );
 }
 
-// sets img.src to the best icon now and upgrades it when the rendered one arrives
-export function setIcon( img, id ) {
-	const s = Icons?.iconSync?.( id );
-	if ( s ) { img.src = s; return; }
-	img.src = glyphFor( id );
-	if ( ! Icons?.iconFor ) return;
+function pending( id ) {
 	let p = waiting.get( id );
 	if ( ! p ) { p = Icons.iconFor( id ).catch( () => null ); waiting.set( id, p ); }
+	return p;
+}
+
+// Sets img.src to the rendered icon. While it is still rendering the img stays empty (css hides an img without
+// a src) rather than showing a line glyph in another style; the category glyph only stands in when the render
+// fails or takes longer than GLYPH_AFTER.
+const GLYPH_AFTER = 2500; // ms
+export function setIcon( img, id ) {
+	const s = Icons?.iconSync?.( id );
+	if ( s ) { img.src = s; delete img.dataset.want; return; }
 	img.dataset.want = id;
-	p.then( url => { if ( url && img.dataset.want === id ) img.src = url; } );
+	if ( ! Icons?.iconFor ) { img.src = glyphFor( id ); return; }
+	img.removeAttribute( 'src' );
+	const late = setTimeout( () => { if ( img.dataset.want === id && ! img.getAttribute( 'src' ) ) img.src = glyphFor( id ); }, GLYPH_AFTER );
+	pending( id ).then( url => { clearTimeout( late ); if ( img.dataset.want === id ) img.src = url || glyphFor( id ); } );
+}
+
+// queue renders ahead of time (the carried items when a world starts)
+export function warmIcons( ids ) {
+	if ( ! Icons?.iconFor ) return;
+	for ( const id of new Set( ids ) ) if ( ! Icons.iconSync?.( id ) ) pending( id );
 }
 
 export function iconUrl( id ) { return Icons?.iconSync?.( id ) || glyphFor( id ); }

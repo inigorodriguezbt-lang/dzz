@@ -36,7 +36,8 @@ export function fmtDate( ms ) {
 	const d = new Date( ms );
 	const now = new Date();
 	const same = d.toDateString() === now.toDateString();
-	return same ? 'Today ' + d.toLocaleTimeString( [], { hour: '2-digit', minute: '2-digit' } ) : d.toLocaleDateString( [], { month: 'short', day: 'numeric', year: d.getFullYear() !== now.getFullYear() ? 'numeric' : undefined } );
+	// 24-hour like every clock in the game
+	return same ? 'Today ' + d.toLocaleTimeString( [], { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' } ) : d.toLocaleDateString( [], { month: 'short', day: 'numeric', year: d.getFullYear() !== now.getFullYear() ? 'numeric' : undefined } );
 }
 
 export function fmtDist( m ) { return m >= 1000 ? ( m / 1000 ).toFixed( m >= 10000 ? 0 : 1 ) + ' km' : Math.round( m ) + ' m'; }

@@ -1,6 +1,6 @@
 // The UI icon set (docs/UI_SPEC.md section 3): outline glyphs on a 24 grid, stroke 1.5 so a 16u icon
 // has exactly 1 px lines. Fill only where the markup says fill="currentColor". Colour comes from
-// `color` (currentColor), sizes from the .i classes in css/base.css: 16u default, 24u, 12u, 10u.
+// `color` (currentColor), sizes from the .i classes in css/base.css: 16u default, 24u, 12u.
 
 // inner SVG markup per icon, for a 0 0 24 24 viewBox
 export const PATHS = {
@@ -61,7 +61,8 @@ export const PATHS = {
 	reset: '<path d="M4 12a8 8 0 1 0 2.35-5.65L4 8.5M4 3.5v5h5"/>',
 	fuel: '<path d="M4.5 20.5v-15A1.5 1.5 0 0 1 6 4h6a1.5 1.5 0 0 1 1.5 1.5v15M3 20.5h12M4.5 10h9M13.5 8.5h2l2.5 2.5v6a1.25 1.25 0 0 0 2.5 0V9L18.5 7"/>',
 	wrench: '<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3.5 17.5l3 3 5.8-5.8a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.1-.4-.4-2.1Z"/>',
-	magazine: '<path d="M9 3.5h6.5l-1.5 17H8.5L9 3.5ZM9 8h6"/>',
+	// a curved box magazine with its base plate: reads as a magazine at 16u (the reserve in the weapon panel)
+	magazine: '<path d="M8 3.5h6.5l.5 6c.3 3.4 1.5 6.6 3.4 9.5h-6C10 16.3 8.4 12.8 8.1 9.4L8 3.5ZM8.1 7.5h6.7M11.2 21h8.5"/>',
 	altitude: '<path d="M2.5 19.5 9 9.5l4 6 2.5-3.5 6 7.5Z"/>',
 	flame: '<path d="M12 21a6 6 0 0 0 6-6c0-4-3-6-4-10-1.5 2-2 3.5-2 5-1-1-1.5-2-1.5-3C8 9 6 11.5 6 15a6 6 0 0 0 6 6Z"/>',
 	car: '<path d="M3.5 16v-3.5L5.7 7h12.6l2.2 5.5V16H3.5Zm0 0v2.5h3V16m11 0v2.5h3V16M3.5 12.5h17"/>',
@@ -71,7 +72,7 @@ export const PATHS = {
 	player: '<path d="M12 3 19 20l-7-4-7 4 7-17Z" fill="currentColor"/>',
 };
 
-const SIZE_CLASS = { 10: 'i10', 12: 'i12', 16: '', 24: 'i24' };
+const SIZE_CLASS = { 12: 'i12', 16: '', 24: 'i24' };
 const NS = 'http://www.w3.org/2000/svg';
 
 function classOf( size, cls ) {
@@ -79,7 +80,7 @@ function classOf( size, cls ) {
 }
 
 // SVG element: icon( 'health' ), icon( 'head', 24 ), icon( 'chevron', 12, 'rot90' ).
-// Sizes are 10, 12, 16 or 24 (u); anything else falls back to the 16u box.
+// Sizes are 12, 16 or 24 (u); anything else falls back to the 16u box.
 export function icon( name, size = 16, cls = '' ) {
 	const svg = document.createElementNS( NS, 'svg' );
 	svg.setAttribute( 'class', classOf( size, cls ) );

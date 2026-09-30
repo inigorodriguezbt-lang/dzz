@@ -42,6 +42,9 @@ const hhmm = hr => { hr = ( ( hr % 24 ) + 24 ) % 24; const a = Math.floor( hr ),
 const headingOf = yaw => ( ( - yaw * 180 / Math.PI ) % 360 + 360 ) % 360;
 const bearingOf = ( dx, dz ) => ( Math.atan2( dx, - dz ) * 180 / Math.PI + 360 ) % 360;
 const angDiff = ( a, b ) => ( ( a - b + 540 ) % 360 ) - 180;
+// trend marks beside a vital's icon: 1-3 chevrons stacked in a 12 x 16 box, pointing up (rising) or down (falling)
+const TREND_Y = [ [], [ 8 ], [ 5.5, 10.5 ], [ 3, 8, 13 ] ];
+const trendPath = ( n, dir ) => TREND_Y[ n ].map( y => `M1.5 ${y + 2.25 * dir}L6 ${y - 2.25 * dir}L10.5 ${y + 2.25 * dir}` ).join( '' );
 
 // ---- vitals (5.5): value in display units, show / low / critical thresholds, trend tiers per minute --------
 const VITALS = [
@@ -136,12 +139,10 @@ export class HUD {
 		this.conds = h( 'div.conds', { hidden: true } );
 		this.vitals = h( 'div.vitals', { hidden: true } );
 		this.vit = VITALS.map( d => {
-			const chev = [ 0, 1, 2 ].map( () => icon( 'chevron', 10, 'r90' ) );
-			const tr = h( 'div.tr', {}, ...chev );
+			const tr = svg( 'tr', '0 0 12 16', '<path/>' );
 			const v = h( 'span.v' ), bar = h( 'i' );
-			const el = h( 'div.vital.fade', {}, tr, icon( d.k ), v, h( 'div.meter', {}, bar ) );
-			for ( const c of chev ) c.style.display = 'none';
-			return { d, el, v, bar, chev, rate: 0, last: null, tier: 0, dir: 0, inDom: false, fadeT: 0 };
+			const el = h( 'div.vital.fade', {}, icon( d.k ), tr, v, h( 'div.meter', {}, bar ) );
+			return { d, el, v, bar, tr, trPath: tr.firstChild, rate: 0, last: null, tier: 0, dir: 0, inDom: false, fadeT: 0 };
 		} );
 		this.bl = h( 'div.bl', {}, this.conds, this.vitals );
 		this.condEls = new Map();
@@ -163,13 +164,15 @@ export class HUD {
 		// bottom right: pickups over the weapon or vehicle panel
 		this.pickups = h( 'div.pickups' );
 		this.pickQ = [];
+		// the name row and the condition bar each sit in a one-row grid that collapses to 0fr (idle, aiming)
 		this.weapon = h( 'div.weapon.plate.fade', { hidden: true },
-			h( 'div.wn', {}, this.wName = h( 'div.name.t-label' ) ),
+			h( 'div.wn', {}, h( 'div', {}, this.wName = h( 'div.name.t-label' ) ) ),
 			this.wAmmo = h( 'div.ammo', {},
 				this.wNum = h( 'span.t-num' ), this.wUnit = h( 'span.unit.t-label', { hidden: true } ),
-				this.wRes = h( 'span.res', {}, this.wMag = icon( 'magazine', 12 ), this.wResN = h( 'span' ) ),
+				// reserve rounds after a hairline: '31 | 60' (loaded | spare)
+				this.wRes = h( 'span.res', {}, this.wResN = h( 'span' ) ),
 				this.wMode = h( 'span.mode.t-label' ), this.wJam = h( 'span.jam.t-label', { hidden: true, text: 'Jam' } ) ),
-			this.wBarWrap = h( 'div.wb', {}, this.wBar = h( 'div.meter', {}, this.wBarI = h( 'i' ) ) ) );
+			this.wBarWrap = h( 'div.wb', {}, h( 'div', {}, this.wBar = h( 'div.meter', {}, this.wBarI = h( 'i' ) ) ) ) );
 		this.vehicle = h( 'div.vehicle.plate', { hidden: true },
 			h( 'div.top', {}, this.vName = h( 'span.t-label' ), this.vGear = h( 'span.gear.t-label' ) ),
 			h( 'div.spd', {}, this.vSpd = h( 'span.t-num' ), this.vUnit = h( 'span.t-label' ) ),
@@ -313,6 +316,9 @@ export class HUD {
 		flag( this.el, 'off', this.hidden || dead );
 		flag( this.el, 'under', screen );
 		flag( this.feed, 'off', this.hidden || dead );
+		// toasts keep clear of whatever a screen puts in the top-left corner (the map title, the inventory panel)
+		const feedAt = ! screen ? '' : ui.screenOpts.inventory ? 'inv' : ui.screenOpts.map ? 'map' : 'screen';
+		if ( feedAt !== this._feedAt ) { this._feedAt = feedAt; this._placeFeed(); }
 
 		const vh = g.vehicles?.hud?.() || null;
 		this._vh = vh;
@@ -487,6 +493,15 @@ export class HUD {
 		const yaw = vh?.heading ?? p.yaw;
 		// heading-up; the ground span per canvas width matches the old 340 px minimap
 		const { toScreen } = map.draw( ctx, { cx: pos.x, cz: pos.z, ppm: this.zoom * W / 340, rot: - yaw, w: W, h: W }, { labels: false, priority: 0.6, u: s } );
+		// at night the daylight relief would be the brightest thing on screen: dim it (markers and the player stay bright)
+		const night = this.app.world?.sky?.night || 0;
+		if ( night > 0.01 ) {
+			ctx.save();
+			ctx.setTransform( 1, 0, 0, 1, 0, 0 );
+			ctx.fillStyle = `rgba(6, 8, 12, ${( 0.62 * Math.min( 1, night ) ).toFixed( 3 )})`;
+			ctx.fillRect( 0, 0, W, W );
+			ctx.restore();
+		}
 		const mid = W / 2, edge = 8 * s;
 		const riding = g.vehicles?.driving?.pos;
 		for ( const v of g.vehicles?.known?.() || [] ) {
@@ -559,7 +574,7 @@ export class HUD {
 			const dir = o.rate < 0 ? - 1 : 1;
 			if ( tier !== o.tier || ( tier && dir !== o.dir ) ) {
 				o.tier = tier; o.dir = dir;
-				o.chev.forEach( ( c, i ) => { c.style.display = i < tier ? '' : 'none'; c.setAttribute( 'class', 'i i10 ' + ( dir < 0 ? 'r90' : 'r-90' ) ); } );
+				o.trPath.setAttribute( 'd', trendPath( tier, dir ) );
 			}
 		}
 		if ( dirty ) sync( this.vitals, this.vit.filter( o => o.inDom ).map( o => o.el ) );
@@ -567,7 +582,9 @@ export class HUD {
 	}
 
 	_conditions( S, inv, creative, input ) {
-		const list = creative ? [] : S.conditions();
+		// Low blood repeats the blood cell of the vitals strip (it always shows by then): the Status screen keeps it
+		const bloodCell = this.vit[ 1 ].inDom;
+		const list = creative ? [] : S.conditions().filter( c => ! ( c.id === 'blood' && bloodCell ) );
 		const ids = new Set();
 		for ( const c of list ) {
 			ids.add( c.id );
@@ -584,7 +601,7 @@ export class HUD {
 			text( o.lab, open ? c.label : '' ); show( o.lab, open );
 			text( o.x, extra ); show( o.x, ! open && !! extra );
 			flag( o.el, 'lab', open || !! extra );
-			for ( const k of [ 'bad', 'warn', 'good' ] ) flag( o.el, k, c.kind === k );
+			for ( const k of [ 'bad', 'warn', 'good' ] ) flag( o.el, 'k-' + k, c.kind === k );
 		}
 		for ( const id of [ ...this.condEls.keys() ] ) if ( ! ids.has( id ) ) this.condEls.delete( id );
 		// K Bandage while bleeding with something that stops it
@@ -657,7 +674,6 @@ export class HUD {
 			tint = rounds === 0 ? 'alarm' : cap && rounds <= cap * 0.2 ? 'warn' : '';
 			this._jam = jam;
 			this._reload = rounds === 0 && res > 0 && ! jam;
-			show( this.wMag, f.feed !== 'internal' );
 		} else if ( d?.tool?.liquid || d?.fuel ) { num = ( held.data.amount || 0 ).toFixed( 1 ); unit = 'L'; }
 		else if ( d?.tool?.battery && held.data.charge != null ) { num = Math.round( held.data.charge / d.tool.battery * 100 ); unit = '%'; }
 		else if ( held.qty > 1 ) num = held.qty;
@@ -753,8 +769,13 @@ export class HUD {
 		this.dmg.style.opacity = Math.min( 1, hd.t ).toFixed( 2 );
 	}
 
-	// toasts start under the FPS / debug block; its height is known from what it shows, so no layout read
+	// toasts start under the FPS / debug block; its height is known from what it shows, so no layout read.
+	// Over a screen the HUD (and its FPS block) is hidden: the map puts them under its title plate, the
+	// inventory in the middle of its top bar (css), anything else in the corner.
 	_placeFeed() {
+		const at = this._feedAt || '';
+		flag( this.feed, 'at-inv', at === 'inv' ); flag( this.feed, 'at-map', at === 'map' );
+		if ( at ) { this.feed.style.top = ''; return; }
 		let top = 24;
 		if ( this._fpsOn ) top += 20 + 8;
 		if ( this.debugOn ) top += ( this._debugLines || 9 ) * 16 + 16 + 8;

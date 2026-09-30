@@ -16,19 +16,21 @@ import { patchMaterial } from '../render/Materials.js';
 
 export const PALM_LEN = 0.095; // wrist to the middle knuckle
 export const PALM_T = 0.024; // palm thickness under the knuckles
-const PALM_SKIN = 0.0128; // bone plane to the palmar skin (pads included): where a grip touches
+let PALM_SKIN = 0.0128; // bone plane to the palmar skin (pads included): where a grip touches
 // A power grip lies diagonally across the palm, from under the index knuckle to the heel on the pinky side: the
 // axis crosses the hand's middle line GRIP_Z in front of the wrist, turned GRIP_BETA from the knuckle line.
-export const GRIP_BETA = 0.44, GRIP_Z = 0.071;
+export const GRIP_BETA = 0.44;
+let GRIP_Z = 0.071;
 export const FORE_LEN = 0.255, UPPER_LEN = 0.29;
 
 // right hand. x, y, z: knuckle (MCP joint); len: phalanges; r: radius at MCP, PIP, DIP, tip; splay: yaw (rad)
-const FINGERS = [
+const FINGERS_PROC = [
 	{ x: 0.0255, y: - 0.0012, z: 0.0895, len: [ 0.044, 0.026, 0.0205 ], r: [ 0.0092, 0.0085, 0.0078, 0.0070 ], splay: 0.03 },
 	{ x: 0.0081, y: 0.0, z: 0.0935, len: [ 0.0475, 0.0295, 0.0215 ], r: [ 0.0095, 0.0088, 0.008, 0.0072 ], splay: 0.0 },
 	{ x: - 0.0094, y: - 0.0008, z: 0.0905, len: [ 0.0445, 0.0275, 0.0205 ], r: [ 0.009, 0.0083, 0.0076, 0.0069 ], splay: - 0.025 },
 	{ x: - 0.0252, y: - 0.0028, z: 0.0815, len: [ 0.0355, 0.0215, 0.0185 ], r: [ 0.0079, 0.0072, 0.0066, 0.0061 ], splay: - 0.06 },
 ];
+let FINGERS = FINGERS_PROC;
 // thumb: CMC joint, rest direction and nail direction (the thumb sits rotated ~70 degrees from the fingers)
 const THUMB = { p: [ 0.0205, - 0.0115, 0.022 ], dir: [ 0.6, - 0.36, 0.71 ], up: [ 0.72, 0.64, - 0.2 ], len: [ 0.045, 0.032, 0.0265 ], r: [ 0.0132, 0.0112, 0.0097, 0.0085 ] };
 
@@ -42,6 +44,14 @@ const B_UPPER = 0, B_FORE = 1, B_WRIST = 2, B_FING = 3, B_THUMB = 15;
 // it like real fingers do. tight < 1 relaxes the hand (0 = flat), > 1 squeezes past contact (a fist).
 const JOINT_MAX = [ 1.62, 1.95, 1.35 ];
 const CURLS = new Map();
+
+// the grip solver's hand: the procedural one below, or the measurements of a loaded hand model (ArmRig.js)
+export function setHandMetrics( m ) {
+	FINGERS = m ? m.fingers : FINGERS_PROC;
+	PALM_SKIN = m ? m.palmSkin : 0.0128;
+	GRIP_Z = m ? 0.071 * m.palmLen / PALM_LEN : 0.071;
+	CURLS.clear();
+}
 export function curlFor( r, tight = 1, beta = GRIP_BETA ) {
 	// solved once per grip size (the view model asks every frame); callers must not modify the result
 	const key = `${ r }|${ tight }|${ beta }`;
@@ -194,9 +204,9 @@ function armPoint( phi, z, off = 0, fold = 0 ) {
 	let x = ( w + off ) * se( c, e ), y = ( s > 0 ? hd + off : hp + off ) * se( s, e );
 	if ( z > - 0.02 && off === 0 ) {
 		// knuckles on the back of the hand
-		if ( s > 0 ) for ( const f of FINGERS ) y += 0.0034 * gauss( Math.hypot( x - f.x, z - f.z + 0.004 ), 0.0072 ) * s;
+		if ( s > 0 ) for ( const f of FINGERS_PROC ) y += 0.0034 * gauss( Math.hypot( x - f.x, z - f.z + 0.004 ), 0.0072 ) * s;
 		// tendons fanning from the wrist to the knuckles
-		if ( s > 0 && z > 0.01 && z < 0.08 ) for ( const f of FINGERS ) { const fx = f.x * ( 0.35 + 0.65 * z / 0.08 ); y += 0.0006 * gauss( x - fx, 0.0028 ) * s; }
+		if ( s > 0 && z > 0.01 && z < 0.08 ) for ( const f of FINGERS_PROC ) { const fx = f.x * ( 0.35 + 0.65 * z / 0.08 ); y += 0.0006 * gauss( x - fx, 0.0028 ) * s; }
 		// palm: thenar (thumb side) and hypothenar pads, the hollow between them
 		if ( s < 0 ) {
 			y -= 0.0068 * gauss( Math.hypot( x - 0.022, z - 0.03 ), 0.017 ) * - s;
@@ -336,7 +346,7 @@ function skinGeometry( side ) {
 		M.slot( 1 );
 	};
 	const qf = new THREE.Quaternion();
-	FINGERS.forEach( ( f, i ) => {
+	FINGERS_PROC.forEach( ( f, i ) => {
 		qf.setFromAxisAngle( new THREE.Vector3( 0, 1, 0 ), f.splay );
 		tube( new THREE.Vector3( f.x, f.y, f.z ), qf.clone(), f.len, f.r, [ B_FING + i * 3, B_FING + i * 3 + 1, B_FING + i * 3 + 2 ], false );
 	} );
@@ -480,7 +490,7 @@ export class Arm {
 		fore.position.set( 0, 0, UPPER_LEN ); upper.add( fore );
 		wrist.position.set( 0, 0, FORE_LEN ); fore.add( wrist );
 		this.fingers = [];
-		FINGERS.forEach( ( f, i ) => {
+		FINGERS_PROC.forEach( ( f, i ) => {
 			const ch = [ bones[ B_FING + i * 3 ], bones[ B_FING + i * 3 + 1 ], bones[ B_FING + i * 3 + 2 ] ];
 			ch[ 0 ].position.set( f.x * side, f.y, f.z );
 			ch[ 0 ].userData.rest = new THREE.Quaternion().setFromAxisAngle( AX_Y, f.splay * side );
@@ -537,6 +547,19 @@ export class Arm {
 		this.skin.material = gl ? [ this.mSkin, this.mGlove, this.mGlove ] : [ this.mSkin, this.mSkin, this.mNail ];
 		// a glove cuff under a long sleeve would poke through it
 		this.cuff.visible = gl && ! ( has && o.long );
+	}
+
+	// every material shown at once (shader warm-up), and back
+	warm( on ) {
+		if ( on ) {
+			this._warm = { mats: this.skin.material, vis: [ this.sleeveLong.visible, this.cuff.visible ] };
+			this.skin.material = [ this.mSkin, this.mGlove, this.mGlove ];
+			this.sleeveLong.visible = this.cuff.visible = true;
+		} else if ( this._warm ) {
+			this.skin.material = this._warm.mats;
+			[ this.sleeveLong.visible, this.cuff.visible ] = this._warm.vis;
+			this._warm = null;
+		}
 	}
 
 	setEnvironment( env, intensity ) {

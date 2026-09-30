@@ -31,6 +31,9 @@ const OK = { ok: true };
 const MINUS = '−';
 
 const cap1 = s => s ? s[ 0 ].toUpperCase() + s.slice( 1 ) : '';
+// item actions carry state in brackets ('Eat (3/3)', 'Eat (rotten)'): the verb stays the label, the state moves to
+// the menu's right column
+const splitLabel = l => { const m = /^(.+?)\s*\(([^()]+)\)((?:\s*\([^()]+\))*)$/.exec( l ); return m ? [ m[ 1 ], [ m[ 2 ], ...( m[ 3 ].match( /[^()\s][^()]*/g ) || [] ) ].map( t => cap1( t.trim() ) ).join( ' · ' ) ] : [ l, null ]; };
 const fmtVol = v => String( Math.round( v * 10 ) / 10 );
 const pct = x => Math.round( x * 100 ) + '%';
 const signed = ( n, dp = 0 ) => { const r = + n.toFixed( dp ); return ( r > 0 ? '+' : r < 0 ? MINUS : '' ) + Math.abs( r ); };
@@ -306,8 +309,10 @@ export class InventoryUI {
 		let capEl = null, meter = null;
 		if ( items && capacity > 0 && capacity < 999 ) {
 			const used = containerVolume( items ), f = used / capacity;
-			capEl = h( 'span.cap' + ( f >= 1 ? '.full' : '' ), { text: `${fmtVol( used )}/${fmtVol( capacity )}` } );
-			meter = h( 'div.meter' + ( f >= 1 ? '.alarm' : f > 0.9 ? '.warn' : '' ), {}, h( 'i', { style: { width: Math.min( 100, f * 100 ).toFixed( 1 ) + '%' } } ) );
+			// full is routine (the bar already says it): brighter, not red; red is kept for over capacity
+			const st = f > 1.001 ? '.over' : f >= 0.999 ? '.full' : '';
+			capEl = h( 'span.cap' + st, { text: `${fmtVol( used )}/${fmtVol( capacity )}` } );
+			meter = h( 'div.meter' + ( st === '.over' ? '.alarm' : st ), {}, h( 'i', { style: { width: Math.min( 100, f * 100 ).toFixed( 1 ) + '%' } } ) );
 		} else {
 			// the ground and bottomless containers (your body) just count their stacks
 			const n = items ? items.length : count;
@@ -710,7 +715,7 @@ export class InventoryUI {
 		this._closeSplit();
 		const img = d.el.querySelector( 'img' );
 		const q = d.loc.type === 'catalog' ? '' : qtyOf( d.stack );
-		d.ghost = h( 'div.drag-ghost', {}, img ? h( 'img', { alt: '', src: img.src } ) : null, q ? h( 'span.q', { text: q } ) : null );
+		d.ghost = h( 'div.drag-ghost', {}, img?.getAttribute( 'src' ) ? h( 'img', { alt: '', src: img.src } ) : null, q ? h( 'span.q', { text: q } ) : null );
 		this.ui.root.appendChild( d.ghost );
 		d.el.classList.add( 'src' );
 		this.el.classList.add( 'dragging' );
@@ -1107,7 +1112,11 @@ export class InventoryUI {
 		const g = this.game, inv = this.inv, d = getItem( stack.id ), H = g.hands;
 		if ( ! d ) return [];
 		const out = [], seen = new Set();
-		const add = ( label, run, hint = null, o = {} ) => { seen.add( label.toLowerCase() ); out.push( { label, hint, ...o, run: () => { run(); this.dirty = true; } } ); };
+		const add = ( label, run, hint = null, o = {} ) => {
+			const [ verb, meta ] = splitLabel( label );
+			seen.add( label.toLowerCase() );
+			out.push( { label: verb, meta, hint, ...o, run: () => { run(); this.dirty = true; } } );
+		};
 		const sep = () => { if ( out.length && out[ out.length - 1 ] ) out.push( null ); };
 		const uses = () => g.itemUse?.actions?.( stack ) || [];
 		if ( loc.type === 'catalog' ) {
@@ -1258,16 +1267,21 @@ export class InventoryUI {
 		setIcon( out, r.out[ 0 ] );
 		out._tipStack = tipStack( r.out[ 0 ] );
 		const reqs = h( 'div.reqs' );
+		// ingredient: render, name, have/need (the count turns red when short); the tooltip has the rest
 		for ( const [ id, q ] of r.in ) {
 			const have = inv.count( id );
 			const img = h( 'img', { alt: '', draggable: false } );
 			setIcon( img, id );
-			const chip = h( 'span.chip.req' + ( have < q ? '.miss' : '' ), {}, img, h( 'span', { text: `${have}/${q}` } ) );
+			const chip = h( 'span.chip.req.ing' + ( have < q ? '.short' : '' ), {}, img, h( 'span.nm', { text: getItem( id )?.name || id } ), h( 'span.n', { text: `${have}/${q}` } ) );
 			chip._tipStack = tipStack( id );
 			reqs.appendChild( chip );
 		}
-		for ( const t of r.tools || [] ) reqs.appendChild( h( 'span.chip.req.txt' + ( ctx.hasTool( t ) ? '' : '.miss' ), { text: TOOL_WORD[ t ] || cap1( t ) } ) );
-		if ( r.station === 'fire' ) reqs.appendChild( h( 'span.chip.req' + ( ctx.fire ? '' : '.miss' ), {}, icon( 'flame' ), h( 'span', { text: 'Fire' } ) ) );
+		// tools by their plain name (Crafting's toolLabels: 'blade', 'cooking pot'), the station from r.station
+		( r.tools || [] ).forEach( ( t, i ) => reqs.appendChild( h( 'span.chip.req.txt' + ( ctx.hasTool( t ) ? '' : '.miss' ), { text: cap1( r.toolLabels?.[ i ] || TOOL_WORD[ t ] || t ) } ) ) );
+		if ( r.station ) {
+			const fire = r.station === 'fire';
+			reqs.appendChild( h( 'span.chip.req' + ( fire && ! ctx.fire ? '.miss' : '' ), {}, icon( fire ? 'flame' : 'wrench' ), h( 'span', { text: fire ? 'Fire' : cap1( r.station ) } ) ) );
+		}
 		if ( r.liquid ) {
 			const miss = ( C.liquidAvailable?.( r.liquid.kind ) || 0 ) < r.liquid.litres - 1e-6;
 			reqs.appendChild( h( 'span.chip.req' + ( miss ? '.miss' : '' ), {}, icon( r.liquid.kind === 'fuel' ? 'fuel' : 'water' ), h( 'span', { text: `${r.liquid.litres} L` } ) ) );

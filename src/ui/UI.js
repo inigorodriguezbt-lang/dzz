@@ -8,11 +8,12 @@ import { Menus } from './Menus.js';
 import { InventoryUI } from './InventoryUI.js';
 import { MapUI } from './MapUI.js';
 import { MapView } from './MapView.js';
-import { loadIcons } from './itemIcons.js';
+import { loadIcons, warmIcons } from './itemIcons.js';
 import { getItem } from '../game/items/ItemDB.js';
 
 // Key hints (spec 5.11): one set at a time while Key hints (the `tutorial` setting) is on, each once per game
-// session. keys: [ [ actions, verb, suffix ] ]; every cap comes from input.label() so rebinding updates it.
+// session and for HINT_MAX seconds at most. keys: [ [ actions, verb, suffix ] ]; every cap comes from input.label()
+// so rebinding updates it.
 const HINTS = {
 	survival: [
 		{ keys: [ [ [ 'forward', 'left', 'back', 'right' ], 'Move' ], [ [ 'sprint' ], 'Sprint' ], [ [ 'crouch' ], 'Crouch' ] ], until: g => g.player.distance > 30 },
@@ -20,10 +21,13 @@ const HINTS = {
 		{ keys: [ [ [ 'map' ], 'Map' ] ], until: ( g, ui ) => ui.seenMap, when: ( g, ui ) => ui.mapAllowed() },
 	],
 	creative: [
-		{ keys: [ [ [ 'jump' ], 'Fly', '×2' ] ], until: g => g.player.flying },
+		// once flying (or driving) you know
+		{ keys: [ [ [ 'jump' ], 'Fly', '×2' ] ], until: g => g.player.flying || !! g.player.vehicle },
 		{ keys: [ [ [ 'chat' ], 'Chat' ] ], until: ( g, ui ) => ui.seenChat },
 	],
 };
+
+const HINT_MAX = 10; // s a key hint stays up when its rule isn't met
 
 // Status screen (spec 7): 1-2 word remedy per condition id, and the item property that counts as carrying it
 const REMEDY = {
@@ -67,6 +71,8 @@ export class UI {
 			if ( this.game && ! this.screen && ! this.chat.open && ! this.game.dead ) app.input.lock();
 		} );
 		window.addEventListener( 'keydown', e => {
+			// Esc with the pointer already free (after alt-tab, or a lock the browser refused) still pauses
+			if ( e.code === 'Escape' && this.game && ! this.screen && ! this.chat.open && ! this.game.dead && ! this.app.input.locked && ! this.confirmOpen ) { e.preventDefault(); this.menus.pause(); return; }
 			if ( ! this.game || ! this.screen || this.screenOpts.sticky || this.screenOpts.inventory || this.confirmOpen ) return;
 			if ( e.code === 'Escape' || ( this.screenOpts.map && this.app.input.codes( 'map' ).includes( e.code ) ) ) { e.preventDefault(); this.closeScreen(); }
 		}, true );
@@ -129,6 +135,9 @@ export class UI {
 		this.lockHint.hidden = true;
 		this.app.input.lock();
 		this.announceSpawn();
+		// render the carried items' icons now, so the first inventory shows renders rather than an empty grid
+		const inv = game.player.inventory;
+		warmIcons( [ ...( inv.allStacks?.() || [] ) ].map( s => s.id ) );
 	}
 
 	// a new life: the location card says where (the creative Fly hint follows from HINTS)
@@ -337,17 +346,18 @@ export class UI {
 	}
 
 	// one key-hint set at a time (spec 5.11): 2.5 s after spawn, then each after the previous ends (its rule
-	// is met, or 20 s on screen). Paused while a screen, the chat or the sights are up.
+	// is met, or HINT_MAX s on screen). Paused while a screen, the chat, the sights or a vehicle are up.
 	_hints( dt ) {
 		const g = this.game, list = HINTS[ g.mode === 'creative' ? 'creative' : 'survival' ];
 		const hint = list[ this.hintIdx ];
 		if ( ! hint || ! this.app.settings.get( 'tutorial' ) ) { this.hud.setHint( null ); return; }
-		if ( hint.until( g, this ) || ( hint.when && ! hint.when( g, this ) ) || this.hintT > 20 + this._hintDelay() ) {
+		if ( hint.until( g, this ) || ( hint.when && ! hint.when( g, this ) ) || this.hintT > HINT_MAX + this._hintDelay() ) {
 			this.hintIdx ++; this.hintT = 0;
 			this.hud.setHint( null );
 			return;
 		}
-		const paused = !! this.screen || this.chat.open || g.dead || !! g.hands?.aiming;
+		// on foot only: the hints are about walking (and a car has its own keys)
+		const paused = !! this.screen || this.chat.open || g.dead || !! g.hands?.aiming || !! g.player.vehicle;
 		if ( ! paused ) this.hintT += dt;
 		this.hud.setHint( ! paused && this.hintT >= this._hintDelay() ? hint : null );
 	}

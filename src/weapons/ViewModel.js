@@ -13,7 +13,8 @@
 import * as THREE from 'three';
 import { getItem } from '../game/items/ItemDB.js';
 import { buildGunView, buildMagView, buildAttachmentView, buildMeleeView, buildThrowableView, weaponMaterials, CALIBERS } from './GunModels.js';
-import { Arm, curlFor, wristMatrix, THUMB_POSE } from './Arms.js';
+import { Arm, curlFor, wristMatrix, THUMB_POSE, setHandMetrics } from './Arms.js';
+import { loadArmRig } from './ArmRig.js';
 import { reticleLens, integratedLens, aimLens, ScopeOverlay, OVERLAY_RETICLES } from './Optics.js';
 import { buildItemModel, modelInfo } from '../render/ItemModels.js';
 
@@ -50,6 +51,17 @@ const HAND_HOLD = {
 	item: { at: [ 0.13, - 0.16, - 0.32 ], x: [ - 0.2, 0.5, 0.85 ], y: [ 0.75, - 0.55, 0.3 ] },
 	// torches and other long things point forward, held overhand
 	long: { at: [ 0.2, - 0.17, - 0.32 ], x: [ - 0.1, 0.2, - 1 ], y: [ - 0.3, - 0.95, 0 ] },
+};
+// gun holds at the hip: the gun frame's origin (trigger, on the bore line) in view space, its turn (pitch, yaw, roll;
+// yaw + points the muzzle in towards the crosshair, roll - leans the top in) and where the elbows hang. Long guns sit
+// low and right with the stock in the shoulder, pointing into the scene just under the crosshair; pistols are out in
+// front in both hands. The screen's bottom-right corner is the HUD's weapon panel: hands stay left of it.
+const GUN_HOLD = {
+	rifle: { p: [ 0.1, - 0.092, - 0.36 ], r: [ 0.02, 0.045, - 0.1 ], eR: [ 0.3, - 0.4, - 0.02 ], eL: [ - 0.22, - 0.38, - 0.3 ] },
+	heavy: { p: [ 0.11, - 0.1, - 0.38 ], r: [ 0.02, 0.04, - 0.08 ], eR: [ 0.3, - 0.42, 0.0 ], eL: [ - 0.2, - 0.4, - 0.3 ] },
+	stock: { p: [ 0.1, - 0.08, - 0.38 ], r: [ 0.02, 0.045, - 0.1 ], eR: [ 0.3, - 0.38, - 0.02 ], eL: [ - 0.22, - 0.38, - 0.32 ] },
+	pistol: { p: [ 0.075, - 0.085, - 0.42 ], r: [ 0.03, 0.07, - 0.04 ], eR: [ 0.2, - 0.4, - 0.12 ], eL: [ - 0.12, - 0.42, - 0.14 ] },
+	bow: { p: [ 0.0, - 0.1, - 0.5 ], r: [ 0.02, 0.12, - 0.4 ], eR: [ 0.3, - 0.4, 0.0 ], eL: [ - 0.2, - 0.4, - 0.3 ] },
 };
 // melee holds: where the right hand's grip sits in view space and how the item points
 const MELEE_HOLD = {
@@ -109,9 +121,11 @@ export class ViewModel {
 		scene.add( this.root );
 		this.holder = new THREE.Group();
 		this.root.add( this.holder );
+		// procedural arms until the modelled ones (ArmRig.js) have loaded, and for good if they can't
 		this.armR = new Arm( 1 );
 		this.armL = new Arm( - 1 );
 		this.root.add( this.armR.root, this.armL.root );
+		if ( typeof document !== 'undefined' ) loadArmRig().then( rig => { if ( ! this._disposed ) this._useRig( rig ); } ).catch( e => console.warn( 'arm rig', e ) );
 		this.shoulderR = V( 0.19, - 0.25, 0.1 );
 		this.shoulderL = V( - 0.19, - 0.25, 0.08 );
 		// where the elbows hang when both hands are on a gun: tucked down, the right one out a little
@@ -374,7 +388,21 @@ export class ViewModel {
 		const key = `${o.skin}:${o.sleeve}:${o.long}:${o.print?.uuid}:${o.glove}`;
 		if ( key === this._armKey ) return;
 		this._armKey = key;
+		this._armStyle = o;
 		this.armR.style( o ); this.armL.style( o );
+	}
+
+	// swap in the modelled arms: the grip solver takes their hand's measurements
+	_useRig( rig ) {
+		setHandMetrics( rig.metrics );
+		const old = [ this.armR, this.armL ];
+		this.armR = rig.make( 1 ); this.armL = rig.make( - 1 );
+		this.root.add( this.armR.root, this.armL.root );
+		for ( const a of old ) a.dispose();
+		this.armR.visible = this.armL.visible = false;
+		if ( this._armStyle ) { this.armR.style( this._armStyle ); this.armL.style( this._armStyle ); }
+		if ( this.env ) this.setEnvironment( this.env );
+		this.onArms?.();
 	}
 
 	// ---- events from Hands ---------------------------------------------------------------------------------------------
@@ -502,10 +530,11 @@ export class ViewModel {
 		if ( gun ) {
 			// the gun frame's origin (trigger, on the bore line) in view space: long guns at a low ready to the right,
 			// pointing into the screen; pistols out in front in both hands
-			if ( cls === 'pistol' ) { hipP.set( 0.14, - 0.1, - 0.4 ); hipQ.copy( E( 0.0, 0.1, - 0.12 ) ).multiply( GUN_Q ); }
-			else if ( cls === 'bow' && it.info.bow ) { hipP.set( 0.0, - 0.1, - 0.5 ); hipQ.copy( E( 0.02, 0.12, - 0.4 ) ).multiply( GUN_Q ); }
-			else if ( it.heavy ) { hipP.set( 0.2, - 0.17, - 0.5 ); hipQ.copy( E( 0.0, 0.05, - 0.08 ) ).multiply( GUN_Q ); }
-			else { hipP.set( 0.2, - 0.15, - 0.48 ); hipQ.copy( E( 0.0, 0.05, - 0.08 ) ).multiply( GUN_Q ); }
+			// (rifle stocks without a pistol grip put the hand higher: the gun can sit lower)
+			const H = GUN_HOLD[ cls === 'pistol' ? 'pistol' : cls === 'bow' && it.info.bow ? 'bow' : it.heavy ? 'heavy' : it.grips.R && it.grips.R.p.y > - 0.06 ? 'stock' : 'rifle' ];
+			hipP.set( ...H.p );
+			hipQ.copy( E( ...H.r ) ).multiply( GUN_Q );
+			it.elbowR = V( ...H.eR ); it.elbowL = V( ...H.eL );
 		} else if ( it.kind === 'melee' ) {
 			// the item's own frame: +x along it (handle -> tip), +y the spine / back of a blade (edges face -y, an axe's
 			// bit +y), +z the flat. The grip is placed at `at`; `x` / `y` orient it in view space
@@ -893,8 +922,8 @@ export class ViewModel {
 		if ( s.overlay ) showL = showR = false;
 		R.visible = showR; Lh.visible = showL;
 		const gunHold = it.kind === 'gun' && it.cls !== 'bow';
-		if ( showR ) { R.setCurl( curlR, thumbR ); R.pose( this.shoulderR, this.handR, 0.4, gunHold ? this.elbowR : null ); }
-		if ( showL ) { Lh.setCurl( curlL, thumbL ); Lh.pose( this.shoulderL, this.handL, 0.5, gunHold ? this.elbowL : null ); }
+		if ( showR ) { R.setCurl( curlR, thumbR ); R.pose( this.shoulderR, this.handR, 0.4, gunHold ? it.elbowR || this.elbowR : null ); }
+		if ( showL ) { Lh.setCurl( curlL, thumbL ); Lh.pose( this.shoulderL, this.handL, 0.5, gunHold ? it.elbowL || this.elbowL : null ); }
 		// what the reload hand carries
 		this._handProp( it, act );
 	}
@@ -1176,6 +1205,7 @@ export class ViewModel {
 	}
 
 	dispose() {
+		this._disposed = true;
 		this.clear();
 		this.scene.remove( this.root, this.light );
 		this.armR.dispose(); this.armL.dispose();

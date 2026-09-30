@@ -91,6 +91,12 @@ export class World {
 		G.uTime.value = this.clock;
 		G.uCamPos.value.copy( this.camera.position );
 		this.terrain.update( this.camera.position );
+		// a teleport or a time jump (/tp, /time set, respawn): snap the eye adaptation and drop the temporal
+		// history instead of fading in from the old view
+		const cp = this.camera.position, dh = Math.abs( this.sky.hour - ( this._lastHour ?? this.sky.hour ) );
+		if ( this._lastCam && ( cp.distanceToSquared( this._lastCam ) > 80 * 80 || ( dh > 0.25 && dh < 23.75 ) ) ) this.renderer.resetExposure();
+		( this._lastCam ??= new THREE.Vector3() ).copy( cp );
+		this._lastHour = this.sky.hour;
 		this.sky.update( dt, this.camera, this.scene, this.settings );
 		// the key light follows the sky model: the sun, then the moon once the sun is 4 degrees down
 		const L = this.sky.keyDir;

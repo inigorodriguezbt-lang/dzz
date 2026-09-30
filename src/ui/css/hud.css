@@ -62,6 +62,12 @@
 .debug { max-width: calc(720 * var(--u)); padding: var(--s-2) var(--s-3); border-radius: var(--r-md); background: var(--m-pop); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink-1); white-space: pre; overflow: hidden; }
 .feed { position: absolute; left: var(--edge); top: var(--edge); z-index: 20; display: flex; flex-direction: column; align-items: flex-start; gap: var(--s-1); pointer-events: none; transition: opacity var(--d-4) var(--ease-out); }
 .feed.off { opacity: 0; }
+/* the map: under its title plate (top 24 + 56 + 8) */
+.feed.at-map { top: calc(88 * var(--u)); }
+/* the inventory: one status line in the empty middle of its top bar (the panel is centred with its hotbar strip
+   under it: 16u gap + 48u strip), the newest toast only */
+.feed.at-inv { left: 50%; top: calc((100vh - min(800 * var(--u), 100vh - 112 * var(--u)) - 64 * var(--u)) / 2 + 10 * var(--u)); transform: translateX(-50%); align-items: center; }
+.feed.at-inv > .toast:not(:last-child) { display: none; }
 .lock { position: absolute; left: 50%; top: 58%; transform: translateX(-50%); z-index: 3; display: flex; align-items: center; height: calc(32 * var(--u)); padding: 0 var(--s-3); pointer-events: none; white-space: nowrap; }
 
 /* ---- minimap ------------------------------------------------------------------------------------------- */
@@ -76,7 +82,8 @@
 .conds { display: flex; flex-wrap: wrap; gap: var(--s-1); max-width: calc(440 * var(--u)); }
 .cond { display: inline-flex; align-items: center; gap: calc(6 * var(--u)); height: calc(24 * var(--u)); padding: 0 var(--s-1); border-radius: var(--r-sm); white-space: nowrap; }
 .cond.lab { padding-right: var(--s-2); }
-.cond.bad > .i { color: var(--alarm); } .cond.warn > .i { color: var(--warn); } .cond.good > .i { color: var(--hud-2); }
+/* the kind colours only the icon (k-* so a warn chip doesn't pick up the .plate.warn tint) */
+.cond.k-bad > .i { color: var(--alarm); } .cond.k-warn > .i { color: var(--warn); } .cond.k-good > .i { color: var(--hud-2); }
 .cond .x { font-weight: 600; font-variant-numeric: tabular-nums; }
 .cond.act { padding-left: 2px; padding-right: var(--s-2); }
 .vitals { display: flex; border-radius: var(--r-md); box-shadow: inset 0 0 0 1px var(--line-2), var(--sh-plate); color: var(--hud-1); }
@@ -92,9 +99,9 @@
 .vital .v { margin-top: calc(4 * var(--u)); font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1; }
 .vital .meter { position: absolute; left: var(--s-2); right: var(--s-2); bottom: calc(6 * var(--u)); background: rgba(255, 255, 255, 0.14); }
 .vital .meter > i { background: var(--hud-1); }
-.vital .tr { position: absolute; right: calc(3 * var(--u)); top: calc(3 * var(--u)); display: flex; color: var(--hud-2); }
-.vital .tr .i { width: calc(10 * var(--u)); height: calc(10 * var(--u)); stroke-width: 2.5; margin-left: calc(-4 * var(--u)); }
-.vital .tr .i:first-child { margin-left: 0; }
+/* trend: 1-3 chevrons in a 12 x 16 box right of the icon, centred on it */
+.vital .tr { position: absolute; right: calc(3 * var(--u)); top: calc(10 * var(--u)); width: calc(12 * var(--u)); height: calc(16 * var(--u)); overflow: visible; }
+.vital .tr path { fill: none; stroke: var(--hud-1); stroke-width: max(1.5px, calc(1.75 * var(--u))); stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
 .vitals > .vital.warn { background: linear-gradient(var(--tint-warn), var(--tint-warn)), var(--m-hud); } .vital.warn > .i { color: var(--warn); } .vital.warn .meter > i { background: var(--warn); }
 .vitals > .vital.crit { background: linear-gradient(var(--tint-alarm), var(--tint-alarm)), var(--m-hud); } .vital.crit > .i { color: var(--alarm); animation: blink 1s steps(1) infinite; } .vital.crit .meter > i { background: var(--alarm); }
 .vitals > .vital.cold { background: linear-gradient(var(--tint-cold), var(--tint-cold)), var(--m-hud); } .vital.cold > .i { color: var(--cold); } .vital.cold .meter > i { background: var(--cold); }
@@ -111,8 +118,8 @@
 .hotbar { display: flex; gap: var(--gap); }
 .hot { position: relative; width: var(--hot); height: var(--hot); }
 .hot > img { position: absolute; left: 50%; top: 50%; width: calc(36 * var(--u)); height: calc(36 * var(--u)); transform: translate(-50%, -50%); object-fit: contain; }
-.hot > .n { position: absolute; left: calc(4 * var(--u)); top: calc(3 * var(--u)); font: 600 calc(10 * var(--u)) / 1 var(--mono); color: var(--hud-2); }
-.hot > .q { position: absolute; right: calc(4 * var(--u)); bottom: calc(3 * var(--u)); font-weight: 600; font-size: calc(11 * var(--u)); line-height: 1; font-variant-numeric: tabular-nums; text-shadow: 0 1px 1px rgba(0, 0, 0, 0.9); }
+.hot > .n { position: absolute; left: calc(4 * var(--u)); top: calc(3 * var(--u)); font: 600 max(9px, calc(10 * var(--u))) / 1 var(--mono); color: var(--hud-2); }
+.hot > .q { position: absolute; right: calc(4 * var(--u)); bottom: calc(3 * var(--u)); font-weight: 600; font-size: max(10px, calc(11 * var(--u))); line-height: 1; font-variant-numeric: tabular-nums; text-shadow: 0 1px 1px rgba(0, 0, 0, 0.9); }
 .hot.on { box-shadow: inset 0 0 0 1.5px var(--accent), var(--sh-plate); } .hot.on > .n { color: var(--accent); }
 .hot.unb { opacity: 0.4; background: transparent; }
 
@@ -124,21 +131,21 @@
 .pickup img { width: calc(20 * var(--u)); height: calc(20 * var(--u)); object-fit: contain; flex: none; }
 .pickup .x { color: var(--hud-2); font-weight: 600; font-variant-numeric: tabular-nums; flex: none; }
 .pickup.out { opacity: 0; transition: opacity var(--d-3) var(--ease-in); }
-/* expanded 78u: name, ammo row, condition meter; .col (idle or aiming) keeps only the 52u ammo row */
-.weapon { display: grid; grid-template-rows: 1fr auto 1fr; width: calc(240 * var(--u)); padding: var(--s-3); }
-.hud .weapon { transition: opacity var(--d-2) var(--ease-out), grid-template-rows var(--d-4) var(--ease-out); }
-.hud .weapon.gone { transition: opacity var(--d-4) var(--ease-in), grid-template-rows var(--d-4) var(--ease-out); }
-.weapon.col { grid-template-rows: 0fr auto 0fr; }
-.weapon > .wn, .weapon > .wb { min-height: 0; overflow: hidden; transition: opacity var(--d-4) var(--ease-out); }
-.weapon.col > .wn, .weapon.col > .wb { opacity: 0; }
+/* expanded 78u: name (18), ammo row (28), condition meter (6 + 2); .col (idle or aiming) keeps only the 52u ammo
+   row. The name and the meter each sit in a one-row grid that collapses 1fr -> 0fr, so each keeps its own height. */
+.weapon { display: flex; flex-direction: column; width: calc(240 * var(--u)); padding: var(--s-3); }
+.weapon > .wn, .weapon > .wb { display: grid; grid-template-rows: 1fr; transition: grid-template-rows var(--d-4) var(--ease-out), opacity var(--d-4) var(--ease-out); }
+.weapon > .wn > div, .weapon > .wb > div { min-height: 0; overflow: hidden; }
+.weapon.col > .wn, .weapon.col > .wb { grid-template-rows: 0fr; opacity: 0; }
 .weapon .name { padding-bottom: var(--s-1); color: var(--hud-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .weapon .ammo { display: flex; align-items: center; gap: var(--s-2); height: calc(28 * var(--u)); }
 .weapon .ammo .unit { color: var(--hud-2); margin-left: calc(-4 * var(--u)); align-self: flex-end; padding-bottom: calc(2 * var(--u)); }
-.weapon .ammo .res { display: flex; align-items: center; gap: 2px; color: var(--hud-2); font-weight: 600; font-variant-numeric: tabular-nums; }
-.weapon .ammo .res .i { stroke-width: 2; } /* 1 px lines at 12u, like the 16u set */
+/* reserve: a hairline, then the spare rounds (loaded | spare) */
+.weapon .ammo .res { display: flex; align-items: center; gap: var(--s-2); color: var(--hud-2); font-weight: 600; font-variant-numeric: tabular-nums; }
+.weapon .ammo .res::before { content: ''; width: 1px; height: calc(16 * var(--u)); background: rgba(255, 255, 255, 0.28); }
 .weapon .ammo .mode { margin-left: auto; }
 .weapon .ammo .jam { margin-left: auto; height: calc(20 * var(--u)); padding: 0 var(--s-2); border-radius: var(--r-sm); background: var(--alarm); color: var(--on-accent); display: inline-flex; align-items: center; }
-.weapon .wb { padding-top: calc(6 * var(--u)); }
+.weapon .wb > div { padding-top: calc(6 * var(--u)); }
 .weapon .meter { background: rgba(255, 255, 255, 0.14); } .weapon .meter > i { background: var(--hud-2); }
 .weapon .meter.warn > i { background: var(--warn); } .weapon .meter.alarm > i { background: var(--alarm); }
 .vehicle { width: calc(240 * var(--u)); padding: var(--s-3); }

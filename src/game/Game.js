@@ -179,21 +179,22 @@ export class Game {
 			lowBlood: THREE.MathUtils.clamp( ( 3800 - S.blood ) / 2200, 0, 1 ),
 			drunk: S.drunk, sick: S.sick * 0.6 + S.infection * 0.4,
 			underwater: p.underwater ? 1 : 0,
-			night: this.world.sky.night,
-			exposure: this.exposure(),
+			exposureBias: this.exposure(),
 			time: this.world.clock,
 			flash: this.flash || 0,
 			fade: this.fade || 0,
 		};
 	}
 
+	// exposure bias on top of the renderer's auto exposure (which handles day, night and shade): interiors a
+	// little brighter so they stay readable. Eased over about half a second so a doorway doesn't pop
 	exposure() {
-		// eye adaptation: brighter at night and indoors so both stay readable
-		const sky = this.world.sky;
-		let e = 1.0 + sky.night * 1.4 * this.settings.get( 'nightBrightness' );
-		if ( this.world.isIndoors?.( this.player.pos ) ) e *= 1.35;
+		const e = this.world.isIndoors?.( this.player.pos ) ? 1.35 : 1;
+		const now = performance.now();
+		const dt = Math.min( 0.1, ( now - ( this._expT ?? now ) ) / 1000 );
+		this._expT = now;
 		this._exp = this._exp ?? e;
-		this._exp += ( e - this._exp ) * 0.03;
+		this._exp += ( e - this._exp ) * Math.min( 1, dt * 6 );
 		return this._exp;
 	}
 
