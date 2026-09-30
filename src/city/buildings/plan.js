@@ -101,12 +101,14 @@ function palette( P ) {
 			}
 			mat.roof = M( L.bitumen, [ 170, 170, 170 ], 4 );
 			mat.rail = M( L.plain, paint( [ [ 236, 236, 232 ], [ 40, 44, 48 ], [ 150, 160, 168 ] ] ), 1 );
+			towerLook( P );
 			break;
 		}
 		case 'office':
 			mat.ext = M( R() < 0.5 ? L.concrete : L.stucco, paint( PAL.concrete ), 3 );
 			mat.roof = M( L.bitumen, [ 170, 170, 170 ], 4 );
 			P.winStyle = 12; P.frame = paint( [ 1, 2, 3 ] );
+			midriseLook( P );
 			break;
 		case 'shop': case 'food': case 'bigbox': case 'gas':
 			mat.ext = S.arch === 'bigbox' ? M( R() < 0.5 ? L.cmu : L.concrete, paint( PAL.stucco ), 3 ) : M( pick( R, [ L.stucco, L.stucco, L.cmu, L.brick, L.beige ] ), paint( PAL.stucco ), 2.6 );
@@ -114,6 +116,7 @@ function palette( P ) {
 			mat.roof = M( L.bitumen, [ 175, 175, 175 ], 4 );
 			P.winStyle = 4; P.frame = paint( [ 1, 2, 3 ] );
 			mat.awning = M( L.fabric, paint( PAL.awning ), 1.5 );
+			shopLook( P );
 			break;
 		case 'church':
 			mat.ext = M( R() < 0.4 ? L.planks : L.stucco, [ 244, 242, 236 ], 2.4 );
@@ -153,6 +156,24 @@ function palette( P ) {
 			mat.roof = M( L.plain, [ 246, 246, 244 ], 3 );
 			P.winStyle = 0;
 			break;
+		case 'hospital':
+			mat.ext = M( L.stucco, paint( [ [ 244, 242, 236 ], [ 232, 228, 218 ], [ 226, 232, 230 ] ] ), 3 );
+			mat.roof = M( L.bitumen, [ 175, 175, 175 ], 4 );
+			P.winStyle = 12; P.frame = paint( [ 2, 6 ] );
+			midriseLook( P );
+			P.look.accent = M( L.stucco, paint( [ [ 60, 112, 122 ], [ 44, 72, 104 ], [ 90, 130, 110 ] ] ), 3 );
+			break;
+		case 'police': case 'fire': case 'school': case 'clinic':
+			mat.ext = S.arch === 'fire' ? M( L.brick, [ 236, 226, 214 ], 2.6 ) : M( R() < 0.5 ? L.cmu : L.stucco, paint( S.arch === 'police' ? [ [ 222, 212, 190 ], [ 214, 214, 206 ], [ 230, 224, 210 ] ] : PAL.stucco ), 2.8 );
+			mat.roof = M( L.bitumen, [ 175, 175, 175 ], 4 );
+			// Honolulu's public buildings: jalousie louvres in the schools, plain sashes elsewhere
+			P.winStyle = S.arch === 'school' ? 2 : 1; P.frame = paint( [ 0, 2 ] );
+			midriseLook( P );
+			if ( S.arch === 'police' ) P.look.accent = M( L.stucco, [ 44, 64, 104 ], 3 );
+			if ( S.arch === 'fire' ) { P.look.accent = M( L.stucco, [ 170, 44, 36 ], 3 ); P.mat.base = null; }
+			if ( S.arch === 'school' ) { P.look.accent = M( L.stucco, paint( [ [ 60, 112, 122 ], [ 164, 96, 64 ], [ 120, 146, 120 ] ] ), 3 ); P.mat.base = null; }
+			P.look.canopy = S.arch !== 'fire';
+			break;
 		default:
 			mat.ext = M( L.stucco, paint( PAL.stucco ), 3 );
 			mat.roof = M( L.bitumen, [ 175, 175, 175 ], 4 );
@@ -161,6 +182,89 @@ function palette( P ) {
 	if ( ! mat.rail ) mat.rail = M( L.plain, mat.trim.c, 1 );
 	// the frame colour follows the trim for wood houses
 	P.boarded *= S.arch === 'tower' ? 0.3 : 1;
+	if ( ! P.look ) P.look = {};
+}
+
+// ---- the city's high-rises: a base, a body and a top, in the colours of Honolulu --------------------------------
+// (a separate random stream: the looks never shift the floor plans)
+
+const RES_BODY = [ [ 244, 240, 230 ], [ 238, 228, 206 ], [ 232, 214, 190 ], [ 238, 210, 196 ], [ 212, 230, 224 ], [ 222, 228, 234 ], [ 240, 232, 206 ], [ 226, 218, 204 ], [ 246, 244, 238 ], [ 214, 222, 214 ] ];
+const RES_ACCENT = [ [ 60, 112, 122 ], [ 164, 96, 64 ], [ 88, 96, 106 ], [ 246, 246, 242 ], [ 176, 146, 104 ], [ 44, 72, 104 ], [ 120, 146, 120 ], [ 196, 120, 96 ] ];
+const STONE = [ [ 150, 140, 128 ], [ 108, 106, 106 ], [ 198, 188, 170 ], [ 132, 118, 104 ], [ 84, 84, 88 ] ];
+// curtain-wall towers: the spandrel panels follow the glass (frame index -> glass tint in the facade shader)
+const SPANDREL = { 1: [ 96, 82, 68 ], 2: [ 70, 96, 104 ], 3: [ 66, 70, 76 ], 6: [ 52, 92, 98 ] };
+const PRECAST = [ [ 232, 228, 218 ], [ 216, 208, 192 ], [ 202, 198, 190 ], [ 226, 216, 198 ], [ 190, 186, 180 ] ];
+
+function towerLook( P ) {
+	const { S, mat } = P;
+	const V = rng( hash32( P.bid, 0x1007 ) );
+	const pk = ( a ) => a[ Math.floor( V() * a.length ) % a.length ];
+	const look = P.look = { corners: 0, fins: 0, bands: false, crown: 'band', canopy: true, plaza: true };
+	const stone = pk( STONE );
+	if ( S.variant === 'office' ) {
+		if ( P.winStyle === 3 ) {
+			// glass curtain wall: the glass tint (frame) and matching spandrels, fins on the mullions
+			P.frame = pk( [ 1, 2, 3, 2, 6 ] );
+			mat.ext = M( L.panels, SPANDREL[ P.frame ] || SPANDREL[ 2 ], 3 );
+			look.fins = V() < 0.6 ? 2 : 0;
+			look.finM = M( L.metal, P.frame === 1 ? [ 150, 128, 100 ] : P.frame === 3 ? [ 60, 62, 66 ] : [ 200, 204, 208 ], 1 );
+			look.crown = V() < 0.55 ? 'glass' : 'band';
+		} else {
+			// precast concrete with ribbon windows (the 1970s Bishop Street look)
+			mat.ext = M( L.concrete, pk( PRECAST ), 4 );
+			P.frame = pk( [ 1, 3, 1, 2 ] );
+			look.fins = V() < 0.5 ? 1 : 0;
+			look.finM = M( L.concrete, mat.ext.c.map( v => v * 0.94 ), 4 );
+			look.crown = 'band';
+		}
+		mat.base = M( L.panels, stone, 1.6 );
+		look.accent = M( L.metal, P.frame === 1 ? [ 120, 100, 80 ] : [ 70, 72, 76 ], 1 );
+	} else {
+		// hotels and condos: pastel stucco, a stone or darker base, accent bands and balcony fronts
+		const body = pk( RES_BODY );
+		mat.ext = M( V() < 0.7 ? L.stucco : L.concrete, body, 3.5 );
+		const acc = pk( RES_ACCENT );
+		look.accent = M( L.stucco, acc, 3 );
+		mat.base = V() < 0.6 ? M( L.panels, stone, 1.6 ) : M( L.stucco, body.map( v => v * 0.82 ), 3 );
+		look.corners = V() < 0.45 ? 0.7 : 0;
+		look.bands = true;
+		look.crown = S.variant === 'hotel' && V() < 0.3 ? 'hip' : V() < 0.5 ? 'cornice' : 'band';
+		// balcony fronts: white or accent-coloured rails, sometimes glass
+		const rv = V();
+		mat.rail = rv < 0.4 ? M( L.plain, [ 244, 244, 240 ], 1 ) : rv < 0.7 ? M( L.plain, acc, 1 ) : M( L.plain, [ 70, 74, 80 ], 1 );
+		look.roofTile = M( L.roof, pk( [ [ 230, 220, 210 ], [ 200, 190, 180 ], [ 150, 170, 160 ] ] ), 2.2 );
+		P.frame = pk( [ 0, 2, 0, 3 ] );
+		// balconies: continuous slabs wrapping the floors (the Waikīkī look), or recessed loggias
+		look.balc = V() < 0.6 ? 'band' : 'loggia';
+		look.balcD = 1.2 + V() * 0.6;
+		look.railGlass = V() < 0.35;
+	}
+}
+
+// low-rise offices, hospitals, headquarters, schools: a base course and a cornice
+function midriseLook( P ) {
+	const V = rng( hash32( P.bid, 0x1008 ) );
+	const pk = ( a ) => a[ Math.floor( V() * a.length ) % a.length ];
+	P.look = { corners: 0, fins: 0, bands: false, crown: V() < 0.5 ? 'cornice' : 'band', canopy: true, plaza: true };
+	P.look.accent = M( L.concrete, pk( PRECAST ).map( v => v * 0.9 ), 4 );
+	P.mat.base = M( L.panels, pk( STONE ), 1.6 );
+}
+
+// strip malls and big boxes: piers between the storefronts, a cornice, a brand colour
+const SHOP_ACCENT = [ [ 150, 60, 44 ], [ 60, 96, 84 ], [ 70, 78, 96 ], [ 196, 160, 96 ], [ 120, 110, 100 ], [ 236, 234, 226 ], [ 40, 110, 124 ], [ 176, 70, 60 ] ];
+function shopLook( P ) {
+	const V = rng( hash32( P.bid, 0x1009 ) );
+	const pk = ( a ) => a[ Math.floor( V() * a.length ) % a.length ];
+	const accent = pk( SHOP_ACCENT );
+	P.look = { accent: M( L.stucco, accent, 3 ), brand: accent, piers: P.S.arch !== 'gas' && V() < 0.75, cornice: V() < 0.7 };
+}
+
+// the outside wall material of storey st (a tower's base is clad in stone); with a facade f, a condo tower's
+// corridor ends run up the building as a coloured stripe
+export function extOf( P, st, f = null ) {
+	if ( st && st.i === 0 && P.mat.base ) return P.mat.base;
+	if ( f && st && st.i > 0 && P.S.arch === 'tower' && P.S.variant !== 'office' && P.look?.accent && ( f.inside.k === 'corridor' || f.inside.k === 'stair' ) ) return P.look.accent;
+	return P.mat.ext;
 }
 
 // window grid for a facade piece of length len, by room kind; null = blank wall
@@ -178,6 +282,24 @@ function windowsFor( P, room, len, st, side ) {
 	if ( ws === 0 ) return null;
 	// the control tower's cab is glass all round, above a desk-high sill
 	if ( S.arch === 'ctower' && st.i === S.n - 1 ) return w( 1.6, 1.52, ch - 1.15, 0.95, 3 );
+	// high-rise facades are one grid whatever the rooms behind: offices glazed all round (frosted where the
+	// restrooms and the core are), flats and hotel rooms with their sliders, a tall window at each corridor end
+	if ( S.arch === 'tower' && st.i > 0 ) {
+		if ( ws === 3 || ws === 12 ) {
+			return ws === 3 ? w( 1.5, 1.44, ch - 1.0, 0.75, 3 ) : w( 1.6, 1.5, 1.35, 0.95, 12 );
+		}
+		if ( k === 'corridor' || k === 'hall' || k === 'entry' ) return len >= 1.2 ? { bay: len, w: Math.min( 1.6, len - 0.5 ), h: ch - 1.0, sill: 0.4, style: 1 } : null;
+		if ( k === 'stair' ) return len >= 1.6 ? w( len, 0.9, ch - 1.5, 0.75, 1 ) : null;
+		// behind a balcony: floor-to-ceiling sliders
+		if ( P.look?.balc === 'band' && ( k === 'living' || k === 'hotelroom' || k === 'bedroom' ) ) return w( 3.0, 2.3, ch - 0.6, 0.05, 5 );
+		if ( k === 'bedroom' ) return w( 3.2, 2.0, 1.75, 0.55, 1 );
+		if ( k === 'kitchen' ) return w( 2.6, 1.4, 1.3, 1.0, 1 );
+	}
+	// a tower's street level: glass wherever people are, plain stone in front of the service rooms
+	if ( S.arch === 'tower' && st.i === 0 ) {
+		if ( k === 'office' || k === 'openoffice' || k === 'meeting' || k === 'breakroom' ) return w( 2.6, 2.3, Math.min( 2.8, ch - 1.2 ), 0.6, 4 );
+		if ( k === 'storage' || k === 'utility' || k === 'restroom' || k === 'elevator' ) return null;
+	}
 	switch ( k ) {
 		case 'checkin': case 'gate': case 'claim':
 			return w( 2.0, 1.92, ch - 1.0, 0.35, 3 );
@@ -480,7 +602,7 @@ const LAYOUT = {
 		const stairs = long > 42 ? [ Math.min( W, D ) === W ? P.rect.z0 + 7 : P.rect.x0 + 7, ( D >= W ? P.rect.z1 : P.rect.x1 ) - 7 ] : null;
 		const alongZ = D >= W;
 		const A0 = alongZ ? P.rect.z0 : P.rect.x0, A1 = alongZ ? P.rect.z1 : P.rect.x1;
-		const loggia = ! office && R() < 0.85;
+		const loggia = ! office && R() < 0.85 && P.look?.balc !== 'band';
 		const res = corridorFloors( P, {
 			cw: office ? 2.4 : 2.0, module: office ? 7.5 : sub === 'hotel' ? 4.3 : 7.4, elevator: true, roof: true,
 			stairs: stairs || [ ( A0 + A1 ) / 2 ], stairDoor: true,

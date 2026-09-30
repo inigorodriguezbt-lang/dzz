@@ -316,11 +316,17 @@ const MARCH_GLSL = /* glsl */`
 						+ scLightDensity( p + vec3( 0.0, 600.0, 0.0 ), coverage, skyLods, true ) * 700.0 ) * scsShell.z;
 					shadowAt = t; shadowDensity = density; shadowCheap = cheap;
 				}
-				if ( hasDirectLight ) energy = scLightEnergy( shadowTau + sigmaT * scfLightOffsets[ 0 ].w, phase );
+				float tauL = shadowTau + sigmaT * scfLightOffsets[ 0 ].w;
+				if ( hasDirectLight ) energy = scLightEnergy( tauL, phase );
+				// (ours) overcast decks: the sunlight diffused down through the whole layer (two-stream
+				// transmission, g 0.8, isotropic) that the three octaves cannot carry past an optical depth of
+				// ~10; it is what makes an overcast base grey instead of sky-blue. Weighted in with the coverage
+				// (scsShadow.w): none for Tidewater's scattered cumulus
+				float diffuse = hasDirectLight ? scsShadow.w * ( 1.0 - exp( -tauL * 0.25 ) ) / ( 1.0 + 0.15 * tauL ) * 0.0795775 : 0.0;
 				float skyVisibility = 0.2 + 0.8 / ( 1.0 + ( skyTau + sigmaT * 25.0 ) * 0.35 );
 				vec3 ambient = ( mix( mix( zenith, horizon, 0.55 ), zenith, sqrt( height ) ) * skyVisibility + bounce * ( 1.0 - height ) )
 					* scsCloudLight.z * ( 1.0 + scsCloudLight.w );
-				vec3 light = ( direct * energy * powder * baseShadow + ambient ) * scsCloudLight.x;
+				vec3 light = ( direct * ( energy * powder * baseShadow + diffuse ) + ambient ) * scsCloudLight.x;
 				float stepT = exp( -sigmaT * stepLength );
 				float alpha = transmission * ( 1.0 - stepT );
 				color += alpha * light; weightedDepth += alpha * t;
@@ -333,6 +339,8 @@ const MARCH_GLSL = /* glsl */`
 			depth = weightedDepth / alpha;
 			// aerial perspective (distance toward the sky behind), then the far melt into the sky
 			vec3 sky = scSky( dir );
+			// (ours) the air under an overcast deck is in its shade: grey airlight (as atmosphereFog)
+			sky = mix( sky, vec3( dot( sky, vec3( 0.2126, 0.7152, 0.0722 ) ) * 0.8 ), scsShadow.w * 0.85 );
 			float ap = exp( -depth / SC_AP_DIST );
 			color = color * ap + sky * alpha * ( 1.0 - ap );
 			float melt = smoothstep( scsFade.y, max( scsFade.z, scsFade.y + 1.0 ), depth );
@@ -774,6 +782,7 @@ export class Clouds {
 		U.scsCloudLight.value.z = this.baseAmbient * ambientK;
 		if ( Math.abs( coverage - this._lastCoverage ) > 0.002 ) {
 			U.scsShell.value.w = coverage;
+			U.scsShadow.value.w = THREE.MathUtils.smoothstep( coverage, 0.55, 0.85 );
 			this._lastCoverage = coverage;
 			this.historyValid = false;
 			this.panoWarm = true;

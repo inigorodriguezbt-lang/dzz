@@ -12,6 +12,12 @@ import { Clouds, CLOUD_VIEW_GLSL } from '../render/sky/Clouds.js';
 import { CIRRUS_GLSL } from '../render/sky/Cirrus.js';
 
 const ENV_SIZE = 128;
+// Tidewater's moon is always up and full: (0.6, 0.7, 1) x 0.12 of key light over a night sky glow and a 0.012
+// sky ambient, seen through its night exposure cap of 2. Ours follows the real moon, so the glow stays (as
+// Tidewater's) and the moon adds its key light and aureole when it is up. Even a full-moon night came out at
+// mean luma ~7 (the ACES toe): the night light is scaled up instead of the exposure, which would also brighten
+// every lamp and emissive tuned for the night exposure.
+const NIGHT_GAIN = 2.5;
 const ss = THREE.MathUtils.smoothstep;
 
 const f = ( x ) => {
@@ -210,7 +216,7 @@ export class Sky {
 		const moonUp = ss( this.moonDir.y, - 0.05, 0.15 );
 		const moonBright = 0.5 - 0.5 * Math.cos( this.moonPhase * Math.PI * 2 );
 		const moonK = ( 0.3 + 0.7 * moonBright ) * moonUp;
-		this.moonColor.setRGB( 0.6, 0.7, 1.0 ).multiplyScalar( 0.12 * night * moonK * nb );
+		this.moonColor.setRGB( 0.6, 0.7, 1.0 ).multiplyScalar( 0.12 * night * moonK * nb * NIGHT_GAIN );
 		// key light: the sun until it is well below the horizon (no direct light in twilight anyway), then the moon
 		this.useMoon = s.y <= - 0.07;
 		this.keyDir.copy( this.useMoon ? this.moonDir : s );
@@ -220,9 +226,11 @@ export class Sky {
 		G.uNight.value = night;
 		G.uStarI.value = night;
 		G.uMoonDir.value.copy( this.moonDir );
-		G.uMoonBright.value = moonK * nb;
-		G.uNightGlow.value = Math.max( moonK, 0.3 ) * nb;
-		const nightAmb = 0.012 * night * nb;
+		const glow = nb * NIGHT_GAIN;
+		G.uMoonBright.value = moonK * nb * NIGHT_GAIN;
+		G.uNightGlow.value = glow;
+		// the sky's ambient (clouds, water, haze) at the level of the glow, as Tidewater's
+		const nightAmb = 0.012 * night * glow;
 		G.uSkyIrr.value.set( this.skyIrradiance.x + nightAmb * 0.6, this.skyIrradiance.y + nightAmb * 0.7, this.skyIrradiance.z + nightAmb );
 		G.uHorizon.value.copy( this.horizonColor );
 		G.uCloudCover.value = this.cloudCover;

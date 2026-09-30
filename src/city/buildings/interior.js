@@ -5,8 +5,8 @@
 // candles. All in building-local metres (x across the front, z from the front to the back, y world height).
 import { Geo, GlassGeo, F_IN } from './geo.js';
 import { L, hash32, rng, winState, winHash, DECAL, decalUV, pumpsOf } from './data.js';
-import { M, slabT } from './plan.js';
-import { storeyOutside, frontSteps, stepBoxes, groundAt, bulkhead, hoseTower, terminalCanopyOf, towerCatwalkOf } from './exterior.js';
+import { M, slabT, extOf } from './plan.js';
+import { storeyOutside, frontSteps, stepBoxes, groundAt, bulkhead, hoseTower, terminalCanopyOf, towerCatwalkOf, penthouseOf, portalOf } from './exterior.js';
 import { furnishRoom } from './furniture.js';
 
 // physics materials: indices into data.js PMAT (collider records: data.js BOX_STRIDE)
@@ -246,7 +246,7 @@ function facadeWall( O, P, st, f, walls ) {
 	const nOut = axis === 'x' ? f.nz : f.nx; // +1: outside is the high side
 	const o0 = nOut > 0 ? - T : 0, o1 = nOut > 0 ? 0 : T;
 	const inner = O.fin.get( f.inside );
-	const ext = f.out ? ( f.out.k === 'porch' ? mat.ext : mat.ext ) : mat.ext;
+	const ext = extOf( P, st, f );
 	const mN = nOut > 0 ? inner.wall : ext, mP = nOut > 0 ? ext : inner.wall;
 	const jamb = M( L.plaster, [ 232, 230, 224 ], 3, 0 );
 	const y0 = st.y, y1 = st.y + st.h;
@@ -603,6 +603,8 @@ function groundExtras( O, P, gh ) {
 	for ( const [ px, pz ] of pumpsOf( P.r, S ) ) { const y = gh ? groundAt( P, gh, px, pz ) : S.fy; O.col( px - 0.7, y - 0.5, pz - 1.3, px + 0.7, y + 1.7, pz + 1.3, PM.metal ); }
 	if ( S.arch === 'fire' ) { const [ x0, z0, x1, z1 ] = hoseTower( P ); O.col( x0, P.r.lo - 0.5, z0, x1, S.top + 5.2, z1, PM.concrete ); }
 	if ( S.arch === 'terminal' ) { const c = terminalCanopyOf( P ); for ( const [ x, z ] of c.cols ) O.col( x - 0.2, P.r.lo - 0.5, z - 0.2, x + 0.2, c.y, z + 0.2, PM.metal ); }
+	const po = portalOf( P );
+	if ( po ) { O.col( po.x0, P.r.lo - 0.5, po.z0, po.x0 + po.pw, po.y1, po.z1 ); O.col( po.x1 - po.pw, P.r.lo - 0.5, po.z0, po.x1, po.y1, po.z1 ); }
 }
 
 // the control tower's catwalk round the cab (reachable through a broken pane)
@@ -640,6 +642,8 @@ function roofTop( O, P ) {
 	O.col( rect.x0, top, rect.z1 - t, rect.x1, top + ph, rect.z1, PM.concrete );
 	O.col( rect.x0, top, rect.z0, rect.x0 + t, top + ph, rect.z1, PM.concrete );
 	O.col( rect.x1 - t, top, rect.z0, rect.x1, top + ph, rect.z1, PM.concrete );
+	// a tower's plant room (drawn by the shell)
+	if ( S.arch === 'tower' && P.look?.crown !== 'hip' ) { const pr = penthouseOf( P, rect.x0, rect.z0, rect.x1, rect.z1 ); O.col( pr.x0, top, pr.z0, pr.x1, top + 3.6, pr.z1 ); }
 	// the stair bulkhead (drawn by the shell): walls and roof, open on the entry side
 	if ( P.stair && P.stair.roof && S.n > 1 ) {
 		const s = P.stair, h = 2.6, w = 0.2, door = 1.0;

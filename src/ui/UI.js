@@ -63,7 +63,9 @@ export class UI {
 		app.settings.on( 'guiScale', () => { this.u = unitPx(); } );
 		this.confirmOpen = false;
 		app.input.onLockChange = ( locked ) => {
-			if ( locked || ! this.game || this.game.dead ) return;
+			// a lock requested just before a screen opened can be granted after it: give the pointer back
+			if ( locked ) { if ( this.screen || this.chat.open || ! this.game ) app.input.unlock(); return; }
+			if ( ! this.game || this.game.dead ) return;
 			if ( ! this.screen && ! this.chat.open ) this.menus.pause();
 		};
 		app.canvas.addEventListener( 'click', () => {
@@ -71,6 +73,12 @@ export class UI {
 			if ( this.game && ! this.screen && ! this.chat.open && ! this.game.dead ) app.input.lock();
 		} );
 		window.addEventListener( 'keydown', e => {
+			// the chat opens on the key itself rather than on the next frame, so fast typing right after T or /
+			// lands in the field instead of reaching the game as hotkeys
+			if ( this.game && ! this.screen && ! this.chat.open && ! this.game.dead && ! this.confirmOpen && ! e.repeat && ! e.ctrlKey && ! e.metaKey && ! e.altKey ) {
+				const I = this.app.input, cmd = I.codes( 'command' ).includes( e.code );
+				if ( cmd || I.codes( 'chat' ).includes( e.code ) ) { e.preventDefault(); this.seenChat = true; this.chat.show( cmd ? '/' : '' ); return; }
+			}
 			// Esc with the pointer already free (after alt-tab, or a lock the browser refused) still pauses
 			if ( e.code === 'Escape' && this.game && ! this.screen && ! this.chat.open && ! this.game.dead && ! this.app.input.locked && ! this.confirmOpen ) { e.preventDefault(); this.menus.pause(); return; }
 			if ( ! this.game || ! this.screen || this.screenOpts.sticky || this.screenOpts.inventory || this.confirmOpen ) return;
@@ -269,7 +277,7 @@ export class UI {
 				kv( 'Health', pct( S.health ), tone( S.health, 50, 25 ) ), kv( 'Food', pct( Math.min( 100, S.hunger ) ), tone( S.hunger, 30, 10 ) ),
 				kv( 'Blood', pct( S.blood / 50 ), tone( S.blood / 50, 76, 60 ) ), kv( 'Water', pct( Math.min( 100, S.thirst ) ), tone( S.thirst, 30, 10 ) ),
 				kv( 'Body', temp.toFixed( 1 ) + '°', temp < 35.2 || temp > 38.6 ? 'alarm' : temp < 36 ? 'cold' : temp > 38 ? 'warn' : '' ), kv( 'Energy', pct( S.energy ), tone( S.energy, 25, 10 ) ),
-				kv( 'Air', Math.round( S.envTemp ) + '°' ), kv( 'Stamina', `${Math.round( S.stamina )}/${Math.round( S.maxStamina() )}` ),
+				kv( 'Air', Math.round( S.envTemp ) + '°' ), kv( 'Stamina', `${Math.round( Math.min( S.stamina, S.maxStamina() ) )}/${Math.round( S.maxStamina() )}` ),
 				kv( 'Wet', pct( S.wet * 100 ) ), kv( 'Weight', weight.toFixed( 1 ) + ' kg', weight > 30 ? 'warn' : '' ) ),
 			sec( 'This life' ),
 			h( 'div.stats', {},

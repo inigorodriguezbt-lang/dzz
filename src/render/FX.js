@@ -511,10 +511,12 @@ export class FX {
 	beam( a, b, color = 0xffc080, width = 0.01, alpha = 1, intensity = 3 ) {
 		if ( this.bN >= this.bMax ) return;
 		const i = this.bN ++;
-		this.bA.array.set( [ a.x, a.y, a.z ], i * 3 );
-		this.bB.array.set( [ b.x, b.y, b.z ], i * 3 );
+		// (element by element: no temporary arrays per bullet per frame)
+		const A = this.bA.array, B = this.bB.array, C = this.bC.array;
+		A[ i * 3 ] = a.x; A[ i * 3 + 1 ] = a.y; A[ i * 3 + 2 ] = a.z;
+		B[ i * 3 ] = b.x; B[ i * 3 + 1 ] = b.y; B[ i * 3 + 2 ] = b.z;
 		const c = _col.set( color );
-		this.bC.array.set( [ c.r * intensity, c.g * intensity, c.b * intensity, alpha ], i * 4 );
+		C[ i * 4 ] = c.r * intensity; C[ i * 4 + 1 ] = c.g * intensity; C[ i * 4 + 2 ] = c.b * intensity; C[ i * 4 + 3 ] = alpha;
 		this.bW.array[ i ] = width;
 	}
 

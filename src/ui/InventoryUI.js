@@ -170,7 +170,8 @@ export class InventoryUI {
 		}
 		if ( this.drag?.active ) return; // re-rendering mid-drag would drop the highlights and the source
 		const near = this._groundNow();
-		if ( this.inv.version !== this.version || near.key !== this.nearKey || this.dirty ) { this.ground = near.list; this.nearKey = near.key; this.render(); }
+		// a game-mode switch (the chat's /gamemode) adds or removes the Catalog tab and the Delete rows
+		if ( this.inv.version !== this.version || near.key !== this.nearKey || this.dirty || g.mode !== this.mode ) { this.ground = near.list; this.nearKey = near.key; this.render(); }
 		// vitals, conditions and the clock change without an inventory change
 		this.liveT = ( this.liveT || 0 ) + dt;
 		if ( this.liveT > 0.5 ) { this.liveT = 0; this._live(); }
@@ -188,6 +189,7 @@ export class InventoryUI {
 		if ( ! this.el ) return;
 		this.dirty = false;
 		this.version = this.inv.version;
+		this.mode = this.game.mode;
 		if ( ! this.ground ) { const n = this._groundNow(); this.ground = n.list; this.nearKey = n.key; }
 		// keep each column's scroll position (and keyboard focus on a section header) across the rebuild
 		const sl = this.resetLeft ? 0 : this.left.scrollTop, sm = this.mid.scrollTop, sr = this.right.scrollTop;

@@ -2,7 +2,7 @@
 // awnings, signs, canopies and rooftop clutter. Everything a storey owns is tagged with that storey so
 // the shell can hide it while the real interior of that storey is loaded (the interior rebuilds it).
 import { L, hash32, rng, pick, pumpsOf } from './data.js';
-import { M, slabT, SIDE_N } from './plan.js';
+import { M, slabT, SIDE_N, extOf } from './plan.js';
 import { signFor, signUV, signIndex, SIGNS } from './names.js';
 
 const WHITE = [ 255, 255, 255 ];
@@ -216,9 +216,10 @@ function shellStorey( g, P, st, lod ) {
 		// far away: skip recessed walls behind loggias (the flat facade in front stands in for them)
 		if ( lod > 0 && f.out && f.out.k === 'loggia' ) continue;
 		const tx = ( f.bx - f.ax ) / f.len, tz = ( f.bz - f.az ) / f.len;
+		const em = extOf( P, st, f );
 		for ( const p of f.pieces ) {
 			const x0 = f.ax + tx * p.a0, z0 = f.az + tz * p.a0, x1 = f.ax + tx * p.a1, z1 = f.az + tz * p.a1;
-			g.facade( x0, z0, x1, z1, y0, y1, mat.ext, p.win, f.u0 + p.a0 );
+			g.facade( x0, z0, x1, z1, y0, y1, em, p.win, f.u0 + p.a0 );
 		}
 		// window sills and AC units on the near shell
 		if ( lod === 0 ) facadeDetails( g, P, st, f );
@@ -299,29 +300,53 @@ function flatRoof( g, P, x0, z0, x1, z1, top, lod ) {
 	g.box( x0, top - 0.02, z0, x1, top + 0.08, z1, { py: deck, px: mat.ext, nx: mat.ext, pz: mat.ext, nz: mat.ext } );
 	g.setTag( P.r.i + 1, 255 );
 	if ( S.arch === 'ctower' ) return; // the cab's roof: towerCab
-	// parapet
+	// parapet (the collider height is the same everywhere: interior.js roofTop)
 	const ph = S.arch === 'tower' ? 1.1 : S.arch === 'house' ? 0.35 : 0.8;
 	const t = 0.22;
 	const cap = M( L.concrete, [ 210, 206, 198 ], 2 );
-	const pm = { px: mat.ext, nx: mat.ext, pz: mat.ext, nz: mat.ext, py: cap };
-	g.box( x0, top, z0, x1, top + ph, z0 + t, pm, 8 );
-	g.box( x0, top, z1 - t, x1, top + ph, z1, pm, 8 );
-	g.box( x0, top, z0 + t, x0 + t, top + ph, z1 - t, pm, 8 + 16 + 32 );
-	g.box( x1 - t, top, z0 + t, x1, top + ph, z1 - t, pm, 8 + 16 + 32 );
-	// the front of shops: a taller false front where the sign goes
-	if ( ( S.arch === 'shop' || S.arch === 'food' ) && lod >= 0 ) g.box( x0, top + ph, z0, x1, top + ph + 0.9, z0 + t, pm, 8 );
-	// towers: a mechanical penthouse crowning the roof
+	const look = P.look || {};
+	// a tower's crown: a taller painted band, a cornice, a glass screen round the plant, or a tiled hip roof
+	const crown = S.arch === 'tower' || ( look.crown && S.n > 1 ) ? look.crown : null;
+	const pmExt = crown === 'band' && look.accent ? look.accent : mat.ext;
+	const pm = { px: pmExt, nx: pmExt, pz: pmExt, nz: pmExt, py: cap };
+	const pH = crown === 'band' ? ph + ( S.arch === 'tower' ? 0.9 : 0.4 ) : ph;
+	g.box( x0, top, z0, x1, top + pH, z0 + t, pm, 8 );
+	g.box( x0, top, z1 - t, x1, top + pH, z1, pm, 8 );
+	g.box( x0, top, z0 + t, x0 + t, top + pH, z1 - t, pm, 8 + 16 + 32 );
+	g.box( x1 - t, top, z0 + t, x1, top + pH, z1 - t, pm, 8 + 16 + 32 );
+	if ( crown ) towerCrown( g, P, crown, x0, z0, x1, z1, top, pH, lod );
+	// the front of shops: a taller false front where the sign goes, capped with a cornice
+	if ( S.arch === 'shop' || S.arch === 'food' ) {
+		g.box( x0, top + ph, z0, x1, top + ph + 0.9, z0 + t, pm, 8 );
+		if ( look.cornice ) {
+			const cm = look.accent || cap;
+			g.box( x0 - 0.15, top + ph + 0.9, z0 - 0.3, x1 + 0.15, top + ph + 1.12, z0 + t + 0.05, { px: cm, nx: cm, pz: cm, nz: cm, py: cap, ny: cm } );
+		}
+	}
+	// a big box: the brand stripe round the top of the walls
+	if ( S.arch === 'bigbox' && look.brand ) {
+		const bm = M( L.plain, look.brand, 1 );
+		g.box( x0 - 0.05, top - 0.9, z0 - 0.05, x1 + 0.05, top - 0.3, z1 + 0.05, { px: bm, nx: bm, pz: bm, nz: bm }, 4 + 8 );
+	}
+	// towers: a mechanical penthouse on the half of the roof away from the stair (the roof door stays in the open)
 	const R = rng( hash32( P.bid, 0x700f ) );
-	if ( S.arch === 'tower' ) {
-		const cw = ( x1 - x0 ) * 0.45, cd = ( z1 - z0 ) * 0.4;
-		const cx = ( x0 + x1 ) / 2 + ( R() - 0.5 ) * 3, cz = ( z0 + z1 ) / 2;
+	if ( S.arch === 'tower' && crown !== 'hip' ) {
+		const pr = penthouseOf( P, x0, z0, x1, z1 );
 		const band = M( L.concrete, [ 190, 188, 182 ], 3 );
-		g.box( cx - cw / 2, top, cz - cd / 2, cx + cw / 2, top + 3.6, cz + cd / 2, { px: band, nx: band, pz: band, nz: band, py: deck } );
+		g.box( pr.x0, top, pr.z0, pr.x1, top + 3.6, pr.z1, { px: band, nx: band, pz: band, nz: band, py: deck } );
 		if ( lod === 0 ) {
-			// louvres, an antenna mast
+			// louvres, cooling towers, an antenna mast
 			const lv = M( L.metal, [ 150, 150, 150 ], 1 );
-			g.box( cx - cw / 2 - 0.05, top + 1.2, cz - 1.5, cx - cw / 2, top + 3.0, cz + 1.5, lv );
-			g.cyl( cx + cw / 4, top + 3.6, cz, 0.08, 6 + R() * 8, 6, M( L.plain, [ 180, 60, 50 ], 1 ), 1 );
+			const cz = ( pr.z0 + pr.z1 ) / 2, cx = ( pr.x0 + pr.x1 ) / 2;
+			g.box( pr.x0 - 0.05, top + 1.2, cz - 1.5, pr.x0, top + 3.0, cz + 1.5, lv );
+			g.box( pr.x1, top + 1.2, cz - 1.5, pr.x1 + 0.05, top + 3.0, cz + 1.5, lv );
+			const ct = M( L.metal, [ 196, 198, 196 ], 1.5 ), fan = M( L.plain, [ 50, 52, 54 ], 1 );
+			for ( let k = 0; k < 2; k ++ ) {
+				const fx = cx + ( k - 0.5 ) * Math.min( 3.2, ( pr.x1 - pr.x0 ) * 0.45 );
+				g.box( fx - 1.2, top + 3.6, cz - 1.2, fx + 1.2, top + 5.0, cz + 1.2, ct );
+				g.cyl( fx, top + 5.0, cz, 0.9, 0.05, 12, fan, 1 );
+			}
+			g.cyl( pr.x1 - 0.8, top + 3.6, pr.z1 - 0.8, 0.08, 6 + R() * 8, 6, M( L.plain, [ 180, 60, 50 ], 1 ), 1 );
 		}
 	}
 	if ( lod > 0 ) return;
@@ -342,6 +367,149 @@ function flatRoof( g, P, x0, z0, x1, z1, top, lod ) {
 		const tank = M( L.rust, [ 200, 190, 170 ], 2 );
 		for ( const [ dx, dz ] of [ [ - 1, - 1 ], [ 1, - 1 ], [ 1, 1 ], [ - 1, 1 ] ] ) g.box( px + dx * 0.8 - 0.06, top, pz + dz * 0.8 - 0.06, px + dx * 0.8 + 0.06, top + 1.6, pz + dz * 0.8 + 0.06, vent );
 		g.cyl( px, top + 1.6, pz, 1.15, 1.8, 12, tank, 1 );
+	}
+}
+
+// the plant room on a tower's roof, on the half of the long axis away from the stair
+export function penthouseOf( P, x0, z0, x1, z1 ) {
+	const W = x1 - x0, D = z1 - z0, s = P.stair;
+	const cw = W * 0.45, cd = D * 0.4;
+	let cx = ( x0 + x1 ) / 2, cz = ( z0 + z1 ) / 2;
+	if ( s ) {
+		const sx = ( s.x0 + s.x1 ) / 2, sz = ( s.z0 + s.z1 ) / 2;
+		if ( D >= W ) cz = sz < cz ? Math.min( z1 - cd / 2 - 1.5, s.z1 + 1.2 + cd / 2 ) : Math.max( z0 + cd / 2 + 1.5, s.z0 - 1.2 - cd / 2 );
+		else cx = sx < cx ? Math.min( x1 - cw / 2 - 1.5, s.x1 + 1.2 + cw / 2 ) : Math.max( x0 + cw / 2 + 1.5, s.x0 - 1.2 - cw / 2 );
+	}
+	return { x0: cx - cw / 2, x1: cx + cw / 2, z0: cz - cd / 2, z1: cz + cd / 2 };
+}
+
+// the top of a high-rise (see plan.js towerLook)
+function towerCrown( g, P, crown, x0, z0, x1, z1, top, pH, lod ) {
+	const { mat, S } = P;
+	const look = P.look;
+	const acc = look.accent || mat.ext;
+	const cap = M( L.concrete, [ 214, 210, 202 ], 2 ), soffit = M( L.plain, [ 226, 224, 218 ], 1 );
+	const dark = M( L.plain, [ 58, 58, 60 ], 1 );
+	// a shadow reveal where the crown meets the body
+	g.box( x0 - 0.04, top - 0.12, z0 - 0.04, x1 + 0.04, top + 0.02, z1 + 0.04, { px: dark, nx: dark, pz: dark, nz: dark }, 4 + 8 );
+	if ( crown === 'cornice' ) {
+		// a projecting slab lid, and a thinner one at the top storey's floor
+		const o = S.arch === 'tower' ? 0.7 : 0.4;
+		g.box( x0 - o, top + pH - 0.05, z0 - o, x1 + o, top + pH + 0.32, z1 + o, { px: acc, nx: acc, pz: acc, nz: acc, py: cap, ny: soffit } );
+		if ( S.n > 3 ) {
+			const y = S.ys[ S.n - 1 ];
+			g.box( x0 - 0.25, y - 0.2, z0 - 0.25, x1 + 0.25, y + 0.05, z1 + 0.25, { px: acc, nx: acc, pz: acc, nz: acc, py: cap, ny: soffit } );
+		}
+	} else if ( crown === 'band' ) {
+		const o = 0.12;
+		g.box( x0 - o, top + pH - 0.02, z0 - o, x1 + o, top + pH + 0.14, z1 + o, { px: cap, nx: cap, pz: cap, nz: cap, py: cap, ny: soffit } );
+	} else if ( crown === 'glass' ) {
+		// a glazed screen round the plant, flush with the curtain wall
+		const h = 4.2, y0 = top, y1 = top + h;
+		const win = { bay: 1.5, w: 1.44, h: h - 0.5, sill: 0.25, style: 3 | ( P.frame << 5 ), seed: hash32( P.bid, 0x9c ) & 0x0fff };
+		const sides = [ [ x1, z0, x0, z0 ], [ x1, z1, x1, z0 ], [ x0, z1, x1, z1 ], [ x0, z0, x0, z1 ] ];
+		for ( const [ ax, az, bx, bz ] of sides ) {
+			const len = Math.hypot( bx - ax, bz - az ), n = Math.max( 1, Math.round( len / 1.5 ) );
+			g.facade( ax, az, bx, bz, y0, y1, mat.ext, { ...win, bay: len / n } );
+			g.facade( bx, bz, ax, az, y0, y1, M( L.plain, [ 70, 72, 76 ], 1 ), null );
+		}
+		g.box( x0 - 0.1, y1, z0 - 0.1, x1 + 0.1, y1 + 0.25, z1 + 0.1, { px: acc, nx: acc, pz: acc, nz: acc, py: cap } );
+	} else if ( crown === 'hip' ) {
+		// a tiled hip roof over the whole top (a Waikīkī hotel classic)
+		hipRoof( g, P, x0, z0, x1, z1, top + pH, 0.3, 0.9, look.roofTile || mat.roof, lod );
+	}
+}
+
+// high-rise and civic dressing: a canopy over the street front, fins on curtain walls, a paved plaza
+function towerDress( g, P, lod ) {
+	const { S, rect } = P;
+	const look = P.look;
+	const acc = look.accent || P.mat.ext;
+	const soffit = M( L.plain, [ 232, 230, 224 ], 1 ), top = M( L.metal, [ 170, 172, 174 ], 2 );
+	if ( look.canopy ) {
+		// cantilevered over the pavement above the shop windows; civic buildings only over the entrance
+		const y = S.fy + Math.min( 3.3, S.Hs[ 0 ] - 0.9 );
+		let a = rect.x0 + 0.3, b = rect.x1 - 0.3;
+		if ( S.arch !== 'tower' ) {
+			const f = P.storeys[ 0 ].facades.find( f => f.side === 0 && f.ops.some( o => o.ext ) );
+			if ( ! f ) a = b;
+			else { const o = f.ops.find( o => o.ext ), c = f.ax + ( f.bx - f.ax ) / f.len * o.u; a = Math.max( rect.x0 + 0.2, c - 3 ); b = Math.min( rect.x1 - 0.2, c + 3 ); }
+		}
+		if ( b - a > 2 ) {
+			const d = S.arch === 'tower' ? 2.6 : 2.2;
+			g.box( a, y, rect.z0 - d, b, y + 0.32, rect.z0, { px: acc, nx: acc, nz: acc, py: top, ny: soffit } );
+		}
+	}
+	// vertical fins on the mullions, above the base, every `fins` bays
+	if ( look.fins && S.n > 2 ) {
+		const st = P.storeys[ 1 ];
+		const y0 = S.ys[ 1 ], y1 = S.top + 0.9;
+		const fm = look.finM || acc, dep = 0.32, hw = 0.06;
+		for ( const f of st.facades ) {
+			const tx = ( f.bx - f.ax ) / f.len, tz = ( f.bz - f.az ) / f.len;
+			for ( const p of f.pieces ) {
+				const w = p.win;
+				if ( ! w ) continue;
+				const n = Math.round( ( p.a1 - p.a0 ) / w.bay );
+				for ( let k = 1; k < n; k ++ ) {
+					if ( k % look.fins ) continue;
+					const u = p.a0 + k * w.bay;
+					const cx = f.ax + tx * u, cz = f.az + tz * u;
+					const ex = Math.abs( tx ) * hw + Math.abs( f.nx ) * dep / 2, ez = Math.abs( tz ) * hw + Math.abs( f.nz ) * dep / 2;
+					const ox = f.nx * dep / 2, oz = f.nz * dep / 2;
+					g.box( cx + ox - ex, y0, cz + oz - ez, cx + ox + ex, y1, cz + oz + ez, fm, 8 );
+				}
+			}
+		}
+	}
+	void lod;
+}
+
+// a condo tower's balconies: a slab and a railing along each run of flats on every floor, outside the walls (never
+// hidden: the interiors look out onto them)
+const BALC_ROOM = { living: 1, bedroom: 1, hotelroom: 1, dining: 1 };
+function balconies( g, P, lod ) {
+	const { S, rect, look } = P;
+	const D = look.balcD || 1.4;
+	const deck = M( L.tiles, [ 200, 196, 188 ], 1.2 ), soffit = M( L.plain, [ 232, 230, 224 ], 1 );
+	const edge = look.accent && look.accent.c[ 0 ] + look.accent.c[ 1 ] + look.accent.c[ 2 ] > 600 ? look.accent : P.mat.ext;
+	const SM = { py: deck, ny: soffit, px: edge, nx: edge, pz: edge, nz: edge };
+	const glass = look.railGlass ? M( L.plain, [ 120, 150, 154 ], 1 ) : null;
+	for ( const st of P.storeys ) {
+		if ( st.i === 0 ) continue;
+		for ( let side = 0; side < 4; side ++ ) {
+			const along = side === 0 || side === 2;
+			const runs = [];
+			for ( const f of st.facades ) {
+				if ( f.side !== side || f.out || ! BALC_ROOM[ f.inside.k ] ) continue;
+				runs.push( along ? [ Math.min( f.ax, f.bx ), Math.max( f.ax, f.bx ) ] : [ Math.min( f.az, f.bz ), Math.max( f.az, f.bz ) ] );
+			}
+			runs.sort( ( p, q ) => p[ 0 ] - q[ 0 ] );
+			const merged = [];
+			for ( const r of runs ) { const l = merged[ merged.length - 1 ]; if ( l && r[ 0 ] - l[ 1 ] < 0.6 ) l[ 1 ] = Math.max( l[ 1 ], r[ 1 ] ); else merged.push( [ ...r ] ); }
+			for ( let [ a, b ] of merged ) {
+				a += 0.25; b -= 0.25;
+				if ( b - a < 2.4 ) continue;
+				const y = st.y;
+				// the slab, then the railing round its outer edges
+				let p0, p1, p2, p3;
+				if ( side === 0 ) { g.box( a, y - 0.2, rect.z0 - D, b, y + 0.02, rect.z0, SM, 16 ); p0 = [ a, rect.z0 ]; p1 = [ a, rect.z0 - D ]; p2 = [ b, rect.z0 - D ]; p3 = [ b, rect.z0 ]; }
+				else if ( side === 2 ) { g.box( a, y - 0.2, rect.z1, b, y + 0.02, rect.z1 + D, SM, 32 ); p0 = [ b, rect.z1 ]; p1 = [ b, rect.z1 + D ]; p2 = [ a, rect.z1 + D ]; p3 = [ a, rect.z1 ]; }
+				else if ( side === 1 ) { g.box( rect.x1, y - 0.2, a, rect.x1 + D, y + 0.02, b, SM, 2 ); p0 = [ rect.x1, a ]; p1 = [ rect.x1 + D, a ]; p2 = [ rect.x1 + D, b ]; p3 = [ rect.x1, b ]; }
+				else { g.box( rect.x0 - D, y - 0.2, a, rect.x0, y + 0.02, b, SM, 1 ); p0 = [ rect.x0, b ]; p1 = [ rect.x0 - D, b ]; p2 = [ rect.x0 - D, a ]; p3 = [ rect.x0, a ]; }
+				if ( glass ) {
+					// glass balustrade: a tinted panel under a slim top rail
+					for ( const [ u, v ] of [ [ p0, p1 ], [ p1, p2 ], [ p2, p3 ] ] ) {
+						g.box( Math.min( u[ 0 ], v[ 0 ] ) - 0.02, y + 0.02, Math.min( u[ 1 ], v[ 1 ] ) - 0.02, Math.max( u[ 0 ], v[ 0 ] ) + 0.02, y + 0.95, Math.max( u[ 1 ], v[ 1 ] ) + 0.02, glass );
+						g.box( Math.min( u[ 0 ], v[ 0 ] ) - 0.03, y + 0.95, Math.min( u[ 1 ], v[ 1 ] ) - 0.03, Math.max( u[ 0 ], v[ 0 ] ) + 0.03, y + 1.02, Math.max( u[ 1 ], v[ 1 ] ) + 0.03, P.mat.rail );
+					}
+				} else {
+					railing( g, P, p0, p1, y + 0.02, [], lod > 0 ? 1.5 : 0.5, lod > 0 ? 'gallery' : 'balcony' );
+					railing( g, P, p1, p2, y + 0.02, [], lod > 0 ? 1.5 : 0.5, lod > 0 ? 'gallery' : 'balcony' );
+					railing( g, P, p2, p3, y + 0.02, [], lod > 0 ? 1.5 : 0.5, lod > 0 ? 'gallery' : 'balcony' );
+				}
+			}
+		}
 	}
 }
 
@@ -699,7 +867,9 @@ function pavedLot( g, P, gh, lod ) {
 	const { r, rect } = P;
 	// the whole lot footprint, draped over the ground samples, in front of and around the building
 	const n = gh.n;
-	const pm = M( L.parking, [ 255, 255, 255 ], 1 );
+	// towers and civic buildings stand on a paved plaza, the rest on a car park
+	const plaza = !! P.look?.plaza;
+	const pm = plaza ? M( L.sidewalk, [ 236, 232, 224 ], 1 ) : M( L.parking, [ 255, 255, 255 ], 1 );
 	const x0 = - r.w / 2, z0 = - r.d / 2, x1 = r.w / 2, z1 = r.d / 2;
 	const nx = lod > 0 ? 2 : Math.max( 2, Math.min( 8, Math.round( r.w / 6 ) ) ), nz = lod > 0 ? 2 : Math.max( 2, Math.min( 10, Math.round( r.d / 6 ) ) );
 	for ( let j = 0; j < nz; j ++ ) for ( let i = 0; i < nx; i ++ ) {
@@ -708,7 +878,7 @@ function pavedLot( g, P, gh, lod ) {
 		// skip cells fully under the building
 		if ( ax >= rect.x0 - 0.01 && bx <= rect.x1 + 0.01 && az >= rect.z0 - 0.01 && bz <= rect.z1 + 0.01 ) continue;
 		const y = ( x, z ) => groundAt( P, gh, x, z ) + 0.05;
-		const s = 1 / 5.2; // one parking stall (2.6 m) per half texture
+		const s = plaza ? 1 / 3 : 1 / 5.2; // one parking stall (2.6 m) per half texture
 		g.quadUV( [ ax, y( ax, bz ), bz ], [ bx, y( bx, bz ), bz ], [ bx, y( bx, az ), az ], [ ax, y( ax, az ), az ],
 			[ ax * s, - bz * s, bx * s, - bz * s, bx * s, - az * s, ax * s, - az * s ], pm, [ 0, 1, 0 ] );
 	}
@@ -727,6 +897,8 @@ function features( g, P, lod, gh ) {
 	// awnings and signs over storefronts
 	if ( S.arch === 'shop' || S.arch === 'food' || S.arch === 'bigbox' || S.arch === 'gas' || ( S.arch === 'tower' && S.shop ) ) storefronts( g, P, lod );
 	else if ( [ 'police', 'fire', 'hospital', 'clinic', 'school', 'church', 'hq', 'armory', 'office', 'tower', 'walkup' ].includes( S.arch ) ) nameSign( g, P, lod );
+	if ( P.look && ( P.look.canopy || P.look.fins ) ) towerDress( g, P, lod );
+	if ( P.look?.balc === 'band' ) balconies( g, P, lod );
 	if ( P.feats.canopy ) gasCanopy( g, P, lod, gh );
 	if ( S.arch === 'terminal' ) terminalCanopy( g, P, lod, gh );
 	if ( S.arch === 'ctower' ) towerCab( g, P, lod );
@@ -826,12 +998,39 @@ function flatCap( g, x0, z0, x1, z1, y ) {
 	g.box( x0, y, z0, x1, y + 0.2, z1, M( L.concrete, [ 200, 196, 188 ], 2 ) );
 }
 
+// a big box's entrance portal: two piers and a head over the doors, rising above the roof with the sign
+export function portalOf( P ) {
+	const { S, rect } = P;
+	if ( S.arch !== 'bigbox' || rect.x1 - rect.x0 < 18 ) return null;
+	const cx = ( rect.x0 + rect.x1 ) / 2;
+	return { x0: cx - 4.6, x1: cx + 4.6, z0: rect.z0 - 1.4, z1: rect.z0, pw: 1.0, y1: S.top + 2.8 };
+}
+
 function storefronts( g, P, lod ) {
 	const { S, mat, rect } = P;
 	const st = P.storeys[ 0 ];
 	const R = rng( hash32( P.bid, 0xa3 ) );
+	const look = P.look || {};
 	const aw = S.arch !== 'bigbox' && S.arch !== 'gas' && S.arch !== 'tower';
 	const units = P.units || [ { x0: rect.x0, x1: rect.x1, shop: S.shop || S.type } ];
+	const cap = M( L.concrete, [ 214, 210, 202 ], 2 );
+	// piers between the storefronts, up to the false front
+	if ( look.piers && ( S.arch === 'shop' || S.arch === 'food' ) ) {
+		const pm = look.accent || mat.ext, y1 = S.top + 0.8 + 0.9;
+		const xs = [ rect.x0 + 0.25, ...units.slice( 1 ).map( u => u.x0 ), rect.x1 - 0.25 ];
+		for ( const x of xs ) g.box( x - 0.25, S.fy - 0.2, rect.z0 - 0.18, x + 0.25, y1, rect.z0, { px: pm, nx: pm, nz: pm, py: cap }, 16 );
+	}
+	// the big box's portal and its canopy along the front
+	const po = portalOf( P );
+	if ( po ) {
+		const am = look.accent || mat.ext;
+		const pm = { px: am, nx: am, pz: am, nz: am, py: cap, ny: am };
+		g.box( po.x0, S.fy - 0.3, po.z0, po.x0 + po.pw, po.y1, po.z1, pm );
+		g.box( po.x1 - po.pw, S.fy - 0.3, po.z0, po.x1, po.y1, po.z1, pm );
+		g.box( po.x0 + po.pw, S.fy + 4.2, po.z0, po.x1 - po.pw, po.y1, po.z1, pm );
+		const cy = S.fy + 3.4, top = M( L.metal, [ 176, 178, 180 ], 2 ), soffit = M( L.plain, [ 232, 230, 224 ], 1 );
+		for ( const [ a, b ] of [ [ rect.x0 + 0.3, po.x0 ], [ po.x1, rect.x1 - 0.3 ] ] ) if ( b - a > 1.5 ) g.box( a, cy, rect.z0 - 2.4, b, cy + 0.3, rect.z0, { px: am, nx: am, nz: am, py: top, ny: soffit } );
+	}
 	for ( let u = 0; u < units.length; u ++ ) {
 		const un = units[ u ];
 		const x0 = un.x0 + 0.3, x1 = un.x1 - 0.3;
@@ -854,7 +1053,13 @@ function storefronts( g, P, lod ) {
 		// the sign board: above the awning on the false front
 		const sg = signFor( P, u, un.shop );
 		if ( sg ) {
-			const sy0 = S.arch === 'tower' ? S.fy + st.h - 1.3 : S.arch === 'bigbox' ? S.top - 2.2 : yA + 0.25;
+			if ( po && u === 0 ) {
+				// on the portal's head, above the roof line
+				const sw = po.x1 - po.x0 - 0.6, sh = Math.min( 1.8, sw / 7 );
+				signBoard( g, po.x0 + 0.3, po.x1 - 0.3, po.y1 - sh - 0.5, po.y1 - 0.5, po.z0 - 0.12, sg );
+				continue;
+			}
+			const sy0 = S.arch === 'tower' ? Math.max( S.fy + st.h - 1.3, S.fy + Math.min( 3.3, S.Hs[ 0 ] - 0.9 ) + 0.42 ) : S.arch === 'bigbox' ? S.top - 2.2 : yA + 0.25;
 			const sh = S.arch === 'bigbox' ? 1.8 : 1.0;
 			const sw = Math.min( w - 0.4, sh * ( S.arch === 'bigbox' ? 7 : 7.5 ) );
 			const cx = ( x0 + x1 ) / 2;

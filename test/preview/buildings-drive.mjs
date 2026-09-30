@@ -15,7 +15,7 @@ const browser = await launch();
 const lite = process.env.LITE === '1';
 const W = + ( process.env.VW || 960 ), H = + ( process.env.VH || 540 );
 const page = await browser.newPage( { viewport: { width: W, height: H } } );
-await lean( page );
+await lean( page, + ( process.env.WORKERS || 2 ) );
 // SETTINGS='{"shadows":"high"}' overrides; the defaults otherwise (only the tutorial off)
 await page.addInitScript( ( o ) => {
 	try { localStorage.setItem( 'deadtide.settings.v1', JSON.stringify( { tutorial: false, ...( o.lite ? { shadows: 'low', terrainDetail: 'low', water: 'low', vegetation: 'low' } : {} ), ...o.extra } ) ); } catch ( e ) { /* ignore */ }
@@ -77,13 +77,13 @@ async function runSteps( steps ) {
 				const yieldNow = () => new Promise( r => { const c = new MessageChannel(); c.port1.onmessage = r; c.port2.postMessage( 0 ); } );
 				const frame = () => a.renderer.render( { scene: a.world.scene, camera: a.world.camera, viewScene: g.player.vehicle || s.noView ? null : g.viewScene, viewCamera: g.viewCamera, grade: g.grade() } );
 				let out;
-				if ( s.js ) { try { out = await ( 0, eval )( `( async ( a, g, C ) => ( ${s.js} ) )` )( a, g, C ); } catch ( e ) { out = 'error: ' + e.message + ' ' + e.stack?.split( '\n' )[ 1 ]; } }
-				const until = s.until ? ( 0, eval )( `( a, g, C ) => ( ${s.until} )` ) : null;
+				if ( s.js ) { try { out = await ( 0, eval )( `( async ( a, g, C, T ) => ( ${s.js} ) )` )( a, g, C, window.__T ); } catch ( e ) { out = 'error: ' + e.message + ' ' + e.stack?.split( '\n' )[ 1 ]; } }
+				const until = s.until ? ( 0, eval )( `( a, g, C, T ) => ( ${s.until} )` ) : null;
 				window.__cityT = []; window.__prof = {};
 				let n = 0;
 				const ft = [];
 				for ( let i = 0; i < ( s.run || 0 ); i ++ ) {
-					if ( until && until( a, g, C ) ) break;
+					if ( until && until( a, g, C, window.__T ) ) break;
 					for ( const k of s.keys || [] ) { a.input.down.add( k ); if ( i === 0 ) a.input.pressedQ.add( k ); }
 					g.inputActive = true; a.input.enabled = true;
 					const t = performance.now();

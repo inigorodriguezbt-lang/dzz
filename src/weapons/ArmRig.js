@@ -31,6 +31,9 @@ const V = () => new THREE.Vector3();
 const _a = V(), _b = V(), _c = V(), _d = V(), _x = V(), _y = V(), _z = V(), _s = V();
 const _m = new THREE.Matrix4(), _m2 = new THREE.Matrix4(), _m3 = new THREE.Matrix4(), _q = new THREE.Quaternion();
 const ONE = new THREE.Vector3( 1, 1, 1 );
+// how far the forearm may leave the hand's resting line: sideways (radial / ulnar) and back / forward (extension /
+// flexion)
+const WRIST_DEV = 0.5, WRIST_FLEX = 1.15;
 const smoothstep = ( a, b, x ) => { const t = Math.min( 1, Math.max( 0, ( x - a ) / ( b - a ) ) ); return t * t * ( 3 - 2 * t ); };
 
 // an orthonormal frame from a forward axis (z) and a hint for x
@@ -97,20 +100,22 @@ function extract( mesh, bones, side ) {
 	const SI = geo.attributes.skinIndex, SW = geo.attributes.skinWeight;
 	const n = pos.count;
 	// per vertex: weights on the rig (anything else, the clavicle or the spine, goes to the upper arm)
-	const wts = new Array( n ), onArm = new Float32Array( n ), onHand = new Float32Array( n );
+	const wts = new Array( n ), onArm = new Float32Array( n ), onHand = new Float32Array( n ), onTip = new Float32Array( n );
+	// the finger ends (middle and last phalanges, the thumb's last): bare in fingerless gloves
+	const TIP = ( r ) => ( r >= B_FING && r < B_THUMB && ( r - B_FING ) % 3 >= 1 ) || r === B_THUMB + 2;
 	for ( let i = 0; i < n; i ++ ) {
 		const w = [];
-		let arm = 0, hand = 0;
+		let arm = 0, hand = 0, tip = 0;
 		for ( let k = 0; k < 4; k ++ ) {
 			const ww = SW.getComponent( i, k );
 			if ( ww <= 0 ) continue;
 			const r = map[ SI.getComponent( i, k ) ];
-			if ( r >= 0 ) { arm += ww; if ( r >= B_HAND ) hand += ww; }
+			if ( r >= 0 ) { arm += ww; if ( r >= B_HAND ) hand += ww; if ( TIP( r ) ) tip += ww; }
 			const rr = r >= 0 ? r : B_UPPER;
 			const e = w.find( x => x[ 0 ] === rr );
 			if ( e ) e[ 1 ] += ww; else w.push( [ rr, ww ] );
 		}
-		wts[ i ] = w; onArm[ i ] = arm; onHand[ i ] = hand;
+		wts[ i ] = w; onArm[ i ] = arm; onHand[ i ] = hand; onTip[ i ] = tip;
 	}
 	// the hand frame at bind: wrist at the hand bone, z to the middle knuckle, y out of the back of the hand
 	const W = P[ B_HAND ];
@@ -217,12 +222,13 @@ function extract( mesh, bones, side ) {
 		}
 		outI.push( k );
 	}
-	// two groups: the arm (0) and the hand from the wrist on (1: skin or glove)
-	const tris = [ [], [] ];
+	// three groups: the arm (0), the hand from the wrist on (1: skin or glove) and the finger ends (2: skin, or the
+	// glove unless it is fingerless)
+	const tris = [ [], [], [] ];
 	for ( let t = 0; t < outI.length; t += 3 ) {
-		let h = 0;
-		for ( let q = 0; q < 3; q ++ ) h += onHand[ keep[ t + q ] ];
-		( h / 3 > 0.5 ? tris[ 1 ] : tris[ 0 ] ).push( outI[ t ], outI[ t + 1 ], outI[ t + 2 ] );
+		let h = 0, tp = 0;
+		for ( let q = 0; q < 3; q ++ ) { h += onHand[ keep[ t + q ] ]; tp += onTip[ keep[ t + q ] ]; }
+		( h / 3 <= 0.5 ? tris[ 0 ] : tp / 3 > 0.5 ? tris[ 2 ] : tris[ 1 ] ).push( outI[ t ], outI[ t + 1 ], outI[ t + 2 ] );
 	}
 	const g = new THREE.BufferGeometry();
 	g.setAttribute( 'position', new THREE.Float32BufferAttribute( outP, 3 ) );
@@ -230,9 +236,10 @@ function extract( mesh, bones, side ) {
 	g.setAttribute( 'uv', new THREE.Float32BufferAttribute( outUV, 2 ) );
 	g.setAttribute( 'skinIndex', new THREE.Uint16BufferAttribute( outSI, 4 ) );
 	g.setAttribute( 'skinWeight', new THREE.Float32BufferAttribute( outSW, 4 ) );
-	g.setIndex( [ ...tris[ 0 ], ...tris[ 1 ] ] );
+	g.setIndex( [ ...tris[ 0 ], ...tris[ 1 ], ...tris[ 2 ] ] );
 	g.addGroup( 0, tris[ 0 ].length, 0 );
 	g.addGroup( tris[ 0 ].length, tris[ 1 ].length, 1 );
+	g.addGroup( tris[ 0 ].length + tris[ 1 ].length, tris[ 2 ].length, 2 );
 	g.computeBoundingSphere();
 	arm.geo = g;
 	// bind frames of the 18 bones (world): the upper arm, the forearm, the hand frame, the finger and thumb chains
@@ -267,6 +274,7 @@ function chainFrames( arm, curl, thumb, splay, out = null ) {
 	const T = arm.thumb;
 	let dir, up, flex;
 	if ( thumb ) {
+		thumb = thumb.rig || thumb;
 		dir = _a.set( thumb.dir[ 0 ] * side, thumb.dir[ 1 ], thumb.dir[ 2 ] ).normalize();
 		// the nail: given, or the rest nail carried along to the new direction and rolled about it
 		if ( thumb.up ) up = _b.set( thumb.up[ 0 ] * side, thumb.up[ 1 ], thumb.up[ 2 ] );
@@ -298,7 +306,7 @@ function handMetrics( arm ) {
 	}
 	const T = arm.thumb;
 	return {
-		fingers, palmSkin: Math.max( 0.011, - palm * 0.9 ), palmLen: arm.fingers[ 1 ].mcp.length(),
+		fingers, palmSkin: Math.max( 0.011, - palm * 0.75 ), palmLen: arm.fingers[ 1 ].mcp.length(),
 		thumb: { p: T.cmc.toArray(), dir: T.dir.toArray(), up: T.up.toArray(), len: T.len.slice(), r: [ ...T.r, T.r[ 2 ] * 0.85 ] },
 		foreLen: arm.foreLen, upperLen: arm.upperLen,
 	};
@@ -480,7 +488,7 @@ const SSS = ( shader ) => {
 		{
 			float ndl = dot( normal, directionalLights[ 0 ].direction );
 			float wrap = max( 0.0, ( ndl + 0.5 ) / 1.5 ) - max( 0.0, ndl );
-			reflectedLight.directDiffuse += directionalLights[ 0 ].color * wrap * diffuseColor.rgb * vec3( 0.62, 0.24, 0.16 );
+			reflectedLight.directDiffuse += directionalLights[ 0 ].color * wrap * diffuseColor.rgb * vec3( 0.4, 0.14, 0.09 );
 		}
 		#endif` );
 };
@@ -565,6 +573,9 @@ export class RigArm {
 		if ( tex.nrm ) this.mSkin.normalScale.set( 0.9, 0.9 );
 		this.mGlove = viewMat( new THREE.MeshStandardMaterial( { color: 0x2a2a2a, roughness: 0.72, metalness: 0 } ), 'arms-rig-glove', INFLATE( 1.3 ) );
 		if ( T.glove ) { this.mGlove.bumpMap = T.glove; this.mGlove.bumpScale = 0.5; }
+		// thin examination gloves: the hand's own shape, glossy
+		this.mLatex = viewMat( new THREE.MeshStandardMaterial( { color: 0x4a8ad6, roughness: 0.35, metalness: 0 } ), 'arms-rig-latex', INFLATE( 0.3 ) );
+		if ( tex.nrm ) { this.mLatex.normalMap = tex.nrm; this.mLatex.normalScale.set( 0.4, 0.4 ); }
 		this.mCuff = viewMat( new THREE.MeshStandardMaterial( { color: 0x2a2a2a, roughness: 0.8, metalness: 0, side: THREE.DoubleSide } ), 'arms-rig-cuff' );
 		this.mSleeve = viewMat( new THREE.MeshStandardMaterial( { color: 0x888888, roughness: 0.9, metalness: 0, side: THREE.DoubleSide, map: whiteTex() } ), 'arms-rig-cloth' );
 		if ( T.weave ) { this.mSleeve.bumpMap = T.weave; this.mSleeve.bumpScale = 0.6; }
@@ -572,7 +583,7 @@ export class RigArm {
 		this.bones = [];
 		for ( let i = 0; i < 18; i ++ ) this.bones.push( new THREE.Bone() );
 		const inv = arm.bind.map( m => m.clone().invert() );
-		this.skin = new THREE.SkinnedMesh( arm.geo, [ this.mSkin, this.mSkin ] );
+		this.skin = new THREE.SkinnedMesh( arm.geo, [ this.mSkin, this.mSkin, this.mSkin ] );
 		for ( const b of this.bones ) this.skin.add( b );
 		this.skeleton = new THREE.Skeleton( this.bones, inv );
 		this.skin.bind( this.skeleton, new THREE.Matrix4() );
@@ -593,7 +604,8 @@ export class RigArm {
 		for ( let i = 0; i < 18; i ++ ) arm.bind[ i ].decompose( this.bones[ i ].position, this.bones[ i ].quaternion, this.bones[ i ].scale );
 	}
 
-	// clothing: { skin, sleeve (colour | null = bare arms), long (to the wrist), print (texture), glove (colour | null) }
+	// clothing: { skin, sleeve (colour | null = bare arms), long (to the wrist), print (texture), glove (colour | null),
+	// gloveStyle ('fingerless' leaves the finger ends bare, 'latex' is thin and glossy) }
 	style( o ) {
 		const has = o.sleeve != null;
 		if ( has ) {
@@ -602,18 +614,19 @@ export class RigArm {
 		}
 		this.sleeveLong.visible = has && !! o.long;
 		this.sleeveShort.visible = has && ! o.long;
-		const gl = o.glove != null;
-		if ( gl ) { this.mGlove.color.set( o.glove ); this.mCuff.color.set( o.glove ).multiplyScalar( 0.85 ); }
-		this.skin.material = gl ? [ this.mSkin, this.mGlove ] : [ this.mSkin, this.mSkin ];
+		const gl = o.glove != null, latex = o.gloveStyle === 'latex';
+		const mg = latex ? this.mLatex : this.mGlove;
+		if ( gl ) { mg.color.set( o.glove ); this.mCuff.color.set( o.glove ).multiplyScalar( 0.85 ); }
+		this.skin.material = gl ? [ this.mSkin, mg, o.gloveStyle === 'fingerless' ? this.mSkin : mg ] : [ this.mSkin, this.mSkin, this.mSkin ];
 		// a glove cuff under a long sleeve would poke through it
-		this.cuff.visible = gl && ! ( has && o.long );
+		this.cuff.visible = gl && ! latex && ! ( has && o.long );
 	}
 
 	// every material shown at once (shader warm-up), and back
 	warm( on ) {
 		if ( on ) {
 			this._warm = { mats: this.skin.material, vis: [ this.sleeveLong.visible, this.sleeveShort.visible, this.cuff.visible ] };
-			this.skin.material = [ this.mSkin, this.mGlove ];
+			this.skin.material = [ this.mSkin, this.mGlove, this.mLatex ];
 			this.sleeveLong.visible = this.cuff.visible = true;
 		} else if ( this._warm ) {
 			this.skin.material = this._warm.mats;
@@ -623,7 +636,7 @@ export class RigArm {
 	}
 
 	setEnvironment( env, intensity ) {
-		for ( const m of [ this.mSkin, this.mGlove, this.mCuff, this.mSleeve ] ) {
+		for ( const m of [ this.mSkin, this.mGlove, this.mLatex, this.mCuff, this.mSleeve ] ) {
 			if ( m.envMap !== env ) { m.envMap = env; m.needsUpdate = true; }
 			m.envMapIntensity = intensity * ( m === this.mSkin ? 0.6 : 0.5 );
 		}
@@ -645,9 +658,11 @@ export class RigArm {
 		const rest = _z.normalize().negate(); // wrist -> elbow
 		const toS = _b.subVectors( elbow || shoulder, W ).normalize();
 		const d = _c.copy( rest ).multiplyScalar( 1 - bend ).addScaledVector( toS, bend ).normalize();
-		// never more than ~40 degrees off the resting wrist
-		const maxBend = 0.7, ang = Math.acos( THREE.MathUtils.clamp( d.dot( rest ), - 1, 1 ) );
-		if ( ang > maxBend ) { const axis = _y.crossVectors( rest, d ).normalize(); d.copy( rest ).applyAxisAngle( axis, maxBend ); }
+		// within what a wrist does: bent back or forward a long way, sideways only a little
+		const fy0 = _y.copy( _z ).cross( fx0 ).negate(); // the resting forearm's y (z points wrist -> elbow here)
+		const lx = d.dot( fx0 ), ly = d.dot( fy0 ), lz = d.dot( rest );
+		const dev = THREE.MathUtils.clamp( Math.atan2( lx, lz ), - WRIST_DEV, WRIST_DEV ), flex = THREE.MathUtils.clamp( Math.atan2( ly, lz ), - WRIST_FLEX, WRIST_FLEX );
+		d.copy( rest ).addScaledVector( fx0, Math.tan( dev ) ).addScaledVector( fy0, Math.tan( flex ) ).normalize();
 		const E = this.elbow.copy( W ).addScaledVector( d, this.foreLen );
 		// forearm: z elbow -> wrist, x as the resting wrist's (the forearm turns with the hand)
 		const Fm = frame( E, _d.copy( d ).negate(), fx0, _m2 );
@@ -670,7 +685,7 @@ export class RigArm {
 	get visible() { return this.root.visible; }
 
 	dispose() {
-		for ( const m of [ this.mSkin, this.mGlove, this.mCuff, this.mSleeve ] ) m.dispose();
+		for ( const m of [ this.mSkin, this.mGlove, this.mLatex, this.mCuff, this.mSleeve ] ) m.dispose();
 		this.root.parent?.remove( this.root );
 	}
 }

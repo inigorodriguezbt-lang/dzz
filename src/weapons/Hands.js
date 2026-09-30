@@ -53,6 +53,7 @@ function holds( items, stack ) {
 }
 
 const PI = Math.PI;
+const VIEW_FOV = 52;
 const clamp = THREE.MathUtils.clamp;
 const rnd = Math.random;
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3(), _q = new THREE.Quaternion(), _e = new THREE.Euler( 0, 0, 0, 'YXZ' );
@@ -801,8 +802,9 @@ export class Hands {
 		this._startAct( xbow ? 'xbow_cock' : 'bow_nock', f.reload * ( this.creative ? 0.8 : 1 ), {}, [
 			[ 0.3, () => this._sfx( xbow ? 'charge' : 'pickup', 0.5, xbow ? 0.6 : 1.2 ) ],
 			[ xbow ? 0.65 : 0.5, () => {
-				const a = ops.findAmmo( this.inv, f.caliber );
+				const a = this._ammoFor( gun, f );
 				if ( a && ops.loadInternal( gun, a, 1 ) ) this._spend( a );
+				this._ammoPref = null;
 				this.vm.s.empty = ! ( gun.data.rounds > 0 );
 				this.inv.changed();
 			} ],
@@ -1190,9 +1192,13 @@ export class Hands {
 		return clamp( this.game.player.aimFov, 0.05, 1 ) * 0.92;
 	}
 
-	// the view model's own field of view (a multiplier on the core's): a little narrower than the world's so the
-	// weapon keeps its proportions instead of stretching towards the screen edge
-	viewFov() { return 0.85 * ( 1 - 0.05 * this.adsT ); }
+	// the view model's own field of view (a multiplier on the core's view camera, min( 70, fov * 0.72 )): the arms and
+	// the weapon are framed for a VIEW_FOV degree (vertical) view camera whatever the world's field of view is set
+	// to, so a wide or narrow world FOV never shrinks the hands to nothing or pushes the weapon into the camera
+	viewFov() {
+		const base = Math.min( 70, ( this.game.settings?.get?.( 'fov' ) ?? 62 ) * 0.72 );
+		return VIEW_FOV / base * ( 1 - 0.05 * this.adsT );
+	}
 
 	crosshairSpread( forShot = false ) {
 		const g = this.game, p = g.player, def = this.def;
@@ -1284,7 +1290,7 @@ export class Hands {
 		const sleeve = c && style !== 'tank' ? ( c.color ?? m?.color ?? 0x777777 ) : null;
 		let print = null;
 		if ( sleeve != null && m?.print && m.print !== 'plain' && ! String( m.print ).startsWith( 'text:' ) ) print = sleevePrint( m );
-		this.vm.setArms( { skin: 0xb98467, sleeve, long, print, glove: gl ? ( gl.clothing?.color ?? gl.model?.color ?? 0x2a2a2a ) : null } );
+		this.vm.setArms( { skin: 0xb98467, sleeve, long, print, glove: gl ? ( gl.clothing?.color ?? gl.model?.color ?? 0x2a2a2a ) : null, gloveStyle: gl?.model?.style || null } );
 	}
 
 	_viewLight() {

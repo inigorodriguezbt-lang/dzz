@@ -96,7 +96,7 @@
 .keys-list .row { height: calc(40 * var(--u)); }
 .keys-list .row > .ctl { width: calc(320 * var(--u)); flex: none; }
 .bind { position: relative; display: inline-flex; align-items: center; justify-content: center; flex: none; width: calc(96 * var(--u)); height: calc(28 * var(--u)); border-radius: var(--r-sm); background: var(--bg-2); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink-1); font: 600 calc(12 * var(--u)) / 1 var(--mono); text-align: center; white-space: nowrap; transition: box-shadow var(--d-1); }
-.bind .i { width: calc(12 * var(--u)); height: calc(12 * var(--u)); }
+.bind .i { width: calc(16 * var(--u)); height: calc(16 * var(--u)); } /* the mouse glyph (LMB / RMB) reads at 16u, not 12 */
 .bind.sq { width: calc(28 * var(--u)); }
 .bind:hover { box-shadow: inset 0 0 0 1px var(--line-3); }
 .bind.listen { box-shadow: inset 0 0 0 1.5px var(--accent); }

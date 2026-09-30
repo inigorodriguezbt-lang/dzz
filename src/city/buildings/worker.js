@@ -6,6 +6,7 @@ import { readBuilding, fitToGround } from './data.js';
 import { makePlan } from './plan.js';
 import { buildShell } from './exterior.js';
 import { buildStorey } from './interior.js';
+import { augmentBuildings } from './infill.js';
 
 const plans = new Map();
 function planOf( hf, world, i ) {
@@ -33,6 +34,8 @@ function groundGrid( hf, r ) {
 }
 
 export function buildingJob( hf, world, msg ) {
+	// the same infill records the main thread appended (see infill.js)
+	if ( ! world.buildings.infill ) augmentBuildings( world, hf );
 	if ( msg.op === 'storey' ) {
 		const P = planOf( hf, world, msg.i );
 		const gh = msg.si === 0 ? groundGrid( hf, P.r ) : null;

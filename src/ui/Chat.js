@@ -58,7 +58,11 @@ export class Chat {
 		this.draft = prefix;
 		this.app.input.unlock();
 		this.log.scrollTop = this.log.scrollHeight;
-		setTimeout( () => { this.input.focus(); this.input.setSelectionRange( prefix.length, prefix.length ); this._suggest(); }, 0 );
+		// focus now: keys typed right after T (queued ahead of any timer on a slow frame) must land in the field.
+		// UI opens the chat on the keydown itself and cancels it, so the T never types into the field.
+		const focus = () => { if ( ! this.open ) return; this.input.focus(); this.input.setSelectionRange( this.input.value.length, this.input.value.length ); this._suggest(); };
+		focus();
+		setTimeout( () => { if ( document.activeElement !== this.input ) focus(); }, 0 );
 	}
 
 	hide() {

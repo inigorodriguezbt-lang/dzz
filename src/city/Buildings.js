@@ -19,14 +19,15 @@ import * as THREE from 'three';
 import { NF, BT, readBuilding, fitToGround, shapeOf, rectOf, effectiveType, pumpsOf, LABEL, LOCATE, NEAR_CELL, FAR_CELL, cellKey, hash32, strHash, rng, BOX_STRIDE, PMAT, PK } from './buildings/data.js';
 import { buildingMaterials, setBuildingState, commitState, setShadowsEnabled, geoToBuffer, decalToBuffer, glassToBuffer } from './buildings/materials.js';
 import { Doors } from './buildings/doors.js';
-import { terminalCanopyOf } from './buildings/exterior.js';
+import { terminalCanopyOf, portalOf } from './buildings/exterior.js';
 import { rollLoot } from '../game/items/Loot.js';
+import { augmentBuildings } from './buildings/infill.js';
 
 const IN_LOAD = 90, IN_DROP = 130; // interior hysteresis (m from the built rect)
 const MAX_INTERIORS = 30;
 const SHADOW_D = 18; // interiors closer than this cast the sun's shadows themselves
 const NEAR_R = 330, NEAR_OUT = 450; // near shells
-const BUDGET_MS = 5; // main-thread integration per frame
+const BUDGET_MS = 4; // main-thread integration per frame (a step that starts under it may run a little over)
 const QUALITY = { low: 0.7, medium: 0.85, high: 1, ultra: 1.2 };
 const RESPAWN_H = 72; // loose loot comes back after three game days
 
@@ -48,6 +49,10 @@ class City {
 		this.pool = game.world.pool;
 		this.physics = game.physics;
 		this.cities = this.meta.cities;
+		// the bake leaves many city lots empty: fill them (deterministic; the workers do the same), and keep the
+		// trees off the new lots (the vegetation read the footprints when it was installed)
+		augmentBuildings( this.meta, game.hf );
+		try { game.vegetation?._buildObstacles?.(); } catch ( e ) { console.error( 'buildings: vegetation obstacles', e ); }
 		const B = this.meta.buildings;
 		this.data = B.data;
 		this.N = Math.floor( B.data.length / NF );
@@ -213,6 +218,8 @@ class City {
 		for ( const [ px, pz ] of pumpsOf( r, S ) ) { const y = this.game.hf.heightAt( ...this.toWorld( r, px, pz ) ); add( px - 0.7, y - 0.5, pz - 1.3, px + 0.7, y + 1.7, pz + 1.3, 'metal' ); }
 		if ( S.arch === 'fire' ) add( rect.x1 - 3.2, r.lo - 0.5, rect.z1, rect.x1, S.top + 5.2, rect.z1 + 3.2 );
 		if ( S.arch === 'terminal' ) { const c = terminalCanopyOf( { S, rect } ); for ( const [ x, z ] of c.cols ) add( x - 0.2, r.lo - 0.5, z - 0.2, x + 0.2, c.y, z + 0.2, 'metal' ); }
+		const po = portalOf( { S, rect } );
+		if ( po ) { add( po.x0, r.lo - 0.5, po.z0, po.x0 + po.pw, po.y1, po.z1 ); add( po.x1 - po.pw, r.lo - 0.5, po.z0, po.x1, po.y1, po.z1 ); }
 		this.shellBoxes.set( bi, list );
 	}
 
@@ -242,7 +249,13 @@ class City {
 			for ( const bi of ids ) { const d = this.rectDist( bi, p.x, p.z ); if ( d < IN_LOAD ) want.push( [ d, bi ] ); }
 		}
 		want.sort( ( a, b ) => a[ 0 ] - b[ 0 ] );
-		for ( const [ d, bi ] of want.slice( 0, MAX_INTERIORS ) ) if ( ! this.interiors.has( bi ) ) this.interiors.set( bi, { bi, r: this.rec( bi ), storeys: new Map(), groundReady: false, coarse: [], d } );
+		// a few new ones per pass (each seats its building on the ground: dozens of height samples)
+		let added = 0;
+		for ( const [ d, bi ] of want.slice( 0, MAX_INTERIORS ) ) {
+			if ( this.interiors.has( bi ) ) continue;
+			if ( ++ added > 6 ) break;
+			this.interiors.set( bi, { bi, r: this.rec( bi ), storeys: new Map(), groundReady: false, coarse: [], d } );
+		}
 		for ( const I of [ ...this.interiors.values() ] ) {
 			I.d = this.rectDist( I.bi, p.x, p.z );
 			if ( I.d > IN_DROP ) { this._dropInterior( I ); continue; }

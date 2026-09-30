@@ -39,9 +39,12 @@ const B_UPPER = 0, B_FORE = 1, B_WRIST = 2, B_FING = 3, B_THUMB = 15;
 
 // ---- finger curl --------------------------------------------------------------------------------------------------
 
-// Joint angles for the four fingers closing around a cylinder of radius r lying under the knuckles (the axis where
-// wristMatrix puts it). Each joint bends just enough for the next segment to touch the cylinder: the chain wraps
-// it like real fingers do. tight < 1 relaxes the hand (0 = flat), > 1 squeezes past contact (a fist).
+// Joint angles for the four fingers closing around a cylinder of radius r lying under the palm (the axis where
+// wristMatrix puts it). Each finger is fitted in its own plane: the three joint angles that lay the finger along
+// the cylinder's surface (the middle and last segments hugging it, the tip on it) without sinking into it, found by
+// a coarse search over the joints (the last joint loosely following the middle one) and a local refinement. A
+// finger that can't reach the grip curls part way, like a relaxed one. tight < 1 relaxes the hand (0 = flat),
+// > 1 squeezes past contact (a fist).
 const JOINT_MAX = [ 1.62, 1.95, 1.35 ];
 const CURLS = new Map();
 
@@ -49,9 +52,56 @@ const CURLS = new Map();
 export function setHandMetrics( m ) {
 	FINGERS = m ? m.fingers : FINGERS_PROC;
 	PALM_SKIN = m ? m.palmSkin : 0.0128;
-	GRIP_Z = m ? 0.071 * m.palmLen / PALM_LEN : 0.071;
+	GRIP_Z = m ? 0.078 * m.palmLen / PALM_LEN : 0.071;
 	CURLS.clear();
 }
+
+// one finger round a cylinder: C (y, z) its centre in the finger's plane, r its radius, k the squash of a diagonal
+// grip's elliptic cross-section along the finger
+function fitFinger( f, cy, cz, r, k ) {
+	const S = [ 0.35, 0.7, 1 ];
+	const W = [ 0.15, 0.15, 0.25, 0.8, 0.9, 1.4, 1.6, 1.8, 2.4 ]; // how much each sample wants to touch
+	const energy = ( a0, a1, a2 ) => {
+		let py = 0, pz = 0, dir = 0, e = 0, n = 0;
+		const A = [ a0, a1, a2 ];
+		for ( let s = 0; s < 3; s ++ ) {
+			dir += A[ s ];
+			const sn = Math.sin( dir ), cs = Math.cos( dir ), L = f.len[ s ];
+			for ( let j = 0; j < 3; j ++ ) {
+				const t = S[ j ] * L, y = py - sn * t, z = pz + cs * t;
+				const rad = f.r[ s ] + ( f.r[ s + 1 ] - f.r[ s ] ) * S[ j ];
+				const d = Math.hypot( y - cy, ( z - cz ) * k ) - ( r + rad * 0.9 );
+				// (flesh gives a little: a few millimetres into the grip between the joints is fine)
+				const pen = Math.min( 0, d + ( j < 2 ? 0.004 : 0.0015 ) );
+				e += 60 * pen * pen + ( d > 0 ? W[ n ] * d * d : 0 );
+				n ++;
+			}
+			py -= sn * L; pz += cs * L;
+		}
+		// rather less curl than more when it makes no difference; the last joint follows the middle one
+		return e + 2e-6 * ( a0 * a0 + a1 * a1 + a2 * a2 ) + 1e-5 * ( a2 - 0.62 * a1 ) ** 2;
+	};
+	let best = Infinity, B = [ 0, 0, 0 ];
+	for ( let a0 = - 0.15; a0 <= JOINT_MAX[ 0 ]; a0 += 0.05 ) for ( let a1 = 0; a1 <= JOINT_MAX[ 1 ]; a1 += 0.05 ) for ( let dd = - 0.3; dd <= 0.31; dd += 0.15 ) {
+		const a2 = Math.min( JOINT_MAX[ 2 ], Math.max( 0, 0.62 * a1 + dd ) );
+		const e = energy( a0, a1, a2 );
+		if ( e < best ) { best = e; B = [ a0, a1, a2 ]; }
+	}
+	// refine
+	for ( let step = 0.02; step > 0.002; step *= 0.5 ) {
+		for ( let it = 0; it < 12; it ++ ) {
+			let moved = false;
+			for ( let i = 0; i < 3; i ++ ) for ( const sg of [ - 1, 1 ] ) {
+				const T = B.slice(); T[ i ] = Math.min( JOINT_MAX[ i ], Math.max( i ? 0 : - 0.15, T[ i ] + sg * step ) );
+				const e = energy( ...T );
+				if ( e < best ) { best = e; B = T; moved = true; }
+			}
+			if ( ! moved ) break;
+		}
+	}
+	return B;
+}
+
 export function curlFor( r, tight = 1, beta = GRIP_BETA ) {
 	// solved once per grip size (the view model asks every frame); callers must not modify the result
 	const key = `${ r }|${ tight }|${ beta }`;
@@ -59,41 +109,26 @@ export function curlFor( r, tight = 1, beta = GRIP_BETA ) {
 	if ( out ) return out;
 	out = [];
 	CURLS.set( key, out );
-	const tb = Math.tan( beta );
+	const tb = Math.tan( beta ), k = Math.cos( beta );
 	for ( const f of FINGERS ) {
 		// 2D in the finger's plane: z forward, y up (back of the hand), origin at the knuckle. The diagonal grip
-		// axis crosses this finger's plane further back for the pinky than for the index; the finger's centre
-		// line has to stay one finger radius off the surface.
+		// axis crosses this finger's plane further back for the pinky than for the index
 		const cy = - ( PALM_SKIN + r ) - f.y, cz = GRIP_Z + f.x * tb - f.z;
-		const angles = [ 0, 0, 0 ];
-		let py = 0, pz = 0, dir = 0; // dir: angle below +z (radians, positive = curling towards the palm)
-		for ( let s = 0; s < 3; s ++ ) {
-			const L = f.len[ s ], R = r + f.r[ s + 1 ] * 0.92;
-			const dist = ( th ) => { const a = dir + th; return Math.hypot( py - Math.sin( a ) * L - cy, pz + Math.cos( a ) * L - cz ) - R; };
-			let th;
-			if ( dist( 0 ) <= 0 ) th = 0;
-			else if ( dist( JOINT_MAX[ s ] ) > 0 ) th = JOINT_MAX[ s ];
-			else {
-				let lo = 0, hi = JOINT_MAX[ s ];
-				for ( let i = 0; i < 18; i ++ ) { const m = ( lo + hi ) / 2; if ( dist( m ) > 0 ) lo = m; else hi = m; }
-				th = ( lo + hi ) / 2;
-			}
-			angles[ s ] = th;
-			dir += th;
-			py -= Math.sin( dir ) * L; pz += Math.cos( dir ) * L;
-		}
-		// natural coupling: the last joint follows the middle one
-		angles[ 2 ] = Math.max( angles[ 2 ], angles[ 1 ] * 0.55 );
-		out.push( angles.map( ( a, i ) => THREE.MathUtils.clamp( a * tight + ( tight > 1 ? ( tight - 1 ) * 0.4 : 0 ), 0, JOINT_MAX[ i ] ) ) );
+		const angles = fitFinger( f, cy, cz, r, k );
+		out.push( angles.map( ( a, i ) => THREE.MathUtils.clamp( a * tight + ( tight > 1 ? ( tight - 1 ) * 0.4 : 0 ), i ? 0 : - 0.15, JOINT_MAX[ i ] ) ) );
 	}
 	return out;
 }
+
+// a closed fist (punches, a knuckle full of something)
+export const FIST = [ [ 1.45, 1.7, 0.95 ], [ 1.5, 1.7, 0.95 ], [ 1.5, 1.7, 0.95 ], [ 1.45, 1.65, 0.9 ] ];
 
 // thumb poses: where the thumb's base bone (the metacarpal, from the wrist's thenar) points in the hand frame,
 // its roll about that line (+ turns the pad towards the fingers) and the flex of its two joints
 export const THUMB_POSE = {
 	relaxed: { dir: [ 0.6, - 0.36, 0.71 ], roll: 0, flex: [ 0.2, 0.15 ] },
-	wrap: { dir: [ 0.3, - 0.5, 0.8 ], roll: 0.75, flex: [ 0.7, 0.5 ] }, // round a grip, over the fingers
+	// (rig: the modelled hand's thumb as an absolute frame: the base bone's direction and the nail's facing)
+	wrap: { dir: [ 0.3, - 0.5, 0.8 ], roll: 0.75, flex: [ 0.7, 0.5 ], rig: { dir: [ 0.15, - 0.75, 0.65 ], up: [ 0.8, - 0.3, - 0.4 ], flex: [ 0.3, 0.3 ] } }, // round a grip, over the fingers
 	along: { dir: [ 0.55, - 0.45, 0.7 ], roll: 0.2, flex: [ 0.05, 0.05 ] }, // laid along the side of a handguard / frame
 	up: { dir: [ 0.62, - 0.1, 0.78 ], roll: - 0.2, flex: [ 0.05, 0.1 ] }, // straight along the top (C-clamp)
 	forward: { dir: [ 0.3, - 0.3, 0.9 ], roll: 0.1, flex: [ 0.08, 0.02 ] }, // thumbs forward along a pistol's frame
@@ -655,9 +690,12 @@ export function wristMatrix( grip, side, out = new THREE.Matrix4(), lift = 0 ) {
 	_ha.copy( _gx ).multiplyScalar( c ).addScaledVector( _gz, - s ); // hand X
 	_hb.copy( _gz ).multiplyScalar( c ).addScaledVector( _gx, s ); // hand Z
 	const r = grip.r;
+	// shift: how far towards the index finger the axis crosses the knuckle line (a support hand holds a handguard
+	// nearer its thumb side)
 	_gp.copy( grip.p )
 		.addScaledVector( _gy, PALM_SKIN + r + lift * 0.05 )
-		.addScaledVector( _hb, - GRIP_Z );
+		.addScaledVector( _hb, - GRIP_Z )
+		.addScaledVector( _ha, - ( grip.shift || 0 ) * side );
 	out.makeBasis( _ha, _gy, _hb ).setPosition( _gp );
 	return out;
 }

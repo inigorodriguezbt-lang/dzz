@@ -8,7 +8,7 @@
 // COMMON_GLSL (sunShadowCSM): PCSS on the near cascade (raw depth reads), 5-tap hardware PCF on the others,
 // seams blended over bands that grow with the distance. Depth is reversed (1 near the light).
 import * as THREE from 'three';
-import { G } from './Materials.js';
+import { G, CSM_FALLBACK } from './Materials.js';
 
 const QUALITY = {
 	off: null,
@@ -57,6 +57,9 @@ export class SunShadows {
 		this.cfg = cfg;
 		this.enabled = !! cfg;
 		G.uCsmOn.value = 0;
+		// (never leave a sampler on a disposed or missing map: the draws would fail)
+		G.uCsm0.value = CSM_FALLBACK.raw;
+		G.uCsm1.value = G.uCsm2.value = CSM_FALLBACK.cmp;
 		if ( ! cfg ) return;
 		const n = cfg.splits.length;
 		this.periods = cfg.splits.map( ( _, i ) => i === 0 ? 1 : i === 1 ? 2 : 4 );
@@ -88,8 +91,8 @@ export class SunShadows {
 		G.uCsmSize.value = cfg.size;
 		G.uCsmBias.value = this.r.reversed ? BIAS : - BIAS;
 		G.uCsm0.value = this.lights[ 0 ].shadow.map.depthTexture;
-		G.uCsm1.value = n > 1 ? this.lights[ 1 ].shadow.map.depthTexture : null;
-		G.uCsm2.value = n > 2 ? this.lights[ 2 ].shadow.map.depthTexture : null;
+		if ( n > 1 ) G.uCsm1.value = this.lights[ 1 ].shadow.map.depthTexture;
+		if ( n > 2 ) G.uCsm2.value = this.lights[ 2 ].shadow.map.depthTexture;
 		for ( let i = 0; i < 3; i ++ ) G.uCsmInfo.value[ i ].set( i < n ? 0 : - 1, 1, 0, 1 );
 	}
 

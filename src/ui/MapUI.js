@@ -44,7 +44,8 @@ export class MapUI {
 		const title = this.titleEl = h( 'div.map-title.plate', {}, this.titleName, this.titleSub );
 		const close = this.closeEl = h( 'div.map-close.plate', {}, kc( input.label( 'map' ), 'out' ),
 			h( 'button.btn.icon', { type: 'button', title: 'Close', 'aria-label': 'Close', onclick: () => this.ui.closeScreen() }, icon( 'close' ) ) );
-		const tool = ( name, label, fn ) => h( 'button.btn.icon', { type: 'button', title: label, 'aria-label': label, onclick: fn }, icon( name ) );
+		// a mouse click drops focus, so the map keys (W A S D, + −) don't then ring the last tool clicked
+		const tool = ( name, label, fn ) => h( 'button.btn.icon', { type: 'button', title: label, 'aria-label': label, onclick: e => { fn(); if ( e.detail ) e.currentTarget.blur(); } }, icon( name ) );
 		this.btnLayers = tool( 'layers', 'Layers', () => this._layersPop() );
 		this.btnMarkers = tool( 'pin', 'Markers', () => this._markersPop() );
 		this.btnMarkers.append( this.markCount = h( 'span.badge' ) );

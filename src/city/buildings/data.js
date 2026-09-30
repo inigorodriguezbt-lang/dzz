@@ -177,7 +177,8 @@ export function shapeOf( r, cities ) {
 		}
 		case 'apartment':
 			if ( S.n >= 5 && W >= 17 ) { S.arch = 'tower'; break; }
-			S.arch = 'walkup'; H = 2.95;
+			// walk-ups top out at four storeys (no lift); the narrow Waikīkī lots keep them low
+			S.arch = 'walkup'; H = 2.95; S.n = Math.min( S.n, 4 );
 			S.bw = Math.min( W, 18 + Math.floor( R() * 3 ) * 4 );
 			front( 26 + Math.floor( R() * 4 ) * 5 );
 			S.pave = true;

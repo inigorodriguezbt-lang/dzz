@@ -12,6 +12,18 @@ function tex1( r, g, b, a ) {
 	return t;
 }
 
+// 1x1 depth stand-ins for the cascade samplers a quality level leaves unused (medium has 2 cascades, off none):
+// a sampler2DShadow must be bound to a depth texture in compare mode, and three's own empty stand-in is never
+// uploaded, so every lit draw failed (GL_INVALID_OPERATION) while a slot was null
+function depth1( compare ) {
+	const t = new THREE.DepthTexture( 1, 1, THREE.UnsignedIntType );
+	t.compareFunction = compare ? THREE.GreaterEqualCompare : null;
+	t.minFilter = t.magFilter = THREE.NearestFilter;
+	t.needsUpdate = true; // (a plain depth texture is allocated on first use in any renderer)
+	return t;
+}
+export const CSM_FALLBACK = { raw: depth1( false ), cmp: depth1( true ) };
+
 export const G = {
 	uTime: { value: 0 },
 	uCamPos: { value: new THREE.Vector3() },
@@ -63,9 +75,9 @@ export const G = {
 	uCsmMat: { value: [ new THREE.Matrix4(), new THREE.Matrix4(), new THREE.Matrix4() ] },
 	uCsmInfo: { value: [ new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4() ] },
 	uCsmBlend: { value: [ new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4() ] },
-	uCsm0: { value: null },
-	uCsm1: { value: null },
-	uCsm2: { value: null },
+	uCsm0: { value: CSM_FALLBACK.raw },
+	uCsm1: { value: CSM_FALLBACK.cmp },
+	uCsm2: { value: CSM_FALLBACK.cmp },
 };
 
 // Uniforms older modules declare themselves before pasting COMMON_GLSL
@@ -322,6 +334,8 @@ export const COMMON_GLSL = /* glsl */`
 		vec3 vh = normalize( vec3( dir.x, max( dir.y, 0.02 ), dir.z ) );
 		vec3 fog = skyLuminance( vh );
 		if ( uStarI > 0.001 ) fog += skyMoonSky( vh );
+		// (ours) under an overcast deck the air is in the clouds' shade: grey, not the sunlit sky's blue
+		fog = mix( fog, vec3( dtLum( fog ) * 0.8 ), smoothstep( 0.55, 0.85, uCloudCover ) * 0.85 );
 		vec3 Ep = uSunColor * hazePhase( dot( dir, uSunDir ) );
 		float eL = dtLum( Ep );
 		float fSun = eL / ( eL + dtLum( uSkyIrr ) + 1e-5 ) * min( uHazeShafts, 1.0 );
