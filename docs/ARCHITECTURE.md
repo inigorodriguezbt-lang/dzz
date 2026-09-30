@@ -147,6 +147,11 @@ Each module file `src/.../<Module>.js` exports `install(game)` (listed in `src/g
 - Creatures: `game.zombies.count()` counts the living only. Door boxes' `owner` exposes `broken` and `isOpen`; zombies bash
   only closed doors. Run-over damage belongs to the vehicles module when `game.vehicles.handlesImpacts` is true (creatures
   only fall back when it isn't). Bullet damage info carries `pellet: true` for shotgun pellets (kind stays 'bullet').
+- Vegetation: 23 species (ids 18–22 added: driftwood, fallen nuts, fallen fronds, monstera, elephant ear). The grass
+  layer is `vegetation/GrassField.js` (Tidewater's clumped blades, drawn from camera-centred ground data in
+  `vegetation/GroundData.js`, not per-cell instances); beach pebbles, shells, sea glass and pumice are
+  `vegetation/PebbleField.js`. The worker's per-cell scatter transfer has 6 entries. `game.vegetation.rebuildObstacles()`
+  (alias of `_buildObstacles()`) is called by Buildings after it appends infill lots, so trees stay off them.
 - Vehicles (`game.vehicles`): drivable entities (type 'vehicle'), `enter(v)`, `exit()`, `seatInteraction()`, camera while driving
   (sets game.camera), fuel / damage / lights / horn, trunk container, `damage(amount, info)`. /summon names: sedan, pickup, jeep, suv,
   police_car, van, sports_car, bus?, motorbike?, boat, speedboat, fishing_boat, jetski, helicopter, plane?. Spawns parked / abandoned
