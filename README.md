@@ -15,6 +15,10 @@ npm run build      # static build in dist/
 npm test           # core logic tests (Node)
 ```
 
+More Node test suites: `node test/items.mjs`, `node test/weapons.mjs`, `node test/creatures-ai.mjs`,
+`node test/vehicles.mjs`, `node test/vehicles-play.mjs`, `node test/buildings.mjs`, `node test/buildings-runtime.mjs`,
+`node test/vegetation.mjs`, `node test/roads.mjs`. Headless screenshots run on Mesa's lavapipe (see `CLAUDE.md`).
+
 ## The world
 
 - **Real Hawaiʻi.** Elevation and ocean depth come from the AWS Terrain Tiles open dataset (USGS 3DEP/NED,
@@ -26,12 +30,16 @@ npm test           # core logic tests (Node)
 - **Towns and cities.** 55 settlements at their real locations — Honolulu from Pearl City to Kaimukī, Waikīkī's
   hotels, Kāneʻohe, Kailua, Hilo, Kona, Kahului, Lahaina, Līhuʻe and dozens of villages — plus Schofield
   Barracks, Pearl Harbor, the Kāneʻohe Marine base, Pōhakuloa, the Pacific Missile Range, the airports and the
-  Mauna Kea observatories. About 4,300 buildings, most of them enterable.
+  Mauna Kea observatories. About 4,600 buildings with interiors — houses, walk-ups, shops, gas stations, police
+  and fire stations, hospitals, schools, hotel and office towers with stairwells and upper floors, warehouses,
+  barracks, the airport terminals — with doors (locked ones can be picked, pried or kicked), furniture, and
+  cupboards, fridges, lockers and safes to search.
 - **Roads.** Highways routed over the real terrain between the towns (H-1, H-2, H-3, the Pali, Kamehameha,
   Farrington, Hāna Highway, Saddle Road, the belt road around the Big Island…), graded and cut into the hills.
-- **Ocean and sky.** Gerstner swell with surf lines running up the beaches, turquoise reef flats and deep blue
-  channels from the real bathymetry, a physically based sky, drifting cumulus with cloud shadows, day and night
-  with the moon and stars, and trade-wind weather from clear skies to Kona storms.
+- **Ocean and sky.** Rendering ported from Tidewater: a physically based atmosphere with auto exposure, volumetric
+  cumulus and cirrus with cloud shadows, sun shafts and haze, ambient occlusion, temporal anti-aliasing, cascaded
+  soft shadows, surf running up the beaches over the real bathymetry, turquoise reef flats and deep blue
+  channels, moonlit nights with stars, and trade-wind weather from clear skies to overcast Kona storms.
 
 ## Survival
 
@@ -57,14 +65,16 @@ cars, trucks, boats and helicopters.
 | Inventory / map / crafting / journal | Tab or I / M / O / P |
 | Chat / command | T / / |
 | Hide HUD / screenshot / debug | F1 / F2 / F3 |
-| Vehicle camera | F5 |
+| Vehicle camera / lights / horn (×2 siren) | F5 / L / H |
+| Aircraft climb / descend / roll | Space / Ctrl / Q, E |
 
 Every key can be rebound in **Options → Key bindings**.
 
 ## Options
 
 Field of view, render distance, resolution scale, GUI scale, head bob, crosshair, graphics presets (shadows,
-terrain detail, vegetation, grass, clouds, water, anti-aliasing, bloom), night brightness, volumes, mouse
+terrain detail, vegetation, grass, clouds, water, anti-aliasing incl. TAA, ambient occlusion, sun shafts, lens
+flare, motion blur, bloom), exposure, night brightness, volumes, mouse
 sensitivity and inversion, toggle / hold for crouch, aim and sprint, hit markers, damage direction and a
 "realistic" mode where the map and compass need the items.
 
