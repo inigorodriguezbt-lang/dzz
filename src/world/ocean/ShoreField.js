@@ -7,7 +7,10 @@
 // with the same swell direction agree; the direction is picked per tile from the open water around it.)
 // Output (RGBA float, res x res over the tile): r = arrival time T (s), g, b = propagation direction x
 // exposure (length = exposure 0..1), a = arrival time at the nearest shoreline (extended onto land for the
-// swash timing). Plain JS (the water's worker).
+// swash timing). (Ours) psi: the along-crest coordinate (m), carried along the rays from the plane wave's
+// along-crest position at the border (Tidewater projects the position on the local crest direction, which only
+// holds near its origin: 15 km out, a 0.1 degree turn of the direction moves that by 25 m). packShoreField
+// packs both for the GPU. Plain JS (the water's worker).
 
 export const GRAVITY = 9.81;
 
@@ -67,6 +70,7 @@ export function computeShoreField( heightAt, { x0, z0, size, res = 512, swellDir
 	}
 
 	const T = new Float32Array( N ).fill( Infinity );
+	const psi = new Float32Array( N ).fill( Infinity );
 	const state = new Uint8Array( N ); // 0 far, 1 trial, 2 known
 	const heap = new MinHeap( N * 4 );
 	const [ sdx, sdz ] = swellDir;
@@ -79,20 +83,30 @@ export function computeShoreField( heightAt, { x0, z0, size, res = 512, swellDir
 		if ( speed[ k ] <= 0 ) continue;
 		const x = x0 + ( i + 0.5 ) * h, z = z0 + ( j + 0.5 ) * h;
 		T[ k ] = ( x * sdx + z * sdz ) / c0 + 4096; // offset keeps T positive
+		psi[ k ] = z * sdx - x * sdz; // along the plane wave's crest: dot( xz, ( - sdz, sdx ) )
 		state[ k ] = 1;
 		heap.push( T[ k ], k );
 	}
 
+	// (the along-crest coordinate of the solved cell goes to solvedPsi: the upwind neighbours' values weighted
+	// by the characteristic direction ( t - tx, t - tz ), i.e. constant along the rays)
+	let solvedPsi = 0;
 	const solve = ( i, j ) => {
 		const k = j * res + i;
 		const c = speed[ k ];
 		if ( c <= 0 ) return Infinity;
 		const f = h / c;
-		const tx = Math.min( i > 0 && state[ k - 1 ] === 2 ? T[ k - 1 ] : Infinity, i < res - 1 && state[ k + 1 ] === 2 ? T[ k + 1 ] : Infinity );
-		const tz = Math.min( j > 0 && state[ k - res ] === 2 ? T[ k - res ] : Infinity, j < res - 1 && state[ k + res ] === 2 ? T[ k + res ] : Infinity );
+		const kl = i > 0 && state[ k - 1 ] === 2 ? k - 1 : - 1, kr = i < res - 1 && state[ k + 1 ] === 2 ? k + 1 : - 1;
+		const kd = j > 0 && state[ k - res ] === 2 ? k - res : - 1, ku = j < res - 1 && state[ k + res ] === 2 ? k + res : - 1;
+		const kx = kl < 0 ? kr : kr < 0 ? kl : T[ kl ] <= T[ kr ] ? kl : kr;
+		const kz = kd < 0 ? ku : ku < 0 ? kd : T[ kd ] <= T[ ku ] ? kd : ku;
+		const tx = kx < 0 ? Infinity : T[ kx ], tz = kz < 0 ? Infinity : T[ kz ];
 		const a = Math.min( tx, tz ), b = Math.max( tx, tz );
-		if ( ! isFinite( b ) || b - a >= f ) return a + f;
-		return 0.5 * ( a + b + Math.sqrt( 2 * f * f - ( a - b ) * ( a - b ) ) );
+		if ( ! isFinite( b ) || b - a >= f ) { solvedPsi = psi[ tx <= tz ? kx : kz ]; return a + f; }
+		const t = 0.5 * ( a + b + Math.sqrt( 2 * f * f - ( a - b ) * ( a - b ) ) );
+		const wx = t - tx, wz = t - tz;
+		solvedPsi = ( wx * psi[ kx ] + wz * psi[ kz ] ) / Math.max( wx + wz, 1e-9 );
+		return t;
 	};
 
 	while ( heap.size > 0 ) {
@@ -108,6 +122,7 @@ export function computeShoreField( heightAt, { x0, z0, size, res = 512, swellDir
 			const t = solve( ni, nj );
 			if ( t < T[ nk ] ) {
 				T[ nk ] = t;
+				psi[ nk ] = solvedPsi;
 				state[ nk ] = 1;
 				heap.push( t, nk );
 			}
@@ -144,8 +159,12 @@ export function computeShoreField( heightAt, { x0, z0, size, res = 512, swellDir
 	const Tfilled = new Float32Array( T );
 	extend( Tfilled, 24, h / 1.5 );
 
+	// the along-crest coordinate the same way (onto land unchanged)
+	const psiFilled = new Float32Array( psi );
+	extend( psiFilled, 24, 0 );
+
 	// smooth to remove first-order FMM kinks (keeps phase monotonic)
-	let Ts = Tfilled;
+	const smooth3 = ( Ts ) => {
 	for ( let it = 0; it < 3; it ++ ) {
 		const out = new Float32Array( N );
 		for ( let j = 0; j < res; j ++ ) for ( let i = 0; i < res; i ++ ) {
@@ -160,9 +179,14 @@ export function computeShoreField( heightAt, { x0, z0, size, res = 512, swellDir
 		}
 		Ts = out;
 	}
+	return Ts;
+	};
+	const Ts = smooth3( Tfilled );
+	const psiS = smooth3( psiFilled );
 
 	// directions + exposure
 	const data = new Float32Array( N * 4 );
+	const psiOut = new Float32Array( N );
 	const sl = Math.hypot( sdx, sdz );
 	for ( let j = 0; j < res; j ++ ) for ( let i = 0; i < res; i ++ ) {
 		const k = j * res + i;
@@ -184,9 +208,42 @@ export function computeShoreField( heightAt, { x0, z0, size, res = 512, swellDir
 		data[ k * 4 + 1 ] = reached ? dx * exposure : 0;
 		data[ k * 4 + 2 ] = reached ? dz * exposure : 0;
 		data[ k * 4 + 3 ] = isFinite( Tshore[ k ] ) ? Tshore[ k ] : ( reached ? t : 1e5 );
+		psiOut[ k ] = isFinite( psiS[ k ] ) ? psiS[ k ] : 0;
 	}
 
-	return { data, res, cellSize: h, x0, z0, size, swellDir: [ sdx, sdz ] };
+	return { data, psi: psiOut, res, cellSize: h, x0, z0, size, swellDir: [ sdx, sdz ] };
+}
+
+// float32 -> IEEE half bits (round to nearest even; the direction x exposure stays within +-1)
+const _f32 = new Float32Array( 1 ), _u32 = new Uint32Array( _f32.buffer );
+function toHalf( v ) {
+	_f32[ 0 ] = v;
+	const x = _u32[ 0 ];
+	const sign = ( x >>> 16 ) & 0x8000;
+	let e = ( ( x >>> 23 ) & 0xff ) - 127 + 15;
+	let m = x & 0x7fffff;
+	if ( e >= 31 ) return sign | 0x7c00;
+	if ( e <= 0 ) {
+		if ( e < - 10 ) return sign;
+		m = ( m | 0x800000 ) >>> ( 1 - e );
+		return sign | ( ( m + 0x1000 ) >>> 13 );
+	}
+	const r = ( ( e << 10 ) | ( m >>> 13 ) ) + ( ( m & 0x1fff ) > 0x1000 || ( ( m & 0x1fff ) === 0x1000 && ( m & 0x2000 ) ) ? 1 : 0 );
+	return sign | r;
+}
+
+// (ours) the field for the GPU as RGBA32UI (exact loads, one sampler): r = bits of T, g = packHalf2x16( direction x
+// exposure ), b = bits of psi, a = bits of the shoreline arrival time (ShoreWaves shoreFieldSample decodes it)
+export function packShoreField( F ) {
+	const N = F.res * F.res, D = F.data, out = new Uint32Array( N * 4 );
+	const fv = new Float32Array( out.buffer );
+	for ( let k = 0; k < N; k ++ ) {
+		fv[ k * 4 ] = D[ k * 4 ];
+		out[ k * 4 + 1 ] = ( toHalf( D[ k * 4 + 1 ] ) | ( toHalf( D[ k * 4 + 2 ] ) << 16 ) ) >>> 0;
+		fv[ k * 4 + 2 ] = F.psi[ k ];
+		fv[ k * 4 + 3 ] = D[ k * 4 + 3 ];
+	}
+	return out;
 }
 
 // (ours) the swell direction for a tile: from the open water around its centre toward it, snapped to 16

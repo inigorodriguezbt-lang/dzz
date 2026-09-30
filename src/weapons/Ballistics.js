@@ -226,7 +226,7 @@ export class Ballistics {
 		const g = this.game;
 		const living = LIVING.has( e.type );
 		const mult = ZONE[ zone ] ?? 1;
-		hitEntity( g, e, dmg * mult, { source: p.source, zone: zone || 'torso', dir: _d.clone(), kind: p.kind === 'arrow' || p.kind === 'bolt' ? 'arrow' : 'bullet', weapon: p.weapon, point } );
+		hitEntity( g, e, dmg * mult, { source: p.source, zone: zone || 'torso', dir: _d.clone(), kind: p.kind === 'arrow' || p.kind === 'bolt' ? 'arrow' : 'bullet', pellet: p.kind === 'pellet', weapon: p.weapon, point } );
 		if ( p.kind === 'flare' ) { e.ignite?.( 6 ); }
 		if ( living ) {
 			g.fx?.blood( point, _d, Math.min( 2, dmg * mult / 35 ) );

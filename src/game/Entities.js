@@ -3,6 +3,8 @@
 // neighbour queries and bullet ray tests.
 import * as THREE from 'three';
 
+const _seen = new Set();
+
 let NEXT_ID = 1;
 const CELL = 16;
 
@@ -112,7 +114,9 @@ export class EntityManager {
 	raycast( o, d, maxT, exclude = null ) {
 		let best = null, bt = maxT;
 		const steps = Math.ceil( maxT / CELL );
-		const seen = new Set();
+		// reused across calls (raycast isn't re-entrant): the AI and ballistics call it many times a frame
+		const seen = _seen;
+		seen.clear();
 		for ( let k = 0; k <= steps; k ++ ) {
 			const t = k * CELL;
 			if ( t > bt + CELL ) break;

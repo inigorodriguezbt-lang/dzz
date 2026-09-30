@@ -9,6 +9,9 @@
 // exactly as an Object3D with rotation.y = yaw.
 import * as THREE from 'three';
 
+// hoisted: the AI calls lineOfSight dozens of times a frame
+const notGlass = ( x ) => x.kind !== 'glass';
+
 const CELL = 8;
 const key = ( i, j ) => ( i + 32768 ) * 65536 + ( j + 32768 );
 
@@ -205,7 +208,7 @@ export class Physics {
 		_d.subVectors( b, a );
 		const L = _d.length();
 		_d.divideScalar( L );
-		const hit = this.raycastBoxes( a, _d, L, x => x.kind !== 'glass' );
+		const hit = this.raycastBoxes( a, _d, L, notGlass );
 		if ( hit ) return false;
 		const tt = this.hf.raycast( a.x, a.y, a.z, _d.x, _d.y, _d.z, L, 2 );
 		return tt < 0;

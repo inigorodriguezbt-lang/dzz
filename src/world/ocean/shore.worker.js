@@ -2,7 +2,7 @@
 // the waves, the swash on the sand) and the shoreline waves' travel-time field (ShoreField.js), from its own
 // copy of the baked terrain (world/HeightField.js, read only).
 import { HeightField } from '../HeightField.js';
-import { computeShoreField, pickSwellDir } from './ShoreField.js';
+import { computeShoreField, pickSwellDir, packShoreField } from './ShoreField.js';
 import { laceData } from './SurfFoam.js';
 import { buildStations } from './breakerStations.js';
 
@@ -39,11 +39,11 @@ const handlers = {
 		const cx = x0 + size / 2, cz = z0 + size / 2;
 		const swellDir = pickSwellDir( ( x, z ) => - heightAt( x, z ), cx, cz, size * 0.5 );
 		let field = null;
-		if ( swellDir ) field = computeShoreField( heightAt, { x0, z0, size, res: fieldRes, swellDir } );
+		if ( swellDir ) { field = computeShoreField( heightAt, { x0, z0, size, res: fieldRes, swellDir } ); field.gpu = packShoreField( field ); }
 		// the breakers' shoreline stations near the centre (they need the travel-time field)
 		const stations = field ? buildStations( h, n, step, x0, z0, { cx, cz } ) : null;
 		const transfer = [ h.buffer ];
-		if ( field ) transfer.push( field.data.buffer, stations.data.buffer );
+		if ( field ) transfer.push( field.data.buffer, field.psi.buffer, field.gpu.buffer, stations.data.buffer );
 		return { result: { x0, z0, n, step, h, field, stations }, transfer };
 	},
 };

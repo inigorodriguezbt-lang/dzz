@@ -183,7 +183,7 @@ function evaluateCode( name, mode ) {
 }
 
 export const SHORE_GLSL = /* glsl */`
-	uniform highp sampler2D uShoreField; uniform vec4 uShoreRect; // x0, z0, size, res
+	uniform highp usampler2D uShoreField; uniform vec4 uShoreRect; // x0, z0, size, res (RGBA32UI, ShoreField packShoreField)
 	uniform float uShorePeriod; uniform float uShoreAmplitude; uniform float uShoreVariation; uniform float uShoreGamma;
 	uniform float uShoreBreakSpan; uniform float uShoreCurl; uniform float uShoreRunup; uniform float uShoreEnabled; uniform float uShoreTurbidity;
 	uniform float uOceanTime;
@@ -210,21 +210,30 @@ export const SHORE_GLSL = /* glsl */`
 
 	// the travel-time field of the tile: ( T, dirX * exposure, dirZ * exposure, shoreline T ), bilinear from 4
 	// exact loads (float data); the exposure fades out over the tile's outer 8 % (no waves beyond it)
-	vec4 shoreFieldSample( vec2 xz ) {
+	// one texel: ( T, direction x exposure, shoreline arrival time ), psi (the along-crest coordinate)
+	vec4 shoreFieldTexel( ivec2 i, out float psi ) {
+		uvec4 u = texelFetch( uShoreField, i, 0 );
+		psi = uintBitsToFloat( u.z );
+		return vec4( uintBitsToFloat( u.x ), unpackHalf2x16( u.y ), uintBitsToFloat( u.w ) );
+	}
+	vec4 shoreFieldSampleP( vec2 xz, out float psi ) {
 		float res = uShoreRect.w;
 		vec2 fp = ( xz - uShoreRect.xy ) / uShoreRect.z * res - 0.5;
 		vec2 fc = clamp( fp, vec2( 0.0 ), vec2( res - 1.001 ) );
 		ivec2 i = ivec2( floor( fc ) );
 		vec2 t = fract( fc );
-		vec4 a = texelFetch( uShoreField, i, 0 );
-		vec4 b = texelFetch( uShoreField, i + ivec2( 1, 0 ), 0 );
-		vec4 c = texelFetch( uShoreField, i + ivec2( 0, 1 ), 0 );
-		vec4 d = texelFetch( uShoreField, i + ivec2( 1, 1 ), 0 );
+		float pa, pb, pc, pd;
+		vec4 a = shoreFieldTexel( i, pa );
+		vec4 b = shoreFieldTexel( i + ivec2( 1, 0 ), pb );
+		vec4 c = shoreFieldTexel( i + ivec2( 0, 1 ), pc );
+		vec4 d = shoreFieldTexel( i + ivec2( 1, 1 ), pd );
 		vec4 s = mix( mix( a, b, t.x ), mix( c, d, t.x ), t.y );
+		psi = mix( mix( pa, pb, t.x ), mix( pc, pd, t.x ), t.y );
 		vec2 ed = min( fp, res - 1.0 - fp );
 		float inside = smoothstep( 0.0, res * 0.08, min( ed.x, ed.y ) );
 		return vec4( s.x, s.yz * inside, s.w );
 	}
+	vec4 shoreFieldSample( vec2 xz ) { float psi; return shoreFieldSampleP( xz, psi ); }
 
 	// (ours) per-wave random number: an integer hash of the wave index (PCG), reproducible on the CPU
 	float shoreHash1( float x ) {
@@ -421,12 +430,15 @@ export const SHORE_GLSL = /* glsl */`
 	}
 	// Local wave phase data at a (Lagrangian) point
 	ShorePhase shorePhaseAt( vec2 xz ) {
-		vec4 sh = shoreFieldSample( xz );
+		float along;
+		vec4 sh = shoreFieldSampleP( xz, along );
 		float T = sh.x;
 		vec2 dirE = vec2( sh.y, sh.z );
 		float exposure = length( dirE );
 		vec2 dir = dirE / max( exposure, 1e-4 );
-		float along = dot( xz, vec2( - dir.y, dir.x ) );
+		// (ours) the along-crest coordinate carried along the rays (ShoreField psi). Tidewater's
+		// dot( xz, perp( dir ) ) jumps by metres between neighbouring vertices this far from the origin: every
+		// along-shore pattern (wave heights, crest wobble, bars, lumps) turned into per-vertex noise, shards.
 		ShoreBar br = shoreBar( along );
 		float s = ( uOceanTime - T ) / uShorePeriod + shoreWobbleR( along, br.rip );
 		ShorePhase o; o.sh = sh; o.T = T; o.dir = dir; o.exposure = exposure; o.along = along; o.s = s; o.barK = br.k; o.barRip = br.rip;
@@ -611,14 +623,23 @@ function profileXY( P, u, lam, B, out ) {
 	return out;
 }
 
+// the packed shore field (ShoreField packShoreField) as an RGBA32UI texture (integer: nearest, exact loads)
+function fieldTexture( data, res ) {
+	const t = new THREE.DataTexture( data, res, res, THREE.RGBAIntegerFormat, THREE.UnsignedIntType );
+	t.internalFormat = 'RGBA32UI';
+	t.minFilter = t.magFilter = THREE.NearestFilter;
+	t.generateMipmaps = false;
+	t.needsUpdate = true;
+	return t;
+}
+
 // The shore waves on the CPU and GPU: parameters (Tidewater ShoreWaves.uniforms), the field of the current
 // tile (a float texture + its data), the fade while tiles swap.
 export class ShoreWaves {
 	constructor() {
 		this.P = { period: 9.0, amplitude: 0.34, variation: 0.55, gamma: 0.78, breakSpan: 0.13, curl: 1.0, runup: 1.0, enabled: 1.0, turbidity: 0.16 };
 		this.field = null; // { data, res, x0, z0, size, swellDir }
-		this.texture = new THREE.DataTexture( new Float32Array( [ 1e5, 0, 0, 1e5 ] ), 1, 1, THREE.RGBAFormat, THREE.FloatType );
-		this.texture.needsUpdate = true;
+		this.texture = fieldTexture( new Uint32Array( new Float32Array( [ 1e5, 0, 0, 1e5 ] ).buffer ), 1 );
 		this.rect = new THREE.Vector4( 0, 0, 1, 1 );
 		this.fade = 0; // 0..1 (the tile swap fade)
 		this._next = null;
@@ -649,11 +670,8 @@ export class ShoreWaves {
 		const t = this.texture;
 		if ( t.image.width !== F.res ) {
 			t.dispose();
-			this.texture = new THREE.DataTexture( F.data, F.res, F.res, THREE.RGBAFormat, THREE.FloatType );
-			this.texture.minFilter = this.texture.magFilter = THREE.NearestFilter;
-			this.texture.generateMipmaps = false;
-		} else t.image.data = F.data;
-		this.texture.needsUpdate = true;
+			this.texture = fieldTexture( F.gpu, F.res );
+		} else { t.image.data = F.gpu; t.needsUpdate = true; }
 		this.rect.set( F.x0, F.z0, F.size, F.res );
 	}
 
@@ -685,6 +703,8 @@ export class ShoreWaves {
 			const b = D[ ( ( j + 1 ) * res + i ) * 4 + c ] * ( 1 - tx ) + D[ ( ( j + 1 ) * res + i + 1 ) * 4 + c ] * tx;
 			out[ c ] = a * ( 1 - tz ) + b * tz;
 		}
+		const P = F.psi;
+		out[ 4 ] = ( P[ j * res + i ] * ( 1 - tx ) + P[ j * res + i + 1 ] * tx ) * ( 1 - tz ) + ( P[ ( j + 1 ) * res + i ] * ( 1 - tx ) + P[ ( j + 1 ) * res + i + 1 ] * tx ) * tz;
 		const inside = sstep( 0, res * 0.08, Math.min( fx, res - 1 - fx, fz, res - 1 - fz ) );
 		out[ 1 ] *= inside; out[ 2 ] *= inside;
 		return out;
@@ -696,10 +716,10 @@ export class ShoreWaves {
 		out[ 0 ] = out[ 1 ] = out[ 2 ] = 0;
 		const en = this.enabled;
 		if ( ! this.field || en <= 0 || depth >= 26 || depth <= - 0.25 ) return out;
-		const sh = this._sample( x, z, this._sh || ( this._sh = [ 0, 0, 0, 0 ] ) );
+		const sh = this._sample( x, z, this._sh || ( this._sh = [ 0, 0, 0, 0, 0 ] ) );
 		const exposure = Math.hypot( sh[ 1 ], sh[ 2 ] );
 		const dx = sh[ 1 ] / Math.max( exposure, 1e-4 ), dz = sh[ 2 ] / Math.max( exposure, 1e-4 );
-		const along = x * - dz + z * dx;
+		const along = sh[ 4 ];
 		const P = this.P;
 		const s = ( time - sh[ 0 ] ) / P.period + wobble( along );
 		const d = depth;

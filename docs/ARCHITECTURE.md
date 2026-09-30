@@ -144,6 +144,9 @@ Each module file `src/.../<Module>.js` exports `install(game)` (listed in `src/g
   the ground is changed in place (eaten, opened, cooked) and swaps building loot for a saved twin. Items draw out to
   10–55 m by size (`drawRange`). recipes.js exports `POT_COOKED`; Loot.js `PERISHABLE_H` (food keeping ≤ 72 h rolls rotten).
   `ItemDB.canMerge` refuses opened cans, part-eaten food and lit chemlights.
+- Creatures: `game.zombies.count()` counts the living only. Door boxes' `owner` exposes `broken` and `isOpen`; zombies bash
+  only closed doors. Run-over damage belongs to the vehicles module when `game.vehicles.handlesImpacts` is true (creatures
+  only fall back when it isn't). Bullet damage info carries `pellet: true` for shotgun pellets (kind stays 'bullet').
 - Vehicles (`game.vehicles`): drivable entities (type 'vehicle'), `enter(v)`, `exit()`, `seatInteraction()`, camera while driving
   (sets game.camera), fuel / damage / lights / horn, trunk container, `damage(amount, info)`. /summon names: sedan, pickup, jeep, suv,
   police_car, van, sports_car, bus?, motorbike?, boat, speedboat, fishing_boat, jetski, helicopter, plane?. Spawns parked / abandoned
