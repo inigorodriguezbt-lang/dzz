@@ -40,7 +40,7 @@ export class Water {
 		const g = this.game;
 		g.actions.start( {
 			label: 'Catching rain', time: 6, cancelOnMove: true,
-			onDone: () => { g.survival.drink( null, 0.15, 'water' ); g.toast( 'A few mouthfuls of rainwater', 'good' ); },
+			onDone: () => { g.survival.drink( null, 0.15, 'water' ); g.toast( 'Rainwater', 'good' ); },
 		} );
 	}
 }

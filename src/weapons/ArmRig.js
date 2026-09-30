@@ -256,7 +256,6 @@ function extract( mesh, bones, side ) {
 
 // finger and thumb frames in the hand frame. curl: [ [ a0, a1, a2 ] x 4 ] (null = rest), thumb: { dir, up, flex }
 // (null = rest), splay spreads the fingers
-const FK_OUT = new Array( 18 ).fill( null ).map( () => new THREE.Matrix4() );
 function chainFrames( arm, curl, thumb, splay, out = null ) {
 	out ||= new Array( 18 ).fill( null ).map( () => new THREE.Matrix4() );
 	const side = arm.side;
@@ -689,4 +688,3 @@ export class RigArm {
 		this.root.parent?.remove( this.root );
 	}
 }
-void FK_OUT;

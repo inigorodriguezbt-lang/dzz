@@ -24,14 +24,13 @@ export class Commands {
 				run: ( a ) => {
 					if ( a[ 0 ] && this.cmds[ a[ 0 ] ] ) { const c = this.cmds[ a[ 0 ] ]; say( `${c.usage} — ${c.desc}`, 'sys' ); return; }
 					say( 'Commands: ' + Object.keys( this.cmds ).map( k => '/' + k ).join( ' ' ), 'sys' );
-					say( 'Tab completes names. Up/Down recalls earlier commands.', 'sys' );
 				},
 			},
 			give: {
-				usage: '/give <item> [count]', desc: 'Give yourself an item', args: [ () => [ ...ITEMS.keys() ], () => [ '1', '5', '10', '30', '100' ] ],
+				usage: '/give <item> [count]', desc: 'Give item', args: [ () => [ ...ITEMS.keys() ], () => [ '1', '5', '10', '30', '100' ] ],
 				run: ( a ) => {
 					const id = this.resolveItem( a[ 0 ] );
-					if ( ! id ) return say( `Unknown item "${a[ 0 ] || ''}". Try /give m4a1`, 'err' );
+					if ( ! id ) return say( `Unknown item: ${a[ 0 ] || ''}`, 'err' );
 					const n = Math.max( 1, Math.min( 999, parseInt( a[ 1 ] || '1', 10 ) || 1 ) );
 					g.give( id, n );
 					say( `Gave ${n} × ${getItem( id ).name}` );
@@ -58,7 +57,7 @@ export class Commands {
 			},
 			time: {
 				usage: '/time set <day|noon|sunset|night|midnight|sunrise|HH:MM> | add <hours> | freeze | unfreeze | speed <min/day> | query',
-				desc: 'Change the time of day', args: [ () => [ 'set', 'add', 'freeze', 'unfreeze', 'speed', 'query' ], ( a ) => a[ 0 ] === 'set' ? [ 'day', 'noon', 'sunrise', 'sunset', 'night', 'midnight', '06:00', '12:00', '18:30' ] : a[ 0 ] === 'speed' ? [ '12', '24', '48', '96', '144' ] : [] ],
+				desc: 'Time of day', args: [ () => [ 'set', 'add', 'freeze', 'unfreeze', 'speed', 'query' ], ( a ) => a[ 0 ] === 'set' ? [ 'day', 'noon', 'sunrise', 'sunset', 'night', 'midnight', '06:00', '12:00', '18:30' ] : a[ 0 ] === 'speed' ? [ '12', '24', '48', '96', '144' ] : [] ],
 				run: ( a ) => {
 					const T = g.time;
 					const named = { day: 8, morning: 8, noon: 12, sunrise: 6.2, dawn: 5.8, sunset: 18.6, dusk: 19, night: 21, midnight: 0, evening: 17.5 };
@@ -74,12 +73,12 @@ export class Commands {
 					if ( a[ 0 ] === 'add' ) { T.hours += parseFloat( a[ 1 ] ) || 1; return say( `Time is ${fmtHour( g.hour )}` ); }
 					if ( a[ 0 ] === 'freeze' ) { g.timeFrozen = true; return say( 'Time frozen' ); }
 					if ( a[ 0 ] === 'unfreeze' ) { g.timeFrozen = false; return say( 'Time resumes' ); }
-					if ( a[ 0 ] === 'speed' ) { const m = parseFloat( a[ 1 ] ); if ( ! ( m > 0 ) ) return say( 'Usage: /time speed <real minutes per day>', 'err' ); T.dayMinutes = m; return say( `A day now lasts ${m} minutes` ); }
+					if ( a[ 0 ] === 'speed' ) { const m = parseFloat( a[ 1 ] ); if ( ! ( m > 0 ) ) return say( 'Usage: /time speed <real minutes per day>', 'err' ); T.dayMinutes = m; return say( `Day length ${m} min` ); }
 					say( `Day ${g.day}, ${fmtHour( g.hour )} (a day lasts ${T.dayMinutes} min)`, 'sys' );
 				},
 			},
 			weather: {
-				usage: '/weather <clear|fair|cloudy|showers|overcast|storm> [lock]', desc: 'Change the weather', args: [ () => Object.keys( WEATHERS ), () => [ 'lock', 'unlock' ] ],
+				usage: '/weather <clear|fair|cloudy|showers|overcast|storm> [lock]', desc: 'Weather', args: [ () => Object.keys( WEATHERS ), () => [ 'lock', 'unlock' ] ],
 				run: ( a ) => {
 					if ( a[ 0 ] === 'unlock' ) { g.weather.locked = false; return say( 'Weather unlocked' ); }
 					if ( ! g.weather.set( a[ 0 ], true ) ) return say( 'Usage: ' + this.cmds.weather.usage, 'err' );
@@ -88,7 +87,7 @@ export class Commands {
 				},
 			},
 			locate: {
-				usage: '/locate <place | building type>', desc: 'Find the nearest place or kind of building', args: [ () => [ ...this.placeNames(), ...this.buildingTypes() ] ],
+				usage: '/locate <place | building type>', desc: 'Find a place or building', args: [ () => [ ...this.placeNames(), ...this.buildingTypes() ] ],
 				run: ( a ) => {
 					const q = a.join( ' ' );
 					if ( ! q ) return say( this.cmds.locate.usage, 'err' );
@@ -105,7 +104,7 @@ export class Commands {
 				},
 			},
 			summon: {
-				usage: '/summon <entity> [count]', desc: 'Spawn creatures or vehicles in front of you', args: [ () => Object.keys( g.spawnables ), () => [ '1', '5', '10', '25' ] ],
+				usage: '/summon <entity> [count]', desc: 'Spawn creature or vehicle', args: [ () => Object.keys( g.spawnables ), () => [ '1', '5', '10', '25' ] ],
 				run: ( a ) => {
 					const name = Object.keys( g.spawnables ).find( k => norm( k ) === norm( a[ 0 ] || '' ) );
 					if ( ! name ) return say( `Unknown entity "${a[ 0 ] || ''}". Try: ${Object.keys( g.spawnables ).slice( 0, 12 ).join( ', ' )}`, 'err' );
@@ -122,40 +121,40 @@ export class Commands {
 				},
 			},
 			gamemode: {
-				usage: '/gamemode <survival|creative>', desc: 'Switch game mode', args: [ () => [ 'survival', 'creative' ] ],
+				usage: '/gamemode <survival|creative>', desc: 'Game mode', args: [ () => [ 'survival', 'creative' ] ],
 				run: ( a ) => {
 					const m = { s: 'survival', survival: 'survival', 0: 'survival', c: 'creative', creative: 'creative', 1: 'creative' }[ ( a[ 0 ] || '' ).toLowerCase() ];
 					if ( ! m ) return say( this.cmds.gamemode.usage, 'err' );
 					g.mode = m;
 					if ( m === 'survival' ) { g.player.flying = false; g.player.noclip = false; }
-					say( `Game mode: ${m}${m === 'creative' ? ' — double-tap Space to fly, the inventory has an item catalog' : ''}` );
+					say( `Mode: ${m}` );
 				},
 			},
-			kill: { usage: '/kill', desc: 'Die (respawn on a beach)', run: () => { g.survival.health = 0; g.onPlayerDeath( 'suicide' ); } },
+			kill: { usage: '/kill', desc: 'Die', run: () => { g.survival.health = 0; g.onPlayerDeath( 'suicide' ); } },
 			heal: {
-				usage: '/heal', desc: 'Restore health and cure every condition', run: () => {
+				usage: '/heal', desc: 'Full heal', run: () => {
 					const S = g.survival; S.health = 100; S.blood = 5000; S.bleeding = 0; S.infected = false; S.infection = 0; S.fracture = false; S.splint = false; S.sick = 0; S.temp = 36.8; S.wet = 0; S.stamina = 100; S.breath = 100; S.pain = 0;
 					say( 'Healed' );
 				},
 			},
-			feed: { usage: '/feed', desc: 'Fill hunger, thirst and energy', run: () => { const S = g.survival; S.hunger = 100; S.thirst = 100; S.energy = 100; say( 'Fed and watered' ); } },
+			feed: { usage: '/feed', desc: 'Fill food, water, energy', run: () => { const S = g.survival; S.hunger = 100; S.thirst = 100; S.energy = 100; say( 'Fed' ); } },
 			clear: {
 				usage: '/clear [confirm]', desc: 'Empty your inventory', args: [ () => [ 'confirm' ] ],
 				run: ( a ) => {
-					if ( a[ 0 ] !== 'confirm' ) return say( 'This deletes everything you carry. Type /clear confirm', 'err' );
+					if ( a[ 0 ] !== 'confirm' ) return say( 'Type /clear confirm', 'err' );
 					const inv = g.player.inventory; inv.equip = {}; inv.weapons = {}; inv.pockets = []; inv.hands = null; inv.hotbar.fill( null ); inv.changed();
 					say( 'Inventory cleared' );
 				},
 			},
-			god: { usage: '/god', desc: 'Toggle invulnerability', run: () => { g.survival.godMode = ! g.survival.godMode; say( `God mode ${g.survival.godMode ? 'on' : 'off'}` ); } },
-			fly: { usage: '/fly', desc: 'Toggle flying (creative)', run: () => { if ( g.mode !== 'creative' ) return say( 'Flying needs creative mode (/gamemode creative)', 'err' ); g.player.flying = ! g.player.flying; say( `Flying ${g.player.flying ? 'on' : 'off'}` ); } },
-			noclip: { usage: '/noclip', desc: 'Fly through walls (creative)', run: () => { if ( g.mode !== 'creative' ) return say( 'Needs creative mode', 'err' ); g.player.noclip = ! g.player.noclip; g.player.flying = g.player.noclip || g.player.flying; say( `No-clip ${g.player.noclip ? 'on' : 'off'}` ); } },
-			speed: { usage: '/speed <multiplier>', desc: 'Creative flight speed', args: [ () => [ '0.5', '1', '2', '5', '10' ] ], run: ( a ) => { g.creativeSpeed = Math.max( 0.1, Math.min( 20, parseFloat( a[ 0 ] ) || 1 ) ); say( `Flight speed ×${g.creativeSpeed}` ); } },
-			pos: { usage: '/pos', desc: 'Where am I', run: () => { const p = g.player.pos; say( `x ${p.x.toFixed( 1 )}  y ${p.y.toFixed( 1 )}  z ${p.z.toFixed( 1 )} — ${this.describe( p )}`, 'sys' ); } },
-			seed: { usage: '/seed', desc: 'Show the world seed', run: () => say( `Seed: ${g.seed}`, 'sys' ) },
-			difficulty: { usage: '/difficulty <easy|normal|hard>', desc: 'Change difficulty', args: [ () => [ 'easy', 'normal', 'hard' ] ], run: ( a ) => { if ( ! [ 'easy', 'normal', 'hard' ].includes( a[ 0 ] ) ) return say( 'Usage: /difficulty easy|normal|hard', 'err' ); g.difficulty = a[ 0 ]; g.save.difficulty = a[ 0 ]; say( `Difficulty: ${a[ 0 ]}` ); } },
+			god: { usage: '/god', desc: 'Invulnerable', run: () => { g.survival.godMode = ! g.survival.godMode; say( `God mode ${g.survival.godMode ? 'on' : 'off'}` ); } },
+			fly: { usage: '/fly', desc: 'Fly', run: () => { if ( g.mode !== 'creative' ) return say( 'Creative only', 'err' ); g.player.flying = ! g.player.flying; say( `Flying ${g.player.flying ? 'on' : 'off'}` ); } },
+			noclip: { usage: '/noclip', desc: 'Fly through walls', run: () => { if ( g.mode !== 'creative' ) return say( 'Creative only', 'err' ); g.player.noclip = ! g.player.noclip; g.player.flying = g.player.noclip || g.player.flying; say( `No-clip ${g.player.noclip ? 'on' : 'off'}` ); } },
+			speed: { usage: '/speed <multiplier>', desc: 'Flight speed', args: [ () => [ '0.5', '1', '2', '5', '10' ] ], run: ( a ) => { g.creativeSpeed = Math.max( 0.1, Math.min( 20, parseFloat( a[ 0 ] ) || 1 ) ); say( `Flight speed ×${g.creativeSpeed}` ); } },
+			pos: { usage: '/pos', desc: 'Position', run: () => { const p = g.player.pos; say( `x ${p.x.toFixed( 1 )}  y ${p.y.toFixed( 1 )}  z ${p.z.toFixed( 1 )} — ${this.describe( p )}`, 'sys' ); } },
+			seed: { usage: '/seed', desc: 'World seed', run: () => say( `Seed: ${g.seed}`, 'sys' ) },
+			difficulty: { usage: '/difficulty <easy|normal|hard>', desc: 'Difficulty', args: [ () => [ 'easy', 'normal', 'hard' ] ], run: ( a ) => { if ( ! [ 'easy', 'normal', 'hard' ].includes( a[ 0 ] ) ) return say( 'Usage: /difficulty easy|normal|hard', 'err' ); g.difficulty = a[ 0 ]; g.save.difficulty = a[ 0 ]; say( `Difficulty: ${a[ 0 ]}` ); } },
 			killall: {
-				usage: '/killall [zombie|animal|vehicle|item]', desc: 'Remove entities around you', args: [ () => [ 'zombie', 'animal', 'npc', 'vehicle', 'item' ] ],
+				usage: '/killall [zombie|animal|vehicle|item]', desc: 'Remove nearby entities', args: [ () => [ 'zombie', 'animal', 'npc', 'vehicle', 'item' ] ],
 				run: ( a ) => {
 					let n = 0;
 					for ( const e of g.entities.list ) {
@@ -164,9 +163,9 @@ export class Commands {
 					say( `Removed ${n}` );
 				},
 			},
-			repair: { usage: '/repair', desc: 'Repair what you hold', run: () => { const s = g.player.inventory.heldStack(); if ( ! s ) return say( 'Hold an item first', 'err' ); s.cond = 1; say( 'Repaired' ); } },
+			repair: { usage: '/repair', desc: 'Repair held item', run: () => { const s = g.player.inventory.heldStack(); if ( ! s ) return say( 'Nothing held', 'err' ); s.cond = 1; say( 'Repaired' ); } },
 			ammo: {
-				usage: '/ammo', desc: 'Fill your weapons and magazines', run: () => {
+				usage: '/ammo', desc: 'Refill ammo', run: () => {
 					for ( const s of g.player.inventory.allStacks() ) {
 						const d = getItem( s.id );
 						if ( d.cat === 'magazine' ) s.data.rounds = d.magazine.capacity;
@@ -174,11 +173,11 @@ export class Commands {
 							if ( d.firearm.feed === 'mag' ) { if ( ! s.data.mag && d.firearm.mags?.length ) s.data.mag = makeStack( d.firearm.mags[ 0 ], 1, { full: true } ); else if ( s.data.mag ) s.data.mag.data.rounds = getItem( s.data.mag.id ).magazine.capacity; s.data.chamber = 1; } else s.data.rounds = d.firearm.capacity;
 						}
 					}
-					g.player.inventory.changed(); say( 'Reloaded everything' );
+					g.player.inventory.changed(); say( 'Reloaded' );
 				},
 			},
-			save: { usage: '/save', desc: 'Save the world now', run: async () => { await g.saveNow( true ); say( 'World saved' ); } },
-			markers: { usage: '/markers clear', desc: 'Clear map markers', args: [ () => [ 'clear' ] ], run: ( a ) => { if ( a[ 0 ] === 'clear' ) { g.markers?.clear(); say( 'Markers cleared' ); } } },
+			save: { usage: '/save', desc: 'Save', run: async () => { await g.saveNow( true ); say( 'Saved' ); } },
+			markers: { usage: '/markers clear', desc: 'Clear markers', args: [ () => [ 'clear' ] ], run: ( a ) => { if ( a[ 0 ] === 'clear' ) { g.markers?.clear(); say( 'Markers cleared' ); } } },
 		};
 	}
 
@@ -245,7 +244,7 @@ export class Commands {
 		const c = this.cmds[ name.toLowerCase() ] || this.cmds[ { tele: 'tp', teleport: 'tp', i: 'give', item: 'give', gm: 'gamemode', w: 'weather', loc: 'locate', spawn: 'summon', where: 'pos' }[ name.toLowerCase() ] ];
 		if ( ! c ) { this.say( `Unknown command /${name}. Type /help`, 'err' ); return; }
 		const creativeOnly = [ 'give', 'tp', 'time', 'weather', 'summon', 'heal', 'feed', 'god', 'fly', 'noclip', 'killall', 'repair', 'ammo', 'speed' ];
-		if ( creativeOnly.includes( name ) && this.game.save.hardcore ) { this.say( 'Cheats are disabled in hardcore worlds', 'err' ); return; }
+		if ( creativeOnly.includes( name ) && this.game.save.hardcore ) { this.say( 'No cheats in hardcore', 'err' ); return; }
 		if ( creativeOnly.includes( name ) && this.game.mode !== 'creative' ) this.game.stats.cheated = true;
 		try { const r = c.run( args ); if ( r && r.catch ) r.catch( e => this.say( String( e.message || e ), 'err' ) ); } catch ( e ) { console.error( e ); this.say( 'Error: ' + e.message, 'err' ); }
 	}

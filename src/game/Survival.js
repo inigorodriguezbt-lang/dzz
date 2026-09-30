@@ -92,9 +92,9 @@ export class Survival {
 		// wounds
 		let bleedChance = { bite: 0.55, scratch: 0.35, bullet: 0.9, melee: 0.25, animal: 0.5, explosion: 0.7, vehicle: 0.3 }[ kind ] || 0;
 		if ( kind === 'bite' || kind === 'scratch' ) bleedChance *= 1 - bite;
-		if ( Math.random() < bleedChance ) { this.bleeding = Math.min( 6, this.bleeding + 1 ); this.msg( 'bleed', 'You are bleeding', 'bad' ); }
+		if ( Math.random() < bleedChance ) { this.bleeding = Math.min( 6, this.bleeding + 1 ); this.msg( 'bleed', 'Bleeding', 'bad' ); }
 		if ( ( kind === 'bite' || kind === 'scratch' ) && Math.random() < ( kind === 'bite' ? 0.18 : 0.06 ) * this.diff.infection * ( 1 - bite ) ) {
-			if ( ! this.infected ) { this.infected = true; this.infection = Math.max( this.infection, 0.02 ); this.msg( 'inf', 'The wound looks infected', 'bad', 0 ); }
+			if ( ! this.infected ) { this.infected = true; this.infection = Math.max( this.infection, 0.02 ); this.msg( 'inf', 'Infected', 'bad', 0 ); }
 		}
 		if ( kind === 'fall' && info.fall > 5 && Math.random() < 0.4 + ( info.fall - 5 ) * 0.1 ) this.breakLeg();
 		if ( kind === 'vehicle' && Math.random() < 0.2 ) this.breakLeg();
@@ -110,7 +110,7 @@ export class Survival {
 	breakLeg() {
 		if ( this.fracture ) return;
 		this.fracture = true; this.splint = false; this.fractureHeal = 0;
-		this.msg( 'frac', 'Your leg is broken — find a splint', 'bad', 0 );
+		this.msg( 'frac', 'Broken leg', 'bad', 0 );
 		this.game.audio?.play( 'bonebreak', { vol: 0.8 } );
 	}
 
@@ -124,20 +124,20 @@ export class Survival {
 		this.hunger = Math.min( 110, this.hunger + ( f.kcal || 0 ) / 20 * portion );
 		this.thirst = Math.min( 100, this.thirst + ( f.water || 0 ) * portion );
 		let sickC = ( f.sick || 0 ) + ( f.raw ? 0.35 : 0 ) + ( fresh <= 0 ? 0.7 : fresh < 0.25 ? 0.25 : 0 );
-		if ( Math.random() < sickC ) { this.sick = Math.min( 1, this.sick + 0.45 ); this.msg( 'sick', 'Your stomach turns…', 'warn' ); }
+		if ( Math.random() < sickC ) { this.sick = Math.min( 1, this.sick + 0.45 ); this.msg( 'sick', 'Nauseous', 'warn' ); }
 		if ( this.hunger > 100 && Math.random() < 0.3 ) this.vomit();
 		return fresh <= 0 ? 'That was rotten.' : null;
 	}
 
 	drink( def, amountL = 0.33, liquid = 'water' ) {
 		const d = def?.drink || {};
-		if ( liquid === 'sea' ) { this.thirst = Math.max( 0, this.thirst - 8 ); this.msg( 'salt', 'Salt water makes it worse', 'bad' ); return; }
+		if ( liquid === 'sea' ) { this.thirst = Math.max( 0, this.thirst - 8 ); this.msg( 'salt', 'Salt water', 'bad' ); return; }
 		const water = d.water != null ? d.water : amountL * 60;
 		this.thirst = Math.min( 105, this.thirst + water );
 		this.hunger = Math.min( 110, this.hunger + ( d.kcal || 0 ) / 20 );
 		if ( d.alcohol ) this.drunk = Math.min( 1, this.drunk + d.alcohol );
 		if ( d.caffeine ) this.caffeine = Math.min( 300, this.caffeine + d.caffeine );
-		if ( liquid === 'dirty' && Math.random() < 0.4 ) { this.sick = Math.min( 1, this.sick + 0.5 ); this.msg( 'sick', 'That water was bad', 'warn' ); }
+		if ( liquid === 'dirty' && Math.random() < 0.4 ) { this.sick = Math.min( 1, this.sick + 0.5 ); this.msg( 'sick', 'Bad water', 'warn' ); }
 		if ( d.sick && Math.random() < d.sick ) this.sick = Math.min( 1, this.sick + 0.4 );
 	}
 
@@ -159,7 +159,7 @@ export class Survival {
 		this.thirst = Math.max( 0, this.thirst - 18 );
 		this.game.audio?.play( 'vomit', { vol: 0.7 } );
 		this.game.player.shake = 0.5;
-		this.msg( 'vomit', 'You threw up', 'warn' );
+		this.msg( 'vomit', 'Vomited', 'warn' );
 	}
 
 	msg( key, text, kind = 'warn', repeat = 30 ) {
@@ -220,7 +220,7 @@ export class Survival {
 		// infection from bites: fever and a slow drain; antibiotics cure it
 		if ( this.infected ) {
 			this.infection = Math.min( 1, this.infection + dt * 0.00055 * this.diff.infection );
-			if ( this.infection > 0.25 ) { this.msg( 'fever', 'You have a fever', 'bad', 90 ); this.temp += dt * 0.004; }
+			if ( this.infection > 0.25 ) { this.msg( 'fever', 'Fever', 'bad', 90 ); this.temp += dt * 0.004; }
 			if ( this.infection > 0.5 ) this.health -= dt * 0.05 * this.infection;
 		}
 		// food poisoning
@@ -233,7 +233,7 @@ export class Survival {
 		// fracture heals with a splint
 		if ( this.fracture && this.splint ) {
 			this.fractureHeal += dt;
-			if ( this.fractureHeal > 900 ) { this.fracture = false; this.splint = false; this.msg( 'heal', 'Your leg has healed', 'good', 0 ); }
+			if ( this.fractureHeal > 900 ) { this.fracture = false; this.splint = false; this.msg( 'heal', 'Leg healed', 'good', 0 ); }
 		}
 
 		// temperature
@@ -251,16 +251,15 @@ export class Survival {
 		const heatGen = ( p.sprinting ? 1.2 : p.moving ? 0.5 : 0.1 ) + ( this.caffeine > 0 ? 0.1 : 0 );
 		const target = 37 + ( this.envTemp - 24 ) * 0.09 * ( 1 - Math.min( 0.9, effIns ) ) + heatGen * 0.4 - this.wet * 1.4 + ( this.envTemp > 30 ? effIns * 1.2 : 0 );
 		this.temp += ( target - this.temp ) * dt * 0.004;
-		if ( this.temp < 35.2 ) { this.health -= dt * ( 35.2 - this.temp ) * 0.08; this.msg( 'cold', 'You are freezing', 'bad' ); }
-		else if ( this.temp < 36 ) this.msg( 'chilly', 'You feel cold', 'warn', 120 );
-		if ( this.temp > 38.6 ) { this.health -= dt * ( this.temp - 38.6 ) * 0.1; this.thirst -= dt * 0.03; this.msg( 'hot', 'You are overheating', 'bad' ); }
+		if ( this.temp < 35.2 ) { this.health -= dt * ( 35.2 - this.temp ) * 0.08; this.msg( 'cold', 'Freezing', 'bad' ); }
+		if ( this.temp > 38.6 ) { this.health -= dt * ( this.temp - 38.6 ) * 0.1; this.thirst -= dt * 0.03; this.msg( 'hot', 'Overheating', 'bad' ); }
 
 		// starvation / dehydration
-		if ( this.hunger <= 0 ) { this.health -= dt * 0.09; this.msg( 'starve', 'You are starving', 'bad' ); }
-		else if ( this.hunger < 15 ) this.msg( 'hungry', 'You are very hungry', 'warn', 120 );
-		if ( this.thirst <= 0 ) { this.health -= dt * 0.18; this.msg( 'dehyd', 'You are dehydrated', 'bad' ); }
-		else if ( this.thirst < 15 ) this.msg( 'thirsty', 'You are very thirsty', 'warn', 120 );
-		if ( this.energy < 10 ) this.msg( 'tired', 'You are exhausted — find somewhere to sleep', 'warn', 180 );
+		if ( this.hunger <= 0 ) { this.health -= dt * 0.09; this.msg( 'starve', 'Starving', 'bad' ); }
+		else if ( this.hunger < 15 ) this.msg( 'hungry', 'Hungry', 'warn', 120 );
+		if ( this.thirst <= 0 ) { this.health -= dt * 0.18; this.msg( 'dehyd', 'Dehydrated', 'bad' ); }
+		else if ( this.thirst < 15 ) this.msg( 'thirsty', 'Thirsty', 'warn', 120 );
+		if ( this.energy < 10 ) this.msg( 'tired', 'Exhausted', 'warn', 180 );
 
 		// breath under water
 		if ( p.underwater ) {

@@ -274,7 +274,7 @@ export class Game {
 			S.thirst = Math.max( 0, S.thirst - hours * 3 );
 			S.health = Math.min( 100, S.health + hours * 2 * quality );
 			this.audio.play( 'sleep', { bus: 'ui', vol: 0.5 } );
-			this.toast( `You slept ${hours} hours`, 'good' );
+			this.toast( `Slept ${hours} h`, 'good' );
 		}, dur * 0.5 );
 		return true;
 	}

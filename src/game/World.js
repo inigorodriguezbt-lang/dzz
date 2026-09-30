@@ -27,12 +27,12 @@ export class World {
 	}
 
 	async load( onStatus ) {
-		onStatus( 'Loading the islands', 0 );
+		onStatus( 'Terrain', 0 );
 		const metaRes = await fetch( 'data/world.json' );
 		this.meta = await metaRes.json();
-		const buf = await loadTerrainBuffer( 'data/terrain.bin.gz', p => onStatus( 'Loading the islands', p * 0.3 ) );
+		const buf = await loadTerrainBuffer( 'data/terrain.bin.gz', p => onStatus( 'Terrain', p * 0.3 ) );
 		this.hf = new HeightField( buf, this.meta );
-		onStatus( 'Starting world workers', 0.32 );
+		onStatus( 'Workers', 0.32 );
 		const n = Math.max( 2, Math.min( 4, ( navigator.hardwareConcurrency || 4 ) - 1 ) );
 		this.pool = new WorkerPool( n );
 		const lean = { cities: this.meta.cities, roads: this.meta.roads, streets: this.meta.streets, runways: this.meta.runways, buildings: this.meta.buildings };

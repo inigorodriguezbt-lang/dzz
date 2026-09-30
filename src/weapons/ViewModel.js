@@ -6,8 +6,9 @@
 // at a low ready to the right pointing into the screen, pistols out in both hands, melee weapons from MELEE_HOLD,
 // grenades / tools / items from a posed right hand in HAND_HOLD), the aimed pose (the sight line through the eye),
 // a sprint pose and the current action's keyframes, then sway, walk bob and spring-damped recoil are layered on.
-// Hands wrap grip cylinders (Arms.js: diagonal power grip, solved finger curl); each forearm continues its hand's
-// line towards where the elbow hangs, and the upper arm reaches back to the shoulder.
+// Hands wrap grip cylinders (Arms.js: diagonal power grip, fitted finger curl) with the thumbs laid in the gun's own
+// frame (GUN_THUMB); each forearm leaves the wrist towards where the elbow hangs (as far as a wrist bends), and the
+// upper arm reaches back to the shoulder. The arms are the modelled ones of ArmRig.js once loaded.
 //
 // Hands.js drives it through `vm.s` (state) and calls fire() / eject() / setItem().
 import * as THREE from 'three';

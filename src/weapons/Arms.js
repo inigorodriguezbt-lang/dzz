@@ -1,7 +1,9 @@
-// First-person arms. Each arm is one smooth-skinned surface from the shoulder through the elbow and the wrist to
-// the palm, with four fingers and a thumb lofted as tubes that blend into it (linear blend skinning across every
-// joint, so knuckles and wrists bend without seams), fingernails, a sleeve (long to the wrist, or short above the
-// elbow) printed with the worn top's fabric, and gloves with a cuff when gloves are worn.
+// First-person arms: the hand frame and grip solver every arm is posed with, and the procedural arms (the fallback
+// until, or if never, the modelled arms of ArmRig.js load). Each procedural arm is one smooth-skinned surface from
+// the shoulder through the elbow and the wrist to the palm, with four fingers and a thumb lofted as tubes that blend
+// into it (linear blend skinning across every joint, so knuckles and wrists bend without seams), fingernails, a
+// sleeve (long to the wrist, or short above the elbow) printed with the worn top's fabric, and gloves with a cuff.
+// setHandMetrics() swaps the solver's hand measurements for the loaded model's.
 //
 // Hand frame (the wrist bone): +Z along the fingers, +Y out of the back of the hand, +X along the knuckle line
 // towards the index finger on the right hand (towards the pinky on the left: the left arm mirrors X).

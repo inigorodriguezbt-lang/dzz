@@ -767,7 +767,7 @@ export class ItemUse {
 		const W = g.weather;
 		if ( ! W ) { g.toast( 'Static', 'info' ); return; }
 		const h = Math.max( 1, Math.round( W.nextChange || 1 ) );
-		g.toast( `Weather: ${W.state}. Change in ~${h} h`, 'info' );
+		g.toast( `${W.state[ 0 ].toUpperCase() + W.state.slice( 1 )} · ${h} h`, 'info' );
 	}
 
 	phoneTime( stack ) {

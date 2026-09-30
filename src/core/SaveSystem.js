@@ -87,12 +87,12 @@ export class SaveSystem {
 	async importWorld( file ) {
 		const text = await file.text();
 		let w;
-		try { w = JSON.parse( text ); } catch ( e ) { throw new Error( 'That file is not a Deadtide world (bad JSON).' ); }
-		if ( w.format !== 'deadtide-world' || ! w.player || ! w.time ) throw new Error( 'That file is not a Deadtide world.' );
-		if ( ( w.version || 0 ) > SAVE_VERSION ) throw new Error( 'This world was saved by a newer version of the game.' );
+		try { w = JSON.parse( text ); } catch ( e ) { throw new Error( 'Not a world file' ); }
+		if ( w.format !== 'deadtide-world' || ! w.player || ! w.time ) throw new Error( 'Not a world file' );
+		if ( ( w.version || 0 ) > SAVE_VERSION ) throw new Error( 'Newer game version' );
 		delete w.format;
 		const existing = await this.load( w.id );
-		if ( existing ) { w.id = newId(); w.name += ' (imported)'; }
+		if ( existing ) { w.id = newId(); w.name += ' 2'; }
 		await this.save( w );
 		return w;
 	}

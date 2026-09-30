@@ -889,7 +889,7 @@ export class Vehicles {
 				can.data.amount = Math.max( 0, ( can.data.amount || 0 ) - got );
 				v.touch();
 				inv.changed();
-				g.toast( `Added ${Math.max( 1, Math.round( got ) )} L of fuel`, 'good' );
+				g.toast( `+${Math.max( 1, Math.round( got ) )} L fuel`, 'good' );
 			},
 		} );
 	}
