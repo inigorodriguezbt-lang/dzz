@@ -810,5 +810,7 @@ export function install( game ) {
 	const roads = new Roads( game );
 	game.roads = roads;
 	game.register( roads );
+	// vegetation installs first: tell it about the parking lots now they exist
+	game.vegetation?.rebuildObstacles?.();
 	return roads;
 }

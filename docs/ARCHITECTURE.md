@@ -152,6 +152,10 @@ Each module file `src/.../<Module>.js` exports `install(game)` (listed in `src/g
   `vegetation/GroundData.js`, not per-cell instances); beach pebbles, shells, sea glass and pumice are
   `vegetation/PebbleField.js`. The worker's per-cell scatter transfer has 6 entries. `game.vegetation.rebuildObstacles()`
   (alias of `_buildObstacles()`) is called by Buildings after it appends infill lots, so trees stay off them.
+- Roads (`game.roads`): city street grids are fitted to the baked street ends (`network.js` fitFrames; the baked
+  city angles are rounded to 0.01 rad, too coarse to place streets). Parking lots: `roads.lots`, `roads.lotAt( x, z )`,
+  `roads.lotObstacles()` (Float32Array, 5 per lot: x, z, half-length, half-width, angle — the buildings' angle
+  convention); vegetation keeps off them. `spawnPoints( center, radius, n )` includes parking stalls.
 - Vehicles (`game.vehicles`): drivable entities (type 'vehicle'), `enter(v)`, `exit()`, `seatInteraction()`, camera while driving
   (sets game.camera), fuel / damage / lights / horn, trunk container, `damage(amount, info)`. /summon names: sedan, pickup, jeep, suv,
   police_car, van, sports_car, bus?, motorbike?, boat, speedboat, fishing_boat, jetski, helicopter, plane?. Spawns parked / abandoned

@@ -236,6 +236,13 @@ export class Vegetation {
 			const r = rw.len / 2 + 50;
 			put( 'b', rw.x - r, rw.z - r, rw.x + r, rw.z + r );
 		}
+		// parking lots (roads module): no trees or shrubs on the tarmac
+		const lots = this.game.roads?.lotObstacles?.();
+		if ( lots ) for ( let k = 0; k < lots.length; k += 5 ) {
+			this._obs.b.push( lots[ k ], lots[ k + 1 ], lots[ k + 2 ], lots[ k + 3 ], lots[ k + 4 ], 0 );
+			const r = Math.hypot( lots[ k + 2 ], lots[ k + 3 ] ) + 12;
+			put( 'b', lots[ k ] - r, lots[ k + 1 ] - r, lots[ k ] + r, lots[ k + 1 ] + r );
+		}
 		const KINDS = { metro: 1, town: 2, village: 3, resort: 4, military: 5, airport: 5, observatory: 5 };
 		const seg = ( ax, az, bx, bz, hw, kind ) => {
 			this._obs.s.push( ax, az, bx, bz, hw, kind );
