@@ -36,7 +36,9 @@ export class Caustics {
 		} );
 		this.rt.texture.anisotropy = 4;
 		this.scene = new THREE.Scene();
-		this.camera = new THREE.Camera();
+		// (a real camera: the reversed-depth renderer updates the projection of whatever camera it renders with;
+		// the vertex shader ignores it)
+		this.camera = new THREE.OrthographicCamera( - 1, 1, 1, - 1, 0, 1 );
 		this.uniforms = { uOceanDeriv: { value: null }, uCauSun: { value: new THREE.Vector3( 0, 1, 0 ) } };
 		this.meshes = [];
 		for ( const Ly of LAYERS ) for ( let k = 0; k < 2; k ++ ) {
@@ -117,7 +119,12 @@ export class Caustics {
 
 	get texture() { return this.rt.texture; }
 
-	update( deriv, sunDir ) {
+	// every frame; on a machine running below ~22 fps (the splatting is ~1M tiny triangles) every 4th, and not
+	// for the near-zero steps of a load (the pattern would not change)
+	update( deriv, sunDir, dt = 1 / 60 ) {
+		this._n = ( this._n || 0 ) + 1;
+		if ( this._done && ( dt < 0.004 || ( dt > 0.045 && this._n % 4 !== 0 ) ) ) return;
+		this._done = true;
 		const gl = this.renderer;
 		this.uniforms.uOceanDeriv.value = deriv;
 		this.uniforms.uCauSun.value.copy( sunDir );

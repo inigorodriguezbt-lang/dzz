@@ -148,6 +148,24 @@ Each module file `src/.../<Module>.js` exports `install(game)` (listed in `src/g
   trunks via `rollLoot('car_trunk')` + `ui.openContainer`), colliders for props.
 - UI (`game.app.ui`): `openContainer(container)`, `openInventory()`, `toast`, `showDeath(info)`; icons come from `src/render/Icons.js`.
 
+## Rendering notes (ported from Tidewater)
+
+- Lighting is physical: Hillaire atmosphere (src/render/Atmosphere.js, src/world/Sky.js) with one energy scale, auto exposure,
+  ACES + grade, bloom, GTAO, haze and sun shafts, TAA + RCAS (`antialias: 'taa'`), cascaded sun shadows with PCSS, lens flare,
+  optional motion blur. Settings keys: `exposure` (EV −2..2), `ao`, `shafts`, `lensFlare`, `motionBlur`, `antialias`.
+  Settings carry a `version`; the v2 migration moves a saved 80° FOV to 62 and MSAA to TAA on high/ultra.
+- `CSM_FALLBACK` (Materials.js): 1×1 depth textures bound to unused shadow-cascade slots — without them shadow quality
+  'medium' (2 cascades) or switching shadows off left an invalid sampler and every lit draw failed.
+- `NIGHT_GAIN` (Sky.js) scales moonlight, night sky glow and night ambient (not the exposure), so lamps and emissives tuned
+  for night exposure stay put.
+- `world.handVis`: sun visibility at the hands (cascade, cloud and hill shadow, read back asynchronously) — dims the
+  first-person arms in shade. The view scene uses the world's key light and environment map rotated into camera space.
+- `Game.grade().exposureBias` is only the indoor factor (1.35, eased ~0.5 s); World resets auto exposure on teleports
+  (>80 m in a frame) and time jumps (>0.25 h).
+- Title vistas all use hour 18.25 and hold the clock, matching the loader key art (public/ui/keyart.jpg).
+- FX that must not ghost under TAA (tracers, sparks, muzzle flashes) go on `LAYER_OVERLAY` (Renderer.js), drawn after
+  the TAA resolve.
+
 ## Shared item ids (so loot tables, NPCs and spawners agree)
 
 Owned by Weapons (`src/game/items/defs/firearms.js`):

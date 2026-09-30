@@ -2,16 +2,22 @@
 // quick-heal, and everything that follows — eating (portions, opening cans with the right tool, cracking coconuts,
 // cooking at a fire), drinking (cans, bottles, canteens of water / seawater / dirty water), medicine and kits,
 // lights with batteries, reading guides, repairing, ripping clothes into rags, flares and chemlights, sleeping.
-//   actions( stack ) -> [ { label, run } ]   (the first is the double-click default)
+//   actions( stack ) -> [ { verb, note, label, run } ]   (the first is the double-click default)
+//     verb: the plain menu verb ('Eat'); note: its short state or null ('2/3', 'Rotten', '2/3 · Rotten');
+//     label: verb and note in brackets ('Eat (2/3) (rotten)'), the form the inventory screen parses today
 //   use( stack )                             runs the default action
 //   fillFrom( kind, stack? )                 'sea' | 'tap' | 'rain' (| 'dirty'): fills a water container
 //   toggleLight( stack? )                    the flashlight key when no hands module handles it
 // Also per frame: food spoils in game hours (inventory, the open container, the ground; cooler bags slow it),
 // batteries drain in lights that are on, carried lights feed the light pool, dropped chemlights and burning
 // flares glow.
+// Using something where it lies (eating off a table, opening a can on a shelf) claims it: the loot spot counts as
+// looted and the item is saved like a drop (WorldItems.claim).
 // Player-facing text stays short and functional: menu labels are a verb (+ object), toasts a few words.
 import * as THREE from 'three';
-import { getItem, makeStack, cloneStack, newUid, freshness } from './ItemDB.js';
+import { getItem, makeStack, cloneStack, newUid, freshness, stackVolume } from './ItemDB.js';
+import { capacityOf, containerVolume } from '../Inventory.js';
+import { POT_COOKED } from './recipes.js';
 import { playItemSound, ensureItemSound } from './sounds.js';
 import { liquidName, worstLiquid, provides, fmtHour, cardinal } from './util.js';
 
@@ -38,6 +44,8 @@ export class ItemUse {
 		this.glows = new Map(); // lit chemlights on the ground: WorldItem -> { src, sprite }
 		this.glowTex = null;
 		this.glowT = 0;
+		// what the guides taught belongs to the character: a new one after death starts without it
+		this.offDeath = game.events?.on?.( 'playerDeath', () => { this.knowledge = {}; } ) || null;
 	}
 
 	get inv() { return this.game.player.inventory; }
@@ -51,8 +59,14 @@ export class ItemUse {
 		const d = getItem( stack?.id );
 		if ( ! d ) return [];
 		const A = [];
-		const add = ( label, run ) => A.push( { label, run } );
-		const first = ( label, run ) => A.unshift( { label, run } );
+		// verb + optional state notes ('3/3', 'rotten'): kept apart, and joined in brackets into `label` for the
+		// inventory screen, which splits them back out of the label
+		const entry = ( verb, run, notes ) => {
+			const n = ( notes || [] ).filter( Boolean );
+			return { verb, note: n.length ? n.map( x => x[ 0 ].toUpperCase() + x.slice( 1 ) ).join( ' · ' ) : null, label: verb + n.map( x => ` (${x})` ).join( '' ), run };
+		};
+		const add = ( verb, run, notes = null ) => A.push( entry( verb, run, notes ) );
+		const first = ( verb, run, notes = null ) => A.unshift( entry( verb, run, notes ) );
 		const g = this.game, inv = this.inv;
 		const nearFire = !! g.nearFire?.( g.player.pos );
 
@@ -64,18 +78,20 @@ export class ItemUse {
 			else if ( f.opener && ! stack.data.open ) add( f.opener === 'cut' ? 'Cut open' : 'Open', () => this.openFood( stack ) );
 			else {
 				const left = stack.data.left ?? f.portions;
-				let label = f.raw ? 'Eat raw' : 'Eat';
-				if ( f.portions > 1 ) label += ` (${left}/${f.portions})`;
-				if ( f.spoil && freshness( stack ) <= 0 ) label += ' (rotten)';
-				add( label, () => this.eat( stack ) );
+				add( f.raw ? 'Eat raw' : 'Eat', () => this.eat( stack ), [ f.portions > 1 ? `${left}/${f.portions}` : null, f.spoil && freshness( stack ) <= 0 ? 'rotten' : null ] );
 			}
-			if ( f.raw && f.cooked && getItem( f.cooked ) && nearFire ) first( 'Cook', () => this.cook( stack ) );
+			if ( f.raw && f.cooked && getItem( f.cooked ) && nearFire ) {
+				// rice and eggs cook in a pot of water (their recipe), everything else roasts on the fire
+				const pot = POT_COOKED[ d.id ] ? g.crafting?.recipes?.find( r => r.id === POT_COOKED[ d.id ] ) : null;
+				if ( pot ) first( 'Cook', () => this.cookInPot( stack, pot ) );
+				else if ( ! POT_COOKED[ d.id ] ) first( 'Cook', () => this.cook( stack ) );
+			}
 		}
 
 		// ---- drinks ----
 		if ( d.drink ) {
 			const k = d.drink, left = stack.data.left ?? k.portions;
-			add( k.portions > 1 ? `Drink (${left}/${k.portions})` : 'Drink', () => this.drinkItem( stack ) );
+			add( 'Drink', () => this.drinkItem( stack ), [ k.portions > 1 ? `${left}/${k.portions}` : null ] );
 			if ( k.container && getItem( k.container ) ) add( 'Pour out', () => this.pourOut( stack ) );
 		}
 
@@ -182,14 +198,21 @@ export class ItemUse {
 	// where things are, taking one off a stack, using up
 	// ============================================================================================================
 
+	// { kind: 'inv'|'other', items, capacity } | { kind: 'equip'|'weapon', slot } | { kind: 'ground', item } | null
 	where( stack ) {
 		const inv = this.inv;
-		const find = ( items ) => { for ( const s of items ) { if ( s === stack ) return items; if ( s.data?.items ) { const r = find( s.data.items ); if ( r ) return r; } } return null; };
-		for ( const c of inv.containers() ) { const r = find( c.items ); if ( r ) return { kind: 'inv', items: r }; }
+		const find = ( items, capacity ) => {
+			for ( const s of items ) {
+				if ( s === stack ) return { items, capacity };
+				if ( s.data?.items ) { const r = find( s.data.items, capacityOf( s ) ); if ( r ) return r; }
+			}
+			return null;
+		};
+		for ( const c of inv.containers() ) { const r = find( c.items, c.capacity ); if ( r ) return { kind: 'inv', ...r }; }
 		for ( const k in inv.equip ) { if ( inv.equip[ k ] === stack ) return { kind: 'equip', slot: k }; }
 		for ( const k in inv.weapons ) { if ( inv.weapons[ k ] === stack ) return { kind: 'weapon', slot: k }; }
 		const other = this.game.app?.ui?.inventory?.other;
-		if ( other?.items ) { const r = find( other.items ); if ( r ) return { kind: 'other', items: r, container: other }; }
+		if ( other?.items ) { const r = find( other.items, other.capacity ?? Infinity ); if ( r ) return { kind: 'other', ...r, container: other }; }
 		const wi = this.game.items3d?.byStack?.( stack );
 		if ( wi ) return { kind: 'ground', item: wi };
 		return null;
@@ -197,10 +220,15 @@ export class ItemUse {
 
 	exists( stack ) { return stack.qty > 0 && !! this.where( stack ); }
 
+	// after changing a stack: redraw, and an item used where it lies is no longer its loot spot's (it is saved like a
+	// drop and the spot counts as looted, so the building does not hand out a fresh one next visit)
 	changed( w = null ) {
 		this.inv.changed();
 		if ( w?.kind === 'other' ) this.game.events.emit( 'container:changed', { container: w.container } );
-		if ( w?.kind === 'ground' ) this.game.items3d?.refresh?.( w.item );
+		if ( w?.kind === 'ground' ) {
+			const it = this.game.items3d?.claim?.( w.item ) || w.item;
+			this.game.items3d?.refresh?.( it );
+		}
 	}
 
 	discard( stack ) {
@@ -208,7 +236,8 @@ export class ItemUse {
 		if ( ! w ) return;
 		if ( w.kind === 'inv' || w.kind === 'equip' || w.kind === 'weapon' ) this.inv.remove( stack );
 		else if ( w.kind === 'other' ) { const i = w.items.indexOf( stack ); if ( i >= 0 ) w.items.splice( i, 1 ); }
-		else if ( w.kind === 'ground' ) this.game.items3d.remove( w.item );
+		// used up where it lay: taken, as far as its loot spot is concerned
+		else if ( w.kind === 'ground' ) { this.game.items3d.remove( w.item, { taken: true } ); this.inv.changed(); return; }
 		this.changed( w );
 	}
 
@@ -220,7 +249,9 @@ export class ItemUse {
 		this.changed( this.where( stack ) );
 	}
 
-	// a single unit to work on: split off a stack of several (opening one can of four)
+	// a single unit to work on: split off a stack of several (opening one can of four). It goes next to the stack
+	// when the container has room for the extra slot, else into any carried container with room (never merged back
+	// into a stack), else onto the ground.
 	splitOne( stack ) {
 		if ( stack.qty <= 1 ) return stack;
 		const w = this.where( stack );
@@ -228,11 +259,21 @@ export class ItemUse {
 		part.uid = newUid();
 		part.qty = 1;
 		stack.qty -= 1;
-		if ( w?.items ) w.items.splice( w.items.indexOf( stack ) + 1, 0, part );
+		if ( w?.items && containerVolume( w.items ) + stackVolume( part ) <= ( w.capacity ?? Infinity ) + 1e-6 ) w.items.splice( w.items.indexOf( stack ) + 1, 0, part );
 		else if ( w?.kind === 'ground' ) this.game.items3d.spawn( part, w.item.pos.clone().add( new THREE.Vector3( 0.12, 0.05, 0.08 ) ), { persistent: true } );
-		else if ( this.inv.add( part, { autoEquip: false } ) > 0 ) this.game.dropStack( part );
+		else if ( ! this.stow( part ) ) this.game.dropStack( part );
 		this.changed( w );
 		return part;
+	}
+
+	// into the first carried container with room for it as its own stack
+	stow( stack ) {
+		for ( const c of this.inv.containers() ) {
+			if ( c.owner === stack || containerVolume( c.items ) + stackVolume( stack ) > c.capacity + 1e-6 ) continue;
+			c.items.push( stack );
+			return true;
+		}
+		return false;
 	}
 
 	// turn a stack into another item in place (a drunk bottle becomes an empty one)
@@ -268,7 +309,7 @@ export class ItemUse {
 		const max = d.tool?.uses ?? d.medical?.uses;
 		if ( ! max ) { this.consumeOne( stack ); return; }
 		stack.data.uses = this.usesLeft( stack ) - n;
-		if ( stack.data.uses <= 0 ) { this.game.toast( `${d.name} used up`, 'info' ); this.consumeOne( stack ); } else this.inv.changed();
+		if ( stack.data.uses <= 0 ) { this.game.toast( `${d.name} used up`, 'info' ); this.consumeOne( stack ); } else this.changed( this.where( stack ) );
 	}
 
 	timed( label, time, sound, onDone, opts = {} ) {
@@ -357,13 +398,34 @@ export class ItemUse {
 		} );
 	}
 
+	// roast one unit on the fire; what was already eaten of it stays eaten
 	cook( stack ) {
 		const g = this.game, d = getItem( stack.id ), f = d.food;
 		if ( ! g.nearFire?.( g.player.pos ) ) { g.toast( 'Need a fire', 'warn' ); return; }
 		const one = this.splitOne( stack );
 		this.timed( `Cooking ${d.name.replace( /^Raw /, '' )}`, d.weight > 1 ? 16 : 11, 'sizzle', () => {
 			if ( ! this.exists( one ) ) return;
-			this.transform( one, f.cooked, { age: 0 } );
+			const cf = getItem( f.cooked ).food, data = { age: 0 };
+			const left = one.data.left ?? f.portions;
+			if ( left < f.portions ) data.left = Math.min( cf.portions, Math.max( 1, Math.round( left / f.portions * cf.portions ) ) );
+			if ( data.left === cf.portions ) delete data.left;
+			this.transform( one, f.cooked, data );
+		} );
+	}
+
+	// rice and eggs: the recipe's pot, water and fire, but this unit (a part-eaten bag of rice gives less)
+	cookInPot( stack, r ) {
+		const g = this.game, C = g.crafting, d = getItem( stack.id ), f = d.food;
+		const need = { ...r, in: [] }; // the pot, the water, the fire: not the ingredient, which is this stack
+		const c = C.check( need );
+		if ( ! c.ok ) { g.toast( c.reason, 'warn' ); return; }
+		const one = this.splitOne( stack );
+		this.timed( `Cooking ${d.name}`, r.time, 'sizzle', () => {
+			if ( ! this.exists( one ) || ! C.check( need ).ok ) return;
+			const k = ( one.data.left ?? f.portions ) / f.portions;
+			if ( r.liquid ) C.drawLiquid( r.liquid.kind, r.liquid.litres );
+			this.consumeOne( one );
+			this.give( r.out[ 0 ], Math.max( 1, Math.round( r.out[ 1 ] * k ) ) );
 		} );
 	}
 
@@ -457,6 +519,7 @@ export class ItemUse {
 		this.timed( 'Purifying', 4, 'pills', () => {
 			if ( ! this.exists( c ) || ! this.exists( tab ) ) return;
 			c.data.liquid = 'water';
+			this.changed( this.where( c ) );
 			if ( d.medical.uses ) this.useUp( tab, need );
 			else { tab.qty -= need; if ( tab.qty <= 0 ) this.discard( tab ); }
 			g.toast( 'Water purified', 'good' );
@@ -516,6 +579,8 @@ export class ItemUse {
 			stack = cand[ 0 ];
 		}
 		const d = getItem( stack.id );
+		// a hands module draws spot lights only from the hands (and a worn headlamp): turning one on takes it out
+		if ( g.hands?.select && ! stack.data.on && d.tool.light?.kind === 'spot' && d.tool.kind !== 'headlamp' && inv.hands !== stack.uid && ( stack.data.charge > 0 ) ) g.hands.select( stack );
 		if ( d.tool.kind === 'torch' ) {
 			if ( stack.data.on ) { stack.data.on = false; playItemSound( g, 'snap', { vol: 0.3 } ); inv.changed(); return; }
 			const src = this.fireSource();
@@ -536,6 +601,7 @@ export class ItemUse {
 		this.timed( 'Replacing batteries', 3, 'click', () => {
 			if ( ! this.exists( bat ) ) return;
 			dev.data.charge = d.tool.battery;
+			this.changed( this.where( dev ) );
 			this.consumeOne( bat );
 		} );
 	}
@@ -564,7 +630,7 @@ export class ItemUse {
 		one.data.on = true;
 		if ( ! ( one.data.charge > 0 ) ) one.data.charge = getItem( one.id ).tool.battery;
 		if ( drop ) this.dropLit( one );
-		else this.inv.changed();
+		this.changed( this.where( one ) );
 	}
 
 	dropLit( stack ) {
@@ -657,8 +723,8 @@ export class ItemUse {
 		this.flares.splice( i, 1 );
 	}
 
-	// the light the hands module draws itself (held light, gun light or worn headlamp): skipped here so it is not lit
-	// or drained twice
+	// the light the hands module draws itself (held light, gun light or the headlamp it picks, as Hands._flashlight
+	// does): skipped here so it is not lit or drained twice
 	_handsLight() {
 		const g = this.game, inv = this.inv;
 		if ( ! g.hands ) return null;
@@ -666,11 +732,15 @@ export class ItemUse {
 		const hd = held ? getItem( held.id ) : null;
 		if ( held && hd?.tool && held.data.on && ( hd.tool.light || hd.tool.kind === 'flashlight' ) ) return held;
 		if ( held && hd?.firearm && held.data.att?.light?.data?.on ) return held.data.att.light;
-		return inv.find( ( s, d ) => d?.tool?.kind === 'headlamp' && s.data.on );
+		let lamp = null;
+		for ( const s of Object.values( inv.equip ) ) if ( s && getItem( s.id )?.tool?.kind === 'headlamp' ) { lamp = s; break; }
+		lamp = lamp || inv.find( ( s, d ) => d?.tool?.kind === 'headlamp' );
+		return lamp?.data.on ? lamp : null;
 	}
 
-	// carried lights: the best spot light (a flashlight clipped to your gear, a phone) and the best point light
-	// (lantern, torch, chemlight) of everything switched on; charge drains in game hours
+	// carried lights: the best point light (lantern, torch, chemlight) of everything switched on, and without a hands
+	// module the best spot light too; charge drains in game hours. With a hands module a spot light (flashlight,
+	// phone) shines only from the hands: one put away switches off rather than light the world a second time.
 	_updateLights( dh ) {
 		const g = this.game, inv = this.inv;
 		const skip = this._handsLight();
@@ -678,6 +748,7 @@ export class ItemUse {
 		for ( const s of inv.findAll( ( st, d ) => this.isLight( d ) && st.data.on ) ) {
 			if ( s === skip ) continue;
 			const d = getItem( s.id ), t = d.tool, L = t.light;
+			if ( g.hands && L.kind === 'spot' ) { s.data.on = false; inv.changed(); continue; }
 			if ( dh > 0 && g.mode !== 'creative' ) s.data.charge = Math.max( 0, ( s.data.charge ?? t.battery ) - dh );
 			if ( ! ( s.data.charge > 0 ) ) {
 				s.data.on = false;
@@ -835,6 +906,7 @@ export class ItemUse {
 		this.timed( 'Fitting canister', 3, 'click', () => {
 			if ( ! this.exists( can ) || ! this.exists( stove ) ) return;
 			stove.data.uses = getItem( stove.id ).tool.uses;
+			this.changed( this.where( stove ) );
 			this.consumeOne( can );
 		} );
 	}
@@ -860,6 +932,7 @@ export class ItemUse {
 		this.timed( `Repairing ${dt.name}`, kind === 'tape' ? 5 : 9, kind === 'tape' ? 'tear' : 'zipper', () => {
 			if ( ! this.exists( tool ) || ! this.exists( target ) ) return;
 			target.cond = Math.min( cap, target.cond + gain );
+			this.changed( this.where( target ) );
 			this.useUp( tool );
 		} );
 	}
@@ -947,6 +1020,7 @@ export class ItemUse {
 	}
 
 	dispose() {
+		this.offDeath?.();
 		for ( let i = this.flares.length - 1; i >= 0; i -- ) this._removeFlare( i );
 		for ( const gl of this.glows.values() ) { this.game.scene.remove( gl.sprite ); gl.sprite.material.dispose(); }
 		this.glows.clear();

@@ -81,15 +81,28 @@ export function registerClothingModels( reg ) {
 			}
 			const tall = { boots: 0.14, combat: 0.18, rain: 0.3, work: 0.15, tabi: 0.12, firefighter: 0.3 }[ style ] || 0;
 			const uH = style === 'reef' ? 0.05 : style === 'dress' ? 0.06 : 0.075;
-			const foot = G.sph( 0.07, 12, 8 ); foot.scale( 1.8, uH / 0.07, 0.62 ); foot.translate( 0, 0.02, 0 );
-			add( g, foot, upper, [ 0.01, 0.005, z ] );
-			if ( tall ) add( g, G.cyl( 0.045, 0.05, tall, 14 ), upper, [ - 0.07, 0.02, z ] );
-			if ( style === 'sneakers' || style === 'combat' || style === 'boots' || style === 'work' ) {
-				for ( let i = 0; i < 4; i ++ ) add( g, G.box( 0.004, 0.003, 0.04 ), M( s.laces ?? 0xf5f5f5 ), [ 0.05 - i * 0.022, 0.078 + ( style === 'sneakers' ? 0 : 0.01 ) - i * 0.002, z ] );
-				add( g, G.box( 0.16, 0.012, 0.004 ), acc, [ 0, 0.03, z + 0.058 * ( flip ? - 1 : 1 ) ] );
+			// the upper: half an ellipsoid standing on the sole (the origin stays at the bottom of the sole)
+			const base = 0.02, rx = 0.126, rz = style === 'dress' ? 0.043 : 0.046, x0 = 0.01;
+			add( g, G.dome( 0.07, 14, 7 ).scale( rx / 0.07, uH / 0.07, rz / 0.07 ), upper, [ x0, base, z ] );
+			// the top of the upper at x (for laces and trims that sit on it)
+			const topAt = ( x ) => base + uH * Math.sqrt( Math.max( 0, 1 - ( ( x - x0 ) / rx ) ** 2 ) );
+			const side = flip ? - 1 : 1; // the outer side of this shoe
+			if ( tall ) {
+				// the shaft leans back a little and a heel counter joins it to the foot
+				add( g, G.cyl( 0.046, 0.052, tall, 14 ), upper, [ - 0.075, base, z ], [ 0, 0, 0.1 ] );
+				add( g, G.rbox( 0.1, 0.075, rz * 1.9, 0.02, 2 ), upper, [ - 0.065, base - 0.002, z ] );
+				if ( style !== 'rain' && style !== 'firefighter' && style !== 'tabi' ) add( g, G.cyl( 0.05, 0.05, 0.018, 14, true ), acc, [ - 0.075 - Math.sin( 0.1 ) * tall, base + tall * Math.cos( 0.1 ) - 0.018, z ], [ 0, 0, 0.1 ] ); // collar
 			}
-			if ( style === 'rain' || style === 'firefighter' ) add( g, G.torus( 0.047, 0.005, 5, 18 ), acc, [ - 0.07, 0.02 + tall, z ], [ PI / 2, 0, 0 ] );
-			if ( style === 'reef' ) add( g, G.box( 0.14, 0.004, 0.08 ), acc, [ 0.02, 0.06, z ] );
+			if ( style === 'sneakers' || style === 'combat' || style === 'boots' || style === 'work' ) {
+				// laces across the top, a toe cap, a stripe along the sole
+				const lace = M( s.laces ?? ( style === 'sneakers' ? 0xf5f5f5 : 0x2a2420 ) );
+				for ( let i = 0; i < 4; i ++ ) { const x = 0.05 - i * 0.02; add( g, G.box( 0.006, 0.004, rz * 0.9 ), lace, [ x, topAt( x ) - 0.0015, z ], [ 0, 0, - 0.35 ] ); }
+				add( g, G.dome( 0.05, 12, 5 ).scale( 0.8, 0.9, rz / 0.05 * 0.98 ), style === 'sneakers' ? sole : acc, [ 0.085, base, z ] );
+				add( g, G.box( L * 0.9, 0.007, 0.003 ), acc, [ 0, 0.008, z + side * 0.0485 ] );
+				if ( style === 'sneakers' ) add( g, G.box( 0.07, 0.01, 0.003 ), acc, [ 0, base + 0.012, z + side * rz * 0.97 ], [ 0, 0, 0.3 ] ); // side flash
+			}
+			if ( style === 'rain' || style === 'firefighter' ) add( g, G.torus( 0.048, 0.005, 5, 18 ), acc, [ - 0.075 - Math.sin( 0.1 ) * tall, base + tall * Math.cos( 0.1 ), z ], [ PI / 2, 0, 0.1 ] );
+			if ( style === 'reef' ) add( g, G.box( 0.12, 0.004, rz * 1.6 ), acc, [ 0.02, topAt( 0.02 ) - 0.012, z ] );
 		};
 		one( - 0.06, false ); one( 0.06, true );
 		return g;
@@ -164,7 +177,7 @@ export function registerClothingModels( reg ) {
 				add( g, G.sph( 0.14, 16, 10, 0, PI * 2, 0, PI * 0.6 ).scale( 1.05, 1, 1 ), mat, [ 0, 0.02, 0 ] );
 				const shield = G.sph( 0.16, 14, 6, - PI * 0.4, PI * 0.8, PI * 0.3, PI * 0.42 ); shield.rotateY( PI / 2 );
 				add( g, shield, MAT.glass( 0xd8e8f0, 0.35 ), [ 0.01, 0.02, 0 ] );
-				add( g, G.box( 0.02, 0.012, 0.28 ), MAT.blackPlastic(), [ 0.13, 0.12, 0 ], [ 0, 0, - 0.5 ] );
+				add( g, G.box( 0.018, 0.012, 0.2 ), MAT.blackPlastic(), [ 0.118, 0.13, 0 ], [ 0, 0, - 0.5 ] ); // visor hinge, flush with the shell
 				break;
 			}
 			case 'helmet_fire': {
@@ -383,11 +396,7 @@ export function registerClothingModels( reg ) {
 				}
 				if ( style === 'rucksack' || style === 'assault' ) for ( let i = 0; i < 4; i ++ ) add( g, G.box( W * 0.7, 0.008, 0.006 ), acc, [ 0, H * ( 0.55 + i * 0.08 ), D * 0.5 ] );
 				if ( style === 'medic' ) add( g, G.box( 0.08, 0.08, 0.004 ), M( 0xd02a2a ), [ 0, H * 0.72, D * 0.5 ] );
-				// lay it on its back so it rests like a dropped bag
-				const inner = group();
-				while ( g.children.length ) inner.add( g.children[ 0 ] );
-				inner.rotation.set( - PI / 2, 0, PI / 2 );
-				g.add( inner );
+				// it stands upright, front pocket towards +z, so the pocket, lid and side pockets read at a glance
 				return ground( g );
 			}
 		}

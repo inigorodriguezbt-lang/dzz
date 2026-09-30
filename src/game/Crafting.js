@@ -2,7 +2,8 @@
 //   recipes            every recipe whose ingredients exist (src/game/items/recipes.js); r.toolLabels names r.tools
 //   available()        the ones you can make right now
 //   canCraft( r ) / check( r ) -> { ok, reason } / craft( r )
-// Recipes consume their `in` items, need their `tools` (a tool's kind, or a melee weapon's tools: 'cut', 'chop'…),
+// Recipes consume their `in` items (loose ones before anything worn or in a weapon slot, never a piece of clothing
+// that still holds something), need their `tools` (a tool's kind, or a melee weapon's tools: 'cut', 'chop'…),
 // optionally a `station: 'fire'` (a lit campfire or stove within reach) and `liquid` drawn from what you carry
 // (water from bottles and canteens, gasoline from fuel cans). The special 'boil' recipe turns the dirty water and
 // seawater you carry into drinking water (seawater loses volume as it distils).
@@ -22,6 +23,7 @@ import { ensureItemSound } from './items/sounds.js';
 const FUEL = { stick: 0.25, long_stick: 0.6, firewood: 1.5, planks: 1, charcoal: 2.5, newspaper: 0.1, rags: 0.08, animal_hide: 0.5, campfire_kit: 1.5,
 	comic_book: 0.1, bible: 0.15, phrasebook: 0.08, tiki: 0.8, ukulele: 0.3 };
 const MAX_FUEL = 8;
+const REAL_FUEL = new Set( [ 'stick', 'long_stick', 'firewood', 'planks', 'charcoal' ] );
 
 export class Crafting {
 	constructor( game, lights = null ) {
@@ -44,6 +46,34 @@ export class Crafting {
 	canCraft( r ) { return this.check( r ).ok; }
 
 	hasTool( kind ) { return !! this.inv.find( ( s ) => provides( s, kind ) ); }
+
+	// the stacks of an ingredient a recipe may use up, in the order it takes them: loose ones in your containers
+	// first, then what you wear or hold in a weapon slot; never one that still holds items (a shirt with a full
+	// pocket), and whole units before part-used ones
+	ingredientStacks( id ) {
+		const inv = this.inv, loose = [], worn = [];
+		const empty = ( s ) => ! s.data?.items?.length;
+		for ( const c of inv.containers() ) for ( const s of c.items ) {
+			if ( s.id === id && empty( s ) ) loose.push( s );
+			if ( s.data?.items ) for ( const t of s.data.items ) if ( t.id === id && empty( t ) ) loose.push( t );
+		}
+		for ( const s of [ ...Object.values( inv.equip ), ...Object.values( inv.weapons ) ] ) if ( s?.id === id && empty( s ) ) worn.push( s );
+		const part = ( s ) => ( s.data?.left != null || s.data?.open ) ? 1 : 0;
+		loose.sort( ( a, b ) => part( a ) - part( b ) );
+		return [ ...loose, ...worn ];
+	}
+
+	ingredientCount( id ) { let n = 0; for ( const s of this.ingredientStacks( id ) ) n += s.qty; return n; }
+
+	consumeIngredient( id, n ) {
+		for ( const s of this.ingredientStacks( id ) ) {
+			if ( n <= 0 ) break;
+			const take = Math.min( s.qty, n );
+			s.qty -= take; n -= take;
+			if ( s.qty <= 0 ) this.inv.remove( s );
+		}
+		this.inv.changed();
+	}
 
 	// litres of a liquid you carry: water in water containers, gasoline in fuel cans
 	liquidAvailable( kind ) {
@@ -80,7 +110,11 @@ export class Crafting {
 	check( r ) {
 		const g = this.game, inv = this.inv;
 		if ( ! r ) return { ok: false, reason: 'Unknown recipe' };
-		for ( const [ id, q ] of r.in ) if ( inv.count( id ) < q ) return { ok: false, reason: `Need ${q}× ${getItem( id )?.name || id}` };
+		for ( const [ id, q ] of r.in ) {
+			if ( this.ingredientCount( id ) >= q ) continue;
+			// there are enough, but one is a piece of clothing with something in it
+			return { ok: false, reason: inv.count( id ) >= q ? 'Empty it first' : `Need ${q}× ${getItem( id )?.name || id}` };
+		}
 		for ( const t of r.tools || [] ) if ( ! this.hasTool( t ) ) return { ok: false, reason: `Need ${TOOL_NEED[ t ] || t}` };
 		if ( r.station === 'fire' && ! this.nearFire( g.player.pos ) ) return { ok: false, reason: 'Need a fire' };
 		if ( r.liquid && this.liquidAvailable( r.liquid.kind ) < r.liquid.litres - 1e-6 ) return { ok: false, reason: r.liquid.kind === 'fuel' ? `Need ${r.liquid.litres} L gasoline` : `Need ${r.liquid.litres} L water` };
@@ -106,7 +140,7 @@ export class Crafting {
 				const c2 = this.check( r );
 				if ( ! c2.ok ) { g.toast( c2.reason, 'warn' ); return; }
 				if ( r.special === 'boil' ) { this.boil(); return; }
-				for ( const [ id, q ] of r.in ) this.inv.consume( id, q );
+				for ( const [ id, q ] of r.in ) this.consumeIngredient( id, q );
 				if ( r.liquid ) this.drawLiquid( r.liquid.kind, r.liquid.litres );
 				// tools wear a little
 				for ( const t of r.tools || [] ) { const tool = this.inv.find( ( s ) => provides( s, t ) ); if ( tool ) tool.cond = Math.max( 0.05, tool.cond - 0.01 ); }
@@ -152,6 +186,14 @@ export class Crafting {
 	}
 
 	fuelValue( id ) { return FUEL[ id ] || 0; }
+
+	// what F feeds a fire: real fuel only (books, rags and ukuleles burn from the item menu), the longest burning
+	// first
+	bestFuel() {
+		let best = null;
+		for ( const s of this.inv.allStacks() ) if ( REAL_FUEL.has( s.id ) && ( ! best || FUEL[ s.id ] > FUEL[ best.id ] ) ) best = s;
+		return best;
+	}
 
 	// a spot on the ground in front of the player for a fire or stove
 	placePoint( dist = 1.1 ) {
@@ -212,9 +254,9 @@ export class Crafting {
 			onDone: () => {
 				if ( stack.qty <= 0 ) return;
 				f.fuel = Math.min( MAX_FUEL, f.fuel + v );
-				stack.qty --;
-				if ( stack.qty <= 0 ) this.inv.remove( stack );
-				this.inv.changed();
+				// wherever it is (a stack on the ground too); without the item-use module, from the inventory
+				if ( g.itemUse ) g.itemUse.consumeOne( stack );
+				else { stack.qty --; if ( stack.qty <= 0 ) this.inv.remove( stack ); this.inv.changed(); }
 			},
 		} );
 	}
@@ -234,7 +276,7 @@ export class Crafting {
 		const f = best, inv = this.inv;
 		const hrs = ( h ) => h >= 1 ? `${Math.round( h )} h` : `${Math.max( 5, Math.round( h * 60 / 5 ) * 5 )} min`;
 		if ( f.kind === 'stove' ) return [ { t: bt, id: f.id, label: 'Pack up stove', hold: 0.6, action: () => this.packStove( f ) } ];
-		const fuelItem = inv.find( ( s ) => this.fuelValue( s.id ) > 0 && s.id !== 'campfire_kit' );
+		const fuelItem = this.bestFuel();
 		const addFuel = fuelItem ? { t: bt, id: f.id, label: `Add ${getItem( fuelItem.id ).name}`, sub: f.fuel > 0.01 ? `${hrs( f.fuel )} left` : null, action: () => this.addFuel( fuelItem ) } : null;
 		if ( ! f.lit ) {
 			if ( f.fuel > 0.01 ) return [ { t: bt, id: f.id, label: 'Light fire', sub: this.fireSource() || g.mode === 'creative' ? `${hrs( f.fuel )} of fuel` : 'Need a lighter or matches', action: () => this.lightFire( f ) } ];

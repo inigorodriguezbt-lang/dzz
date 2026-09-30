@@ -609,8 +609,9 @@ const TERRAIN_ALBEDO = /* glsl */`
 
 		// ---- beach sand: pale coral sand, drifts of warmer / coarser sand, grain
 		float dryK = smoothstep( 0.8, 3.0, hb );
-		vec3 sand = mix( ${ S( 0.83, 0.75, 0.6 ) }, ${ S( 0.9, 0.84, 0.72 ) }, smoothstep( 0.3, 0.72, mcr + dryK * 0.2 ) );
-		sand = mix( sand, ${ S( 0.84, 0.72, 0.55 ) }, smoothstep( 0.55, 0.8, dM.w + ( macroB - 0.5 ) * 0.6 ) * 0.45 );
+		// a touch warmer and darker than the first port: under a high noon sun it read near-white next to Tidewater's
+		vec3 sand = mix( ${ S( 0.79, 0.69, 0.52 ) }, ${ S( 0.86, 0.77, 0.62 ) }, smoothstep( 0.3, 0.72, mcr + dryK * 0.2 ) );
+		sand = mix( sand, ${ S( 0.8, 0.66, 0.47 ) }, smoothstep( 0.55, 0.8, dM.w + ( macroB - 0.5 ) * 0.6 ) * 0.45 );
 		sand = sand * ( ( dM.w - 0.5 ) * 0.16 + 1.0 ) * ( ( dN.w - 0.5 ) * 0.1 + 1.0 );
 		sand = sand * ( ( grain - 0.45 ) * 0.3 + 0.97 ) * ( ( grainF - 0.45 ) * 0.2 + 1.0 );
 		// disturbed / trodden patches: slightly darker, coarser sand (footfall, crabs, wind scour)

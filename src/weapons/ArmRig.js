@@ -208,13 +208,17 @@ function extract( mesh, bones, side ) {
 	};
 	// the skin geometry, compacted
 	const remap = new Map();
-	const outP = [], outN = [], outUV = [], outSI = [], outSW = [], outI = [];
+	const outP = [], outN = [], outUV = [], outSI = [], outSW = [], outI = [], outU = [];
+	// (each vertex's place along the arm, as the sleeves measure it: the skin under a sleeve is not drawn)
+	const ua = V().subVectors( P[ B_FORE ], P[ B_UPPER ] ).normalize(), fa = V().subVectors( W, P[ B_FORE ] ).normalize();
 	for ( const v of keep ) {
 		let k = remap.get( v );
 		if ( k === undefined ) {
 			k = outP.length / 3;
 			remap.set( v, k );
 			outP.push( pos.getX( v ), pos.getY( v ), pos.getZ( v ) );
+			const sF = _a.fromBufferAttribute( pos, v ).sub( P[ B_FORE ] ).dot( fa );
+			outU.push( sF > 0 ? arm.upperLen + sF : _a.fromBufferAttribute( pos, v ).sub( P[ B_UPPER ] ).dot( ua ) );
 			outN.push( nor.getX( v ), nor.getY( v ), nor.getZ( v ) );
 			outUV.push( uv.getX( v ), uv.getY( v ) );
 			const w = wts[ v ].filter( e => e[ 1 ] > 1e-4 ).sort( ( a, b ) => b[ 1 ] - a[ 1 ] ).slice( 0, 4 );
@@ -237,6 +241,7 @@ function extract( mesh, bones, side ) {
 	g.setAttribute( 'uv', new THREE.Float32BufferAttribute( outUV, 2 ) );
 	g.setAttribute( 'skinIndex', new THREE.Uint16BufferAttribute( outSI, 4 ) );
 	g.setAttribute( 'skinWeight', new THREE.Float32BufferAttribute( outSW, 4 ) );
+	g.setAttribute( 'armU', new THREE.Float32BufferAttribute( outU, 1 ) );
 	g.setIndex( [ ...tris[ 0 ], ...tris[ 1 ], ...tris[ 2 ] ] );
 	g.addGroup( 0, tris[ 0 ].length, 0 );
 	g.addGroup( tris[ 0 ].length, tris[ 1 ].length, 1 );
@@ -444,7 +449,8 @@ function clothTube( arm, from, end, off, fold, hem = true ) {
 		const ids = [];
 		for ( let j = 0; j <= N; j ++ ) {
 			const phi = j / N * Math.PI * 2;
-			let r = profileR( S, s, phi ) + o;
+			// (looser round the elbow: a bent elbow's skin bulges out through a tight tube)
+			let r = profileR( S, s, phi ) + o + smoothstep( 0, 1, 1 - Math.abs( u - U.L ) / 0.1 ) * 0.02;
 			if ( fo ) {
 				const bunch = 0.5 + ( seg === 0 ? smoothstep( S.L - 0.1, S.L, s ) : 1 - smoothstep( 0, 0.08, s ) ) * 0.8;
 				r *= 1 + fo * bunch * ( Math.sin( phi * 2 + s * 61 ) * 0.6 + Math.sin( phi * 3 - s * 37 + 1.3 ) * 0.4 + Math.sin( phi * 5 + s * 23 + 0.4 ) * 0.25 );
@@ -522,6 +528,17 @@ const SSS = ( shader ) => {
 		}
 		#endif` );
 };
+// skin under a sleeve is not drawn (a bent elbow's skin would push out through the cloth): discarded short of `u.value`
+// along the arm
+const COVER = ( u ) => ( shader ) => {
+	shader.uniforms.uCover = u;
+	shader.vertexShader = shader.vertexShader
+		.replace( '#include <common>', '#include <common>\nattribute float armU;\nvarying float vArmU;' )
+		.replace( '#include <begin_vertex>', '#include <begin_vertex>\n\tvArmU = armU;' );
+	shader.fragmentShader = shader.fragmentShader
+		.replace( '#include <common>', '#include <common>\nuniform float uCover;\nvarying float vArmU;' )
+		.replace( '#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\n\tif ( vArmU < uCover ) discard;' );
+};
 // gloves: the hand's own surface pushed out along its (bind) normals
 const INFLATE = ( mm ) => ( shader ) => {
 	shader.vertexShader = shader.vertexShader.replace( '#include <begin_vertex>', `#include <begin_vertex>\n\ttransformed += normal * ${( mm / 1000 ).toFixed( 5 )};` );
@@ -571,8 +588,8 @@ function clothGeometries( arm ) {
 	if ( G ) return G;
 	const [ U, F ] = arm.profile;
 	G = {
-		// long sleeves stop short of the wrist bone; short ones above the elbow
-		sleeveLong: clothTube( arm, - 0.03, { seg: 1, s: F.L - 0.035 }, 0.0065, 0.05 ),
+		// long sleeves come down to the wrist bone; short ones stop above the elbow
+		sleeveLong: clothTube( arm, - 0.03, { seg: 1, s: F.L - 0.018 }, 0.0065, 0.05 ),
 		sleeveShort: clothTube( arm, - 0.03, { seg: 0, s: U.L * 0.62 }, 0.008, 0.045 ),
 		cuff: clothTube( arm, 0, { seg: 1, s: F.L + 0.012 }, 0.0032, 0, true ),
 	};
@@ -599,7 +616,8 @@ export class RigArm {
 		this.root = new THREE.Group();
 		this.root.name = arm.side > 0 ? 'armR' : 'armL';
 		const T = textures();
-		this.mSkin = viewMat( new THREE.MeshStandardMaterial( { color: 0xffffff, map: tex.col, normalMap: tex.nrm, roughness: 0.52, metalness: 0 } ), 'arms-rig-skin', SSS );
+		this.cover = { value: - 10 };
+		this.mSkin = viewMat( new THREE.MeshStandardMaterial( { color: 0xffffff, map: tex.col, normalMap: tex.nrm, roughness: 0.52, metalness: 0 } ), 'arms-rig-skin', ( sh ) => { SSS( sh ); COVER( this.cover )( sh ); } );
 		if ( tex.nrm ) this.mSkin.normalScale.set( 0.9, 0.9 );
 		this.mGlove = viewMat( new THREE.MeshStandardMaterial( { color: 0x2a2a2a, roughness: 0.72, metalness: 0 } ), 'arms-rig-glove', INFLATE( 1.3 ) );
 		if ( T.glove ) { this.mGlove.bumpMap = T.glove; this.mGlove.bumpScale = 0.5; }
@@ -645,12 +663,15 @@ export class RigArm {
 		}
 		this.sleeveLong.visible = has && !! o.long;
 		this.sleeveShort.visible = has && ! o.long;
+		// the skin shows from a little inside the hem on
+		const [ U, F ] = this.R.profile;
+		this.cover.value = ! has ? - 10 : o.long ? U.L + F.L - 0.032 : U.L * 0.62 - 0.025;
 		const gl = o.glove != null, latex = o.gloveStyle === 'latex';
 		const mg = latex ? this.mLatex : this.mGlove;
 		if ( gl ) { mg.color.set( o.glove ); this.mCuff.color.set( o.glove ).multiplyScalar( 0.85 ); }
 		this.skin.material = gl ? [ this.mSkin, mg, o.gloveStyle === 'fingerless' ? this.mSkin : mg ] : [ this.mSkin, this.mSkin, this.mSkin ];
-		// a glove cuff under a long sleeve would poke through it
-		this.cuff.visible = gl && ! latex && ! ( has && o.long );
+		// (under a long sleeve too: it fills the gap between the sleeve's hem and the glove)
+		this.cuff.visible = gl && ! latex;
 	}
 
 	// every material shown at once (shader warm-up), and back

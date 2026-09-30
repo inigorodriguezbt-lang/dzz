@@ -1,8 +1,10 @@
-// A fixed set of real lights shared by everything the items module lights up: the player's flashlight or
-// headlamp (one spot light that follows the view) and three point lights handed each frame to the strongest
-// nearby sources — campfires, road flares, chemlights, a lantern or torch on your belt.
+// A fixed set of real lights shared by everything that lights up the world at night: three point lights handed
+// each frame to the strongest nearby sources — campfires, road flares, chemlights, a lantern or torch on your belt,
+// building lamps and street lights (Buildings / Roads add their sources here too).
 // The light count never changes (unused lights sit at intensity 0) because adding or removing a light makes
-// three.js recompile every lit material in the world.
+// three.js recompile every lit material in the world, and every light costs every lit pixel even when dark.
+// The carried spot light (`spotSource`) is only for a game without a hands module (which draws the flashlight
+// itself): its SpotLight is created the first time one is needed, so a normal game never pays for it.
 import * as THREE from 'three';
 
 const POINTS = 3;
@@ -10,16 +12,14 @@ const POINTS = 3;
 export class LightPool {
 	constructor( game ) {
 		this.game = game;
-		this.spot = new THREE.SpotLight( 0xffffff, 0, 40, 0.45, 0.55, 2 );
-		this.spot.castShadow = false;
-		this.spot.target.position.set( 0, 0, - 1 );
+		this.spot = null;
 		this.points = [];
 		for ( let i = 0; i < POINTS; i ++ ) {
 			const l = new THREE.PointLight( 0xffaa66, 0, 12, 2 );
 			l.castShadow = false;
 			this.points.push( l );
 		}
-		game.scene.add( this.spot, this.spot.target, ...this.points );
+		game.scene.add( ...this.points );
 		this.sources = new Set(); // { pos: Vector3, color, intensity, range, flicker, on, priority }
 		this.spotSource = null; // { color, intensity, range, angle }
 		this.t = 0;
@@ -35,7 +35,12 @@ export class LightPool {
 		const g = this.game, cam = g.camera;
 		// the carried spot light: at the eyes, a little down and to the right of the view like a chest / head lamp
 		const s = this.spotSource;
-		if ( s && ! g.dead ) {
+		if ( s && ! this.spot ) {
+			this.spot = new THREE.SpotLight( 0xffffff, 0, 40, 0.45, 0.55, 2 );
+			this.spot.castShadow = false;
+			g.scene.add( this.spot, this.spot.target );
+		}
+		if ( this.spot && s && ! g.dead ) {
 			this._fwd.set( 0, 0, - 1 ).applyQuaternion( cam.quaternion );
 			this.spot.position.copy( cam.position ).addScaledVector( this._fwd, 0.15 );
 			this.spot.position.y -= s.kind === 'headlamp' ? 0.02 : 0.25;
@@ -46,7 +51,7 @@ export class LightPool {
 			this.spot.distance = s.range;
 			const fl = s.flicker ? 0.85 + Math.sin( this.t * 23 ) * 0.08 + Math.sin( this.t * 57 ) * 0.07 : 1;
 			this.spot.intensity = s.intensity * fl * ( s.dim ?? 1 );
-		} else this.spot.intensity = 0;
+		} else if ( this.spot ) this.spot.intensity = 0;
 
 		// point lights: the strongest sources relative to their distance from the camera
 		const list = this._list;
@@ -76,8 +81,8 @@ export class LightPool {
 	}
 
 	dispose() {
-		this.game.scene.remove( this.spot, this.spot.target, ...this.points );
-		this.spot.dispose();
+		this.game.scene.remove( ...this.points );
+		if ( this.spot ) { this.game.scene.remove( this.spot, this.spot.target ); this.spot.dispose(); }
 		for ( const l of this.points ) l.dispose();
 		this.sources.clear();
 	}

@@ -7,6 +7,9 @@
 //   setIconRenderer( webglRenderer )         the game's renderer (no second WebGL context); a private one otherwise
 // Rendering goes into a half-float target (linear HDR), then a small pass applies ACES + sRGB and un-premultiplies
 // alpha into an 8-bit target that is read back; 2× supersampling gives clean edges after the canvas downscale.
+// No stalls on the game's context: a model's shaders are compiled for the stage first (in parallel where the
+// browser can, then the icon is drawn on a later frame) and pixels come back through an async readback.
+// An icon that comes back (nearly) empty — a lost context, a failed draw — is never cached or stored.
 import * as THREE from 'three';
 import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
@@ -14,12 +17,14 @@ import { getItem } from '../game/items/ItemDB.js';
 import { buildItemModel, hasModelBuilder, builderSignature } from './ItemModels.js';
 import { G as UNI } from './Materials.js';
 
-export const ICON_VERSION = 5; // bump to invalidate every stored icon (lighting / framing changes)
+export const ICON_VERSION = 6; // bump to invalidate every stored icon (lighting / framing changes; 6: blank icons were kept)
 const SIZE = 128, SS = 2, RT = SIZE * SS;
+const MIN_COVER = RT * RT * 0.004; // fewer drawn pixels than this: the draw failed, do not keep it
 const WEAPON_TYPES = new Set( [ 'gun', 'mag', 'ammo_box', 'attachment', 'melee', 'throwable' ] );
 
 // the weapons module registers its builders when it loads; make sure they exist before drawing a weapon icon
-const weaponModelModules = import.meta.glob( '../weapons/*Models.js' );
+let weaponModelModules = {};
+try { weaponModelModules = import.meta.glob( '../weapons/*Models.js' ); } catch ( e ) { /* not built by Vite (Node tests) */ }
 let weaponModelsLoading = null;
 function loadWeaponModels() {
 	if ( ! weaponModelsLoading ) weaponModelsLoading = Promise.all( Object.values( weaponModelModules ).map( f => f().catch( e => console.warn( 'icons: weapon models', e ) ) ) );
@@ -123,6 +128,8 @@ export async function clearIcons() {
 // ---- the render queue --------------------------------------------------------------------------------------
 
 let scheduled = false;
+let inFlight = 0; // icons drawn and waiting for their pixels
+const MAX_IN_FLIGHT = 4;
 function schedule() {
 	if ( scheduled ) return;
 	scheduled = true;
@@ -131,7 +138,7 @@ function schedule() {
 		const t0 = performance.now();
 		// a few per frame so opening a full inventory never stalls the game
 		const later = [];
-		while ( queue.length && ( performance.now() - t0 < 7 ) ) {
+		while ( queue.length && inFlight < MAX_IN_FLIGHT && ( performance.now() - t0 < 6 ) ) {
 			const job = queue.shift();
 			const cached = iconSync( job.id );
 			if ( cached ) { job.resolve( cached ); continue; }
@@ -145,13 +152,20 @@ function schedule() {
 			// store: wait for it (a few seconds at most, then draw it anyway but do not keep it)
 			const ready = texturesReady( buildItemModel( def ) );
 			if ( ! ready && ( job.tries = ( job.tries || 0 ) + 1 ) < 60 ) { later.push( job ); continue; }
-			let url = null;
-			try { url = render( def, ! ready ); } catch ( e ) { console.warn( 'icon', job.id, e ); }
-			job.resolve( url );
+			try {
+				if ( ! job.compiled ) {
+					// new shaders compile off the frame; the icon is drawn once they are ready
+					job.compiled = true;
+					const p = prepare( def );
+					if ( p ) { p.then( () => { queue.unshift( job ); schedule(); }, () => { queue.unshift( job ); schedule(); } ); continue; }
+				}
+				inFlight ++;
+				render( def, ! ready ).then( ( url ) => job.resolve( url ), ( e ) => { console.warn( 'icon', job.id, e ); job.resolve( null ); } ).finally( () => { inFlight --; if ( queue.length ) schedule(); } );
+			} catch ( e ) { console.warn( 'icon', job.id, e ); job.resolve( null ); }
 		}
 		scheduled = false;
 		if ( later.length ) { queue.push( ...later ); if ( ! scheduled ) setTimeout( schedule, 100 ); return; }
-		if ( queue.length ) schedule();
+		if ( queue.length && inFlight < MAX_IN_FLIGHT ) schedule();
 	};
 	if ( typeof requestAnimationFrame === 'function' ) requestAnimationFrame( () => { run(); } );
 	else setTimeout( run, 16 );
@@ -194,6 +208,50 @@ function disposeStage() {
 	if ( ! stage ) return;
 	stage.hdr.dispose(); stage.ldr.dispose(); stage.quad.dispose(); stage.env?.dispose();
 	stage = null;
+}
+
+function getStage() {
+	const r = getRenderer();
+	if ( ! stage || stage.renderer !== r ) { disposeStage(); stage = makeStage( r ); }
+	return stage;
+}
+
+const contextLost = ( r ) => !! r.getContext?.()?.isContextLost?.();
+
+// the renderer state an icon draws with (the program cache keys on some of it: the target, shadows)
+function enter( r, S ) {
+	const prev = { target: r.getRenderTarget(), clear: r.getClearColor( new THREE.Color() ), alpha: r.getClearAlpha(), auto: r.autoClear, xr: r.xr.enabled, shadow: r.shadowMap.enabled };
+	r.xr.enabled = false;
+	r.shadowMap.enabled = false;
+	r.setRenderTarget( S.hdr );
+	return prev;
+}
+function leave( r, prev ) {
+	r.setRenderTarget( prev.target );
+	r.setClearColor( prev.clear, prev.alpha );
+	r.autoClear = prev.auto; r.xr.enabled = prev.xr; r.shadowMap.enabled = prev.shadow;
+}
+
+// start compiling the model's shaders for the stage's lights and target (the icon stage lights differ from the
+// world's, so each material needs its own program here); a promise for when they are ready, or null when they
+// already are
+function prepare( def ) {
+	const r = getRenderer();
+	if ( ! r.compile || ! r.properties || contextLost( r ) ) return null;
+	const S = getStage();
+	const model = buildItemModel( def );
+	const prevParent = model.parent;
+	S.scene.add( model );
+	const prev = enter( r, S );
+	let mats = null;
+	try { mats = r.compile( S.scene, S.camera ); } finally {
+		leave( r, prev );
+		S.scene.remove( model );
+		if ( prevParent ) prevParent.add( model );
+	}
+	const busy = () => [ ...( mats || [] ) ].some( m => { const pr = r.properties.get( m ).currentProgram; return pr && ! pr.isReady(); } );
+	if ( ! busy() ) return null;
+	return new Promise( ( resolve ) => { const poll = () => busy() ? setTimeout( poll, 12 ) : resolve(); setTimeout( poll, 12 ); } );
 }
 
 function makeStage( r ) {
@@ -241,16 +299,18 @@ function makeStage( r ) {
 	const octx = out.getContext( '2d' );
 	octx.imageSmoothingEnabled = true; octx.imageSmoothingQuality = 'high';
 	const webp = out.toDataURL( 'image/webp' ).startsWith( 'data:image/webp' );
-	return { renderer: r, scene, camera, hdr, ldr, quad, env, canvas, ctx: canvas.getContext( '2d' ), out, octx, webp, pixels: new Uint8Array( RT * RT * 4 ), img: new ImageData( RT, RT ) };
+	return { renderer: r, scene, camera, hdr, ldr, quad, env, canvas, ctx: canvas.getContext( '2d' ), out, octx, webp, img: new ImageData( RT, RT ) };
 }
 
 const _box = new THREE.Box3(), _v = new THREE.Vector3(), _dir = new THREE.Vector3(), _up = new THREE.Vector3( 0, 1, 0 );
 const _right = new THREE.Vector3(), _camUp = new THREE.Vector3();
 
-function render( def, noKeep = false ) {
+const pixelPool = [];
+
+async function render( def, noKeep = false ) {
 	const r = getRenderer();
-	if ( ! stage || stage.renderer !== r ) { disposeStage(); stage = makeStage( r ); }
-	const S = stage;
+	if ( contextLost( r ) ) return null;
+	const S = getStage();
 	const model = buildItemModel( def );
 	const fallback = !! model.userData.fallback;
 	const prevParent = model.parent;
@@ -308,39 +368,49 @@ function render( def, noKeep = false ) {
 	// the world's atmosphere patch would fog the model (it sits far from the game camera): neutralise it
 	const saved = { fog: UNI.uFogDensity.value, wet: UNI.uWet.value, cs: UNI.uCloudShadowK.value, cam: UNI.uCamPos.value.clone() };
 	UNI.uFogDensity.value = 0; UNI.uWet.value = 0; UNI.uCloudShadowK.value = 0; UNI.uCamPos.value.copy( cam.position );
-	const prevTarget = r.getRenderTarget();
-	const prevClear = r.getClearColor( new THREE.Color() ), prevAlpha = r.getClearAlpha();
-	const prevAuto = r.autoClear, prevXR = r.xr.enabled;
-	const prevShadow = r.shadowMap.enabled;
-	let url = null;
+	const px = pixelPool.pop() || new Uint8Array( RT * RT * 4 );
+	let read = null;
+	const prev = enter( r, S );
 	try {
-		r.xr.enabled = false;
-		r.shadowMap.enabled = false;
-		r.setRenderTarget( S.hdr );
 		r.setClearColor( 0x000000, 0 );
 		r.clear( true, true, false );
 		r.render( S.scene, cam );
 		r.setRenderTarget( S.ldr );
 		r.clear( true, false, false );
 		S.quad.render( r );
-		r.readRenderTargetPixels( S.ldr, 0, 0, RT, RT, S.pixels );
+		// the copy is queued now (the targets are free for the next icon); the pixels arrive a frame or so later
+		read = r.readRenderTargetPixelsAsync ? r.readRenderTargetPixelsAsync( S.ldr, 0, 0, RT, RT, px ) : ( r.readRenderTargetPixels( S.ldr, 0, 0, RT, RT, px ), null );
 	} finally {
-		r.setRenderTarget( prevTarget );
-		r.setClearColor( prevClear, prevAlpha );
-		r.autoClear = prevAuto; r.xr.enabled = prevXR; r.shadowMap.enabled = prevShadow;
+		leave( r, prev );
 		UNI.uFogDensity.value = saved.fog; UNI.uWet.value = saved.wet; UNI.uCloudShadowK.value = saved.cs; UNI.uCamPos.value.copy( saved.cam );
 		S.scene.remove( model );
 		model.scale.copy( prevScale );
 		model.updateMatrixWorld( true );
 		if ( prevParent ) prevParent.add( model );
 	}
+	try {
+		if ( read ) await read;
+		return finish( S, def, px, fallback, noKeep );
+	} finally { pixelPool.push( px ); }
+}
+
+// how many pixels the model covers (alpha above ~3%)
+export function coverage( px ) {
+	let n = 0;
+	for ( let i = 3; i < px.length; i += 4 ) if ( px[ i ] > 8 ) n ++;
+	return n;
+}
+
+function finish( S, def, px, fallback, noKeep ) {
+	// a lost context reads back zeros and a failed draw leaves the target empty: show nothing, keep nothing
+	if ( contextLost( S.renderer ) || coverage( px ) < MIN_COVER ) return null;
 	// GL rows are bottom-up
-	const px = S.pixels, dst = S.img.data, row = RT * 4;
+	const dst = S.img.data, row = RT * 4;
 	for ( let y = 0; y < RT; y ++ ) dst.set( px.subarray( ( RT - 1 - y ) * row, ( RT - y ) * row ), y * row );
 	S.ctx.putImageData( S.img, 0, 0 );
 	S.octx.clearRect( 0, 0, SIZE, SIZE );
 	S.octx.drawImage( S.canvas, 0, 0, SIZE, SIZE );
-	url = S.webp ? S.out.toDataURL( 'image/webp', 0.92 ) : S.out.toDataURL( 'image/png' );
+	const url = S.webp ? S.out.toDataURL( 'image/webp', 0.92 ) : S.out.toDataURL( 'image/png' );
 	const entry = { sig: sigFor( def.id ), url, fallback: fallback || noKeep };
 	if ( noKeep ) return url; // textures never arrived: show it this once, try again next time
 	mem.set( def.id, entry );

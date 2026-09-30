@@ -203,13 +203,17 @@ export function registerFoodModels( reg ) {
 		const g = group(), k = s.kind || 'mango', ck = !! s.cooked;
 		switch ( k ) {
 			case 'pineapple': {
-				const skin = canvasTex( 'pineapple-skin', 128, 128, ( ctx, W, H ) => {
-					ctx.fillStyle = '#b8862a'; ctx.fillRect( 0, 0, W, H );
-					for ( let y = 0; y < 8; y ++ ) for ( let x = 0; x < 8; x ++ ) {
-						const cx = ( x + ( y % 2 ) * 0.5 ) * W / 8, cy = ( y + 0.5 ) * H / 8;
-						ctx.fillStyle = y % 3 === 0 ? '#8f6a1f' : '#c99a34';
-						ctx.beginPath(); ctx.moveTo( cx, cy - 7 ); ctx.lineTo( cx + 8, cy ); ctx.lineTo( cx, cy + 7 ); ctx.lineTo( cx - 8, cy ); ctx.closePath(); ctx.fill();
-						ctx.fillStyle = '#5e4a18'; ctx.fillRect( cx - 1, cy - 1, 2, 2 );
+				// diamond scales: dark crevices, golden eyes shading to green at the edge, a dark spike in each
+				const skin = canvasTex( 'pineapple-skin2', 256, 256, ( ctx, W, H ) => {
+					ctx.fillStyle = '#3e3312'; ctx.fillRect( 0, 0, W, H );
+					const nx = 12, ny = 11, dw = W / nx, dh = H / ny;
+					for ( let y = - 1; y <= ny; y ++ ) for ( let x = - 1; x <= nx; x ++ ) {
+						const cx = ( x + ( y & 1 ) * 0.5 ) * dw, cy = ( y + 0.5 ) * dh;
+						const gr = ctx.createRadialGradient( cx, cy - dh * 0.15, 1, cx, cy, dw * 0.55 );
+						gr.addColorStop( 0, '#e8b848' ); gr.addColorStop( 0.6, '#c08a2a' ); gr.addColorStop( 1, '#6a7a2a' );
+						ctx.fillStyle = gr;
+						ctx.beginPath(); ctx.moveTo( cx, cy - dh * 0.47 ); ctx.lineTo( cx + dw * 0.46, cy ); ctx.lineTo( cx, cy + dh * 0.47 ); ctx.lineTo( cx - dw * 0.46, cy ); ctx.closePath(); ctx.fill();
+						ctx.fillStyle = '#2a200a'; ctx.beginPath(); ctx.arc( cx, cy + dh * 0.12, 1.8, 0, PI * 2 ); ctx.fill();
 					}
 				}, { repeat: true } );
 				const inner = group();

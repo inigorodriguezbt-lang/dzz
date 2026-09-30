@@ -47,12 +47,14 @@ const BASE = [
 	R( 'poi', 'Pound poi', [ 'poi', 1 ], [ [ 'cooked_taro', 1 ] ], { liquid: { kind: 'water', litres: 0.25 }, time: 14, cat: 'food' } ),
 ];
 
+// raw foods that cook in a pot of water (their recipe above) rather than roasting on the fire
+export const POT_COOKED = { rice_bag: 'cook_rice', eggs: 'cook_egg' };
+
 // every raw food with a cooked form roasts at a fire (the pot-cooked ones above are skipped)
 function cookingRecipes() {
 	const out = [];
-	const special = new Set( [ 'rice_bag', 'eggs' ] );
 	for ( const d of ITEMS.values() ) {
-		if ( d.cat !== 'food' || ! d.food?.cooked || special.has( d.id ) ) continue;
+		if ( d.cat !== 'food' || ! d.food?.cooked || POT_COOKED[ d.id ] ) continue;
 		const heavy = d.weight > 1;
 		out.push( R( 'cook_' + d.id, 'Cook ' + ( ITEMS.get( d.food.cooked )?.name || d.food.cooked ).replace( /^Cooked /, '' ).replace( /^(Roasted|Steamed|Baked|Boiled) /, '' ),
 			[ d.food.cooked, 1 ], [ [ d.id, 1 ] ], { station: 'fire', time: heavy ? 18 : 12, cat: 'food' } ) );

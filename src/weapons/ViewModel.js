@@ -66,7 +66,7 @@ const HAND_HOLD = {
 const GUN_HOLD = {
 	rifle: { p: [ 0.245, - 0.138, - 0.66 ], r: [ - 0.03, 0.16, 0.2 ], eR: [ 0.45, - 0.3, - 0.4 ], eL: [ - 0.1, - 0.42, - 0.5 ] },
 	heavy: { p: [ 0.25, - 0.145, - 0.67 ], r: [ - 0.03, 0.15, 0.17 ], eR: [ 0.45, - 0.3, - 0.4 ], eL: [ - 0.1, - 0.42, - 0.5 ] },
-	stock: { p: [ 0.245, - 0.128, - 0.65 ], r: [ - 0.03, 0.16, 0.2 ], eR: [ 0.45, - 0.28, - 0.4 ], eL: [ - 0.1, - 0.42, - 0.5 ] },
+	stock: { p: [ 0.2, - 0.115, - 0.64 ], r: [ - 0.03, 0.16, 0.2 ], eR: [ 0.42, - 0.28, - 0.4 ], eL: [ - 0.12, - 0.42, - 0.5 ] },
 	pistol: { p: [ 0.06, - 0.075, - 0.46 ], r: [ 0.03, 0.15, 0.1 ], eR: [ 0.22, - 0.42, - 0.2 ], eL: [ - 0.1, - 0.44, - 0.22 ] },
 	bow: { p: [ 0.0, - 0.1, - 0.5 ], r: [ 0.02, 0.12, - 0.4 ], eR: [ 0.3, - 0.4, 0.0 ], eL: [ - 0.2, - 0.4, - 0.3 ] },
 };
@@ -78,7 +78,7 @@ const ITEM_ELBOW_R = V( 0.42, - 0.3, - 0.12 ), ITEM_ELBOW_L = V( - 0.3, - 0.3, -
 // sprinting: where the gun frame goes (view space) and its turn (a pistol at a low ready: muzzle down, barely canted)
 const SPRINT = {
 	rifleP: V( 0.1, - 0.18, - 0.41 ), rifleQ: E( 0.25, 0.6, 0.45 ),
-	pistolP: V( 0.1, - 0.14, - 0.38 ), pistolQ: E( - 0.55, 0.3, 0.05 ),
+	pistolP: V( 0.1, - 0.12, - 0.4 ), pistolQ: E( - 0.5, 0.3, 0.05 ),
 	itemQ: E( - 0.2, 0.1, 0 ),
 };
 // melee holds: where the right hand's grip sits in view space and how the item points
@@ -435,7 +435,8 @@ export class ViewModel {
 	setLighting( envIntensity ) {
 		if ( Math.abs( ( this._envI ?? - 1 ) - envIntensity ) < 0.01 ) return;
 		this._envI = envIntensity;
-		for ( const m of Object.values( weaponMaterials( 'view' ) ) ) m.envMapIntensity = envIntensity;
+		// (the gun a little more: its bevels catch the studio light, so a dark gun keeps its edges in the shade)
+		for ( const m of Object.values( weaponMaterials( 'view' ) ) ) m.envMapIntensity = envIntensity * 1.25;
 		if ( this.env ) { this.armR.setEnvironment( this.env, envIntensity ); this.armL.setEnvironment( this.env, envIntensity ); }
 	}
 
@@ -1319,5 +1320,3 @@ function viewCopy( m ) {
 	VIEW_MATS.set( m.uuid, c );
 	return c;
 }
-// TEMP-TUNE
-if ( typeof window !== 'undefined' ) window.__vmTune = { GUN_HOLD, SPRINT, MELEE_HOLD, HAND_HOLD, ITEM_ELBOW_R, ITEM_ELBOW_L, GUN_THUMB };

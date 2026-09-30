@@ -23,11 +23,11 @@ const V3 = ( x = 0, y = 0, z = 0 ) => new THREE.Vector3( x, y, z );
 // lighter, 'wood' gets a grain along the gun, 'matte' only a faint mottle. Colours are a little lighter than the real
 // finishes: a black gun must still show its shapes in the view's light.
 const MAT = {
-	blk: { color: 0x38393a, metalness: 0.5, roughness: 0.52, fin: 'metal', bare: 0x8c9095 }, // parkerised steel
-	blued: { color: 0x2c3138, metalness: 0.78, roughness: 0.3, fin: 'metal', bare: 0xa3a8ae },
-	alu: { color: 0x3b3e42, metalness: 0.3, roughness: 0.4, fin: 'metal', bare: 0xb9bdc2 }, // anodised aluminium
-	poly: { color: 0x2e2f31, metalness: 0.0, roughness: 0.66, grip: 1, fin: 'poly' },
-	polyS: { color: 0x323335, metalness: 0.0, roughness: 0.52, fin: 'poly' },
+	blk: { color: 0x47484a, metalness: 0.45, roughness: 0.5, fin: 'metal', bare: 0x8c9095 }, // parkerised steel
+	blued: { color: 0x363c44, metalness: 0.75, roughness: 0.3, fin: 'metal', bare: 0xa3a8ae },
+	alu: { color: 0x4a4e53, metalness: 0.25, roughness: 0.4, fin: 'metal', bare: 0xb9bdc2 }, // anodised aluminium
+	poly: { color: 0x3b3c3f, metalness: 0.0, roughness: 0.62, grip: 1, fin: 'poly' },
+	polyS: { color: 0x3f4043, metalness: 0.0, roughness: 0.5, fin: 'poly' },
 	tan: { color: 0x9a8461, metalness: 0.0, roughness: 0.7, grip: 1, fin: 'poly' },
 	tanM: { color: 0x8c7856, metalness: 0.3, roughness: 0.55, fin: 'metal', bare: 0x9b9c9c }, // FDE cerakote metal
 	od: { color: 0x4b5137, metalness: 0.0, roughness: 0.72, grip: 1, fin: 'poly' },
@@ -1273,7 +1273,7 @@ function pump870( o ) {
 	const gR = grip( [ - 0.11, - 0.042, 0 ], [ 0.62, 0.78, 0 ], [ 0.05, 0.15, 1 ], 0.019, { trig: [ - 0.02, - 0.045, 0 ] } );
 	return {
 		P, info: {
-			sightH, rearX: - 0.07, eyeBack: 0.06, eyeX: - 0.17, eyeUp: 0.026, frontX: bEnd - 0.012, muzzle: [ bEnd, 0, 0 ], eject: [ 0.035, 0.004, 0.018 ], shellPort: [ 0.03, - 0.04, 0 ],
+			sightH, rearX: - 0.07, eyeBack: 0.06, eyeX: - 0.13, eyeUp: 0.03, frontX: bEnd - 0.012, muzzle: [ bEnd, 0, 0 ], eject: [ 0.035, 0.004, 0.018 ], shellPort: [ 0.03, - 0.04, 0 ],
 			optic: [ - 0.02, 0.03 ], opticParts: [ 'mount' ], light: [ 0.3, - 0.03, 0.024 ],
 			grips: { R: gR, L: grip( [ 0.265, - 0.03, 0 ], [ 1, 0.05, 0 ], [ 0, - 0.75, - 0.66 ], 0.024 ) },
 			stock: - 0.456, len: bEnd + 0.456, pump: 'pump', pumpTravel: 0.085,

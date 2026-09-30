@@ -277,7 +277,7 @@ export class Ocean {
 			U.uShoreSim.value = this.sim.texture;
 			U.uShoreSimRect.value.copy( this.sim.rect );
 		}
-		if ( this.caustics ) this.caustics.update( this.fft.deriv, G.uSunDir.value );
+		if ( this.caustics ) this.caustics.update( this.fft.deriv, G.uSunDir.value, dt );
 		const u = this.mat.uniforms;
 		u.uOceanDisp.value = this.fft.disp;
 		u.uOceanDeriv.value = this.fft.deriv;

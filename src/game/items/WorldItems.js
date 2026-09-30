@@ -6,7 +6,10 @@
 //
 //   drop( stack, pos )                          a player drop: falls from hand height, persistent
 //   spawn( stack, pos, { yaw, key, persistent, settle } ) -> WorldItem
-//   remove( item, { taken } )                   taken: fires the taken listeners like an F pickup
+//   remove( item, { taken, stack } )            taken: fires the taken listeners like an F pickup (with `stack`,
+//                                               what was taken, when the item's own stack has already changed)
+//   claim( item ) -> WorldItem                  the player used it where it lies: its loot spot counts as looted and
+//                                               it is saved like a drop (a streamed loot item is swapped for a twin)
 //   near( pos, r ) -> [ WorldItem ]              nearest first
 //   addTakenListener( fn( item, stack ) ) -> unsubscribe
 //
@@ -26,8 +29,11 @@ import { Fishing } from './Fishing.js';
 import { Gathering } from './Gathering.js';
 
 const CELL = 16;
-const DRAW_R = 55; // instanced drawing range (m)
+const DRAW_R = 55; // instanced drawing range (m) of the biggest items; small ones stop sooner (drawRange)
 const SHADOW_R = 24; // item batches with an instance this close cast shadows
+const SHADOW_MIN = 0.05; // (m radius) smaller things cast no shadow worth a draw call
+// a ring or a battery is invisible long before a backpack is: draw range by model size
+export const drawRange = ( radius ) => Math.min( DRAW_R, Math.max( 10, radius * 350 ) );
 const MAX_SAVED = 4000;
 const hkey = ( i, j ) => ( i + 32768 ) * 65536 + ( j + 32768 );
 
@@ -47,7 +53,9 @@ export class WorldItem extends Entity {
 		this.quat = new THREE.Quaternion().setFromAxisAngle( _Y, this.yaw );
 		this.vy = 0;
 		this.falling = false;
+		this.spin = null; // tumble while falling (axis, rad/s)
 		this.noAuto = !! opts.noAuto; // just dropped: no auto-pickup until the player walks away
+		this.quiet = !! opts.quiet; // lands without a sound (all but one of a loot pile)
 		this.cellKey = null;
 	}
 	get def() { return getItem( this.stack.id ); }
@@ -63,18 +71,27 @@ export class WorldItem extends Entity {
 		const inWater = this.pos.y < water;
 		this.vy = inWater ? Math.max( this.vy - 4 * dt, - 0.8 ) : this.vy - 18 * dt;
 		const ny = this.pos.y + this.vy * dt;
+		// into the sea: a splash (plop for small things), then it sinks slowly
+		if ( ! inWater && ny < water && this.mgr.game.audio && ! this.quiet ) this.mgr._waterSound( this );
 		const floor = P.ground( this.pos.x, this.pos.z, this.pos.y + 0.02, 0.05, 0 );
 		if ( ny <= floor.y ) {
 			this.pos.y = floor.y;
 			this.falling = false;
 			this.vy = 0;
+			this.spin = null;
 			this.mgr._rest( this, floor.box );
-			if ( ! inWater && this.mgr.game.audio ) this.mgr._landSound( this );
-		} else this.pos.y = ny;
+			if ( ! inWater && this.mgr.game.audio && ! this.quiet ) this.mgr._landSound( this );
+			this.quiet = false;
+		} else {
+			this.pos.y = ny;
+			// a little tumble on the way down (it settles flat on landing); slower under water
+			if ( this.spin ) this.quat.premultiply( _q.setFromAxisAngle( this.spin.axis, this.spin.rate * dt * ( inWater ? 0.3 : 1 ) ) );
+		}
 		this.mgr.dirty = true;
 	}
 }
 const _Y = new THREE.Vector3( 0, 1, 0 );
+const _q = new THREE.Quaternion();
 
 // ---- the manager ---------------------------------------------------------------------------------------------
 
@@ -115,8 +132,10 @@ export class WorldItems {
 		const gap = pos.y - floor.y;
 		const settle = opts.settle ?? ( gap < 0.6 );
 		if ( gap < - 0.05 ) { it.pos.y = floor.y; this._rest( it, floor.box ); } // inside the ground: pop up
-		else if ( settle && gap > 0.01 ) { it.falling = true; }
-		else this._rest( it, floor.box, gap > 0.01 );
+		else if ( settle && gap > 0.01 ) {
+			it.falling = true;
+			if ( gap > 0.3 ) it.spin = { axis: new THREE.Vector3( Math.random() - 0.5, Math.random() * 0.4, Math.random() - 0.5 ).normalize(), rate: 3 + Math.random() * 5 };
+		} else this._rest( it, floor.box, gap > 0.01 );
 		this.items.add( it );
 		this._hashAdd( it );
 		this.game.entities.add( it );
@@ -147,14 +166,26 @@ export class WorldItems {
 		return it;
 	}
 
-	remove( item, { taken = false } = {} ) {
+	remove( item, { taken = false, stack = null } = {} ) {
 		if ( ! item || ! this.items.has( item ) ) return false;
 		this.items.delete( item );
 		this._hashRemove( item );
 		this.game.entities.remove( item );
 		this.dirty = true;
-		if ( taken ) for ( const fn of [ ...this.takenListeners ] ) { try { fn( item, item.stack ); } catch ( e ) { console.error( e ); } }
+		if ( taken ) for ( const fn of [ ...this.takenListeners ] ) { try { fn( item, stack || item.stack ); } catch ( e ) { console.error( e ); } }
 		return true;
+	}
+
+	// the player used an item where it lies (ate from it, opened it, took part of it): its loot spot counts as looted
+	// and it is saved like a drop. A building drops its streamed loot with the storey, so that item is swapped for a
+	// persistent twin holding the same stack.
+	claim( item ) {
+		if ( ! item || ! this.items.has( item ) || item.persistent ) return item;
+		if ( item.key == null ) { item.persistent = true; return item; }
+		this.remove( item, { taken: true } );
+		const twin = this.spawn( item.stack, item.pos, { yaw: item.yaw, persistent: true, settle: false, noAuto: item.noAuto } );
+		if ( twin ) twin.quat.copy( item.quat );
+		return twin;
 	}
 
 	near( pos, r ) {
@@ -182,7 +213,8 @@ export class WorldItems {
 		const stacks = rollLoot( table, rnd );
 		stacks.forEach( ( s, i ) => {
 			const a = i * 2.4 + rnd() * 0.5, r = 0.15 + Math.sqrt( i ) * 0.28;
-			const it = this.spawn( s, new THREE.Vector3( pos.x + Math.cos( a ) * r, pos.y + 0.3, pos.z + Math.sin( a ) * r ), { persistent: opts.persistent ?? true, settle: true } );
+			// one landing sound for the pile, not one per stack in the same frame
+			const it = this.spawn( s, new THREE.Vector3( pos.x + Math.cos( a ) * r, pos.y + 0.3, pos.z + Math.sin( a ) * r ), { persistent: opts.persistent ?? true, settle: true, quiet: i > 0 } );
 			if ( it ) out.push( it );
 		} );
 		return out;
@@ -203,16 +235,19 @@ export class WorldItems {
 		const g = this.game, inv = g.player.inventory, s = item.stack;
 		if ( ! this.items.has( item ) ) return;
 		const before = s.qty;
+		// what was picked up: a stack that tops up one you carry is left at qty 0 by the merge
+		const picked = { ...s, qty: before };
 		const left = inv.add( s );
 		if ( left <= 0 ) {
-			this.remove( item, { taken: true } );
+			this.remove( item, { taken: true, stack: picked } );
 			g.audio?.play( 'pickup', { vol: 0.5 } );
-			g.events.emit( 'item:pick', { stack: s } );
+			g.events.emit( 'item:pick', { stack: picked } );
 		} else if ( left < before ) {
-			// part of a stack fitted
+			// part of a stack fitted: the rest stays, but the loot spot is spent
 			g.audio?.play( 'pickup', { vol: 0.4 } );
 			g.events.emit( 'item:pick', { stack: { ...s, qty: before - left } } );
 			g.toast( 'Not enough room', 'warn' );
+			this.claim( item );
 			this.dirty = true;
 		} else {
 			g.toast( 'Not enough room', 'warn' );
@@ -281,7 +316,7 @@ export class WorldItems {
 		}
 		for ( const b of this.batches.values() ) b.used = false;
 		const t0 = performance.now();
-		for ( const [ id, list ] of groups ) {
+		for ( const [ id, all ] of groups ) {
 			let b = this.batches.get( id );
 			if ( ! b ) {
 				// building a new model costs a few ms (canvas labels): spread new types over frames
@@ -289,6 +324,11 @@ export class WorldItems {
 				b = this._makeBatch( id );
 				if ( ! b ) continue;
 			}
+			// small things drop out sooner (they are sub-pixel long before 55 m)
+			const info = this.info( id );
+			const R = drawRange( info.radius ), R2 = R * R;
+			const list = R >= DRAW_R ? all : all.filter( it => it._d2 <= R2 );
+			if ( ! list.length ) continue;
 			b.used = true;
 			b.idle = 0;
 			if ( list.length > b.cap ) this._grow( b, list.length );
@@ -299,12 +339,13 @@ export class WorldItems {
 				for ( const m of b.meshes ) m.setMatrixAt( k, this._m );
 				nearest = Math.min( nearest, it._d2 );
 			}
+			const shadow = info.radius > SHADOW_MIN && nearest < SHADOW_R * SHADOW_R;
 			for ( const m of b.meshes ) {
 				m.count = list.length;
 				m.instanceMatrix.needsUpdate = true;
 				m.boundingSphere = null; // recomputed from the instances for culling
 				m.visible = true;
-				m.castShadow = m.userData.shadow && nearest < SHADOW_R * SHADOW_R;
+				m.castShadow = m.userData.shadow && shadow;
 			}
 		}
 		for ( const [ id, b ] of this.batches ) {
@@ -366,6 +407,12 @@ export class WorldItems {
 		}
 		this._hashRemove( it );
 		this._hashAdd( it );
+	}
+
+	_waterSound( it ) {
+		const d = getItem( it.stack.id );
+		const w = d.weight * it.stack.qty;
+		this.game.audio.play( w > 1.5 ? 'splash' : 'plop', { pos: it.pos, vol: Math.min( 0.6, 0.2 + w * 0.08 ), rate: w > 1.5 ? 1.3 : 1.1, max: 40 } );
 	}
 
 	_landSound( it ) {
@@ -431,9 +478,11 @@ export class WorldItems {
 			const before = it.stack.qty;
 			const left = p.inventory.add( it.stack, { autoEquip: false } );
 			if ( left >= before ) continue;
-			g.events.emit( 'item:pick', { stack: { ...it.stack, qty: before - left } } );
+			const picked = { ...it.stack, qty: before - left };
+			g.events.emit( 'item:pick', { stack: picked } );
 			g.audio?.play( 'pickup', { vol: 0.35 } );
-			if ( left <= 0 ) this.remove( it, { taken: true } );
+			if ( left <= 0 ) this.remove( it, { taken: true, stack: picked } );
+			else this.claim( it );
 			p.inventory.changed();
 		}
 	}
@@ -441,6 +490,9 @@ export class WorldItems {
 	// ---- spatial hash -----------------------------------------------------------------------------------------
 
 	_hashAdd( it ) {
+		// never twice (spawn rests an item, which re-hashes it, before adding it): a stale entry would outlive remove()
+		// and keep a taken item drawn and hoverable
+		if ( it.cellKey !== null ) this._hashRemove( it );
 		const k = hkey( Math.floor( it.pos.x / CELL ), Math.floor( it.pos.z / CELL ) );
 		let a = this.hash.get( k );
 		if ( ! a ) { a = []; this.hash.set( k, a ); }

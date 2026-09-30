@@ -15,6 +15,9 @@
 // loose rounds of the right calibre next to them.
 import { ITEMS, RARITY_WEIGHT, makeStack } from './ItemDB.js';
 
+// food that keeps less than this many game hours is found rotten (the outbreak is a week old)
+export const PERISHABLE_H = 72;
+
 // ---- weapon groups (shared ids owned by the weapons module) -------------------------------------------------
 
 const PISTOLS_CIV = [ 'glock17', 'm1911', 'revolver_357', 'ruger_mk4', 'makarov', 'beretta_m9', 'revolver_44', 'sig_p226' ];
@@ -387,6 +390,8 @@ export function rollLoot( table, rnd = Math.random, n = undefined ) {
 		const def = ITEMS.get( id );
 		const s = makeStack( id, lootQty( def, e.q, rnd ), { loot: true, rnd } );
 		if ( ! s ) continue;
+		// a week without power: fresh meals, meat and fish found in the world have gone off
+		if ( def.food?.spoil && def.food.spoil <= PERISHABLE_H ) s.data.age = def.food.spoil + ( s.data.age || 0 );
 		out.push( s );
 		// a gun is rarely alone: a spare magazine or a handful of rounds next to it
 		if ( def.cat === 'firearm' ) {

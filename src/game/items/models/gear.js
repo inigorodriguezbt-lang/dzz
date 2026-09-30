@@ -629,7 +629,7 @@ export function registerGearModels( reg ) {
 	reg( 'bundle', ( s ) => { // campfire kit: sticks tied with a rag
 		const g = group(), bark = M( 0x6a4a2e, { rough: 0.95 } );
 		for ( let i = 0; i < 6; i ++ ) add( g, G.cylX( 0.015, 0.45, 6 ), bark, [ 0, 0.015 + ( i >= 3 ? 0.026 : 0 ), ( i % 3 - 1 ) * 0.03 + ( i >= 3 ? 0.015 : 0 ) ], [ 0, ( i - 2.5 ) * 0.04, 0 ] );
-		for ( const x of [ - 0.12, 0.12 ] ) add( g, G.cylX( 0.05, 0.03, 10 ), M( s.rag ?? 0xd8cfc0, { rough: 0.95 } ), [ x, 0.035, 0.012 ] );
+		for ( const x of [ - 0.12, 0.12 ] ) add( g, G.cylX( 0.048, 0.03, 10 ), M( s.rag ?? 0xd8cfc0, { rough: 0.95 } ), [ x, 0.048, 0.012 ] );
 		return g;
 	} );
 	reg( 'paper', () => {

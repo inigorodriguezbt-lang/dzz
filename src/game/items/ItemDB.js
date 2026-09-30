@@ -113,11 +113,15 @@ export function stackVolume( s ) {
 	return def ? def.size * ( def.stack > 1 ? Math.ceil( s.qty / Math.max( 1, def.stackPerSlot || def.stack ) ) : s.qty ) : 1;
 }
 
+const unitState = ( s ) => !! ( s.data?.open || s.data?.left != null || s.data?.on );
+
 export function canMerge( a, b ) {
 	if ( a.id !== b.id ) return false;
 	const def = ITEMS.get( a.id );
 	if ( ! def || def.stack <= 1 ) return false;
 	if ( def.cat === 'food' && Math.abs( ( a.data.age || 0 ) - ( b.data.age || 0 ) ) > 24 ) return false;
+	// a unit with its own state (an open can, a half-eaten bar, a lit chemlight) stays its own stack
+	if ( unitState( a ) || unitState( b ) ) return false;
 	return true;
 }
 

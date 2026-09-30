@@ -190,11 +190,12 @@ console.log( 'item use' );
 	const { ItemUse } = await import( '../src/game/items/ItemUse.js' );
 	const { Crafting } = await import( '../src/game/Crafting.js' );
 	const { LightPool } = await import( '../src/game/items/LightPool.js' );
+	const { Events } = await import( '../src/core/Events.js' );
 	const toasts = [];
 	const game = {
 		mode: 'survival', difficulty: 'normal', time: { hours: 100, dayMinutes: 48 }, get hour() { return this.time.hours % 24; }, get day() { return 5; },
 		scene: new THREE.Scene(), camera: new THREE.PerspectiveCamera(), stats: {},
-		events: { emit() {}, on() { return () => {}; } }, audio: { play() {}, loop() { return null; }, buffers: new Map() },
+		events: new Events(), audio: { play() {}, loop() { return null; }, buffers: new Map() },
 		interact: { addProvider() { return () => {}; } }, settings: { get: () => true }, input: { pressed: () => false },
 		world: { isIndoors: () => false, sky: { sunDir: new THREE.Vector3( 0, 1, 0 ), night: 0 } }, weather: { rain: 0, cover: 0.3 },
 		player: { pos: new THREE.Vector3(), yaw: 0, stanceH: 1.6, shake: 0, inventory: new PlayerInventory(), lookDir: ( o ) => o.set( 0, 0, - 1 ) },
@@ -207,6 +208,7 @@ console.log( 'item use' );
 	game.crafting = new Crafting( game, lights );
 	const U = game.itemUse, S = game.survival, inv = game.player.inventory;
 	inv.equip.back = makeStack( 'backpack_military', 1 ); // room for everything
+	inv.equip.vest = makeStack( 'chest_rig', 1 ); inv.equip.legs = makeStack( 'cargo_pants', 1 );
 	const finish = () => game.actions.update( 999 );
 	const put = ( id, q = 1, o = {} ) => { const st = makeStack( id, q, o ); inv.add( st, { autoEquip: false } ); return inv.find( ( x ) => x.id === id ); };
 	const act = ( st, re ) => U.actions( st ).find( a => re.test( a.label ) );
@@ -215,6 +217,18 @@ console.log( 'item use' );
 	const spam = put( 'spam' );
 	S.hunger = 20;
 	ok( /^Eat \(3\/3\)/.test( U.actions( spam )[ 0 ]?.label ), 'spam: first action eats a portion: ' + U.actions( spam )[ 0 ]?.label );
+	{
+		// the verb and its state come separately too (the label keeps the bracket form the inventory screen parses)
+		const a = U.actions( spam )[ 0 ];
+		ok( a.verb === 'Eat' && a.note === '3/3' && a.label === 'Eat (3/3)', `spam: verb ${a.verb}, note ${a.note}` );
+		const rot = makeStack( 'poke', 1 ); rot.data.age = 999;
+		const b = U.actions( rot )[ 0 ];
+		ok( b.verb === 'Eat' && b.note === 'Rotten' && b.label === 'Eat (rotten)', `rotten poke: verb ${b.verb}, note ${b.note}, label ${b.label}` );
+		const pog = makeStack( 'pog_juice', 1 );
+		const c = U.actions( pog ).find( x => x.verb === 'Drink' );
+		ok( c && ( getItem( 'pog_juice' ).drink.portions > 1 ? /^\d+\/\d+$/.test( c.note ) : c.note === null ), `drink: verb Drink, note ${c?.note}` );
+		ok( U.actions( makeStack( 'canned_beans', 1 ) ).every( x => typeof x.verb === 'string' && ! /[()]/.test( x.verb ) && ( x.note === null || typeof x.note === 'string' ) ), 'every action has a plain verb and a note or null' );
+	}
 	U.use( spam ); finish();
 	ok( Math.abs( S.hunger - ( 20 + 1020 / 20 / 3 ) ) < 0.01 && spam.data.left === 2, `spam: one portion eaten (hunger ${S.hunger.toFixed( 1 )}, left ${spam.data.left})` );
 	U.use( spam ); finish(); U.use( spam ); finish();
@@ -271,6 +285,31 @@ console.log( 'item use' );
 	ok( U.actions( boar )[ 0 ].label === 'Cook', 'raw meat: cooking is the default at a fire' );
 	U.use( boar ); finish();
 	ok( boar.id === 'cooked_boar', 'raw boar cooks' );
+	// what was eaten raw stays eaten: half a breadfruit cooks into half a roasted one
+	{
+		const bf = put( 'breadfruit' ); bf.data.left = 1;
+		U.cook( bf ); finish();
+		ok( bf.id === 'cooked_breadfruit' && bf.data.left === 1, `half-eaten breadfruit cooks into a half (${bf.id}, left ${bf.data.left})` );
+		// rice cooks in a pot of water (its recipe): no pot, no cooking; a bag gives five bowls, half a bag fewer
+		const rice = put( 'rice_bag' );
+		const cookRice = U.actions( rice ).find( a => a.verb === 'Cook' );
+		toasts.length = 0; cookRice?.run(); finish();
+		ok( inv.count( 'rice_bag' ) === 1 && toasts.some( t => /pot/i.test( t ) ), 'rice: Cook needs a pot: ' + toasts.join( ' | ' ) );
+		put( 'cooking_pot' );
+		const jug = put( 'water_jug' ); jug.data.liquid = 'water'; jug.data.amount = getItem( 'water_jug' ).tool.liquid;
+		const bowls0 = inv.count( 'cooked_rice' );
+		U.actions( rice ).find( a => a.verb === 'Cook' ).run(); finish();
+		ok( ! inv.count( 'rice_bag' ) && inv.count( 'cooked_rice' ) === bowls0 + 5, `rice bag cooks into 5 bowls (${inv.count( 'cooked_rice' ) - bowls0})` );
+		const rice2 = put( 'rice_bag' ); rice2.data.left = 5;
+		const b1 = inv.count( 'cooked_rice' );
+		U.actions( rice2 ).find( a => a.verb === 'Cook' ).run(); finish();
+		ok( inv.count( 'cooked_rice' ) - b1 === 3, `half a bag of rice cooks into 3 bowls (${inv.count( 'cooked_rice' ) - b1})` );
+		const eggs = put( 'eggs', 2 );
+		const e0 = inv.count( 'cooked_egg' );
+		U.actions( eggs ).find( a => a.verb === 'Cook' ).run(); finish();
+		ok( inv.count( 'cooked_egg' ) === e0 + 1 && inv.count( 'eggs' ) === 1, 'an egg boils in the pot (its recipe)' );
+		for ( const x of inv.findAll( ( st ) => [ 'cooking_pot', 'water_jug', 'cooked_rice', 'eggs', 'cooked_egg', 'cooked_breadfruit' ].includes( st.id ) ) ) inv.remove( x );
+	}
 	// the fire burns down in game hours
 	game.time.hours += 3; game.crafting.update( 0.1 );
 	ok( ! fire.lit && fire.deadSince !== null, 'the campfire burns out' );
@@ -291,6 +330,20 @@ console.log( 'item use' );
 	U.use( cipro ); finish();
 	ok( ! S.infected, 'strong antibiotics clear an infection' );
 
+	// the rags recipe takes a spare shirt, not the one you wear with something in its pocket
+	{
+		const worn = makeStack( 'tshirt', 1 ); const chain = makeStack( 'gold_chain', 1 );
+		const holder = getItem( 'tshirt' ).clothing.capacity > 0;
+		if ( holder ) worn.data.items = [ chain ];
+		const prevTorso = inv.equip.torso; inv.equip.torso = worn;
+		const rec = game.crafting.recipes.find( r => r.id === 'rags_tshirt' );
+		if ( holder ) ok( ! game.crafting.canCraft( rec ) && game.crafting.check( rec ).reason === 'Empty it first', 'rags recipe: a worn shirt with something in it is not used: ' + game.crafting.check( rec ).reason );
+		const spare = makeStack( 'tshirt', 1 ); inv.add( spare, { autoEquip: false } );
+		ok( game.crafting.canCraft( rec ), 'rags recipe: a spare shirt can be used' );
+		game.crafting.craft( rec ); finish();
+		ok( inv.equip.torso === worn && ( ! holder || worn.data.items[ 0 ] === chain ) && ! inv.findAll( x => x === spare ).length, 'rags recipe: the spare shirt went, the worn one and its pocket stayed' );
+		if ( prevTorso ) inv.equip.torso = prevTorso; else delete inv.equip.torso;
+	}
 	// rags from a t-shirt, bandage from rags (crafting)
 	const tee = put( 'tshirt' );
 	U.actions( tee ).find( a => /Rip/.test( a.label ) ).run(); finish();
@@ -303,6 +356,17 @@ console.log( 'item use' );
 	const spear = game.crafting.recipes.find( r => r.id === 'spear' );
 	ok( ! game.crafting.canCraft( spear ) && /long stick/i.test( game.crafting.check( spear ).reason ), 'spear needs a long stick: ' + game.crafting.check( spear ).reason );
 
+	// the fire's F prompt feeds real fuel, the longest burning first (not rags, books or a ukulele)
+	{
+		const f2 = game.crafting.placeFire( 'campfire', new THREE.Vector3( 0.4, 0, 0.3 ), { lit: true, fuel: 0.5 } );
+		put( 'rags', 3 ); put( 'bible' ); put( 'stick', 2 ); put( 'firewood', 1 );
+		ok( game.crafting.bestFuel()?.id === 'firewood', 'best fuel: firewood before sticks, rags or a bible' );
+		const opts = game.crafting.provide( { origin: new THREE.Vector3( 0.4, 1, 1.3 ), dir: new THREE.Vector3( 0, - 0.55, - 0.84 ).normalize() }, 4 );
+		ok( opts?.[ 0 ]?.label === 'Add Firewood', 'a low fire offers firewood on F: ' + opts?.[ 0 ]?.label );
+		game.crafting.removeFire( f2 );
+		for ( const x of inv.findAll( ( st ) => [ 'rags', 'bible', 'stick', 'firewood' ].includes( st.id ) ) ) inv.remove( x );
+	}
+
 	// lights drain batteries in game hours
 	const fl = put( 'flashlight' );
 	U.toggleLight( fl );
@@ -314,6 +378,23 @@ console.log( 'item use' );
 	put( 'batteries', 2 );
 	act( fl, /Replace batteries/ ).run(); finish();
 	ok( fl.data.charge === getItem( 'flashlight' ).tool.battery, 'fresh batteries' );
+	{
+		// no idle spot light in the world scene: the pool is three point lights
+		const L2 = new LightPool( { ...game, scene: new THREE.Scene() } );
+		ok( ! L2.spot && L2.game.scene.children.length === 3, 'a fresh light pool adds three point lights and no spot light' );
+		L2.dispose();
+		// with a hands module, a flashlight left on in the bag switches off (the hands draw the held one)
+		const selected = [];
+		game.hands = { select: ( st ) => { selected.push( st ); inv.hands = st.uid; return true; } };
+		fl.data.on = true; inv.hands = null;
+		U._updateLights( 0 );
+		ok( ! fl.data.on, 'with hands: a flashlight on in the bag switches off' );
+		act( fl, /Turn on/ ).run();
+		ok( fl.data.on && selected[ 0 ] === fl, 'with hands: Turn on takes the flashlight into the hands' );
+		U._updateLights( 0 );
+		ok( fl.data.on && ! lights.spotSource, 'with hands: the held flashlight stays on, drawn by the hands' );
+		fl.data.on = false; inv.hands = null; delete game.hands;
+	}
 
 	// food spoils with game time
 	const poke = put( 'poke' ); poke.data.age = 0;
@@ -355,6 +436,27 @@ console.log( 'item use' );
 	const guide = put( 'fishing_guide' );
 	act( guide, /^Read$/ ).run(); finish();
 	ok( U.knowledge.fishing && ! act( guide, /^Read$/ ), 'fishing guide teaches fishing once' );
+	// and it dies with the character
+	game.events.emit( 'playerDeath', {} );
+	ok( ! U.knowledge.fishing && act( guide, /^Read$/ ), 'knowledge is forgotten on death' );
+
+	// splitting one unit off never overfills its container: it goes where there is room
+	{
+		const { containerVolume } = await import( '../src/game/Inventory.js' );
+		const pockets = inv.pockets;
+		const filler = [ ...ITEMS.values() ].find( d => d.size === 1 && d.stack === 1 && d.cat === 'material' ) || [ ...ITEMS.values() ].find( d => d.size === 1 && d.stack === 1 );
+		const tuna = makeStack( 'canned_tuna', 4 );
+		inv.pockets = [ tuna, makeStack( 'canned_tuna', 1 ), makeStack( filler.id, 1 ), makeStack( filler.id, 1 ), makeStack( filler.id, 1 ) ];
+		const full = containerVolume( inv.pockets );
+		const one = U.splitOne( tuna );
+		ok( full === 4 && containerVolume( inv.pockets ) <= 4 && one !== tuna && one.qty === 1 && tuna.qty === 3 && U.where( one )?.kind === 'inv' && ! inv.pockets.includes( one ), `split: the unit went to another container (pockets ${containerVolume( inv.pockets )}/4)` );
+		inv.remove( one );
+		inv.pockets = pockets;
+		// an open can stays its own stack
+		const { canMerge } = await import( '../src/game/items/ItemDB.js' );
+		const c1 = makeStack( 'canned_tuna', 1 ), c2 = makeStack( 'canned_tuna', 1 ); c2.data.open = true;
+		ok( ! canMerge( c1, c2 ) && canMerge( c1, makeStack( 'canned_tuna', 2 ) ), 'an open can does not merge into closed ones' );
+	}
 
 	// player-facing text: short, plain, no exclamation marks
 	const labels = new Set();
@@ -368,6 +470,129 @@ console.log( 'item use' );
 	ok( ! loud.length, 'toasts are short: ' + loud.join( ' | ' ) );
 	const descs = [ ...ITEMS.values() ].filter( d => ! d.firearm && ! d.melee && ! d.ammo && ! d.magazine && ! d.attachment && ( d.cat !== 'throwable' || d.id === 'road_flare' ) && ( d.desc.length > 40 || /!/.test( d.desc ) ) );
 	ok( ! descs.length, 'item descriptions are short: ' + descs.map( d => d.id ).join( ' ' ) );
+}
+
+// ---- world items: loot spots, pickups, claims (the real WorldItems with a stub game) ------------------------------
+console.log( 'world items' );
+{
+	const THREE = await import( 'three' );
+	const { PlayerInventory } = await import( '../src/game/Inventory.js' );
+	const { Survival } = await import( '../src/game/Survival.js' );
+	const { Actions } = await import( '../src/game/Actions.js' );
+	const { Events } = await import( '../src/core/Events.js' );
+	const { WorldItems, drawRange } = await import( '../src/game/items/WorldItems.js' );
+	const { ItemUse } = await import( '../src/game/items/ItemUse.js' );
+	const picks = [];
+	const game = {
+		mode: 'survival', time: { hours: 50, dayMinutes: 48 }, get hour() { return 12; }, get day() { return 3; },
+		scene: new THREE.Scene(), camera: new THREE.PerspectiveCamera(), stats: {}, events: new Events(),
+		audio: { play() {}, loop() { return null; }, buffers: new Map() }, settings: { get: () => true }, input: { pressed: () => false },
+		interact: { addProvider() { return () => {}; }, target: null }, entities: { add() {}, remove() {} },
+		physics: { ground: () => ( { y: 0, box: null } ), waterLevel: () => - 50, raycastBoxes: () => null },
+		hf: { normalAt: ( x, z, out ) => out.set( 0, 1, 0 ), heightAt: () => 0 },
+		world: { isIndoors: () => false, sky: { sunDir: new THREE.Vector3( 0, 1, 0 ), night: 0 } }, weather: { rain: 0 },
+		player: { pos: new THREE.Vector3(), yaw: 0, eye: 1.6, stanceH: 1.6, inventory: new PlayerInventory(), lookDir: ( o ) => o.set( 0, 0, - 1 ) },
+		toast: () => {}, dropStack: () => {}, inputActive: true,
+	};
+	game.survival = new Survival( game );
+	game.actions = new Actions( game );
+	const W = game.items3d = new WorldItems( game );
+	const U = game.itemUse = new ItemUse( game, null );
+	const inv = game.player.inventory;
+	inv.equip.back = makeStack( 'backpack_military', 1 );
+	const finish = () => game.actions.update( 999 );
+	game.events.on( 'item:pick', e => picks.push( e.stack.qty ) );
+	const taken = [];
+	W.addTakenListener( ( it, st ) => taken.push( { key: it.key, qty: st.qty } ) );
+
+	// eating from a streamed loot item on a table: the spot counts as looted, the rest is saved like a drop
+	const spam = makeStack( 'spam', 1 );
+	const loot = W.spawn( spam, new THREE.Vector3( 0.3, 0.8, 0 ), { key: '12:0:s3', persistent: false, settle: false } );
+	U.actions( spam )[ 0 ].run(); finish();
+	const now = W.byStack( spam );
+	ok( taken.some( t => t.key === '12:0:s3' ), 'eating from a loot item marks its spot looted' );
+	ok( now && now !== loot && now.persistent && now.key === null && ! W.items.has( loot ) && spam.data.left === 2, 'the part-eaten item is now a persistent twin (the building drops the original)' );
+	// used up where it lies: taken
+	taken.length = 0;
+	const kit = makeStack( 'first_aid_kit', 1 );
+	W.spawn( kit, new THREE.Vector3( - 0.3, 0.8, 0 ), { key: '12:0:s4', persistent: false, settle: false } );
+	U.use( kit ); finish();
+	ok( taken.some( t => t.key === '12:0:s4' ) && ! W.byStack( kit ), 'unpacking a kit on the floor takes it (spot looted)' );
+	// a pickup that tops up a stack you carry reports what was picked up, not the emptied stack
+	inv.add( makeStack( 'ammo_9mm', 10 ), { autoEquip: false } );
+	taken.length = 0; picks.length = 0;
+	const rounds = W.spawn( makeStack( 'ammo_9mm', 20 ), new THREE.Vector3( 0, 0, 0.5 ), { persistent: true } );
+	W.take( rounds );
+	ok( inv.count( 'ammo_9mm' ) === 30 && picks[ 0 ] === 20 && taken[ 0 ]?.qty === 20, `merged pickup reports 20 rounds (event ${picks[ 0 ]}, listener ${taken[ 0 ]?.qty})` );
+	// a taken item is gone from the spatial hash too (a shelf item used to linger there, still drawn and hoverable)
+	const shelf = W.spawn( makeStack( 'crackers', 1 ), new THREE.Vector3( 1, 0.9, 0 ), { key: '12:0:s6', settle: false } );
+	W.take( shelf );
+	ok( ! W.near( new THREE.Vector3( 1, 0.9, 0 ), 2 ).includes( shelf ) && ! W.near( new THREE.Vector3( 0, 0, 0.5 ), 2 ).includes( rounds ), 'taken items leave no ghost in the spatial hash' );
+	// splitting a unit off a stack on the ground claims the stack
+	taken.length = 0;
+	const cans = makeStack( 'canned_tuna', 3 );
+	W.spawn( cans, new THREE.Vector3( 0.6, 0, 0 ), { key: '12:0:s5', persistent: false, settle: false } );
+	inv.add( makeStack( 'can_opener', 1 ), { autoEquip: false } );
+	U.use( cans ); finish();
+	ok( taken.some( t => t.key === '12:0:s5' ) && W.byStack( cans )?.persistent && cans.qty === 2, 'opening one can of a pile on the floor claims the pile' );
+	// small things are drawn less far
+	ok( drawRange( 0.02 ) === 10 && drawRange( 0.1 ) === 35 && drawRange( 0.4 ) === 55, 'draw range scales with model size' );
+	W.dispose(); U.dispose();
+}
+
+// ---- loot: perishables have gone off a week into the outbreak ------------------------------------------------
+{
+	const { PERISHABLE_H } = await import( '../src/game/items/Loot.js' );
+	let fresh = 0, found = 0;
+	for ( let i = 0; i < 300; i ++ ) for ( const t of [ 'fridge', 'restaurant', 'fastfood' ] ) for ( const st of rollLoot( t, rnd ) ) {
+		const f = ITEMS.get( st.id ).food;
+		if ( ! f?.spoil || f.spoil > PERISHABLE_H ) continue;
+		found ++; if ( freshness( st ) > 0 ) fresh ++;
+	}
+	ok( found > 0 && fresh === 0, `perishable loot is rotten (${found} found, ${fresh} fresh)` );
+	const tin = rollLoot( { rolls: [ 1, 1 ], items: [ 'spam' ] }, rnd )[ 0 ];
+	ok( freshness( tin ) === 1, 'tinned food is still good' );
+}
+
+// ---- icons: an empty render is not an icon -----------------------------------------------------------------
+{
+	const { coverage, ICON_VERSION } = await import( '../src/render/Icons.js' );
+	const px = new Uint8Array( 256 * 256 * 4 );
+	ok( coverage( px ) === 0, 'icons: an empty read-back covers nothing' );
+	for ( let i = 0; i < 4000; i ++ ) px[ i * 4 + 3 ] = 255;
+	ok( coverage( px ) === 4000 && ICON_VERSION >= 6, 'icons: coverage counts drawn pixels' );
+}
+
+// ---- models: every item model builds, rests on y = 0 (no DOM: a no-op canvas stands in) ---------------------------
+console.log( 'models' );
+{
+	const noop = () => {};
+	const ctx2d = new Proxy( {}, { get: ( t, k ) => {
+		if ( k in t ) return t[ k ];
+		if ( k === 'measureText' ) return () => ( { width: 10 } );
+		if ( k === 'createLinearGradient' || k === 'createRadialGradient' || k === 'createPattern' ) return () => ( { addColorStop: noop } );
+		if ( k === 'getImageData' ) return ( x, y, w, h ) => ( { data: new Uint8ClampedArray( w * h * 4 ), width: w, height: h } );
+		return noop;
+	}, set: ( t, k, v ) => { t[ k ] = v; return true; } } );
+	const el = () => ( { width: 1, height: 1, style: {}, getContext: () => ctx2d, toDataURL: () => 'data:,', addEventListener: noop, removeEventListener: noop, setAttribute: noop } );
+	const hadDoc = 'document' in globalThis;
+	if ( ! hadDoc ) globalThis.document = { createElement: el, createElementNS: el };
+	try {
+		const M = await import( '../src/render/ItemModels.js' );
+		let built = 0;
+		const fell = [], low = [];
+		for ( const d of ITEMS.values() ) {
+			if ( WEAPON_MODELS.has( d.model?.type ) ) continue;
+			try {
+				const info = M.modelInfo( d );
+				built ++;
+				if ( M.buildItemModel( d ).userData.fallback ) fell.push( d.id );
+				if ( info.box.min.y < - 0.005 ) low.push( `${d.id} ${info.box.min.y.toFixed( 3 )}` );
+			} catch ( e ) { fell.push( d.id + ': ' + e.message ); }
+		}
+		ok( built > 300 && ! fell.length, `${built} models build without the placeholder: ${fell.join( ' | ' )}` );
+		ok( ! low.length, 'models rest on y = 0 (nothing below the origin): ' + low.join( ' | ' ) );
+	} finally { if ( ! hadDoc ) delete globalThis.document; }
 }
 
 console.log( `\n${passes} passed, ${fails} failed` );
