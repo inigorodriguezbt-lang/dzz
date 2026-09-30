@@ -5,11 +5,13 @@
 // its long axis along +x, metres, meshes may share materials.
 //
 // Also here: modelInfo( def ) (bounds of the template, cached) and instanceParts( def ) (the template's meshes
-// merged per material, transforms baked in — what the world item instancer draws).
+// merged per material, transforms baked in — what the world item instancer draws). Untextured opaque parts (buttons,
+// zips, tin lids, trims) merge further into a few shared vertex-coloured materials, so most items are 1-2 draws.
 // The builders for food, clothing and gear live in src/game/items/models/*.js; weapon builders are registered
 // by the weapons module ('gun', 'melee', 'mag', 'ammo_box', 'attachment', 'throwable').
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { patchMaterial } from './Materials.js';
 import { registerFoodModels } from '../game/items/models/food.js';
 import { registerClothingModels } from '../game/items/models/clothing.js';
 import { registerGearModels } from '../game/items/models/gear.js';
@@ -83,6 +85,25 @@ export function modelInfo( def ) {
 	return info;
 }
 
+// the shared material an untextured opaque part draws with (its colour moves into the vertices): matte, glossy or
+// metal, per side; roughness and metalness snap to the bucket's, which small parts never show
+const plainMats = new Map();
+function plainBucket( m ) {
+	if ( ! m?.isMeshStandardMaterial || m.map || m.normalMap || m.roughnessMap || m.metalnessMap || m.alphaMap || m.aoMap || m.emissiveMap
+		|| m.transparent || m.alphaTest > 0 || m.vertexColors || m.userData.layer || ( m.emissiveIntensity > 0 && m.emissive.getHex() !== 0 ) ) return null;
+	const kind = m.metalness > 0.5 ? 'metal' : m.roughness < 0.45 ? 'gloss' : 'matte';
+	const key = kind + ':' + m.side;
+	let mat = plainMats.get( key );
+	if ( ! mat ) {
+		mat = new THREE.MeshStandardMaterial( { color: 0xffffff, vertexColors: true, side: m.side,
+			roughness: kind === 'metal' ? 0.35 : kind === 'gloss' ? 0.35 : 0.8, metalness: kind === 'metal' ? 0.85 : 0 } );
+		patchMaterial( mat, 'item' );
+		mat.name = 'item-plain-' + key;
+		plainMats.set( key, mat );
+	}
+	return mat;
+}
+
 // the template's meshes merged per material: [ { geometry, material, layer, castShadow } ]
 export function instanceParts( def ) {
 	let parts = partsCache.get( def.id );
@@ -93,9 +114,10 @@ export function instanceParts( def ) {
 	obj.traverse( ( o ) => {
 		if ( ! o.isMesh || ! o.geometry ) return;
 		const mats = Array.isArray( o.material ) ? o.material : [ o.material ];
-		const key = mats[ 0 ];
+		const plain = plainBucket( mats[ 0 ] );
+		const key = plain || mats[ 0 ];
 		let g = groups.get( key );
-		if ( ! g ) { g = { material: key, geos: [], layer: o.layers.mask & 2 ? 1 : 0 }; groups.set( key, g ); }
+		if ( ! g ) { g = { material: key, geos: [], layer: o.layers.mask & 2 ? 1 : 0, colored: !! plain }; groups.set( key, g ); }
 		let geo = o.geometry.clone();
 		// keep only what every part has, so they merge
 		for ( const name of Object.keys( geo.attributes ) ) if ( ! [ 'position', 'normal', 'uv' ].includes( name ) ) geo.deleteAttribute( name );
@@ -104,6 +126,12 @@ export function instanceParts( def ) {
 		if ( geo.index ) geo = geo.toNonIndexed();
 		geo.clearGroups();
 		geo.applyMatrix4( o.matrixWorld );
+		if ( plain ) {
+			// the part's own colour (linear), per vertex
+			const c = mats[ 0 ].color, n = geo.attributes.position.count, col = new Float32Array( n * 3 );
+			for ( let i = 0; i < n; i ++ ) { col[ i * 3 ] = c.r; col[ i * 3 + 1 ] = c.g; col[ i * 3 + 2 ] = c.b; }
+			geo.setAttribute( 'color', new THREE.Float32BufferAttribute( col, 3 ) );
+		}
 		g.geos.push( geo );
 	} );
 	parts = [];
