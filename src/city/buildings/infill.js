@@ -16,6 +16,44 @@ const COMMERCIAL = [ [ 'convenience', 20 ], [ 'restaurant', 15 ], [ 'clothing', 
 	[ 'apartment', 14 ], [ 'sports', 3 ], [ 'surf', 4 ], [ 'pharmacy', 3 ], [ 'hardware', 2 ], [ 'garage', 3 ] ];
 const CORE = [ [ 'office', 45 ], [ 'apartment', 32 ], [ 'hotel', 13 ] ];
 
+// The bake stores each city's grid angle rounded to 0.01 rad: rebuilt from that, the grid drifts by up to a few
+// metres far from the centre. Fit every city's frame (origin + angle; the block pitch is exact) to its baked
+// street ends instead (2-D Procrustes), as the roads do (roads/network.js fitFrames), so the infill lines up with
+// the streets and sidewalks the roads draw.
+function fitFrames( meta ) {
+	const cities = meta.cities || [];
+	const pts = cities.map( () => [] );
+	for ( const s of meta.streets || [] ) {
+		const c = cities[ s[ 0 ] ];
+		if ( ! c || ! c.pu ) continue;
+		const ca = Math.cos( c.angle ), sa = Math.sin( c.angle );
+		for ( const [ x, z ] of [ [ s[ 1 ], s[ 2 ] ], [ s[ 4 ], s[ 5 ] ] ] ) {
+			const i = Math.round( ( ( x - c.x ) * ca + ( z - c.z ) * sa ) / c.pu ), j = Math.round( ( - ( x - c.x ) * sa + ( z - c.z ) * ca ) / c.pv );
+			pts[ s[ 0 ] ].push( x, z, i * c.pu, j * c.pv );
+		}
+	}
+	return cities.map( ( c, k ) => {
+		const P = pts[ k ], n = P.length / 4;
+		let angle = c.angle, ox = c.x, oz = c.z;
+		if ( n >= 4 ) {
+			let mx = 0, mz = 0, mu = 0, mv = 0;
+			for ( let q = 0; q < P.length; q += 4 ) { mx += P[ q ]; mz += P[ q + 1 ]; mu += P[ q + 2 ]; mv += P[ q + 3 ]; }
+			mx /= n; mz /= n; mu /= n; mv /= n;
+			let dot = 0, cross = 0;
+			for ( let q = 0; q < P.length; q += 4 ) {
+				const px = P[ q ] - mx, pz = P[ q + 1 ] - mz, qu = P[ q + 2 ] - mu, qv = P[ q + 3 ] - mv;
+				dot += qu * px + qv * pz; cross += qu * pz - qv * px;
+			}
+			if ( dot > 0 ) {
+				angle = Math.atan2( cross, dot );
+				const ca = Math.cos( angle ), sa = Math.sin( angle );
+				ox = mx - ( mu * ca - mv * sa ); oz = mz - ( mu * sa + mv * ca );
+			}
+		}
+		return { x: ox, z: oz, angle };
+	} );
+}
+
 function pickW( R, list ) {
 	let t = 0;
 	for ( const [ , w ] of list ) t += w;
@@ -85,6 +123,7 @@ export function augmentBuildings( meta, hf ) {
 
 	const out = [];
 	const cities = meta.cities || [];
+	const frames = fitFrames( meta );
 	// the blocks of each city: grid cells whose four edges are streets
 	const edges = cities.map( () => new Set() );
 	const ek = ( i0, j0, i1, j1 ) => i0 < i1 || ( i0 === i1 && j0 < j1 ) ? `${i0},${j0},${i1},${j1}` : `${i1},${j1},${i0},${j0}`;
@@ -106,8 +145,10 @@ export function augmentBuildings( meta, hf ) {
 			// a block has its low corner at (i, j): try the cells on both sides of this edge
 			if ( j0 === j1 ) { blocks.add( `${Math.min( i0, i1 )},${j0}` ); blocks.add( `${Math.min( i0, i1 )},${j0 - 1}` ); } else { blocks.add( `${i0},${Math.min( j0, j1 )}` ); blocks.add( `${i0 - 1},${Math.min( j0, j1 )}` ); }
 		}
-		const ca = Math.cos( c.angle ), sa = Math.sin( c.angle );
-		const toW = ( u, v ) => [ c.x + u * ca - v * sa, c.z + u * sa + v * ca ];
+		// (block indices from the stored frame above, positions from the fitted one)
+		const fr = frames[ ci ];
+		const ca = Math.cos( fr.angle ), sa = Math.sin( fr.angle );
+		const toW = ( u, v ) => [ fr.x + u * ca - v * sa, fr.z + u * sa + v * ca ];
 		const street = c.street || 10, walk = c.walk || 0;
 		for ( const b of [ ...blocks ].sort() ) {
 			const [ i, j ] = b.split( ',' ).map( Number );
@@ -131,7 +172,7 @@ export function augmentBuildings( meta, hf ) {
 			};
 			free.fill( 1 );
 			// world -> raster cell ranges of a disc / box around a point list
-			const lu = ( x, z ) => ( x - c.x ) * ca + ( z - c.z ) * sa - u0, lv = ( x, z ) => - ( x - c.x ) * sa + ( z - c.z ) * ca - v0;
+			const lu = ( x, z ) => ( x - fr.x ) * ca + ( z - fr.z ) * sa - u0, lv = ( x, z ) => - ( x - fr.x ) * sa + ( z - fr.z ) * ca - v0;
 			const burn = ( pts, r, test ) => {
 				let umin = Infinity, umax = - Infinity, vmin = Infinity, vmax = - Infinity;
 				for ( let k = 0; k < pts.length; k += 2 ) { const u = lu( pts[ k ], pts[ k + 1 ] ), v = lv( pts[ k ], pts[ k + 1 ] ); umin = Math.min( umin, u ); umax = Math.max( umax, u ); vmin = Math.min( vmin, v ); vmax = Math.max( vmax, v ); }
@@ -140,7 +181,7 @@ export function augmentBuildings( meta, hf ) {
 				for ( let a = a0; a <= a1; a ++ ) for ( let q = q0; q <= q1; q ++ ) {
 					if ( ! free[ a * nv + q ] ) continue;
 					const u = u0 + ( a + 0.5 ) * CS, v = v0 + ( q + 0.5 ) * CS;
-					if ( test( c.x + u * ca - v * sa, c.z + u * sa + v * ca ) ) free[ a * nv + q ] = 0;
+					if ( test( fr.x + u * ca - v * sa, fr.z + u * sa + v * ca ) ) free[ a * nv + q ] = 0;
 				}
 			};
 			for ( const o of near( grid, 0 ) ) {
@@ -189,14 +230,14 @@ export function augmentBuildings( meta, hf ) {
 				if ( c.kind === 'village' && ( type === 'office' || type === 'hotel' ) ) type = 'house';
 				// footprint inside the lot (setbacks as the bake places buildings)
 				let setF, setS, setB;
-				if ( type === 'house' ) { setF = 4 + R2() * 3; setS = 2 + R2() * 1.5; setB = 3 + R2() * 3; } else { setF = L.big ? 3 : 1; setS = L.big ? 2 : 0.6; setB = L.big ? 3 : 2 + R2() * 3; }
+				if ( type === 'house' ) { setF = 4 + R2() * 3; setS = 2 + R2() * 1.5; setB = 3 + R2() * 3; } else { setF = L.big ? 3 : 1.6; setS = L.big ? 2 : 0.6; setB = L.big ? 3 : 2 + R2() * 3; }
 				let w = L.w - setS * 2, d = L.d - setF - setB;
 				if ( type === 'house' ) { w = Math.min( w, 9 + R2() * 6 ); d = Math.min( d, 8 + R2() * 5 ); }
 				if ( w < 6 || d < 6 ) continue;
 				const cu = L.u + L.w / 2;
 				const cv = L.face === 1 ? L.v + L.d - setF - d / 2 : L.v + setF + d / 2;
 				const [ x, z ] = toW( cu, cv );
-				const angle = c.angle + ( L.face === 1 ? Math.PI : 0 );
+				const angle = fr.angle + ( L.face === 1 ? Math.PI : 0 );
 				const o = { x, z, hw: w / 2, hd: d / 2, c: Math.cos( angle ), s: Math.sin( angle ) };
 				// dry, gentle ground, no pavement of a highway or a runway under it (the baked flags)
 				let lo = Infinity, hi = - Infinity, paved = false;

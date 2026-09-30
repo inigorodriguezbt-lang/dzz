@@ -1,27 +1,41 @@
 // Ported from Tidewater src/engine/render/Shadows.js (SunShadows) and the shadow part of
 // src/engine/render/wgsl/lighting.js (MIT, see LICENSE-Tidewater.txt).
-// Cascaded sun shadow maps: cascades fitted to bounding spheres of slices of the camera frustum (stable under
-// rotation, the radius quantised to 1/16 m) and snapped to their texel grid (no shimmer when moving), pulled
-// back 200 m toward the light for off-screen casters. The near cascade renders every frame, the next every
-// 2nd, the last every 4th (all of them when the light moves). They are three hidden DirectionalLights whose
-// maps three's WebGLShadowMap renders (the custom depth materials keep working); the lighting samples them in
-// COMMON_GLSL (sunShadowCSM): PCSS on the near cascade (raw depth reads), 5-tap hardware PCF on the others,
-// seams blended over bands that grow with the distance. Depth is reversed (1 near the light).
+// Cascaded sun shadow maps. Each cascade covers a sphere around the camera (the lighting picks the cascade by
+// the distance to the camera, not the view depth), so its map doesn't depend on where the camera looks: turning
+// never re-renders a cascade, and a camera-centred sphere is also smaller than one around a 90-degree-wide
+// frustum slice. The centre is snapped to the texel grid (no shimmer when moving), and the map is pulled back
+// 200 m toward the light for off-screen casters.
+// Updates are amortised: the near cascade renders every frame, the middle one every 2nd frame, and the last
+// (the widest, most casters) only when the camera has used up the slack its sphere was given, when the light
+// direction took a step, or every LAZY_REFRESH frames for moving casters, and never on the middle one's
+// frames. The light direction the maps use follows the sun in SUN_STEP steps (it moves ~0.1 degree/s at the
+// default day length: re-rendering every cascade whenever it moved made slow frames slower still), and a step
+// reaches each cascade at its own next turn. A jump (time set, sun to moon) re-renders them all at once.
+// They are three hidden DirectionalLights whose maps three's WebGLShadowMap renders (the custom depth
+// materials keep working); the lighting samples them in COMMON_GLSL (sunShadowCSM): PCSS on the near cascade
+// (raw depth reads), 5-tap hardware PCF on the others, seams blended over bands that grow with the distance.
+// Depth is reversed (1 near the light).
 import * as THREE from 'three';
 import { G, CSM_FALLBACK } from './Materials.js';
 
+// splits: the far edge of each cascade (m from the camera)
 const QUALITY = {
 	off: null,
-	medium: { size: 1024, splits: [ 10, 120 ] },
-	high: { size: 2048, splits: [ 10, 60, 400 ] },
-	ultra: { size: 4096, splits: [ 10, 60, 400 ] },
+	medium: { size: 1024, splits: [ 12, 150 ] },
+	high: { size: 2048, splits: [ 10, 60, 450 ] },
+	ultra: { size: 4096, splits: [ 10, 60, 450 ] },
 };
 const NORMAL_BIAS = [ 0.015, 0.06, 0.3 ];
 const LIGHT_MARGIN = 200;
 const BIAS = 0.00002;
+// camera travel a cascade's sphere allows before its map must follow, as a share of its split
+const SLACK = 0.08;
+// frames between refreshes of the last cascade (moving casters: vehicles, creatures)
+const LAZY_REFRESH = 12;
+// rad: the step of the maps' light direction, and the change that re-renders every cascade at once
+const SUN_STEP = 0.003;
+const SUN_JUMP = 0.05;
 
-const _corners = [];
-for ( let i = 0; i < 8; i ++ ) _corners.push( new THREE.Vector3() );
 const _center = new THREE.Vector3();
 const _rot = new THREE.Matrix4();
 const _inv = new THREE.Matrix4();
@@ -36,8 +50,10 @@ export class SunShadows {
 		this.lights = [];
 		this.cfg = null;
 		this.frame = 0;
-		this.lastSun = new THREE.Vector3( 0, - 2, 0 );
+		// the light direction the maps are rendered with (follows the key light in steps)
+		this.lightDir = new THREE.Vector3( 0, - 2, 0 );
 		this.enabled = false;
+		this.stats = { renders: [ 0, 0, 0 ], frames: 0 };
 		// WebGLShadowMap.render needs three's render state (set only during a render): the cascades are
 		// rendered from the afterRender callback of an empty scene
 		this._host = new THREE.Scene();
@@ -62,7 +78,7 @@ export class SunShadows {
 		G.uCsm1.value = G.uCsm2.value = CSM_FALLBACK.cmp;
 		if ( ! cfg ) return;
 		const n = cfg.splits.length;
-		this.periods = cfg.splits.map( ( _, i ) => i === 0 ? 1 : i === 1 ? 2 : 4 );
+		this.periods = cfg.splits.map( ( _, i ) => i === 0 ? 1 : 2 );
 		for ( let i = 0; i < n; i ++ ) {
 			const L = new THREE.DirectionalLight( 0xffffff, 0 );
 			L.castShadow = true;
@@ -70,7 +86,11 @@ export class SunShadows {
 			L.shadow.mapSize.set( cfg.size, cfg.size );
 			L.shadow.bias = 0;
 			L.shadow.normalBias = 0;
-			L.userData.dirty = true;
+			// the sphere: the slice's far edge (with half its seam band) plus the slack
+			const x = i === 0 ? 0 : cfg.splits[ i - 1 ], y = cfg.splits[ i ];
+			const far = i === n - 1 ? y : y + this._margin( y ) * 0.5;
+			const slack = Math.max( 0.5, y * SLACK );
+			L.userData = { dirty: true, stale: false, last: - 1e9, centre: new THREE.Vector3( 1e9, 0, 0 ), slack, radius: Math.ceil( ( far + slack ) * 16 ) / 16, x, y, far };
 			// the near cascade is read raw (PCSS): a plain depth texture, nearest; the others compare in hardware
 			// (the colour attachment is never read: one byte per texel instead of four)
 			const map = new THREE.WebGLRenderTarget( cfg.size, cfg.size, { format: THREE.RedFormat, type: THREE.UnsignedByteType, generateMipmaps: false } );
@@ -94,9 +114,14 @@ export class SunShadows {
 		if ( n > 1 ) G.uCsm1.value = this.lights[ 1 ].shadow.map.depthTexture;
 		if ( n > 2 ) G.uCsm2.value = this.lights[ 2 ].shadow.map.depthTexture;
 		for ( let i = 0; i < 3; i ++ ) G.uCsmInfo.value[ i ].set( i < n ? 0 : - 1, 1, 0, 1 );
+		for ( let i = 0; i < n; i ++ ) {
+			const u = this.lights[ i ].userData;
+			G.uCsmBlend.value[ i ].set( u.x, u.y, this._margin( u.x ), this._margin( u.y ) );
+		}
+		this.lightDir.set( 0, - 2, 0 );
 	}
 
-	// seam blend band at view distance d (SoftCSMShadowNode: max( 0.25 e^2, 0.25 e ) of the normalised break,
+	// seam blend band at distance d (SoftCSMShadowNode: max( 0.25 e^2, 0.25 e ) of the normalised break,
 	// times the shadow distance)
 	_margin( d ) {
 		const far = this.cfg.splits[ this.cfg.splits.length - 1 ];
@@ -104,33 +129,16 @@ export class SunShadows {
 		return Math.max( 0.25 * e * e, 0.25 * e ) * far;
 	}
 
-	// fit cascade i to the view-distance slice of the camera, widened by half the seam blend bands
-	_fit( i, camera, L ) {
-		const splits = this.cfg.splits, n = splits.length, size = this.cfg.size;
-		const light = this.lights[ i ];
-		const x = i === 0 ? 0 : splits[ i - 1 ];
-		const y = splits[ i ];
-		const mN = this._margin( x ), mF = this._margin( y );
-		const near = Math.max( camera.near, x - mN * 0.5 );
-		const far = i === n - 1 ? y : y + mF * 0.5;
-		G.uCsmBlend.value[ i ].set( x, y, mN, mF );
-		// slice corners in world space
-		const tanY = Math.tan( camera.fov * Math.PI / 360 ) / ( camera.zoom || 1 );
-		const tanX = tanY * camera.aspect;
-		let k = 0;
-		for ( const d of [ near, far ] ) for ( const sx of [ - 1, 1 ] ) for ( const sy of [ - 1, 1 ] ) _corners[ k ++ ].set( sx * tanX * d, sy * tanY * d, - d ).applyMatrix4( camera.matrixWorld );
-		// bounding sphere of the slice: centre on the axis, radius to the farthest corner
-		const zc = Math.min( far, ( near + far ) / 2 * ( 1 + tanX * tanX + tanY * tanY ) );
-		_center.set( 0, 0, - zc ).applyMatrix4( camera.matrixWorld );
-		let r = 0;
-		for ( const p of _corners ) r = Math.max( r, p.distanceTo( _center ) );
-		r = Math.ceil( r * 16 ) / 16; // quantised: the texel size stays fixed while the camera turns
+	// centre cascade i on the camera (snapped to its texels) for the light direction L
+	_fit( i, camPos, L ) {
+		const light = this.lights[ i ], u = light.userData, size = this.cfg.size;
+		const r = u.radius;
 		// light view looking along -L (three's lookAt basis), the centre snapped to texels
 		const up = Math.abs( L.y ) > 0.99 ? _upX : _upY;
 		_rot.lookAt( L, _origin, up );
 		_inv.copy( _rot ).invert();
 		const texel = 2 * r / size;
-		const ls = _v4.set( _center.x, _center.y, _center.z, 1 ).applyMatrix4( _inv );
+		const ls = _v4.set( camPos.x, camPos.y, camPos.z, 1 ).applyMatrix4( _inv );
 		ls.x = Math.round( ls.x / texel ) * texel;
 		ls.y = Math.round( ls.y / texel ) * texel;
 		const back = r + LIGHT_MARGIN;
@@ -147,11 +155,11 @@ export class SunShadows {
 		cam.updateProjectionMatrix();
 		light.shadow.updateMatrices( light );
 		G.uCsmMat.value[ i ].copy( light.shadow.matrix );
-		// far split, texel (m), normal bias (m), depth range (m)
-		G.uCsmInfo.value[ i ].set( far, texel, NORMAL_BIAS[ i ] ?? 0.05, cam.far - cam.near );
+		// far edge (m from the camera), texel (m), normal bias (m), depth range (m)
+		G.uCsmInfo.value[ i ].set( u.far, texel, NORMAL_BIAS[ i ] ?? 0.05, cam.far - cam.near );
 	}
 
-	// fit the cascades due this frame and render them (before the main render)
+	// fit and render the cascades due this frame (before the main render)
 	update( camera, L, scene ) {
 		if ( ! this.enabled ) return;
 		this.frame ++;
@@ -159,18 +167,40 @@ export class SunShadows {
 		G.uCsmOn.value = on ? 1 : 0;
 		if ( ! on ) return;
 		camera.updateMatrixWorld();
-		const sunMoved = this.lastSun.angleTo( L ) > 1e-4;
-		this.lastSun.copy( L );
-		const todo = [];
-		for ( let i = 0; i < this.lights.length; i ++ ) {
-			const light = this.lights[ i ];
-			if ( sunMoved || light.userData.dirty || ( this.frame + i ) % this.periods[ i ] === 0 ) {
-				this._fit( i, camera, L );
-				light.userData.dirty = false;
-				light.shadow.needsUpdate = true;
-				todo.push( light );
-			}
+		_center.setFromMatrixPosition( camera.matrixWorld );
+		const n = this.lights.length, last = n - 1;
+		// the maps' light direction: a step marks every cascade stale (each catches up at its next turn), a jump
+		// re-renders them all now
+		const a = this.lightDir.angleTo( L );
+		if ( a > SUN_JUMP || this.lightDir.y < - 1.5 ) {
+			this.lightDir.copy( L );
+			for ( const light of this.lights ) light.userData.dirty = true;
+		} else if ( a > SUN_STEP ) {
+			this.lightDir.copy( L );
+			for ( const light of this.lights ) light.userData.stale = true;
 		}
+		// the last cascade takes the frames the middle one skips (no frame renders both)
+		const midTurn = n > 2 && ( this.frame + 1 ) % this.periods[ 1 ] === 0;
+		const todo = [];
+		for ( let i = 0; i < n; i ++ ) {
+			const light = this.lights[ i ], u = light.userData;
+			const moved = _center.distanceToSquared( u.centre ) > u.slack * u.slack;
+			let due = u.dirty || moved;
+			if ( ! due ) {
+				if ( i < last || n === 1 ) due = ( this.frame + i ) % this.periods[ i ] === 0;
+				else due = ! midTurn && ( u.stale || this.frame - u.last >= LAZY_REFRESH );
+			}
+			if ( ! due ) continue;
+			this._fit( i, _center, this.lightDir );
+			u.dirty = false;
+			u.stale = false;
+			u.last = this.frame;
+			u.centre.copy( _center );
+			light.shadow.needsUpdate = true;
+			todo.push( light );
+			this.stats.renders[ i ] ++;
+		}
+		this.stats.frames ++;
 		if ( ! todo.length ) return;
 		const gl = this.r.gl;
 		const layers = camera.layers.mask;
@@ -181,6 +211,9 @@ export class SunShadows {
 		this._scene = null;
 		camera.layers.mask = layers;
 	}
+
+	// re-render every cascade on the next update (after a teleport, or when casters changed wholesale)
+	invalidate() { for ( const light of this.lights ) light.userData.dirty = true; }
 
 	// the shadow source for the post passes (the haze march): one hard tap per cascade
 	get source() {

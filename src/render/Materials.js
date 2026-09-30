@@ -275,11 +275,11 @@ export const COMMON_GLSL = /* glsl */`
 		return sum / 5.0;
 	}
 	// sun visibility at P (1 = lit), N the geometric world normal; the seams blended over a quarter of the
-	// break, the last cascade fading out over its final part
+	// break, the last cascade fading out over its final part. The cascades are spheres around the camera
+	// (render/Shadows.js): picked by the distance to the camera, not the view depth
 	float sunShadowCSM( vec3 P, vec3 N, bool pcss ) {
 		if ( uCsmOn < 0.5 ) return 1.0;
-		vec3 fwd = - vec3( viewMatrix[ 0 ][ 2 ], viewMatrix[ 1 ][ 2 ], viewMatrix[ 2 ][ 2 ] );
-		float dist = dot( P - uCamPos, fwd );
+		float dist = length( P - uCamPos );
 		float noise = dtIGN( gl_FragCoord.xy + mod( uFrame, 64.0 ) * 5.588238 );
 		float pcfNoise = dtIGN( gl_FragCoord.xy );
 		float ret = 1.0;

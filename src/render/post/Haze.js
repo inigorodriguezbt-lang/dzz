@@ -93,12 +93,11 @@ const MARCH_FRAG = /* glsl */`
 				tPrev = t;
 				float Tr = exp( - tau );
 				float w = sig * Tr * dt;
-				// one hard tap in the cascade covering P (by view distance)
+				// one hard tap in the cascade covering P (the cascades are spheres around the camera: by distance)
 				float v = 1.0;
 				if ( uShadowOn > 0.5 ) {
-					float vd = t * fwdK;
 					int c = -1;
-					for ( int k = 0; k < 3; k ++ ) if ( c < 0 && float( k ) < uCsmCount && vd < uCsmInfo[ k ].x ) c = k;
+					for ( int k = 0; k < 3; k ++ ) if ( c < 0 && float( k ) < uCsmCount && t < uCsmInfo[ k ].x ) c = k;
 					if ( c >= 0 ) {
 						vec4 sc = c == 0 ? sc0[ 0 ] + scd[ 0 ] * t : ( c == 1 ? sc0[ 1 ] + scd[ 1 ] * t : sc0[ 2 ] + scd[ 2 ] * t );
 						if ( ! ( any( lessThanEqual( sc.xy, vec2( 0.0 ) ) ) || any( greaterThanEqual( sc.xy, vec2( 1.0 ) ) ) || sc.z < 0.0 ) ) v = csmTap( c, sc.xy, sc.z + uCsmBias );
