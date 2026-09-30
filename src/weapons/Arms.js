@@ -104,9 +104,11 @@ function fitFinger( f, cy, cz, r, k ) {
 	return B;
 }
 
-export function curlFor( r, tight = 1, beta = GRIP_BETA ) {
+// dz / sink: the grip sits dz further towards the fingers and sinks that far into the palm's pads (a support hand
+// cradling a handguard near the finger roots rather than a fist round a grip)
+export function curlFor( r, tight = 1, beta = GRIP_BETA, dz = 0, sink = 0 ) {
 	// solved once per grip size (the view model asks every frame); callers must not modify the result
-	const key = `${ r }|${ tight }|${ beta }`;
+	const key = `${ r }|${ tight }|${ beta }|${ dz }|${ sink }`;
 	let out = CURLS.get( key );
 	if ( out ) return out;
 	out = [];
@@ -115,7 +117,7 @@ export function curlFor( r, tight = 1, beta = GRIP_BETA ) {
 	for ( const f of FINGERS ) {
 		// 2D in the finger's plane: z forward, y up (back of the hand), origin at the knuckle. The diagonal grip
 		// axis crosses this finger's plane further back for the pinky than for the index
-		const cy = - ( PALM_SKIN + r ) - f.y, cz = GRIP_Z + f.x * tb - f.z;
+		const cy = - ( PALM_SKIN - sink + r ) - f.y, cz = GRIP_Z + dz + f.x * tb - f.z;
 		const angles = fitFinger( f, cy, cz, r, k );
 		out.push( angles.map( ( a, i ) => THREE.MathUtils.clamp( a * tight + ( tight > 1 ? ( tight - 1 ) * 0.4 : 0 ), i ? 0 : - 0.15, JOINT_MAX[ i ] ) ) );
 	}
@@ -695,8 +697,8 @@ export function wristMatrix( grip, side, out = new THREE.Matrix4(), lift = 0 ) {
 	// shift: how far towards the index finger the axis crosses the knuckle line (a support hand holds a handguard
 	// nearer its thumb side)
 	_gp.copy( grip.p )
-		.addScaledVector( _gy, PALM_SKIN + r + lift * 0.05 )
-		.addScaledVector( _hb, - GRIP_Z )
+		.addScaledVector( _gy, PALM_SKIN - ( grip.sink || 0 ) + r + lift * 0.05 )
+		.addScaledVector( _hb, - GRIP_Z - ( grip.dz || 0 ) )
 		.addScaledVector( _ha, - ( grip.shift || 0 ) * side );
 	out.makeBasis( _ha, _gy, _hb ).setPosition( _gp );
 	return out;

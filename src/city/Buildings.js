@@ -545,20 +545,21 @@ class City {
 					_v.set( tp.x, tp.y, tp.z );
 					const t = raySphere( o, dir, _v, 0.2, maxDist );
 					if ( t === null ) continue;
-					const fill = g.player.inventory.find?.( ( s, d ) => d?.tool?.liquid && ( s.data?.amount || 0 ) < d.tool.liquid - 0.01 );
-					out.push( { t, id: 'tap:' + tp.key, label: fill ? 'Fill' : 'Drink', sub: 'Tap', noOcclusion: true, action: () => this.useTap( tp, !! fill ) } );
+					// drink when thirsty, else fill a bottle that has room (if there is one)
+					const thirsty = ( g.survival?.thirst ?? 0 ) < 90;
+					const fill = ! thirsty && g.itemUse?.fillFrom ? g.player.inventory.find?.( ( s, d ) => d?.tool?.liquid && ( s.data?.amount || 0 ) < d.tool.liquid - 0.01 ) : null;
+					out.push( { t, id: 'tap:' + tp.key, label: fill ? 'Fill' : 'Drink', sub: 'Tap', noOcclusion: true, action: () => this.useTap( tp, fill ) } );
 				}
 			}
 		}
 		return out;
 	}
 
-	useTap( tp, fill ) {
+	useTap( tp, fill = null ) {
 		const g = this.game;
-		g.audio?.play( 'drink', { vol: 0.3 } );
-		if ( ! tp.water ) { g.toast( 'No water', 'warn' ); return; }
-		if ( fill && g.itemUse?.fillFrom ) { g.itemUse.fillFrom( 'tap' ); return; }
-		g.survival?.drink?.( null, 0.4, 'water' );
+		if ( ! tp.water ) { g.audio?.play( 'door_locked', { vol: 0.2, rate: 1.6 } ); g.toast( 'No water', 'warn' ); return; }
+		if ( fill && g.itemUse?.fillFrom ) { g.itemUse.fillFrom( 'tap', fill ); return; }
+		g.actions.start( { label: 'Drinking', time: 2, sound: 'drink', onDone: () => g.survival?.drink?.( null, 0.4, 'water' ) } );
 	}
 
 	hasPry() { return !! this.game.player.inventory.hasTool?.( 'pry' ); }

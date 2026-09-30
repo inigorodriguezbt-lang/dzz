@@ -23,7 +23,7 @@ const SURF = [
 	// painted steel reads darker than it should with much metalness (little sky to reflect in the streets)
 	[ 0.9, 0, 0.8 ], [ 0.45, 0.35, 0.6 ], [ 0.8, 0.25, 1 ], [ 0.95, 0, 0.7 ], [ 0.9, 0, 0.8 ], [ 0.95, 0, 0.8 ], [ 0.55, 0, 0 ], [ 0.95, 0, 0.6 ], // 16-23
 	[ 0.5, 0, 0 ], [ 0.8, 0, 0 ], [ 0.8, 0, 0.8 ], [ 0.35, 0, 0.3 ], [ 0.25, 0, 0 ], [ 0.9, 0, 0.9 ], [ 0.95, 0, 0.6 ], [ 0.18, 0, 0.8 ], // 24-31
-	[ 0.5, 0, 0 ], // 32 sign
+	[ 0.5, 0, 0 ], [ 0.2, 0.35, 0.3 ], // 32 sign, 33 spandrel glass
 ];
 
 const glslArr = ( type, n, fn ) => `const ${type} ${n}[ ${LAYERS} ] = ${type}[ ${LAYERS} ]( ${Array.from( { length: LAYERS }, ( _, i ) => fn( SURF[ i ] || SURF[ 0 ] ) ).join( ', ' )} );`;
@@ -164,7 +164,8 @@ const PARS_F = /* glsl */`
 			float day = clamp( dot( uSunColor, vec3( 0.2126, 0.7152, 0.0722 ) ) / 3.0, 0.0, 1.0 );
 			float lightIn = 0.015 + 0.2 * day;
 			float flick = 0.8 + 0.2 * sin( uTime * 9.0 + float( h & 63u ) ) * sin( uTime * 3.7 + float( h & 31u ) );
-			bool candle = ( ( h >> 16u ) & 255u ) < 5u && uNight > 0.3;
+			// power's out: about one window in thirty still shows a candle or a lantern
+			bool candle = ( ( h >> 16u ) & 255u ) < 8u && uNight > 0.3;
 
 			// the slab edge at each floor reads as a faint band on multi-storey walls
 			if ( sty < 7 || sty >= 11 ) alb *= 1.0 - 0.1 * ( 1.0 - smoothstep( 0.06, 0.14, v ) );
@@ -320,7 +321,7 @@ const PARS_F = /* glsl */`
 			emit += room * lightIn;
 			if ( candle && sty != 3 && sty != 12 ) {
 				vec2 c = p - vec2( ( float( ( h >> 3u ) & 7u ) / 7.0 - 0.5 ) * hw, wh * 0.35 );
-				emit += vec3( 1.0, 0.5, 0.16 ) * ( 0.06 + 0.5 * exp( - dot( c, c ) * 6.0 ) ) * flick * uNight;
+				emit += vec3( 1.0, 0.5, 0.16 ) * ( 0.1 + 0.8 * exp( - dot( c, c ) * 4.0 ) ) * flick * uNight;
 			}
 		}
 	#endif

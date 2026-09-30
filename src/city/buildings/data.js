@@ -185,7 +185,8 @@ export function shapeOf( r, cities ) {
 			break;
 		case 'office':
 			if ( S.n >= 4 && W >= 17 ) { S.arch = 'tower'; break; }
-			S.arch = 'office'; H = 3.6; H0 = 4.2; front( 28 );
+			// a narrow office lot: a mid-rise block (no lifts in the plan, so no more than six floors)
+			S.arch = 'office'; H = 3.6; H0 = 4.2; front( 28 ); S.n = Math.min( S.n, 6 );
 			S.pave = true;
 			break;
 		case 'hotel':
@@ -304,7 +305,7 @@ export const L = {
 	plain: 0, stucco: 1, plaster: 2, beige: 3, bluewall: 4, panels: 5, planks: 6, oldplanks: 7, brick: 8, tinroof: 9, roof: 10,
 	greyroof: 11, bitumen: 12, woodfloor: 13, tiles: 14, carpet: 15, concrete: 16, metal: 17, rust: 18, fabric: 19, sidewalk: 20,
 	asphalt: 21, wood: 22, ceiltile: 23, products: 24, books: 25, lattice: 26, lino: 27, terrazzo: 28, cmu: 29, parking: 30, tilewall: 31,
-	sign0: 32,
+	sign0: 32, spandrel: 33,
 };
 // layers backed by a real texture (with a normal map); the rest are drawn procedurally
 export const TEX_LAYERS = [ null, 'stucco', 'plaster', 'beige', 'bluewall', 'panels', 'planks', 'oldplanks', 'brick', 'tinroof', 'roof',

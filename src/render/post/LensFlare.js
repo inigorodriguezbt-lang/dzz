@@ -87,7 +87,8 @@ export const FLARE_GLSL = /* glsl */`
 	vec3 flareLight( vec2 uv ) {
 		if ( uFlareStrength <= 0.0 ) return vec3( 0.0 );
 		float vis = texelFetch( tFlareVis, ivec2( 0 ), 0 ).r;
-		if ( vis <= 0.0 ) return vec3( 0.0 );
+		// (the eased visibility only decays toward 0: skip the per-pixel ghosts once it is negligible)
+		if ( vis < 1e-4 ) return vec3( 0.0 );
 		vec2 asp = vec2( uFlareAspect, 1.0 );
 		vec2 p = ( uv - 0.5 ) * asp;
 		vec2 s = ( uFlareSunUV - 0.5 ) * asp;

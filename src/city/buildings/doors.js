@@ -169,8 +169,8 @@ export class Doors {
 			d.leaves.push( leaf );
 		}
 		d.lw = lw;
-		// the API the creatures use (game.city.doorAt( pos ).bash( amount ))
-		d.bash = ( amount, source = null ) => this.bash( d, amount, source );
+		// the API the creatures use: game.city.doorAt( pos ).bash( amount, { source, kind } )
+		d.bash = ( amount, info = null ) => this.bash( d, amount, info );
 		d.pos = this._centre( d );
 		Object.defineProperty( d, 'isOpen', { get: () => d.target > 0.5 } );
 		this._pose( d );
@@ -249,8 +249,10 @@ export class Doors {
 	unlock( d ) { d.locked = false; this._sound( d, 'door_open', 0.4 ); this._save( d ); }
 
 	// damage from kicks or the infected; the door gives way at 0. The infected make their own thuds and noise.
-	bash( d, amount, source = null ) {
+	// info: { source, kind } (the creatures), or the source itself (the player's kicks)
+	bash( d, amount, info = null ) {
 		if ( d.broken || ( d.target > 0.5 && ! d.locked ) ) return false;
+		const source = info && info.source !== undefined ? info.source : info;
 		const player = source === this.game.player;
 		d.hp -= amount;
 		if ( player ) {
@@ -261,7 +263,7 @@ export class Doors {
 			d.broken = true; d.locked = false; d.target = 1;
 			this.moving.add( d );
 			this._sound( d, 'door_break', 1 );
-			this.game.events.emit( 'noise', { pos: this._centre( d ), radius: 40, source: player ? source : source?.source || null, kind: 'door' } );
+			this.game.events.emit( 'noise', { pos: this._centre( d ), radius: 40, source: source || null, kind: 'door' } );
 		}
 		this._save( d );
 		return true;

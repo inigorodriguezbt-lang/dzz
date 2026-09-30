@@ -22,9 +22,10 @@ function status( s, p ) {
 }
 
 // title-screen camera: slow drifts over famous views
+// all at the loader key art's hour (the Kona vista at 18.25), so the curtain dissolves into the same light
 const VISTAS = [
-	{ at: [ - 3880, - 9660 ], h: 26, yaw: - 118, pitch: - 4, hour: 17.6 }, // Waikīkī towards Diamond Head
-	{ at: [ - 6760, - 15260 ], h: 7, yaw: 135, pitch: - 3, hour: 17.9 }, // Sunset Beach, North Shore
+	{ at: [ - 3880, - 9660 ], h: 26, yaw: - 118, pitch: - 4, hour: 18.25 }, // Waikīkī towards Diamond Head
+	{ at: [ - 6760, - 15260 ], h: 7, yaw: 135, pitch: - 3, hour: 18.25 }, // Sunset Beach, North Shore
 	{ at: [ 19870, 13024 ], h: 12, yaw: 90, pitch: - 2, hour: 18.25 }, // Kailua-Kona, looking out to sea
 ];
 
@@ -173,13 +174,15 @@ class App {
 				const cam = this.world.camera;
 				cam.rotation.y += dt * 0.004;
 				cam.updateMatrixWorld();
-				this.world.sky.setTime( this.vista.hour + this.titleT / 600, 120 );
+				// (the time holds: a drifting clock took the golden hour into dusk, and jumped when the title
+				// came back after a game)
+				this.world.sky.setTime( this.vista.hour, 120 );
 			}
 			this.world.update( dt );
 			this.renderer.render( {
 				scene: this.world.scene, camera: this.world.camera,
 				viewScene: g && ! g.dead && ! g.player.vehicle ? g.viewScene : null, viewCamera: g?.viewCamera,
-				grade: g ? g.grade() : { exposure: 1.0 + this.world.sky.night * 1.4, night: this.world.sky.night, time: this.world.clock },
+				grade: g ? g.grade() : { time: this.world.clock },
 			} );
 			this.ui.update( dt );
 			// music: the title screen, and quietly around dawn and dusk in the world

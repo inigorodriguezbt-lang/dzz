@@ -87,6 +87,11 @@ function palette( P ) {
 			mat.roof = M( L.bitumen, [ 180, 180, 180 ], 4 );
 			P.winStyle = R() < 0.6 ? 2 : 1; P.frame = 2;
 			mat.rail = M( L.plain, paint( [ [ 240, 240, 236 ], [ 60, 90, 80 ], [ 80, 60, 50 ], [ 50, 70, 100 ] ] ), 1 );
+			{
+				// the gallery slabs' edges in a band of colour (the 1960s walk-up look)
+				const V = rng( hash32( P.bid, 0x100a ) );
+				P.look = { edge: V() < 0.6 ? M( L.stucco, RES_ACCENT[ Math.floor( V() * RES_ACCENT.length ) % RES_ACCENT.length ], 3 ) : null };
+			}
 			break;
 		case 'tower': {
 			const sub = S.variant;
@@ -192,7 +197,7 @@ const RES_BODY = [ [ 244, 240, 230 ], [ 238, 228, 206 ], [ 232, 214, 190 ], [ 23
 const RES_ACCENT = [ [ 60, 112, 122 ], [ 164, 96, 64 ], [ 88, 96, 106 ], [ 246, 246, 242 ], [ 176, 146, 104 ], [ 44, 72, 104 ], [ 120, 146, 120 ], [ 196, 120, 96 ] ];
 const STONE = [ [ 150, 140, 128 ], [ 108, 106, 106 ], [ 198, 188, 170 ], [ 132, 118, 104 ], [ 84, 84, 88 ] ];
 // curtain-wall towers: the spandrel panels follow the glass (frame index -> glass tint in the facade shader)
-const SPANDREL = { 1: [ 96, 82, 68 ], 2: [ 70, 96, 104 ], 3: [ 66, 70, 76 ], 6: [ 52, 92, 98 ] };
+const SPANDREL = { 1: [ 92, 80, 68 ], 2: [ 72, 86, 94 ], 3: [ 62, 66, 70 ], 6: [ 60, 80, 84 ] };
 const PRECAST = [ [ 232, 228, 218 ], [ 216, 208, 192 ], [ 202, 198, 190 ], [ 226, 216, 198 ], [ 190, 186, 180 ] ];
 
 function towerLook( P ) {
@@ -205,7 +210,7 @@ function towerLook( P ) {
 		if ( P.winStyle === 3 ) {
 			// glass curtain wall: the glass tint (frame) and matching spandrels, fins on the mullions
 			P.frame = pk( [ 1, 2, 3, 2, 6 ] );
-			mat.ext = M( L.panels, SPANDREL[ P.frame ] || SPANDREL[ 2 ], 3 );
+			mat.ext = M( L.spandrel, SPANDREL[ P.frame ] || SPANDREL[ 2 ], 1.5 );
 			look.fins = V() < 0.6 ? 2 : 0;
 			look.finM = M( L.metal, P.frame === 1 ? [ 150, 128, 100 ] : P.frame === 3 ? [ 60, 62, 66 ] : [ 200, 204, 208 ], 1 );
 			look.crown = V() < 0.55 ? 'glass' : 'band';
@@ -222,7 +227,7 @@ function towerLook( P ) {
 	} else {
 		// hotels and condos: pastel stucco, a stone or darker base, accent bands and balcony fronts
 		const body = pk( RES_BODY );
-		mat.ext = M( V() < 0.7 ? L.stucco : L.concrete, body, 3.5 );
+		mat.ext = M( V() < 0.75 ? L.stucco : L.beige, body, 3.5 );
 		const acc = pk( RES_ACCENT );
 		look.accent = M( L.stucco, acc, 3 );
 		mat.base = V() < 0.6 ? M( L.panels, stone, 1.6 ) : M( L.stucco, body.map( v => v * 0.82 ), 3 );
@@ -1013,7 +1018,9 @@ function shopUnits( P, arch ) {
 		const x0 = rect.x0 + W * u / n, x1 = rect.x0 + W * ( u + 1 ) / n;
 		const uw = x1 - x0;
 		// the first unit is the listed business; the rest of a strip mall fills up with the usual suspects
+		// (no two units of one strip alike)
 		let shop = u === 0 ? r.type : UNIT_POOL[ hash32( r.i, u ) % UNIT_POOL.length ];
+		for ( let k = 1; u > 0 && k < UNIT_POOL.length && P.units.some( un => un.shop === shop ); k ++ ) shop = UNIT_POOL[ ( hash32( r.i, u ) + k ) % UNIT_POOL.length ];
 		if ( arch === 'food' && u > 0 ) shop = pick( R, [ 'restaurant', 'fastfood', 'bar', 'takeout' ] );
 		P.units.push( { x0, x1, shop } );
 		const food = arch === 'food' || shop === 'takeout' || shop === 'bakery';

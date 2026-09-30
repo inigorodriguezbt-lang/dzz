@@ -237,15 +237,20 @@ export function augmentBuildings( meta, hf ) {
 				const [ x, z ] = toW( cu, cv );
 				const angle = c.angle + ( L.face === 1 ? Math.PI : 0 );
 				const o = { x, z, hw: w / 2, hd: d / 2, c: Math.cos( angle ), s: Math.sin( angle ) };
-				// dry, gentle ground
-				let lo = Infinity, hi = - Infinity;
+				// dry, gentle ground, no pavement of a highway or a runway under it (the baked flags)
+				let lo = Infinity, hi = - Infinity, paved = false;
 				for ( let a = - 1; a <= 1; a ++ ) for ( let q = - 1; q <= 1; q ++ ) {
-					const h = hf.heightAt( x + a * w / 2 * o.c - q * d / 2 * o.s, z + a * w / 2 * o.s + q * d / 2 * o.c );
+					const px = x + a * ( w / 2 + 1 ) * o.c - q * ( d / 2 + 1 ) * o.s, pz = z + a * ( w / 2 + 1 ) * o.s + q * ( d / 2 + 1 ) * o.c;
+					const h = hf.heightAt( px, pz );
 					lo = Math.min( lo, h ); hi = Math.max( hi, h );
+					if ( hf.flagsNear( px, pz ) & ( FLAG_ROAD | FLAG_RUNWAY ) ) paved = true;
 				}
-				if ( lo < 0.6 || hi - lo > 5 ) { if ( STATS ) STATS.ground = ( STATS.ground || 0 ) + 1; continue; }
-				const floors = type === 'office' ? ( zone === 'core' ? 6 + Math.floor( R2() * 14 ) : 2 + Math.floor( R2() * 2 ) ) : type === 'apartment' ? ( zone === 'core' || zone === 'resort' ? 6 + Math.floor( R2() * 12 ) : 2 + Math.floor( R2() * 3 ) )
-					: type === 'hotel' ? 5 + Math.floor( R2() * 12 ) : type === 'house' ? ( R2() < 0.3 ? 2 : 1 ) : 1;
+				if ( paved || lo < 0.6 || hi - lo > 5 ) { if ( STATS ) STATS.ground = ( STATS.ground || 0 ) + 1; continue; }
+				// only Honolulu and Waikīkī build high; Hilo, Kahului and the towns stay low
+				const high = c.id === 'honolulu' || c.id === 'waikiki';
+				const floors = type === 'house' ? ( R2() < 0.3 ? 2 : 1 ) : ! high ? ( type === 'office' || type === 'apartment' || type === 'hotel' ? 2 + Math.floor( R2() * ( zone === 'core' ? 4 : 2 ) ) : 1 )
+					: type === 'office' ? ( zone === 'core' ? 6 + Math.floor( R2() * 14 ) : 2 + Math.floor( R2() * 2 ) ) : type === 'apartment' ? ( zone === 'core' || zone === 'resort' ? 6 + Math.floor( R2() * 12 ) : 2 + Math.floor( R2() * 3 ) )
+					: type === 'hotel' ? 5 + Math.floor( R2() * 12 ) : 1;
 				addRect( { ...o, hw: o.hw + 3, hd: o.hd + 3 } );
 				out.push( x, z, w, d, angle, hi, lo, BT[ type ], floors, ci, Math.floor( R2() * 256 ) );
 			}

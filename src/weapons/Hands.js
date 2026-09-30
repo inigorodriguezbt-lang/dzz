@@ -720,7 +720,7 @@ export class Hands {
 					const old = gun.data.mag;
 					inv.remove( best );
 					gun.data.mag = best;
-					if ( old && inv.add( old, { autoEquip: false } ) > 0 ) { g.dropStack( old ); g.toast( 'No room, magazine dropped', 'warn' ); }
+					if ( old && inv.add( old, { autoEquip: false } ) > 0 ) { g.dropStack( old ); g.toast( 'Magazine dropped', 'warn' ); }
 					this._sfx( 'mag_in', 0.8 );
 					inv.changed();
 				} ],
@@ -1376,7 +1376,7 @@ export class Hands {
 			onDone: () => {
 				const r = ops.unloadMagazine( mag );
 				const rest = ops.giveRounds( this.inv, r.id, r.qty );
-				if ( rest ) { g.dropStack( rest ); g.toast( 'No room, rounds dropped', 'warn' ); }
+				if ( rest ) { g.dropStack( rest ); g.toast( 'Rounds dropped', 'warn' ); }
 				this.inv.changed();
 			},
 		} );
@@ -1419,7 +1419,7 @@ export class Hands {
 		const m = gun?.data?.mag;
 		if ( ! m ) return false;
 		gun.data.mag = null;
-		if ( inv.add( m, { autoEquip: false } ) > 0 ) { g.dropStack( m ); g.toast( 'No room, magazine dropped', 'warn' ); }
+		if ( inv.add( m, { autoEquip: false } ) > 0 ) { g.dropStack( m ); g.toast( 'Magazine dropped', 'warn' ); }
 		this._sfx( 'mag_out', 0.6 );
 		if ( gun === this.held ) this.vm.s.empty = ! ops.readyToFire( gun );
 		inv.changed();
@@ -1489,7 +1489,7 @@ export class Hands {
 		if ( ! a ) return false;
 		gun.data.att[ slot ] = null;
 		delete gun.data.att[ slot ];
-		if ( inv.add( a, { autoEquip: false } ) > 0 ) { g.dropStack( a ); g.toast( 'No room, dropped', 'warn' ); }
+		if ( inv.add( a, { autoEquip: false } ) > 0 ) { g.dropStack( a ); g.toast( 'Attachment dropped', 'warn' ); }
 		this._sfx( 'mag_out', 0.4, 1.3 );
 		inv.changed();
 		return true;

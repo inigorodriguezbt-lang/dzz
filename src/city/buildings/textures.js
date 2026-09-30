@@ -12,12 +12,12 @@ import { tex } from '../../render/Materials.js';
 import { L, TEX_LAYERS } from './data.js';
 import { paintSignAtlas } from './names.js';
 
-export const LAYERS = 33; // 0..31 surfaces, 32 = sign atlas (sampled from its own texture)
+export const LAYERS = 34; // 0..31 and 33 surfaces, 32 = sign atlas (sampled from its own texture)
 const N = 512, NN = 256;
 
 // layers whose colour comes from the vertex tint (texture = detail only)
 const PAINTED = new Set( [ L.stucco, L.plaster, L.beige, L.panels, L.planks, L.oldplanks, L.tinroof, L.concrete, L.metal, L.fabric, L.carpet,
-	L.cmu, L.tilewall, L.ceiltile, L.wood, L.tiles, L.lino ] );
+	L.cmu, L.tilewall, L.ceiltile, L.wood, L.tiles, L.lino, L.spandrel ] );
 
 // contrast kept for the painted layers (1 = the photo's own)
 const SOFT = { [ L.plaster ]: 0.35, [ L.stucco ]: 0.55, [ L.beige ]: 0.5, [ L.concrete ]: 0.7, [ L.cmu ]: 0.9, [ L.carpet ]: 0.7, [ L.fabric ]: 0.8 };
@@ -174,6 +174,14 @@ function procedural( layer ) {
 			const n = 4;
 			x.fillStyle = 'rgba(120,120,115,0.6)'; h.fillStyle = '#303030';
 			for ( let k = 0; k <= n; k ++ ) { const p = k * N / n; x.fillRect( p - 3, 0, 6, N ); x.fillRect( 0, p - 3, N, 6 ); h.fillRect( p - 3, 0, 6, N ); h.fillRect( 0, p - 3, N, 6 ); }
+			break;
+		}
+		case L.spandrel: {
+			// opaque spandrel glass / enamelled panels of a curtain wall: smooth, a faint pane joint every 1.5 m
+			noiseFill( [ 200, 200, 200 ], 6, 4 );
+			const h = H();
+			x.fillStyle = 'rgba(40,40,40,0.35)'; h.fillStyle = '#404040';
+			x.fillRect( 0, 0, N, 3 ); h.fillRect( 0, 0, N, 3 );
 			break;
 		}
 		default:

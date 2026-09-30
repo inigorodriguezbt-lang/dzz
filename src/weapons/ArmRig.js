@@ -83,7 +83,8 @@ async function build( buffer ) {
 	// the exporter baked everything into the bind: vertex attributes are world metres (bindMatrix = identity)
 	const sides = { 1: extract( mesh, bones, 1 ), [ - 1 ]: extract( mesh, bones, - 1 ) };
 	const metrics = handMetrics( sides[ 1 ] );
-	for ( const o of [ gltf.scene ] ) o.traverse( m => { if ( m.isMesh ) m.geometry.dispose(); } );
+	// (the source body is only read: the arms keep copies; the textures stay cached with the rig for the next game)
+	root.traverse( m => { if ( m.isMesh ) m.geometry.dispose(); } );
 	return { metrics, make: ( side ) => new RigArm( sides[ side ], { col, nrm } ), sides };
 }
 
@@ -314,10 +315,11 @@ function handMetrics( arm ) {
 // the arm's radius round the upper arm and forearm axes: rows along the arm (every 1 cm), 24 angles each, found by
 // casting rays from the bone line out to the skin; the sleeves and the glove cuff are lofted from it
 const NPHI = 24;
+const _mc = [ 0, 0 ];
 function armProfile( arm, P ) {
 	const segs = [
-		{ o: P[ B_UPPER ], e: P[ B_FORE ], F: arm.Ub },
-		{ o: P[ B_FORE ], e: P[ B_HAND ], F: arm.Fb },
+		{ o: P[ B_UPPER ], e: P[ B_FORE ], F: arm.Ub, min: 0.034 },
+		{ o: P[ B_FORE ], e: P[ B_HAND ], F: arm.Fb, min: 0.02 },
 	];
 	// the arm's triangles as a flat list
 	const g = arm.geo, pa = g.attributes.position, ix = g.index.array;
@@ -345,19 +347,38 @@ function armProfile( arm, P ) {
 		return best;
 	};
 	const out = [];
+	const med = ( a ) => { const b = a.filter( x => x > 0 ).sort( ( x, y ) => x - y ); return b.length ? b[ b.length >> 1 ] : 0; };
 	for ( const S of segs ) {
 		const L = S.o.distanceTo( S.e );
 		const X = V().setFromMatrixColumn( S.F, 0 ), Y = V().setFromMatrixColumn( S.F, 1 ), Z = V().setFromMatrixColumn( S.F, 2 );
 		const rows = Math.ceil( ( L + 0.06 ) / 0.01 ) + 1;
 		const R = Array.from( { length: rows }, () => new Float32Array( NPHI ) );
-		for ( let r = 0; r < rows; r ++ ) {
-			const c = _c.copy( S.o ).addScaledVector( Z, r * 0.01 - 0.03 );
+		const C = Array.from( { length: rows }, () => [ 0, 0 ] );
+		const ring = ( r, cx, cy, out ) => {
+			const c = _c.copy( S.o ).addScaledVector( Z, r * 0.01 - 0.03 ).addScaledVector( X, cx ).addScaledVector( Y, cy );
 			for ( let k = 0; k < NPHI; k ++ ) {
 				const ph = k / NPHI * Math.PI * 2;
 				const d = _d.copy( X ).multiplyScalar( Math.cos( ph ) ).addScaledVector( Y, Math.sin( ph ) );
 				const h = cast( c.x, c.y, c.z, d.x, d.y, d.z );
-				R[ r ][ k ] = h < 0.1 ? h : 0;
+				out[ k ] = h < 0.1 ? h : 0;
 			}
+		};
+		for ( let r = 0; r < rows; r ++ ) {
+			// from the bone line first; the cross-section's middle (the hits nearer than 1.6x the median: the torso by the
+			// armpit doesn't count), then again from there
+			ring( r, 0, 0, R[ r ] );
+			const m = med( Array.from( R[ r ] ) );
+			let sx = 0, sy = 0, n = 0;
+			for ( let k = 0; k < NPHI; k ++ ) {
+				const h = R[ r ][ k ];
+				if ( ! h || h > m * 1.6 ) continue;
+				const ph = k / NPHI * Math.PI * 2;
+				sx += Math.cos( ph ) * h; sy += Math.sin( ph ) * h; n ++;
+			}
+			if ( n >= 6 ) { C[ r ][ 0 ] = sx / n; C[ r ][ 1 ] = sy / n; ring( r, C[ r ][ 0 ], C[ r ][ 1 ], R[ r ] ); }
+			// what's left of an armpit or a missed seam: no bulges past 1.4x the row's middle
+			const m2 = med( Array.from( R[ r ] ) ), lo = S.min;
+			for ( let k = 0; k < NPHI; k ++ ) if ( R[ r ][ k ] ) R[ r ][ k ] = Math.max( lo, Math.min( R[ r ][ k ], m2 * 1.4 ) );
 		}
 		// fill the misses (a row's from its neighbours, then whole rows from the nearest good one), then soften
 		for ( const row of R ) {
@@ -367,7 +388,7 @@ function armProfile( arm, P ) {
 				if ( ! any ) break;
 			}
 		}
-		for ( let r = 0; r < rows; r ++ ) if ( ! R[ r ][ 0 ] ) { const src = R.find( ( x, i ) => i > r && x[ 0 ] ) || R.slice( 0, r ).reverse().find( x => x[ 0 ] ); if ( src ) R[ r ].set( src ); else R[ r ].fill( 0.04 ); }
+		for ( let r = 0; r < rows; r ++ ) if ( ! R[ r ][ 0 ] ) { const src = R.findIndex( ( x, i ) => i > r && x[ 0 ] ); const j = src >= 0 ? src : R.map( x => !! x[ 0 ] ).lastIndexOf( true ); if ( j >= 0 ) { R[ r ].set( R[ j ] ); C[ r ] = C[ j ].slice(); } else R[ r ].fill( 0.04 ); }
 		const sm = R.map( ( row, r ) => row.map( ( v, k ) => {
 			let t = 0, w = 0;
 			for ( let dr = - 1; dr <= 1; dr ++ ) for ( let dk = - 1; dk <= 1; dk ++ ) {
@@ -378,12 +399,21 @@ function armProfile( arm, P ) {
 			// never inside the skin
 			return Math.max( v, t / w );
 		} ) );
-		out.push( { o: S.o.clone(), X, Y, Z, L, rows, R: sm } );
+		// the middles, smoothed along the arm
+		const cs = C.map( ( c, r ) => { let x = 0, y = 0, w = 0; for ( let d = - 2; d <= 2; d ++ ) { const q = C[ r + d ]; if ( ! q ) continue; const ww = 3 - Math.abs( d ); x += q[ 0 ] * ww; y += q[ 1 ] * ww; w += ww; } return [ x / w, y / w ]; } );
+		out.push( { o: S.o.clone(), X, Y, Z, L, rows, R: sm, C: cs } );
 	}
 	return out;
 }
 
-// the radius at (segment, s, angle) with bilinear interpolation
+// the cross-section's middle (in the segment's x, y) at s
+function profileC( S, s, out ) {
+	const fr = Math.min( S.rows - 1.001, Math.max( 0, ( s + 0.03 ) / 0.01 ) ), r0 = Math.floor( fr ), tr = fr - r0;
+	out[ 0 ] = S.C[ r0 ][ 0 ] * ( 1 - tr ) + S.C[ r0 + 1 ][ 0 ] * tr;
+	out[ 1 ] = S.C[ r0 ][ 1 ] * ( 1 - tr ) + S.C[ r0 + 1 ][ 1 ] * tr;
+	return out;
+}
+// the radius round that middle at (segment, s, angle) with bilinear interpolation
 function profileR( S, s, phi ) {
 	const fr = Math.min( S.rows - 1.001, Math.max( 0, ( s + 0.03 ) / 0.01 ) ), r0 = Math.floor( fr ), tr = fr - r0;
 	const fk = ( ( phi / ( Math.PI * 2 ) ) % 1 + 1 ) % 1 * NPHI, k0 = Math.floor( fk ) % NPHI, k1 = ( k0 + 1 ) % NPHI, tk = fk - Math.floor( fk );
@@ -405,7 +435,8 @@ function clothTube( arm, from, end, off, fold, hem = true ) {
 		const other = arm.profile[ 1 - seg ];
 		const Z = _d.copy( S.Z ).lerp( other.Z, k ).normalize();
 		const X = _x.copy( S.X ).addScaledVector( Z, - S.X.dot( Z ) ).normalize(), Y = _y.crossVectors( Z, X );
-		const c = _c.copy( S.o ).addScaledVector( S.Z, s );
+		const mc = profileC( S, s, _mc );
+		const c = _c.copy( S.o ).addScaledVector( S.Z, s ).addScaledVector( S.X, mc[ 0 ] ).addScaledVector( S.Y, mc[ 1 ] );
 		// skin weights along the arm: upper arm -> forearm round the elbow, forearm -> hand at the wrist
 		const u = seg === 0 ? s : U.L + s;
 		const e = smoothstep( U.L - 0.04, U.L + 0.04, u ), wh = smoothstep( U.L + F.L - 0.05, U.L + F.L + 0.01, u );
@@ -603,8 +634,9 @@ export class RigArm {
 		for ( let i = 0; i < 18; i ++ ) arm.bind[ i ].decompose( this.bones[ i ].position, this.bones[ i ].quaternion, this.bones[ i ].scale );
 	}
 
-	// clothing: { skin, sleeve (colour | null = bare arms), long (to the wrist), print (texture), glove (colour | null),
-	// gloveStyle ('fingerless' leaves the finger ends bare, 'latex' is thin and glossy) }
+	// clothing: { sleeve (colour | null = bare arms), long (to the wrist), print (texture), glove (colour | null),
+	// gloveStyle ('fingerless' leaves the finger ends bare, 'latex' is thin and glossy) }. The skin is the model's own
+	// painted skin (`skin` is only read by the procedural arms)
 	style( o ) {
 		const has = o.sleeve != null;
 		if ( has ) {

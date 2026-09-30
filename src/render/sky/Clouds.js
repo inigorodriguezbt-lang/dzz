@@ -647,19 +647,33 @@ export class Clouds {
 					return;
 				}
 
-				vec4 color = vec4( 0.0 ); float weightSum = 0.0;
-				ivec2 base = ivec2( floor( source ) ); vec2 fraction = fract( source );
-				for ( int y = 0; y < 2; y ++ ) for ( int x = 0; x < 2; x ++ ) {
-					ivec2 pos = scSourceClamp( base + ivec2( x, y ) );
-					vec4 tap = texelFetch( scCurrentColor, pos, 0 ); float depth = texelFetch( scCurrentMeta, pos, 0 ).x;
-					float bilinear = ( x == 1 ? fraction.x : 1.0 - fraction.x ) * ( y == 1 ? fraction.y : 1.0 - fraction.y );
-					float weight = bilinear * exp( -abs( depth - metadata.x ) / max( 0.1, metadata.x * 0.1 ) - abs( tap.a - central.a ) * 4.0 );
-					color += tap * weight; weightSum += weight;
+				// (ours) the current trace upsampled with a cubic B-spline over 4 x 4 source texels (premultiplied
+				// in-scatter and opacity blend correctly across cloud edges), depth-weighted only between two cloud
+				// taps. sky-pro's edge-stopping 2 x 2 weights (the alpha difference, and the 250 km sky depth against
+				// a cloud's few km) were nearest-like at every cloud edge: 8-pixel stair steps wherever the history
+				// was new (a cut, a fast turn, the screen edges) until the lattice filled in
+				vec4 smoothC = vec4( 0.0 ); float weightSum = 0.0;
+				ivec2 base = ivec2( floor( source ) ); vec2 fr = fract( source );
+				vec2 fr2 = fr * fr, fr3 = fr2 * fr;
+				vec2 bw[ 4 ];
+				bw[ 0 ] = ( 1.0 - 3.0 * fr + 3.0 * fr2 - fr3 ) / 6.0;
+				bw[ 1 ] = ( 4.0 - 6.0 * fr2 + 3.0 * fr3 ) / 6.0;
+				bw[ 2 ] = ( 1.0 + 3.0 * fr + 3.0 * fr2 - 3.0 * fr3 ) / 6.0;
+				bw[ 3 ] = fr3 / 6.0;
+				for ( int y = 0; y < 4; y ++ ) for ( int x = 0; x < 4; x ++ ) {
+					ivec2 pos = scSourceClamp( base + ivec2( x - 1, y - 1 ) );
+					vec4 tap = texelFetch( scCurrentColor, pos, 0 );
+					float weight = bw[ x ].x * bw[ y ].y;
+					if ( tap.a > 0.02 && central.a > 0.02 ) {
+						float depth = texelFetch( scCurrentMeta, pos, 0 ).x;
+						weight *= exp( -abs( depth - metadata.x ) / max( 0.5, metadata.x * 0.3 ) );
+					}
+					smoothC += tap * weight; weightSum += weight;
 				}
-				color = weightSum > 0.00001 ? color / max( weightSum, 0.00001 ) : central;
-				if ( fresh ) color = central;
+				smoothC = weightSum > 0.00001 ? smoothC / weightSum : central;
+				vec4 color = fresh ? central : smoothC;
 				if ( ! historyValid ) {
-					scResolve( color, currentDepth, currentDepth, metadata.z, 0.0 );
+					scResolve( smoothC, currentDepth, currentDepth, metadata.z, 0.0 );
 					return;
 				}
 
@@ -680,6 +694,8 @@ export class Clouds {
 				vec4 oldMeta = texelFetch( scPreviousMeta, previousPixel, 0 );
 				bool valid = previous.z > 0.0 && all( greaterThanEqual( previous.xy, vec2( 0.0 ) ) ) && all( lessThanEqual( previous.xy, vec2( 1.0 ) ) ) && oldMeta.y >= 0.001;
 				float carriedDepth = currentDepth; float historyFraction = 0.0;
+				// newly revealed pixels: the smooth upsample (an exact sample alone there shows as a dot)
+				if ( ! valid ) color = smoothC;
 				if ( valid ) {
 					vec4 history = clamp( scHistoryAt( previous.xy, vec2( size ) ), low, high );
 					float motionPixels = length( ( previous.xy - uv ) * vec2( size ) );

@@ -67,7 +67,8 @@ async function boot( query ) {
 
 async function runSteps( steps ) {
 	const out = [];
-	const log = ( t ) => out.push( t );
+	// (also appended to <outdir>/log.txt as it happens: a crashed page keeps what it printed)
+	const log = ( t ) => { out.push( t ); try { fs.appendFileSync( `${outdir}/log.txt`, t + '\n' ); } catch ( e ) { /* ignore */ } };
 	for ( const s of steps ) {
 		const t1 = Date.now();
 		let r;

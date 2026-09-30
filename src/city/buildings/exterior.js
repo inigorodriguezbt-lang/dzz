@@ -20,7 +20,8 @@ export function storeyOutside( g, P, st, lod, opts = {} ) {
 			if ( rm.k === 'porch' ) g.box( rm.x0, y0 - 0.06, rm.z0, rm.x1, y0, rm.z1, { py: deckM, pz: deckM, nz: deckM, px: deckM, nx: deckM } );
 		} else {
 			const under = M( L.plaster, [ 225, 222, 215 ], 3 );
-			g.box( rm.x0, y0 - sT, rm.z0, rm.x1, y0, rm.z1, { py: deckM, ny: under, px: mat.ext, nx: mat.ext, pz: mat.ext, nz: mat.ext } );
+			const edge = P.look?.edge || mat.ext;
+			g.box( rm.x0, y0 - sT, rm.z0, rm.x1, y0, rm.z1, { py: deckM, ny: under, px: edge, nx: edge, pz: edge, nz: edge } );
 		}
 		// posts under the roof for porches; columns along galleries
 		if ( lod === 0 && ( rm.k === 'porch' || rm.k === 'gallery' ) ) {
@@ -290,6 +291,12 @@ function roof( g, P, lod ) {
 		case 'tent': tentRoof( g, P, lod ); break;
 		default: flatRoof( g, P, x0, z0, x1, z1, top, lod );
 	}
+	// the island terminal: a row of steep hip-roofed pavilions over the hall (Kona's open-air look)
+	if ( S.arch === 'terminal' ) {
+		const n = Math.max( 2, Math.round( ( x1 - x0 ) / 13 ) ), w = ( x1 - x0 ) / n;
+		const tm = M( L.roof, [ 150, 110, 90 ], 2.2 );
+		for ( let k = 0; k < n; k ++ ) hipRoof( g, P, x0 + k * w + 0.4, z0, x0 + ( k + 1 ) * w - 0.4, z1, top + 0.9, 0.55, 1.2, tm, lod );
+	}
 }
 
 function flatRoof( g, P, x0, z0, x1, z1, top, lod ) {
@@ -310,6 +317,12 @@ function flatRoof( g, P, x0, z0, x1, z1, top, lod ) {
 	const pmExt = crown === 'band' && look.accent ? look.accent : mat.ext;
 	const pm = { px: pmExt, nx: pmExt, pz: pmExt, nz: pmExt, py: cap };
 	const pH = crown === 'band' ? ph + ( S.arch === 'tower' ? 0.9 : 0.4 ) : ph;
+	if ( S.arch === 'house' ) {
+		// a modern house: a thin flat roof slab overhanging the walls, dark fascia, pale soffit
+		const fm = M( L.plain, [ 60, 58, 56 ], 1 ), so = M( L.plain, [ 236, 234, 228 ], 1 );
+		g.box( x0 - 0.8, top - 0.02, z0 - 0.8, x1 + 0.8, top + 0.28, z1 + 0.8, { px: fm, nx: fm, pz: fm, nz: fm, py: deck, ny: so } );
+		return;
+	}
 	g.box( x0, top, z0, x1, top + pH, z0 + t, pm, 8 );
 	g.box( x0, top, z1 - t, x1, top + pH, z1, pm, 8 );
 	g.box( x0, top, z0 + t, x0 + t, top + pH, z1 - t, pm, 8 + 16 + 32 );
@@ -471,7 +484,7 @@ const BALC_ROOM = { living: 1, bedroom: 1, hotelroom: 1, dining: 1 };
 function balconies( g, P, lod ) {
 	const { S, rect, look } = P;
 	const D = look.balcD || 1.4;
-	const deck = M( L.tiles, [ 200, 196, 188 ], 1.2 ), soffit = M( L.plain, [ 232, 230, 224 ], 1 );
+	const deck = M( L.concrete, [ 196, 192, 184 ], 3 ), soffit = M( L.plain, [ 232, 230, 224 ], 1 );
 	const edge = look.accent && look.accent.c[ 0 ] + look.accent.c[ 1 ] + look.accent.c[ 2 ] > 600 ? look.accent : P.mat.ext;
 	const SM = { py: deck, ny: soffit, px: edge, nx: edge, pz: edge, nz: edge };
 	const glass = look.railGlass ? M( L.plain, [ 120, 150, 154 ], 1 ) : null;

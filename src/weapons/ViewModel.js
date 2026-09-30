@@ -63,10 +63,10 @@ const HAND_HOLD = {
 // elbows hang. Long guns sit low and right, pointing into the scene just under the crosshair; pistols are out in front
 // in both hands. The screen's bottom-right corner is the HUD's weapon panel: the hands stay left of it.
 const GUN_HOLD = {
-	rifle: { p: [ 0.095, - 0.09, - 0.46 ], r: [ 0.015, 0.045, 0.12 ], eR: [ 0.3, - 0.42, - 0.1 ], eL: [ - 0.2, - 0.45, - 0.32 ] },
-	heavy: { p: [ 0.1, - 0.095, - 0.47 ], r: [ 0.015, 0.04, 0.1 ], eR: [ 0.3, - 0.42, - 0.1 ], eL: [ - 0.2, - 0.45, - 0.32 ] },
-	stock: { p: [ 0.1, - 0.085, - 0.46 ], r: [ 0.015, 0.045, 0.12 ], eR: [ 0.3, - 0.4, - 0.1 ], eL: [ - 0.2, - 0.45, - 0.32 ] },
-	pistol: { p: [ 0.08, - 0.075, - 0.46 ], r: [ 0.04, 0.08, 0.18 ], eR: [ 0.22, - 0.42, - 0.2 ], eL: [ - 0.1, - 0.44, - 0.22 ] },
+	rifle: { p: [ 0.1, - 0.092, - 0.52 ], r: [ 0.015, 0.045, 0.12 ], eR: [ 0.3, - 0.42, - 0.1 ], eL: [ - 0.2, - 0.45, - 0.32 ] },
+	heavy: { p: [ 0.105, - 0.097, - 0.53 ], r: [ 0.015, 0.04, 0.1 ], eR: [ 0.3, - 0.42, - 0.1 ], eL: [ - 0.2, - 0.45, - 0.32 ] },
+	stock: { p: [ 0.105, - 0.087, - 0.51 ], r: [ 0.015, 0.045, 0.12 ], eR: [ 0.3, - 0.4, - 0.1 ], eL: [ - 0.2, - 0.45, - 0.32 ] },
+	pistol: { p: [ 0.06, - 0.075, - 0.46 ], r: [ 0.03, 0.15, 0.1 ], eR: [ 0.22, - 0.42, - 0.2 ], eL: [ - 0.1, - 0.44, - 0.22 ] },
 	bow: { p: [ 0.0, - 0.1, - 0.5 ], r: [ 0.02, 0.12, - 0.4 ], eR: [ 0.3, - 0.4, 0.0 ], eL: [ - 0.2, - 0.4, - 0.3 ] },
 };
 // a bolt handle's knob, in the handle's frame: the firing hand closes on it from behind and below
@@ -75,14 +75,14 @@ const BOLT_KNOB = grip( [ - 0.09, - 0.034, 0.054 ], [ 0.35, 0.93, 0 ], [ 0.1, 0.
 const ITEM_ELBOW_R = V( 0.24, - 0.44, - 0.14 ), ITEM_ELBOW_L = V( - 0.16, - 0.46, - 0.2 );
 // sprinting: where the gun frame goes (view space) and its turn
 const SPRINT = {
-	rifleP: V( 0.08, - 0.16, - 0.4 ), rifleQ: E( 0.3, 0.7, 0.55 ),
-	pistolP: V( 0.1, - 0.14, - 0.38 ), pistolQ: E( - 0.55, 0.3, 0.2 ),
+	rifleP: V( 0.1, - 0.18, - 0.41 ), rifleQ: E( 0.25, 0.6, 0.45 ),
+	pistolP: V( 0.07, - 0.13, - 0.38 ), pistolQ: E( - 0.45, 0.35, 0.3 ),
 	itemQ: E( - 0.2, 0.1, 0 ),
 };
 // melee holds: where the right hand's grip sits in view space and how the item points
 const MELEE_HOLD = {
 	knife: { at: [ 0.13, - 0.14, - 0.36 ], x: [ - 0.38, 0.3, - 0.88 ], y: [ 0.9, 0.42, 0 ] },
-	one: { at: [ 0.14, - 0.15, - 0.4 ], x: [ - 0.3, 0.6, - 0.75 ], y: [ 1, 0.25, 0.2 ] },
+	one: { at: [ 0.14, - 0.15, - 0.4 ], x: [ - 0.3, 0.45, - 0.85 ], y: [ 1, 0.25, 0.2 ] },
 	two: { at: [ 0.12, - 0.15, - 0.45 ], x: [ 0.45, 0.75, - 0.45 ], y: [ - 0.3, 0.1, - 1 ] },
 	spear: { at: [ 0.14, - 0.17, - 0.32 ], x: [ - 0.1, 0.15, - 1 ], y: [ 0, 1, 0 ] },
 };
@@ -93,7 +93,7 @@ const BOW_CURL = [ [ 0.9, 1.1, 0.6 ], [ 0.9, 1.1, 0.6 ], [ 0.9, 1.1, 0.6 ], [ 1.
 // procedural fallback keeps its THUMB_POSE.
 const GUN_THUMB = {
 	// firing hand round a pistol grip: across the back strap and forward along the left side of the frame
-	grip: { dir: [ 0.65, 0.12, - 0.75 ], up: [ - 0.4, 0.8, - 0.3 ], flex: [ 0.3, 0.3 ] },
+	grip: { dir: [ 0.75, 0.25, - 0.6 ], up: [ - 0.35, 0.75, - 0.55 ], flex: [ 0.2, 0.15 ] },
 	// both thumbs forward along the left of a pistol's frame, the support thumb under the firing one
 	pistolR: { dir: [ 0.85, 0.08, - 0.5 ], up: [ - 0.2, 0.75, - 0.6 ], flex: [ 0.12, 0.06 ] },
 	pistolL: { dir: [ 0.95, - 0.08, - 0.28 ], up: [ 0, 0.45, - 0.9 ], flex: [ 0.06, 0.02 ] },
@@ -161,7 +161,7 @@ export class ViewModel {
 		this.elbowL = V( - 0.14, - 0.52, - 0.2 );
 		// muzzle flash: a camera-facing star and crossed side flames along the barrel
 		const T = flashTextures();
-		const fm = ( map ) => new THREE.MeshBasicMaterial( { map, color: new THREE.Color( 7, 4.2, 1.9 ), blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, fog: false } );
+		const fm = ( map = null ) => new THREE.MeshBasicMaterial( { map, color: new THREE.Color( 7, 4.2, 1.9 ), blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, fog: false } );
 		this.flashStar = new THREE.Mesh( new THREE.PlaneGeometry( 1, 1 ), fm( T?.star ) );
 		this.flashSide = new THREE.Group();
 		for ( let i = 0; i < 2; i ++ ) {
@@ -320,8 +320,12 @@ export class ViewModel {
 		// the handguard lies diagonally across the palm (heel to the index knuckle), so the forearm comes back towards
 		// the body instead of out to the side
 		let L = info.grips.L;
-		if ( L && ! L.support && ! L.vert && ! L.under && ! L.bow ) L = { ...L, n: V( 0, - 1, - 0.3 ).normalize(), beta: 0.6 };
-		it.grips = { R: info.grips.R, L };
+		if ( L && ! L.support && ! L.vert && ! L.under && ! L.bow ) L = { ...L, n: V( 0, - 1, - 0.3 ).normalize(), beta: 0.6, dz: 0.015, sink: 0.006 };
+		// a straight stock's wrist (shotguns, hunting rifles) is held with the back of the hand turned down a little, so
+		// the knuckles stay under the comb when the gun is aimed
+		let R = info.grips.R;
+		if ( R && R.p.y > - 0.06 && ! L?.support ) R = { ...R, p: R.p.clone().add( V( - 0.02, - 0.012, 0 ) ), n: V( 0.05, - 0.2, 1 ).normalize() };
+		it.grips = { R, L };
 		it.eye = this._eyePoint( it );
 		it.cls = f.cls;
 		it.heavy = !! info.heavy || def.weight > 6;
@@ -353,7 +357,9 @@ export class ViewModel {
 		const extra = { pistol: 0.12, smg: 0.07, rifle: 0.08, sniper: 0.06, shotgun: 0.07, lmg: 0.08, bow: 0 }[ it.f.cls ] ?? 0.06;
 		// a bow is aimed past the right of its riser, looking down the arrow
 		if ( info.bow ) return V( info.rearX - info.eyeBack - 0.08, info.sightH * 0.9, 0.018 );
-		return V( info.rearX - info.eyeBack - extra, info.sightH, 0 );
+		// (a bolt gun's irons sit out on the barrel: the eye stays behind the bolt shroud)
+		const x = info.rearX - info.eyeBack - extra;
+		return V( info.boltHandle ? Math.min( x, - 0.3 ) : x, info.sightH, 0 );
 	}
 
 	_buildMelee( def ) {
@@ -444,6 +450,10 @@ export class ViewModel {
 		if ( this._armStyle ) { this.armR.style( this._armStyle ); this.armL.style( this._armStyle ); }
 		if ( this.env ) this.setEnvironment( this.env );
 		this.onArms?.();
+		// the reload hands' grips, solved ahead in idle moments (~10 ms each) rather than as hitches mid-reload
+		const pre = [ [ 0.028, 1 ], [ 0.012, 1.2 ], [ 0.006, 1.1 ], [ 0.02, 0.8 ], [ 0.01, 1.1 ], [ 0.03, 0.5 ], [ 0.02, 1.3 ] ];
+		const next = () => { if ( this._disposed || ! pre.length ) return; curlFor( ...pre.shift() ); setTimeout( next, 60 ); };
+		setTimeout( next, 500 );
 	}
 
 	// ---- events from Hands ---------------------------------------------------------------------------------------------
@@ -908,7 +918,7 @@ export class ViewModel {
 		// defaults: both hands on their grips
 		if ( gR ) toView( gR, 1, this.handR ); else showR = false;
 		if ( gL ) toView( gL, - 1, this.handL ); else showL = false;
-		let curlR = gR ? curlFor( gR.r, 1, gR.beta ) : curlFor( 0.02, 1.3 ), curlL = gL ? curlFor( gL.r, gL.tight ?? 1, gL.beta ) : curlFor( 0.03, 0.5 );
+		let curlR = gR ? curlFor( gR.r, 1, gR.beta ) : curlFor( 0.02, 1.3 ), curlL = gL ? curlFor( gL.r, gL.tight ?? 1, gL.beta, gL.dz, gL.sink ) : curlFor( 0.03, 0.5 );
 		let thumbR = THUMB_POSE.wrap, thumbL = gL?.thumb ? THUMB_POSE[ gL.thumb ] : THUMB_POSE.along;
 		if ( it.kind === 'gun' && ! it.info.bow ) {
 			const pistol = !! gL?.support;
@@ -1275,7 +1285,7 @@ export class ViewModel {
 		// the flash, the brass and the scope overlay
 		for ( const m of [ this.flashStar, ...this.flashSide.children, this.overlay.mesh ] ) { m.geometry.dispose(); m.material.dispose(); }
 		this.casings[ 0 ]?.m.geometry.dispose();
-		if ( FLASH_TEX ) { FLASH_TEX.star?.dispose(); FLASH_TEX.cone?.dispose(); }
+		if ( FLASH_TEX ) { FLASH_TEX.star?.dispose(); FLASH_TEX.cone?.dispose(); FLASH_TEX = null; }
 	}
 }
 
