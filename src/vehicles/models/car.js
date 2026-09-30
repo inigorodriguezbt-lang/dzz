@@ -192,8 +192,8 @@ export class CarBuilder {
 			for ( const dx of cs ) {
 				const x = cx + dx * side;
 				this.patch( face, x, cy, r0 * 2 + 0.05, r0 * 2 + 0.05, 0.004, D.bezel === 'paint' ? MAT.paint : MAT.chrome, { round: 1, nu: 16, nv: 8 } );
-				this.patch( face, x, cy, r0 * 2, r0 * 2, 0.009, lens, { round: 1, nu: 16, nv: 8 } );
-				if ( kind === 'head' ) this.patch( face, x, cy, r0 * 0.7, r0 * 0.7, 0.012, MAT.chrome, { round: 1, nu: 8, nv: 4 } );
+				// (a chrome reflector round the bulb, drawn in the decal atlas)
+				this.patch( face, x, cy, r0 * 2, r0 * 2, 0.009, lens, { round: 1, nu: 16, nv: 8, uv: kind === 'head' ? ATLAS.headRound : undefined } );
 			}
 			if ( kind === 'head' && D.ind !== false ) this.patch( face, cx + side * ( w / 2 + 0.07 ), cy - h * 0.15, 0.08, 0.04, 0.006, side < 0 ? MAT.indL : MAT.indR, { round: 0.5, nu: 4, nv: 2 } );
 			if ( kind === 'tail' && D.rev !== false ) this.patch( face, cx - side * ( w / 2 + 0.06 ), cy, 0.07, 0.07, 0.006, MAT.reverse, { round: 1, nu: 6, nv: 3 } );
@@ -201,15 +201,12 @@ export class CarBuilder {
 		}
 		const rnd = D.round ?? 0.35;
 		this.patch( face, cx, cy, w + 0.025, h + 0.025, 0.004, MAT.gloss, { round: rnd, slant } );
-		this.patch( face, cx, cy, w, h, 0.008, lens, { round: rnd, slant } );
+		// the lens: a detailed lamp unit from the decal atlas (reflectors, projector, LED strip; red bars at the back),
+		// its outer end outwards on both sides
+		const U = kind === 'head' ? ATLAS.headlamp : h > w * 1.3 ? ATLAS.tailV : ATLAS.tailH;
+		this.patch( face, cx, cy, w, h, 0.008, lens, { round: rnd, slant, nu: 12, nv: 4, uv: U, mirror: side < 0 } );
 		if ( kind === 'head' ) {
-			// reflector bowls: slightly brighter discs inside the lens, no dark centres (those read as eyes)
-			const n = D.projectors ?? ( w > 0.3 ? 2 : 1 );
-			for ( let i = 0; i < n; i ++ ) {
-				const dx = ( n === 1 ? - w * 0.1 : ( - w * 0.22 + i * w * 0.28 ) ) * side;
-				this.patch( face, cx + dx, cy + h * 0.04, h * 0.55, h * 0.55, 0.011, mat( 'chrome', { c: 0xdfe3e8, r: 0.12 } ), { round: 1, nu: 8, nv: 4 } );
-			}
-			if ( D.ind !== false ) this.patch( face, cx + side * w * 0.38, cy - h * 0.1, w * 0.18, h * 0.45, 0.011, side < 0 ? MAT.indL : MAT.indR, { round: 0.3, nu: 3, nv: 2, slant } );
+			if ( D.ind !== false ) this.patch( face, cx + side * w * 0.4, cy - h * 0.05, w * 0.12, h * 0.5, 0.011, side < 0 ? MAT.indL : MAT.indR, { round: 0.3, nu: 3, nv: 2, slant } );
 		} else {
 			if ( D.rev !== false ) this.patch( face, cx - side * w * 0.26, cy - h * 0.12, w * 0.32, h * 0.42, 0.011, MAT.reverse, { round: 0.3, nu: 3, nv: 2 } );
 			if ( D.ind !== false ) this.patch( face, cx + side * w * 0.26, cy + h * 0.2, w * 0.3, h * 0.3, 0.011, side < 0 ? MAT.indL : MAT.indR, { round: 0.3, nu: 3, nv: 2 } );

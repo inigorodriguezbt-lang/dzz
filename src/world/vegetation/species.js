@@ -12,9 +12,9 @@ export const STRIDE = 8;
 export const SP = {
 	PALM: 0, MONKEYPOD: 1, KUKUI: 2, OHIA: 3, PINE: 4, IRONWOOD: 5, KIAWE: 6, TREEFERN: 7, BANANA: 8, TI: 9,
 	SHRUB: 10, NAUPAKA: 11, TALLGRASS: 12, PINEAPPLE: 13, CANE: 14, ROCK: 15, FERN: 16, GRASS: 17,
-	DRIFTWOOD: 18, NUTS: 19, FROND: 20,
+	DRIFTWOOD: 18, NUTS: 19, FROND: 20, MONSTERA: 21, KALO: 22,
 };
-export const NSP = 21;
+export const NSP = 23;
 
 // Which streamed layer a species lives in: 0 canopy (64 m cells out to the render distance), 1 detail
 // (64 m cells near the camera: understory, crops, rocks), 2 grass (32 m cells right around the player)
@@ -46,6 +46,9 @@ export const SPECIES = [
 	{ id: SP.DRIFTWOOD, name: 'driftwood', layer: 1, collider: null, params: 'a bleaching, b -' },
 	{ id: SP.NUTS, name: 'fallen coconuts', layer: 1, collider: null, params: 'a how many (0..1), b ripeness' },
 	{ id: SP.FROND, name: 'fallen frond', layer: 1, collider: null, params: 'a -, b -' },
+	// broadleaf understory (after Tidewater's monstera / elephant ear)
+	{ id: SP.MONSTERA, name: 'monstera', layer: 1, collider: null, params: 'a -, b -' },
+	{ id: SP.KALO, name: 'kalo', layer: 1, collider: null, params: 'a -, b -' },
 ];
 
 export const SPECIES_OF_LAYER = [ 0, 1, 2 ].map( l => SPECIES.filter( s => s.layer === l ).map( s => s.id ) );

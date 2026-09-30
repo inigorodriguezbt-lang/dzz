@@ -9,13 +9,16 @@
 // ragdolls that stay as searchable bodies for ten minutes.
 import * as THREE from 'three';
 import { CharacterLib, AVATARS, ALOHA, avatarsFor } from './Characters.js';
-import { Zombie, ZTYPES, WORN, ALOHA_ITEM } from './Zombie.js';
+import { Zombie, ZTYPES, WORN, ALOHA_ITEM, vehicleNearest } from './Zombie.js';
 import { Population } from './Population.js';
 import { Animals } from './Animals.js';
+import { disposeAnimalTemplates } from './AnimalModels.js';
 import { Bandits } from './Bandit.js';
 import { nav } from './Steer.js';
 import { rollLoot } from '../game/items/Loot.js';
 import { getItem, makeStack } from '../game/items/ItemDB.js';
+// (Math.hypot boxes its arguments in V8: garbage on hot paths)
+const hyp = ( a, b ) => Math.sqrt( a * a + b * b );
 
 const rnd = Math.random;
 const clamp = ( v, a, b ) => v < a ? a : v > b ? b : v;
@@ -34,7 +37,7 @@ const DIFF = {
 const CAP = { low: 30, medium: 50, high: 72, ultra: 90 };
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3();
 const _frustum = new THREE.Frustum(), _pm = new THREE.Matrix4(), _sphere = new THREE.Sphere();
-const _eye = new THREE.Vector3(), _near = [], _c = new THREE.Color();
+const _eye = new THREE.Vector3(), _near = [], _cands = [], _c = new THREE.Color();
 
 export function install( game ) {
 	const mgr = new Creatures( game );
@@ -59,7 +62,6 @@ export class Creatures {
 		this.frame = 0;
 		this.night = 0;
 		this.sightRange = 50;
-		this.diff = DIFF[ game.difficulty ] || DIFF.normal;
 		this.quality = game.settings.get( 'quality' );
 		this.cap = CAP[ this.quality ] || 72;
 		this.spawnT = 0;
@@ -78,8 +80,8 @@ export class Creatures {
 		this.animals = new Animals( game, this );
 		this.bandits = new Bandits( game, this );
 		this.zombieApi = {
-			list: () => this.zombies.filter( z => z.alive ),
-			count: () => this.zombies.length,
+			list: () => this.zombies.filter( z => z.alive && ! z.removed ),
+			count: () => { let n = 0; for ( const z of this.zombies ) if ( z.alive && ! z.removed ) n ++; return n; },
 			spawn: ( kind, pos, o ) => this.spawnZombie( kind, pos, o ),
 			horde: ( pos, n ) => this.spawnHorde( pos, n ),
 		};
@@ -88,6 +90,9 @@ export class Creatures {
 		// warm the character cache with everyday people
 		this.lib.ready.then( () => { for ( const id of [ 'm_casual2', 'f_casual2', 'm_tourist1', 'm_casual1' ] ) this.lib.load( id ); } );
 	}
+
+	// difficulty can change mid-game (/difficulty): read it when used
+	get diff() { return DIFF[ this.game.difficulty ] || DIFF.normal; }
 
 	// ---- per frame -------------------------------------------------------------------------------------------
 
@@ -105,6 +110,7 @@ export class Creatures {
 		this._playerInfo();
 		this._camera();
 		this._trail();
+		this._ram();
 		// the infected
 		let alive = 0;
 		for ( let i = this.zombies.length - 1; i >= 0; i -- ) {
@@ -135,9 +141,35 @@ export class Creatures {
 		const stance = p.stance === 'prone' ? 0.28 : p.stance === 'crouch' ? 0.55 : 1;
 		const sp = p.speedNow || 0;
 		const moving = p.sprinting ? 1.3 : sp > 1 ? 1 : 0.7;
-		const light = this.night > 0.3 && g.hands?.spot?.intensity > 0 ? 1 + this.night * 1.4 : 1;
+		// a torch in the dark is seen from far off (about 50 m standing still, 75 m walking)
+		const light = this.night > 0.3 && g.hands?.spot?.intensity > 0 ? 1 + this.night * 3.2 : 1;
 		pi.visibility = pi.vehicle ? 1.5 : stance * moving * light;
 		if ( p.swimming ) pi.visibility *= 0.8;
+	}
+
+	// run over by the player's vehicle: the vehicles module does it (game.vehicles.handlesImpacts); this is only
+	// for a vehicles module that leaves it to us, so a hit is never counted twice
+	_ram() {
+		const g = this.game, v = this.pi.vehicle;
+		if ( ! v || ! v.pos || g.vehicles?.handlesImpacts ) return;
+		const sp = typeof v.speed === 'number' ? v.speed : v.vel?.length?.() || 0;
+		if ( sp < 3 ) return;
+		for ( const e of g.entities.near( v.pos, ( v.radius || 3 ) + 1, null, _near ) ) {
+			if ( ! e.alive || ( e.type !== 'zombie' && e.type !== 'animal' && e.type !== 'npc' ) ) continue;
+			if ( this.time - ( e.vehicleHitT ?? - 10 ) < 0.9 ) continue;
+			const q = vehicleNearest( v, e.pos, _v );
+			if ( Math.sqrt( ( q.x - e.pos.x ) ** 2 + ( q.z - e.pos.z ) ** 2 ) > ( e.radius || 0.35 ) + 0.2 ) continue;
+			e.vehicleHitT = this.time;
+			const dir = new THREE.Vector3( e.pos.x - v.pos.x, 0, e.pos.z - v.pos.z ).normalize().setY( 0.25 ).normalize();
+			const dmg = sp * sp * 1.2, src = g.player;
+			e.damage( dmg, { source: src, kind: 'vehicle', dir, zone: 'torso', weapon: 'vehicle', point: new THREE.Vector3( e.pos.x, e.pos.y + 1, e.pos.z ) } );
+			g.events.emit( 'damage', { target: e, amount: dmg, source: src, zone: 'torso', kind: 'vehicle' } );
+			if ( ! e.alive ) g.events.emit( 'kill', { target: e, source: src, weapon: 'vehicle' } );
+			else e.knockback?.( dir, sp * 0.7 );
+			v.damage?.( Math.min( 30, sp * 0.4 ), { kind: 'impact', source: e } );
+			g.audio?.play( 'hit_flesh', { pos: e.pos, vol: 1, max: 70 } );
+			g.fx?.blood?.( e.pos, dir, 1.5 );
+		}
 	}
 
 	_camera() {
@@ -170,7 +202,7 @@ export class Creatures {
 		if ( i >= oldest && i < n ) {
 			const tp = this.trail[ i % TRAIL ];
 			// reached: look further along
-			if ( Math.hypot( tp.x - z.pos.x, tp.z - z.pos.z ) < 1.3 ) {
+			if ( hyp( tp.x - z.pos.x, tp.z - z.pos.z ) < 1.3 ) {
 				let best = - 1;
 				for ( let k = Math.min( n - 1, i + 6 ); k > i; k -- ) {
 					const q = this.trail[ k % TRAIL ];
@@ -400,15 +432,23 @@ export class Creatures {
 		z.inst.updateWorld();
 		z.state = 'dead'; z.noHit = true;
 		z.body.ragdoll( this.game.physics, _v.set( 0, 0, 0 ), { point: _v2.set( z.pos.x, z.pos.y + 1.2, z.pos.z ), dir: _v3.set( rnd() - 0.5, 0, rnd() - 0.5 ).normalize(), strength: 1.5 } );
+		// it has lain there a while: let it fall and come to rest now (spawned out of sight), not in front of anyone
+		for ( let i = 0; i < 180 && ! z.body.asleep; i ++ ) z.body._ragdollStep( 1 / 30 );
+		z.body.asleep = false;
+		z.body.update( 0 );
+		z.body.ragdollCentre( z.pos );
 		z.type = 'corpse';
 	}
 
 	_spawnFeeding( pos, kind ) {
 		const victim = this.spawnZombie( rnd() < 0.5 ? 'civilian' : 'tourist', pos, { victim: true } );
 		if ( ! victim || victim.then ) return;
+		// kneeling at the body's chest where it came to rest (it slid a little as it fell)
+		const r = victim.body.rag.p, cx = r[ 3 ], cz = r[ 5 ];
 		const a = rnd() * Math.PI * 2;
-		const fp = new THREE.Vector3( pos.x + Math.cos( a ) * 0.9, pos.y, pos.z + Math.sin( a ) * 0.9 );
-		const y = Math.atan2( - ( pos.x - fp.x ), - ( pos.z - fp.z ) );
+		const fp = new THREE.Vector3( cx + Math.cos( a ) * 0.75, pos.y, cz + Math.sin( a ) * 0.75 );
+		fp.y = this.game.physics.ground( fp.x, fp.z, pos.y + 1, 0.45, 0.3 ).y;
+		const y = Math.atan2( - ( cx - fp.x ), - ( cz - fp.z ) );
 		this.spawnZombie( kind === 'crawler' ? 'civilian' : kind, fp, { yaw: y, state: 'feed' } );
 	}
 
@@ -471,10 +511,10 @@ export class Creatures {
 			let r = R;
 			if ( indoors && ! g.world.isIndoors?.( z.pos ) ) r *= 0.5;
 			if ( d > r ) continue;
-			// footsteps give away where you are; shots bring them running
+			// footsteps give away where you are; shots bring them running from three quarters of the way out
 			const src = e.source === g.player ? this.pi.entity : null;
 			if ( src && e.kind === 'step' && d < r * 0.6 ) z.alertTo( e.pos, src, false );
-			else z.alertTo( e.pos, null, gun && d < r * 0.6 );
+			else z.alertTo( e.pos, null, gun ? d < r * 0.75 : d < r * 0.35 );
 		}
 		// the ones beyond the active area come too
 		if ( gun && e.radius > 120 && ! this.first ) {
@@ -489,7 +529,8 @@ export class Creatures {
 	// ---- bodies: search the infected and survivors, butcher animals ----------------------------------------------
 
 	provide( ray ) {
-		const g = this.game, out = [];
+		const g = this.game, out = _cands;
+		out.length = 0;
 		const o = ray.origin, d = ray.dir;
 		for ( const e of g.entities.near( o, 4, 'corpse', _near ) ) {
 			if ( e.removed || ! e.centre ) continue;
@@ -504,7 +545,12 @@ export class Creatures {
 			if ( t === null ) continue;
 			if ( e.butcherable ) out.push( e.butcherPrompt( t ) );
 			else if ( e.species ) continue; // nothing to take from a dead honu
-			else out.push( { id: 'zc' + e.id, t, label: 'Search body', owner: e, noOcclusion: true, action: () => this.search( e ) } );
+			else {
+				// one prompt object per body, kept (the provider runs every frame)
+				const p = e._searchPrompt || ( e._searchPrompt = { id: 'zc' + e.id, t: 0, label: 'Search', sub: e.victim ? 'Body' : ( e.label || 'Body' ), owner: e, noOcclusion: true, action: () => this.search( e ) } );
+				p.t = t;
+				out.push( p );
+			}
 		}
 		return out;
 	}
@@ -588,11 +634,8 @@ export class Creatures {
 		this.zombies.length = 0;
 		this.animals.dispose();
 		this.bandits.dispose();
-		for ( const id of this.lib.loadedIds() ) {
-			for ( const inst of this.lib.live.get( id ) || [] ) inst.dispose();
-			this.lib.live.delete( id );
-			this.lib.unload( id );
-		}
+		this.lib.dispose();
+		disposeAnimalTemplates();
 	}
 }
 

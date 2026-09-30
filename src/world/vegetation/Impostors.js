@@ -21,7 +21,7 @@ import * as THREE from 'three';
 import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
 import { G, patchMaterial } from '../../render/Materials.js';
 import { SP, NSP, PALM_H } from './species.js';
-import { KIND, VG, PALM_BARK_GLSL } from './VegMaterial.js';
+import { KIND, VG, PALM_BARK_GLSL, BROAD_GLSL } from './VegMaterial.js';
 import { InstanceTarget } from './InstanceTarget.js';
 
 export const IMP_N = 6; // frames per side of a species block
@@ -31,7 +31,7 @@ const ATLAS_N = 2048; // leaf atlas size (mip level estimate in the bake)
 
 // species drawn as impostors somewhere (far: the canopy out to the render distance, mid: the small
 // plants between their near model and their end distance)
-export const IMP_SPECIES = [ SP.PALM, SP.MONKEYPOD, SP.KUKUI, SP.OHIA, SP.PINE, SP.IRONWOOD, SP.KIAWE, SP.TREEFERN, SP.BANANA, SP.TI, SP.SHRUB, SP.NAUPAKA, SP.TALLGRASS ];
+export const IMP_SPECIES = [ SP.PALM, SP.MONKEYPOD, SP.KUKUI, SP.OHIA, SP.PINE, SP.IRONWOOD, SP.KIAWE, SP.TREEFERN, SP.BANANA, SP.TI, SP.SHRUB, SP.NAUPAKA, SP.TALLGRASS, SP.MONSTERA, SP.KALO ];
 
 const smooth = ( a, b, x ) => { const t = Math.min( 1, Math.max( 0, ( x - a ) / ( b - a ) ) ); return t * t * ( 3 - 2 * t ); };
 
@@ -69,6 +69,7 @@ const BAKE_FRAG = /* glsl */`
 		return mix( mix( vegHash( i ), vegHash( i + vec2( 1, 0 ) ), u.x ), mix( vegHash( i + vec2( 0, 1 ) ), vegHash( i + vec2( 1, 1 ) ), u.x ), u.y );
 	}
 	${ PALM_BARK_GLSL }
+	${ BROAD_GLSL }
 	void main() {
 		float part = vMat.x;
 		// leaf cards seen edge-on are thinned as on the near models (VegMaterial vegEdge); the frame looks
@@ -78,7 +79,16 @@ const BAKE_FRAG = /* glsl */`
 		vec2 dx = dFdx( vUv ), dy = dFdy( vUv );
 		vec4 c;
 		float leaf = 0.0;
-		if ( part < 0.5 ) c = vec4( vegPalmBark( vUv.y, vUv.x, ${PALM_H.toFixed( 1 )}, 0.5, 0.5 ).rgb, 1.0 );
+		if ( part > 5.5 ) {
+			// broadleaf blades (VegMaterial BROAD_GLSL, as the near shader)
+			if ( vUv.x < 0.0 ) c = vec4( vegBroadStem( part, vUv.y, ( vUv.x + 1.0 ) * 2.0, vMat.w, vMat.y ), 1.0 );
+			else {
+				vec2 sh = vegBroadShape( part, vUv.x, vUv.y, vMat.y, vMat.z, vMat.w, 0.5 );
+				if ( abs( vUv.y ) >= sh.x || sh.y > 0.5 ) discard;
+				c = vec4( vegBroadAlbedo( part, vUv.x, vUv.y, vMat.y, vMat.z, vMat.w, 0.5, 0.5, vP.y ), 1.0 );
+				leaf = 1.0;
+			}
+		} else if ( part < 0.5 ) c = vec4( vegPalmBark( vUv.y, vUv.x, ${PALM_H.toFixed( 1 )}, 0.5, 0.5 ).rgb, 1.0 );
 		else if ( part < 1.5 ) c = vec4( texture2D( tBark, vUv ).rgb / dot( max( textureLod( tBark, vec2( 0.5 ), 12.0 ).rgb, vec3( 1e-4 ) ), vec3( 0.333 ) ), 1.0 ); // as the near shader
 		else {
 			c = textureGrad( tLeaf, vUv, dx, dy );
@@ -89,9 +99,10 @@ const BAKE_FRAG = /* glsl */`
 			leaf = part < 2.5 ? 1.0 : 0.0;
 		}
 		// the near shader's albedo (VegMaterial FRAG_COLOR) before the per-plant tints
-		float ao = vMat.y;
+		// (broadleaf parts carry their age there: no exposure)
+		float ao = part > 5.5 ? 1.0 : vMat.y;
 		// (bark: no albedo AO, as the near shader: its exposure only dims the indirect light)
-		vec3 col = c.rgb * vCol * ( part < 1.5 ? vec3( 1.0 ) : mix( 0.55, 1.0, ao ) * mix( vec3( 1.0 ), vec3( 1.16, 1.22, 0.92 ), smoothstep( 0.62, 1.0, ao ) * 0.7 ) );
+		vec3 col = c.rgb * vCol * ( part < 1.5 || part > 5.5 ? vec3( 1.0 ) : mix( 0.55, 1.0, ao ) * mix( vec3( 1.0 ), vec3( 1.16, 1.22, 0.92 ), smoothstep( 0.62, 1.0, ao ) * 0.7 ) );
 		if ( uPass < 0.5 ) gl_FragColor = vec4( max( col, vec3( 0.0 ) ), 1.0 );
 		else if ( uPass < 1.5 ) gl_FragColor = vec4( normalize( vN ) * 0.5 + 0.5, leaf );
 		else gl_FragColor = vec4( ao, 0.0, 0.0, 1.0 );

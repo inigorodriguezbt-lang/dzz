@@ -27,6 +27,10 @@ const REGIONS = {
 	stripes: [ 0, 320, 384, 64 ],
 	fire: [ 0, 384, 384, 64 ],
 	numbers: [ 384, 384, 256, 64 ],
+	headlamp: [ 640, 384, 256, 64 ],
+	tailH: [ 640, 448, 256, 64 ],
+	tailV: [ 896, 384, 64, 128 ],
+	headRound: [ 960, 384, 64, 64 ],
 };
 export const ATLAS = {};
 for ( const k in REGIONS ) {
@@ -196,6 +200,59 @@ export function atlas() {
 		const [ x, y, w, h ] = R( 'numbers' );
 		g.fillStyle = '#fff'; g.fillRect( x, y, w, h );
 		g.fillStyle = '#111'; g.font = font( 46, 800 ); g.textAlign = 'center'; g.fillText( 'N172HI', x + w / 2, y + 48 );
+	}
+	// modern headlamp unit (the outer end on the right): chrome housing, a projector and a high-beam bowl, an LED
+	// daytime strip along the bottom, the amber corner, the clear lens' sheen
+	{
+		const [ x, y, w, h ] = R( 'headlamp' );
+		let gr = g.createLinearGradient( 0, y, 0, y + h );
+		gr.addColorStop( 0, '#aeb6bf' ); gr.addColorStop( 0.45, '#e3e7eb' ); gr.addColorStop( 1, '#7c858f' );
+		g.fillStyle = gr; g.fillRect( x, y, w, h );
+		g.fillStyle = '#1c2026'; g.fillRect( x, y, w, 3 ); g.fillRect( x, y + h - 3, w, 3 );
+		const bowl = ( cx, r ) => {
+			const rg = g.createRadialGradient( x + cx - r * 0.3, y + 26 - r * 0.3, r * 0.1, x + cx, y + 28, r );
+			rg.addColorStop( 0, '#ffffff' ); rg.addColorStop( 0.5, '#c9d0d7' ); rg.addColorStop( 0.85, '#6f7882' ); rg.addColorStop( 1, '#3a4048' );
+			g.fillStyle = rg; g.beginPath(); g.arc( x + cx, y + 28, r, 0, Math.PI * 2 ); g.fill();
+		};
+		bowl( 78, 22 ); bowl( 150, 19 );
+		// the projector's lens: dark glass with a bright rim
+		const pl = g.createRadialGradient( x + 74, y + 24, 2, x + 78, y + 28, 12 );
+		pl.addColorStop( 0, '#f8fbff' ); pl.addColorStop( 0.25, '#6a7788' ); pl.addColorStop( 1, '#161b24' );
+		g.fillStyle = pl; g.beginPath(); g.arc( x + 78, y + 28, 12, 0, Math.PI * 2 ); g.fill();
+		g.strokeStyle = '#eef2f6'; g.lineWidth = 2; g.beginPath(); g.arc( x + 78, y + 28, 13, 0, Math.PI * 2 ); g.stroke();
+		// LED strip
+		g.fillStyle = 'rgba(255,255,255,0.35)'; g.fillRect( x + 14, y + 46, w - 60, 12 );
+		g.fillStyle = '#ffffff'; g.beginPath(); g.roundRect( x + 18, y + 50, w - 68, 5, 2.5 ); g.fill();
+		// amber corner
+		gr = g.createLinearGradient( x + w - 50, 0, x + w, 0 );
+		gr.addColorStop( 0, '#b8661a' ); gr.addColorStop( 0.5, '#f0a040' ); gr.addColorStop( 1, '#a4560f' );
+		g.fillStyle = gr; g.fillRect( x + w - 46, y + 8, 40, h - 16 );
+		// lens sheen
+		gr = g.createLinearGradient( x, y, x + w * 0.6, y + h );
+		gr.addColorStop( 0, 'rgba(255,255,255,0.35)' ); gr.addColorStop( 0.4, 'rgba(255,255,255,0)' );
+		g.fillStyle = gr; g.fillRect( x, y, w, h );
+	}
+	// tail lamps: layered red with LED bars, darker at the edges (horizontal and upright units)
+	const tail = ( [ x, y, w, h ], upright ) => {
+		let gr = upright ? g.createLinearGradient( x, 0, x + w, 0 ) : g.createLinearGradient( 0, y, 0, y + h );
+		gr.addColorStop( 0, '#4a0606' ); gr.addColorStop( 0.3, '#b0141a' ); gr.addColorStop( 0.7, '#c81c22' ); gr.addColorStop( 1, '#3e0505' );
+		g.fillStyle = gr; g.fillRect( x, y, w, h );
+		g.fillStyle = 'rgba(255,90,90,0.9)';
+		if ( upright ) for ( let j = 10; j < h - 8; j += 14 ) g.fillRect( x + 10, y + j, w - 20, 4 );
+		else for ( let i = 12; i < w - 8; i += 22 ) g.fillRect( x + i, y + 14, 5, h - 28 );
+		g.strokeStyle = 'rgba(20,0,0,0.8)'; g.lineWidth = 3; g.strokeRect( x + 1.5, y + 1.5, w - 3, h - 3 );
+		gr = g.createLinearGradient( x, y, x + w, y + h );
+		gr.addColorStop( 0, 'rgba(255,255,255,0.25)' ); gr.addColorStop( 0.35, 'rgba(255,255,255,0)' );
+		g.fillStyle = gr; g.fillRect( x, y, w, h );
+	};
+	tail( R( 'tailH' ), false );
+	tail( R( 'tailV' ), true );
+	// a round headlamp: a chrome reflector round the bulb
+	{
+		const [ x, y, w, h ] = R( 'headRound' );
+		const rg = g.createRadialGradient( x + w * 0.45, y + h * 0.42, 2, x + w / 2, y + h / 2, w / 2 );
+		rg.addColorStop( 0, '#ffffff' ); rg.addColorStop( 0.18, '#e9edf1' ); rg.addColorStop( 0.3, '#8d96a0' ); rg.addColorStop( 0.65, '#d7dce1' ); rg.addColorStop( 1, '#59616a' );
+		g.fillStyle = rg; g.fillRect( x, y, w, h );
 	}
 	const t = new THREE.CanvasTexture( c );
 	t.colorSpace = THREE.SRGBColorSpace;
@@ -380,7 +437,7 @@ export function makeGlassMaterial( opts = {} ) {
 				{
 					// glass reflects more at grazing angles: raise the alpha with a fresnel term
 					float fr = pow( 1.0 - abs( dot( normalize( vViewPosition ), normal ) ), 4.0 );
-					diffuseColor.a = clamp( uTint + fr * 0.6 + gd * 0.7 + crackLine * uCrack * 0.6, 0.0, 0.97 );
+					diffuseColor.a = clamp( uTint + fr * 0.45 + gd * 0.7 + crackLine * uCrack * 0.6, 0.0, 0.95 );
 				}
 				#include <opaque_fragment>` );
 	}, { noCloudShadow: false } );

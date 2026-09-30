@@ -3,6 +3,8 @@
 // separation from neighbours, keeping out of deep water and off cliffs, stuck detection, and the move itself
 // (collide with the physics boxes, follow the ground, fall).
 import * as THREE from 'three';
+// (Math.hypot boxes its arguments in V8: garbage on hot paths)
+const hyp = ( a, b ) => Math.sqrt( a * a + b * b );
 
 const _o = new THREE.Vector3(), _d = new THREE.Vector3(), _n = new THREE.Vector3();
 const PROBE_ANGLES = [ 0.45, 0.9, 1.35, 1.9, 2.5 ];
@@ -58,7 +60,7 @@ export function pathFree( game, p, dx, dz, len, m, knee = 0.75 ) {
 export function steer( game, ent, m, gx, gz, dt, neighbours = null ) {
 	const p = ent.pos;
 	let dx = gx - p.x, dz = gz - p.z;
-	const dist = Math.hypot( dx, dz );
+	const dist = hyp( dx, dz );
 	if ( dist < 1e-3 ) return 0;
 	dx /= dist; dz /= dist;
 	const probe = Math.min( 1.6, dist );
@@ -79,7 +81,8 @@ export function steer( game, ent, m, gx, gz, dt, neighbours = null ) {
 		let found = false;
 		const a0 = Math.atan2( dx, dz );
 		for ( const a of PROBE_ANGLES ) {
-			for ( const s of [ m.side, - m.side ] ) {
+			for ( let k = 0; k < 2; k ++ ) {
+				const s = k ? - m.side : m.side;
 				const b = a0 + a * s;
 				const cx = Math.sin( b ), cz = Math.cos( b );
 				if ( pathFree( game, p, cx, cz, 1.3, m ) ) {
@@ -109,7 +112,7 @@ export function steer( game, ent, m, gx, gz, dt, neighbours = null ) {
 		}
 		const k = following ? 0.8 : 1.5;
 		ox += sx * k; oz += sz * k;
-		const l = Math.hypot( ox, oz ) || 1;
+		const l = hyp( ox, oz ) || 1;
 		ox /= l; oz /= l;
 	}
 	m.dir.set( ox, 0, oz );
@@ -142,9 +145,9 @@ const _boxes = [];
 export function findPath( game, p, gx, gz, m ) {
 	const P = game.physics, hf = game.hf;
 	let tx = gx, tz = gz;
-	const full = Math.hypot( gx - p.x, gz - p.z );
+	const full = hyp( gx - p.x, gz - p.z );
 	if ( full > PLAN_R ) { tx = p.x + ( gx - p.x ) / full * PLAN_R; tz = p.z + ( gz - p.z ) / full * PLAN_R; }
-	const dist = Math.hypot( tx - p.x, tz - p.z );
+	const dist = hyp( tx - p.x, tz - p.z );
 	const pad = 10 + dist * 0.35;
 	let x0 = Math.min( p.x, tx ) - pad, z0 = Math.min( p.z, tz ) - pad;
 	let nx = Math.ceil( ( Math.max( p.x, tx ) + pad - x0 ) / CELL ), nz = Math.ceil( ( Math.max( p.z, tz ) + pad - z0 ) / CELL );
@@ -156,11 +159,12 @@ export function findPath( game, p, gx, gz, m ) {
 	// obstacles: what stands between knee and head height on this level, grown by the mover's radius
 	_planMinY = p.y + 0.5; _planMaxY = p.y + Math.max( 1.2, m.h );
 	const cx = x0 + nx * CELL * 0.5, cz = z0 + nz * CELL * 0.5;
-	const list = P.near( cx, cz, Math.hypot( nx, nz ) * CELL * 0.5, _boxes );
+	const list = P.near( cx, cz, hyp( nx, nz ) * CELL * 0.5, _boxes );
 	const grow = m.r * 0.9;
 	for ( const b of list ) {
 		if ( ! planBox( b ) ) continue;
-		const v = b.kind === 'door' ? 2 : 1;
+		// closed doors can be broken through; an open or broken leaf is just in the way
+		const v = b.kind === 'door' && ! ( b.owner && ( b.owner.broken || b.owner.isOpen ) ) ? 2 : 1;
 		const i0 = Math.max( 0, Math.floor( ( b.minX - grow - x0 ) / CELL ) ), i1 = Math.min( nx - 1, Math.floor( ( b.maxX + grow - x0 ) / CELL ) );
 		const j0 = Math.max( 0, Math.floor( ( b.minZ - grow - z0 ) / CELL ) ), j1 = Math.min( nz - 1, Math.floor( ( b.maxZ + grow - z0 ) / CELL ) );
 		for ( let j = j0; j <= j1; j ++ ) {
@@ -293,8 +297,8 @@ function gridLine( occ, nx, a, b ) {
 function followPath( game, p, m, gx, gz, direct ) {
 	const path = m.path;
 	// the goal moved away from the one planned for (a chase): plan again
-	if ( path.n && Math.hypot( path.gx - gx, path.gz - gz ) > 4 ) path.n = 0;
-	if ( path.n && direct && Math.hypot( gx - p.x, gz - p.z ) < 12 ) path.n = 0; // clear line to a close goal
+	if ( path.n && hyp( path.gx - gx, path.gz - gz ) > 4 ) path.n = 0;
+	if ( path.n && direct && hyp( gx - p.x, gz - p.z ) < 12 ) path.n = 0; // clear line to a close goal
 	if ( ! path.n ) {
 		if ( direct || m.planT > 0 || nav.budget <= 0 ) return false;
 		nav.budget --;
@@ -303,17 +307,17 @@ function followPath( game, p, m, gx, gz, direct ) {
 	}
 	// the next waypoint; skip ahead when a later one is in plain view
 	let wx = path.pts[ path.i * 2 ], wz = path.pts[ path.i * 2 + 1 ];
-	if ( Math.hypot( wx - p.x, wz - p.z ) < 0.9 ) {
+	if ( hyp( wx - p.x, wz - p.z ) < 0.9 ) {
 		path.i ++;
 		if ( path.i >= path.n ) { path.n = 0; return false; }
 		wx = path.pts[ path.i * 2 ]; wz = path.pts[ path.i * 2 + 1 ];
 	}
 	if ( path.i + 1 < path.n ) {
 		const nx = path.pts[ path.i * 2 + 2 ], nz = path.pts[ path.i * 2 + 3 ];
-		const L = Math.hypot( nx - p.x, nz - p.z );
+		const L = hyp( nx - p.x, nz - p.z );
 		if ( L > 1e-3 && pathFree( game, p, ( nx - p.x ) / L, ( nz - p.z ) / L, Math.min( L, 6 ), m ) ) { path.i ++; wx = nx; wz = nz; }
 	}
-	const L = Math.hypot( wx - p.x, wz - p.z ) || 1;
+	const L = hyp( wx - p.x, wz - p.z ) || 1;
 	m.blocked = null;
 	// a door on the way sets m.blocked for the caller (the infected bash it)
 	pathFree( game, p, ( wx - p.x ) / L, ( wz - p.z ) / L, Math.min( 1.4, L ), m );
@@ -342,7 +346,7 @@ export function move( game, ent, m, dt, speed, turnRate, push = null ) {
 		if ( h < - 0.8 && h < game.hf.heightAt( ox, oz ) ) { p.x = ox; p.z = oz; }
 	}
 	P.resolveCylinder( p, m.r, m.h, 0.45 );
-	if ( m.water ) return Math.hypot( p.x - ox, p.z - oz );
+	if ( m.water ) return hyp( p.x - ox, p.z - oz );
 	const g = P.ground( p.x, p.z, p.y, 0.45, m.r * 0.5 );
 	if ( p.y <= g.y + 0.02 || ( m.onGround && p.y - g.y < 0.5 ) ) {
 		p.y = g.y; m.vy = 0; m.onGround = true;
@@ -352,12 +356,12 @@ export function move( game, ent, m, dt, speed, turnRate, push = null ) {
 		p.y += m.vy * dt;
 		if ( p.y < g.y ) { p.y = g.y; m.vy = 0; m.onGround = true; }
 	}
-	return Math.hypot( p.x - ox, p.z - oz );
+	return hyp( p.x - ox, p.z - oz );
 }
 
 // stuck bookkeeping: call once a second with whether the mover wanted to go somewhere
 export function stuckCheck( ent, m, wanted ) {
-	const moved = Math.hypot( ent.pos.x - m.lastX, ent.pos.z - m.lastZ );
+	const moved = hyp( ent.pos.x - m.lastX, ent.pos.z - m.lastZ );
 	m.lastX = ent.pos.x; m.lastZ = ent.pos.z;
 	if ( wanted && moved < 0.25 ) {
 		m.stuckN ++;

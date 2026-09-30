@@ -4,6 +4,8 @@
 //              y branch / frond bend weight (palm fronds: s along the frond), z flutter weight, w phase
 //   aMat vec4: x part (0 palm trunk, 1 bark, 2 atlas leaf, 3 untextured colour, 4 rock)
 //              y exposure / ambient occlusion (0 deep inside .. 1 outer), z colour random, w palm crown id
+//              (parts 6 monstera, 7 elephant ear: procedural blades, aMat = ( part, age, half-width, seed ),
+//              see PlantGeometry broadBlade)
 //   aCol vec3: linear base colour multiplier
 import * as THREE from 'three';
 

@@ -8,11 +8,15 @@ import { animalTemplate, animalInstance } from './AnimalModels.js';
 import { Mover, steer, move, stuckCheck } from './Steer.js';
 import { rayCapsule } from './Body.js';
 import { getItem, makeStack } from '../game/items/ItemDB.js';
+// (Math.hypot boxes its arguments in V8: garbage on hot paths)
+const hyp = ( a, b ) => Math.sqrt( a * a + b * b );
+const hyp3 = ( a, b, c ) => Math.sqrt( a * a + b * b + c * c );
 
 const rnd = Math.random;
 const clamp = ( v, a, b ) => v < a ? a : v > b ? b : v;
 const wrap = ( a ) => Math.atan2( Math.sin( a ), Math.cos( a ) );
 const smooth = ( t ) => t * t * ( 3 - 2 * t );
+const cap = ( s ) => s[ 0 ].toUpperCase() + s.slice( 1 );
 const TAU = Math.PI * 2;
 
 // yields: [ [ ids (first defined wins), min, max ] ]
@@ -53,13 +57,16 @@ export class Animal extends Entity {
 		const male = o.male ?? rnd() < 0.4;
 		const variant = { male, hereford: species === 'cow' && rnd() < 0.4 };
 		if ( species === 'goat' ) {
-			const coats = [ [ 0x6a4a30, 0x8a6a4a ], [ 0x1c1a18, 0x2a2622 ], [ 0xd8d0c0, 0xe8e2d8 ], [ 0x8a6038, 0xc8b8a0 ] ];
+			const coats = [ [ 0x6a4a30, 0x8a6a4a ], [ 0x2e2924, 0x3a342e ], [ 0xd8d0c0, 0xe8e2d8 ], [ 0x8a6038, 0xc8b8a0 ] ];
 			const c = coats[ Math.floor( rnd() * coats.length ) ];
 			variant.coat = c[ 0 ]; variant.belly = c[ 1 ];
 		}
 		this.male = male;
 		this.a = animalInstance( animalTemplate( species, variant ) );
 		this.object = this.a.mesh;
+		// the leg bones in gait order (FL FR HL HR; upper, lower, foot), looked up once
+		this.legs = [];
+		for ( const L of LEGS ) for ( const k of [ '1', '2', '3' ] ) this.legs.push( this.a.bone[ L + k ] || null );
 		this.pos.copy( pos );
 		this.yaw = o.yaw ?? rnd() * TAU;
 		this.scaleK = 0.9 + rnd() * 0.2 * ( male ? 1.1 : 1 );
@@ -165,7 +172,7 @@ export class Animal extends Entity {
 	_fleeFrom( from ) {
 		const S = this.S;
 		const dx = this.pos.x - from.x, dz = this.pos.z - from.z;
-		const l = Math.hypot( dx, dz ) || 1;
+		const l = hyp( dx, dz ) || 1;
 		const gx = this.pos.x + dx / l * 25 + ( rnd() - 0.5 ) * 8, gz = this.pos.z + dz / l * 25 + ( rnd() - 0.5 ) * 8;
 		steer( this.game, this, this.mover, gx, gz, this.thinkT, this.game.entities.near( this.pos, 1.5, 'animal', _nb ) );
 		this.wantV = S.run * ( this.health < this.maxHealth * 0.4 ? 0.7 : 1 );
@@ -190,7 +197,7 @@ export class Animal extends Entity {
 		} else {
 			steer( g, this, this.mover, this.pass.x, this.pass.z, this.thinkT, null );
 			this.wantV = this.S.run * 0.8;
-			if ( Math.hypot( this.pass.x - this.pos.x, this.pass.z - this.pos.z ) < 1.5 || this.stateT > 3 ) { this.pass = null; this.stateT = 0; }
+			if ( hyp( this.pass.x - this.pos.x, this.pass.z - this.pos.z ) < 1.5 || this.stateT > 3 ) { this.pass = null; this.stateT = 0; }
 		}
 		if ( this.charges >= 3 ) { this._scare( pi.pos ); this._set( 'flee' ); }
 	}
@@ -218,7 +225,7 @@ export class Animal extends Entity {
 	_sharkThink() {
 		const pi = this.mgr.pi, P = this.game.player;
 		const swimmer = pi.alive && P.swimming && ! pi.vehicle;
-		const d = Math.hypot( pi.pos.x - this.pos.x, pi.pos.z - this.pos.z );
+		const d = hyp( pi.pos.x - this.pos.x, pi.pos.z - this.pos.z );
 		if ( this.state === 'flee' ) { if ( this.stateT > 15 ) this._set( 'circle' ); return; }
 		if ( ! swimmer ) { if ( this.state === 'attack' ) this._set( 'circle' ); this.lose = ( this.lose || 0 ) + this.thinkT; return; }
 		this.lose = 0;
@@ -234,7 +241,7 @@ export class Animal extends Entity {
 		const pp = pi.pos;
 		if ( st === 'attack' ) {
 			tx = pp.x; tz = pp.z; v = this.S.dash; depth = 0.9;
-			const d3 = Math.hypot( pp.x - this.pos.x, ( pp.y + 1.2 ) - this.pos.y, pp.z - this.pos.z );
+			const d3 = hyp3( pp.x - this.pos.x, ( pp.y + 1.2 ) - this.pos.y, pp.z - this.pos.z );
 			if ( d3 < 1.8 && ! this.bit ) {
 				this.bit = true;
 				const dir = new THREE.Vector3( pp.x - this.pos.x, 0, pp.z - this.pos.z ).normalize();
@@ -339,7 +346,8 @@ export class Animal extends Entity {
 			m.position.add( _v );
 			if ( this.water ) m.position.y = this.pos.y;
 			// legs go stiff
-			for ( const L of LEGS ) { if ( b[ L + '1' ] ) b[ L + '1' ].rotation.x = ( L[ 0 ] === 'F' ? - 0.35 : 0.35 ) * deadK; if ( b[ L + '2' ] ) b[ L + '2' ].rotation.x = 0; }
+			const lg = this.legs;
+			for ( let i = 0; i < 4; i ++ ) { if ( lg[ i * 3 ] ) lg[ i * 3 ].rotation.x = ( i < 2 ? - 0.35 : 0.35 ) * deadK; if ( lg[ i * 3 + 1 ] ) lg[ i * 3 + 1 ].rotation.x = 0; }
 			if ( b.neck ) b.neck.rotation.x = 0.3 * deadK;
 			return;
 		}
@@ -353,17 +361,18 @@ export class Animal extends Entity {
 		const stride = S.leg * sc * gait.stride;
 		this.phase = ( this.phase + dt * v / stride ) % 1;
 		const moving = clamp( v / 0.3, 0, 1 );
-		LEGS.forEach( ( L, i ) => {
-			const up = b[ L + '1' ], lo = b[ L + '2' ], ft = b[ L + '3' ];
-			if ( ! up ) return;
+		const lg = this.legs;
+		for ( let i = 0; i < 4; i ++ ) {
+			const up = lg[ i * 3 ], lo = lg[ i * 3 + 1 ], ft = lg[ i * 3 + 2 ];
+			if ( ! up ) continue;
 			const s = ( this.phase + gait.off[ i ] ) % 1;
 			let ang, flex;
 			if ( s < gait.duty ) { const t = s / gait.duty; ang = gait.amp * ( 1 - 2 * t ); flex = 0; }
 			else { const t = ( s - gait.duty ) / ( 1 - gait.duty ); ang = - gait.amp + 2 * gait.amp * smooth( t ); flex = Math.sin( t * Math.PI ) * gait.flex; }
 			up.rotation.x = ang * moving;
-			lo.rotation.x = - flex * moving * ( L[ 0 ] === 'F' ? 1 : 0.8 );
+			lo.rotation.x = - flex * moving * ( i < 2 ? 1 : 0.8 );
 			if ( ft ) ft.rotation.x = flex * moving * 0.5;
-		} );
+		}
 		// body bob and pitch, head nod; grazing lowers the neck, alarm raises it
 		const bob = Math.abs( Math.sin( this.phase * TAU * 2 ) ) * gait.bob * moving;
 		b.body.position.y = b.body.userData.y0 ?? ( b.body.userData.y0 = b.body.position.y );
@@ -474,10 +483,12 @@ export class Animal extends Entity {
 	butcherPrompt( t ) {
 		const g = this.game;
 		const blade = g.player.inventory.hasTool( 'skin' ) || g.player.inventory.hasTool( 'cut' );
-		return {
-			id: 'ab' + this.id, t, label: 'Butcher ' + this.S.name, sub: blade ? undefined : 'Needs a knife', owner: this, noOcclusion: true,
-			action: () => blade ? this.butcher() : g.toast( 'Needs a knife', 'warn' ),
-		};
+		// one prompt object, kept (the provider runs every frame)
+		const p = this._prompt || ( this._prompt = { id: 'ab' + this.id, t: 0, label: 'Butcher', sub: '', owner: this, noOcclusion: true, action: null } );
+		p.t = t;
+		p.sub = blade ? cap( this.S.name ) : 'Needs a knife';
+		p.action = blade ? this._butcherFn || ( this._butcherFn = () => this.butcher() ) : this._noBladeFn || ( this._noBladeFn = () => g.toast( 'Needs a knife', 'warn' ) );
+		return p;
 	}
 
 	butcher() {
@@ -638,6 +649,20 @@ export class Animals {
 		return a;
 	}
 
+	// the nearest point at least 4 m deep within r of p (a ring search), or null
+	deepWater( p, r ) {
+		const hf = this.game.hf;
+		if ( hf.heightAt( p.x, p.z ) < - 4 ) return p;
+		for ( let d = 6; d <= r; d += 6 ) {
+			const n = Math.ceil( d * 0.8 );
+			for ( let k = 0; k < n; k ++ ) {
+				const a = k / n * TAU, x = p.x + Math.cos( a ) * d, z = p.z + Math.sin( a ) * d;
+				if ( hf.heightAt( x, z ) < - 4 ) return new THREE.Vector3( x, 0, z );
+			}
+		}
+		return null;
+	}
+
 	onNoise( e ) {
 		if ( e.kind !== 'gunshot' && e.kind !== 'explosion' && e.kind !== 'step' ) return;
 		for ( const a of this.list ) {
@@ -683,11 +708,16 @@ export class Animals {
 	}
 
 	registerSpawnables( S ) {
+		const g = this.game;
 		const mk = ( sp, desc, o = {} ) => ( { desc, spawn: ( pos, opts = {} ) => {
-			if ( sp === 'shark' || sp === 'turtle' ) {
-				const g = this.game;
+			if ( sp === 'shark' ) {
+				// only in deep water: the nearest spot at least 4 m deep within 80 m, else none
+				const at = this.deepWater( pos, 80 );
+				if ( ! at ) { g.toast?.( 'Needs deep water', 'warn' ); return null; }
+				pos.set( at.x, g.physics.waterLevel( at.x, at.z ) - 1.5, at.z );
+			} else if ( sp === 'turtle' ) {
 				const h = g.hf.heightAt( pos.x, pos.z );
-				if ( h < - 0.5 ) pos.y = g.physics.waterLevel( pos.x, pos.z ) - ( sp === 'shark' ? 1.5 : 0.6 );
+				if ( h < - 0.5 ) pos.y = g.physics.waterLevel( pos.x, pos.z ) - 0.6;
 			}
 			return this.spawn( sp, pos, { yaw: opts.yaw, ...o } );
 		} } );

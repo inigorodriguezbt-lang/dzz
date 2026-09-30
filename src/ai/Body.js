@@ -6,6 +6,9 @@
 // Character space is the avatar's armature frame (y up, centimetres, see Anim.js); the rig's helpers take
 // directions there. The body never allocates per frame.
 import * as THREE from 'three';
+// (Math.hypot boxes its arguments in V8: garbage on hot paths)
+const hyp = ( a, b ) => Math.sqrt( a * a + b * b );
+const hyp3 = ( a, b, c ) => Math.sqrt( a * a + b * b + c * c );
 
 const TAU = Math.PI * 2;
 const clamp = ( v, a, b ) => v < a ? a : v > b ? b : v;
@@ -181,7 +184,7 @@ export class HumanBody {
 			let a = Math.atan2( - dx, - dz ) - yaw;
 			a = Math.atan2( Math.sin( a ), Math.cos( a ) );
 			a = clamp( a, - 1.1, 1.1 ) * this.lookW;
-			const p = clamp( Math.atan2( dy, Math.hypot( dx, dz ) ), - 0.6, 0.5 ) * this.lookW;
+			const p = clamp( Math.atan2( dy, hyp( dx, dz ) ), - 0.6, 0.5 ) * this.lookW;
 			rig.bend( 'neck', - p * 0.4, a * 0.4 );
 			rig.bend( 'head', - p * 0.6, a * 0.6 );
 		}
@@ -223,10 +226,10 @@ export class HumanBody {
 		if ( S.arms === 'rifle' ) {
 			// both hands on a long gun held across the chest, muzzle forward
 			const p = this.aimPitch;
-			rig.aimAt( 'rUpper', ...this._arr( this._dir( 0.25, - 0.9, R * 0.25 ) ), 1 );
-			rig.aimAt( 'rFore', ...this._arr( this._dir( 0.95, 0.1 + p, - R * 0.3 ) ), 1 );
-			rig.aimAt( 'lUpper', ...this._arr( this._dir( 0.55, - 0.6, L * 0.05 ) ), 1 );
-			rig.aimAt( 'lFore', ...this._arr( this._dir( 0.85, 0.2 + p, - L * 0.35 ) ), 1 );
+			this._aim( 'rUpper', 0.25, - 0.9, R * 0.25, 1 );
+			this._aim( 'rFore', 0.95, 0.1 + p, - R * 0.3, 1 );
+			this._aim( 'lUpper', 0.55, - 0.6, L * 0.05, 1 );
+			this._aim( 'lFore', 0.85, 0.2 + p, - L * 0.35, 1 );
 			return;
 		}
 		let reach = this.reachW;
@@ -234,15 +237,15 @@ export class HumanBody {
 		if ( reach > 0.02 ) {
 			// arms out towards the prey, uneven and wavering
 			const sw = Math.sin( life * 2.3 ) * 0.08, sw2 = Math.sin( life * 1.7 + 1 ) * 0.08;
-			rig.aimAt( 'lUpper', ...this._arr( this._dir( 0.9, - 0.12 + sw, L * 0.28 ) ), reach );
-			rig.aimAt( 'lFore', ...this._arr( this._dir( 0.95, 0.05 + sw2, - L * 0.05 ) ), reach );
-			rig.aimAt( 'rUpper', ...this._arr( this._dir( 0.9, - 0.28 + sw2, R * 0.3 ) ), reach * 0.85 );
-			rig.aimAt( 'rFore', ...this._arr( this._dir( 0.9, - 0.05 + sw, - R * 0.1 ) ), reach * 0.85 );
+			this._aim( 'lUpper', 0.9, - 0.12 + sw, L * 0.28, reach );
+			this._aim( 'lFore', 0.95, 0.05 + sw2, - L * 0.05, reach );
+			this._aim( 'rUpper', 0.9, - 0.28 + sw2, R * 0.3, reach * 0.85 );
+			this._aim( 'rFore', 0.9, - 0.05 + sw, - R * 0.1, reach * 0.85 );
 		} else if ( S.arms === 'hang' ) {
 			// limp arms: pulled a little forward by the hunch and swinging slightly out of step
 			const sw = Math.sin( life * 1.1 ) * 0.1;
-			rig.aimAt( 'lUpper', ...this._arr( this._dir( 0.25 + sw, - 1, L * 0.12 ) ), 0.45 * ( 1 - moving * 0.6 ) );
-			rig.aimAt( 'rUpper', ...this._arr( this._dir( 0.2 - sw, - 1, R * 0.12 ) ), 0.45 * ( 1 - moving * 0.6 ) );
+			this._aim( 'lUpper', 0.25 + sw, - 1, L * 0.12, 0.45 * ( 1 - moving * 0.6 ) );
+			this._aim( 'rUpper', 0.2 - sw, - 1, R * 0.12, 0.45 * ( 1 - moving * 0.6 ) );
 		}
 		if ( ! act || ( act.kind !== 'swipeL' && act.kind !== 'swipeR' && act.kind !== 'bite' && act.kind !== 'eat' && act.kind !== 'shove' ) ) return;
 		const k = act.t / act.dur;
@@ -251,29 +254,34 @@ export class HumanBody {
 			const side = act.kind === 'swipeL' ? L : R;
 			const ub = act.kind === 'swipeL' ? 'lUpper' : 'rUpper', fb = act.kind === 'swipeL' ? 'lFore' : 'rFore';
 			let f, u, r, f2, u2, r2;
-			if ( k < 0.45 ) { const s = k / 0.45; f = 0.2 - s * 0.5; u = 0.3 + s * 0.6; r = side * ( 0.8 ); f2 = 0.2; u2 = 0.9; r2 = side * 0.3; }
-			else if ( k < 0.65 ) { const s = ( k - 0.45 ) / 0.2; f = - 0.3 + s * 1.3; u = 0.9 - s * 1.2; r = side * ( 0.8 - s * 1.2 ); f2 = 0.2 + s * 0.8; u2 = 0.9 - s * 1.2; r2 = side * ( 0.3 - s * 0.9 ); }
-			else { f = 1; u = - 0.3; r = - side * 0.4; f2 = 1; u2 = - 0.3; r2 = - side * 0.6; }
-			rig.aimAt( ub, ...this._arr( this._dir( f, u, r ) ), wAct );
-			rig.aimAt( fb, ...this._arr( this._dir( f2, u2, r2 ) ), wAct );
+			// (wind-up: the upper arm drawn out and back at shoulder height, the forearm cocked up, clawed hand high)
+			if ( k < 0.45 ) { const s = smooth( 0, 1, k / 0.45 ); f = 0.3 - s * 0.65; u = - 0.2 + s * 0.6; r = side * ( 0.5 + s * 0.4 ); f2 = 0.35 + s * 0.05; u2 = - 0.1 + s * 0.85; r2 = side * 0.25; }
+			else if ( k < 0.65 ) { const s = smooth( 0, 1, ( k - 0.45 ) / 0.2 ); f = - 0.35 + s * 1.35; u = 0.4 - s * 0.5; r = side * ( 0.9 - s * 1.2 ); f2 = 0.4 + s * 0.6; u2 = 0.75 - s * 1.1; r2 = side * ( 0.25 - s * 0.85 ); }
+			else { f = 1; u = - 0.1; r = - side * 0.3; f2 = 1; u2 = - 0.35; r2 = - side * 0.6; }
+			this._aim( ub, f, u, r, wAct );
+			this._aim( fb, f2, u2, r2, wAct );
 		} else if ( act.kind === 'bite' || act.kind === 'shove' ) {
 			// both hands grab forward and pull in
 			const pull = k > 0.55 ? ( k - 0.55 ) / 0.45 : 0;
-			rig.aimAt( 'lUpper', ...this._arr( this._dir( 1, 0.05, L * 0.2 ) ), wAct );
-			rig.aimAt( 'rUpper', ...this._arr( this._dir( 1, 0.05, R * 0.2 ) ), wAct );
-			rig.aimAt( 'lFore', ...this._arr( this._dir( 1 - pull * 0.6, 0.1, - L * ( 0.1 + pull * 0.6 ) ) ), wAct );
-			rig.aimAt( 'rFore', ...this._arr( this._dir( 1 - pull * 0.6, 0.1, - R * ( 0.1 + pull * 0.6 ) ) ), wAct );
+			this._aim( 'lUpper', 1, 0.05, L * 0.2, wAct );
+			this._aim( 'rUpper', 1, 0.05, R * 0.2, wAct );
+			this._aim( 'lFore', 1 - pull * 0.6, 0.1, - L * ( 0.1 + pull * 0.6 ), wAct );
+			this._aim( 'rFore', 1 - pull * 0.6, 0.1, - R * ( 0.1 + pull * 0.6 ), wAct );
 		} else if ( act.kind === 'eat' ) {
 			// hands down on the carcass, tearing
 			const tear = Math.sin( act.t * 3.1 ) * 0.25;
-			rig.aimAt( 'lUpper', ...this._arr( this._dir( 0.8, - 0.7, L * 0.15 ) ), wAct );
-			rig.aimAt( 'rUpper', ...this._arr( this._dir( 0.8, - 0.7, R * 0.15 ) ), wAct );
-			rig.aimAt( 'lFore', ...this._arr( this._dir( 0.5, - 0.9 + tear, 0 ) ), wAct );
-			rig.aimAt( 'rFore', ...this._arr( this._dir( 0.5, - 0.9 - tear, 0 ) ), wAct );
+			this._aim( 'lUpper', 0.8, - 0.7, L * 0.15, wAct );
+			this._aim( 'rUpper', 0.8, - 0.7, R * 0.15, wAct );
+			this._aim( 'lFore', 0.5, - 0.9 + tear, 0, wAct );
+			this._aim( 'rFore', 0.5, - 0.9 - tear, 0, wAct );
 		}
 	}
 
-	_arr( v ) { _arr3[ 0 ] = v.x; _arr3[ 1 ] = v.y; _arr3[ 2 ] = v.z; return _arr3; }
+	// aim bone k along the character-space direction ( forward f, up u, the character's right r ) with weight w
+	_aim( k, f, u, r, w ) {
+		const I = this.info;
+		this.rig.aimAt( k, I.fwd.x * f + I.right.x * r, u, I.fwd.z * f + I.right.z * r, w );
+	}
 
 	_actionBody( act, w ) {
 		const rig = this.rig, k = act.t / act.dur, I = this.info;
@@ -356,15 +364,15 @@ export class HumanBody {
 		rig.bend( 'neck', - 0.45 ); rig.bend( 'head', - 0.35, Math.sin( this.t.life * 0.7 ) * 0.2 );
 		// arms: one reaches ahead and plants, the other pulls under the chest
 		const reachL = Math.max( 0, a ), reachR = Math.max( 0, b );
-		rig.aimAt( 'lUpper', ...this._arr( this._dir( 0.35 + ( 1 - reachL ) * 0.4, 0.75 * reachL - 0.2 * ( 1 - reachL ), L * 0.45 ) ), 1 );
-		rig.aimAt( 'lFore', ...this._arr( this._dir( 0.55, 0.8 * reachL - 0.1, - L * 0.15 ) ), 1 );
-		rig.aimAt( 'rUpper', ...this._arr( this._dir( 0.35 + ( 1 - reachR ) * 0.4, 0.75 * reachR - 0.2 * ( 1 - reachR ), R * 0.45 ) ), 1 );
-		rig.aimAt( 'rFore', ...this._arr( this._dir( 0.55, 0.8 * reachR - 0.1, - R * 0.15 ) ), 1 );
+		this._aim( 'lUpper', 0.35 + ( 1 - reachL ) * 0.4, 0.75 * reachL - 0.2 * ( 1 - reachL ), L * 0.45, 1 );
+		this._aim( 'lFore', 0.55, 0.8 * reachL - 0.1, - L * 0.15, 1 );
+		this._aim( 'rUpper', 0.35 + ( 1 - reachR ) * 0.4, 0.75 * reachR - 0.2 * ( 1 - reachR ), R * 0.45, 1 );
+		this._aim( 'rFore', 0.55, 0.8 * reachR - 0.1, - R * 0.15, 1 );
 		// legs drag behind, one knee working a little
-		rig.aimAt( 'lThigh', ...this._arr( this._dir( 0.1, - 1, L * 0.15 ) ), 1 );
-		rig.aimAt( 'rThigh', ...this._arr( this._dir( 0.1 + Math.max( 0, a ) * 0.3, - 1, R * 0.2 ) ), 1 );
-		rig.aimAt( 'lCalf', ...this._arr( this._dir( - 0.15, - 1, 0 ) ), 1 );
-		rig.aimAt( 'rCalf', ...this._arr( this._dir( - 0.35 * Math.max( 0, a ), - 1, 0 ) ), 1 );
+		this._aim( 'lThigh', 0.1, - 1, L * 0.15, 1 );
+		this._aim( 'rThigh', 0.1 + Math.max( 0, a ) * 0.3, - 1, R * 0.2, 1 );
+		this._aim( 'lCalf', - 0.15, - 1, 0, 1 );
+		this._aim( 'rCalf', - 0.35 * Math.max( 0, a ), - 1, 0, 1 );
 		rig.jawOpen = 0.35 + Math.max( 0, Math.sin( this.t.life * 1.7 ) ) * 0.4;
 		// the body rocks with each pull
 		rig.bend( 'pelvis', 0, 0, ( a - b ) * 0.06 );
@@ -383,14 +391,14 @@ export class HumanBody {
 		const f = this.riseFace;
 		// arms flopped out on the ground (a touch towards it: the ground is ahead of a body lying face down (f = 1) and
 		// behind one lying on its back), one elbow bent, head turned to one side, legs apart
-		rig.aimAt( 'lUpper', ...this._arr( this._dir( 0.12 * f, - 0.6, - m * 0.75 ) ), 0.9 * w );
-		rig.aimAt( 'lFore', ...this._arr( this._dir( 0.1 * f, - 0.85, - m * 0.4 ) ), 0.9 * w );
-		rig.aimAt( 'rUpper', ...this._arr( this._dir( 0.12 * f, - 0.15, m * 0.95 ) ), 0.9 * w );
-		rig.aimAt( 'rFore', ...this._arr( this._dir( 0.1 * f, 0.55, m * 0.6 ) ), 0.9 * w );
-		rig.aimAt( 'lThigh', ...this._arr( this._dir( 0.05 * f, - 1, - m * 0.2 ) ), 0.7 * w );
-		rig.aimAt( 'rThigh', ...this._arr( this._dir( 0.05 * f, - 1, m * 0.25 ) ), 0.7 * w );
-		rig.aimAt( 'lCalf', ...this._arr( this._dir( 0.05 * f, - 1, - m * 0.22 ) ), 0.7 * w );
-		rig.aimAt( 'rCalf', ...this._arr( this._dir( 0.05 * f, - 1, m * 0.3 ) ), 0.7 * w );
+		this._aim( 'lUpper', 0.12 * f, - 0.6, - m * 0.75, 0.9 * w );
+		this._aim( 'lFore', 0.1 * f, - 0.85, - m * 0.4, 0.9 * w );
+		this._aim( 'rUpper', 0.12 * f, - 0.15, m * 0.95, 0.9 * w );
+		this._aim( 'rFore', 0.1 * f, 0.55, m * 0.6, 0.9 * w );
+		this._aim( 'lThigh', 0.05 * f, - 1, - m * 0.2, 0.7 * w );
+		this._aim( 'rThigh', 0.05 * f, - 1, m * 0.25, 0.7 * w );
+		this._aim( 'lCalf', 0.05 * f, - 1, - m * 0.22, 0.7 * w );
+		this._aim( 'rCalf', 0.05 * f, - 1, m * 0.3, 0.7 * w );
 		rig.bend( 'head', 0, 0.9 * ( this.seed % 2 < 1 ? 1 : - 1 ) * w );
 	}
 
@@ -442,7 +450,8 @@ export class HumanBody {
 			if ( hit ) {
 				const d = _v.distanceTo( hit.point );
 				const k = hit.strength * Math.exp( - d * d / 0.25 ) + hit.strength * 0.25;
-				vx += hit.dir.x * k; vy += hit.dir.y * k * 0.3 + 0.2 * k; vz += hit.dir.z * k;
+				// (a slight lift: a body thrown by the blow; more and it tips over like a plank, legs in the air)
+				vx += hit.dir.x * k; vy += hit.dir.y * k * 0.3 + 0.1 * k; vz += hit.dir.z * k;
 			}
 			r.o[ i * 3 ] = _v.x - vx * h; r.o[ i * 3 + 1 ] = _v.y - vy * h; r.o[ i * 3 + 2 ] = _v.z - vz * h;
 		}
@@ -456,7 +465,7 @@ export class HumanBody {
 		this.asleep = false;
 	}
 
-	_dist( p, a, b ) { return Math.hypot( p[ a * 3 ] - p[ b * 3 ], p[ a * 3 + 1 ] - p[ b * 3 + 1 ], p[ a * 3 + 2 ] - p[ b * 3 + 2 ] ); }
+	_dist( p, a, b ) { return hyp3( p[ a * 3 ] - p[ b * 3 ], p[ a * 3 + 1 ] - p[ b * 3 + 1 ], p[ a * 3 + 2 ] - p[ b * 3 + 2 ] ); }
 
 	// shove a limp body (a later bullet, a blast)
 	ragdollImpulse( point, dir, strength ) {
@@ -465,7 +474,7 @@ export class HumanBody {
 		this.asleep = false; r.calm = 0;
 		const h = 1 / 60;
 		for ( let i = 0; i < NP; i ++ ) {
-			const d = Math.hypot( r.p[ i * 3 ] - point.x, r.p[ i * 3 + 1 ] - point.y, r.p[ i * 3 + 2 ] - point.z );
+			const d = hyp3( r.p[ i * 3 ] - point.x, r.p[ i * 3 + 1 ] - point.y, r.p[ i * 3 + 2 ] - point.z );
 			const k = strength * Math.exp( - d * d / 0.15 ) * h;
 			r.o[ i * 3 ] -= dir.x * k; r.o[ i * 3 + 1 ] -= ( dir.y + 0.3 ) * k; r.o[ i * 3 + 2 ] -= dir.z * k;
 		}
@@ -568,28 +577,22 @@ export class HumanBody {
 		rig.clearOverlays();
 		rig.begin();
 		rig.addBind( 1 );
-		const B = I.bindPos, ix = I.idx;
-		const bpos = ( k, out ) => out.fromArray( B, ix[ k ] * 3 );
 		// pelvis frame from the hips and the spine, chest frame from the shoulders and the neck
-		const Dp = frameDelta( bpos( 'rThigh', _v ).sub( bpos( 'lThigh', _v2 ) ), bpos( 'spine2', _v3 ).sub( bpos( 'pelvis', _v4 ) ),
+		const Dp = frameDelta( bindPos( I, 'rThigh', _v ).sub( bindPos( I, 'lThigh', _v2 ) ), bindPos( I, 'spine2', _v3 ).sub( bindPos( I, 'pelvis', _v4 ) ),
 			_w1.subVectors( cp[ RHP ], cp[ LHP ] ), _w2.subVectors( cp[ C_ ], cp[ P_ ] ), _qp );
-		const Dc = frameDelta( bpos( 'rUpper', _v ).sub( bpos( 'lUpper', _v2 ) ), bpos( 'neck', _v3 ).sub( bpos( 'spine2', _v4 ) ),
+		const Dc = frameDelta( bindPos( I, 'rUpper', _v ).sub( bindPos( I, 'lUpper', _v2 ) ), bindPos( I, 'neck', _v3 ).sub( bindPos( I, 'spine2', _v4 ) ),
 			_w1.subVectors( cp[ RS ], cp[ LS ] ), _w2.subVectors( cp[ N_ ], cp[ C_ ] ), _qc );
-		const setW = ( k, D ) => {
-			const i = ix[ k ] * 4;
-			_q3.set( I.bindW[ i ], I.bindW[ i + 1 ], I.bindW[ i + 2 ], I.bindW[ i + 3 ] ).premultiply( D );
-			rig.setWorld( k, _q3.x, _q3.y, _q3.z, _q3.w );
-		};
-		setW( 'pelvis', Dp );
-		setW( 'spine', _q2.copy( Dp ).slerp( Dc, 0.33 ) );
-		setW( 'spine1', _q2.copy( Dp ).slerp( Dc, 0.66 ) );
-		setW( 'spine2', Dc );
-		const aim = ( k, a, b ) => { _w1.subVectors( cp[ b ], cp[ a ] ); rig.aimAt( k, _w1.x, _w1.y, _w1.z, 1 ); };
-		aim( 'neck', N_, H_ ); aim( 'head', N_, H_ );
-		aim( 'lUpper', LS, LE ); aim( 'lFore', LE, LH ); aim( 'rUpper', RS, RE ); aim( 'rFore', RE, RH );
-		aim( 'lThigh', LHP, LK ); aim( 'lCalf', LK, LF ); aim( 'rThigh', RHP, RK ); aim( 'rCalf', RK, RF );
-		rig.pelvisAbs = rig.pelvisAbs || new THREE.Vector3();
-		rig.pelvisAbs.copy( cp[ P_ ] );
+		setBindWorld( rig, 'pelvis', Dp );
+		setBindWorld( rig, 'spine', _q2.copy( Dp ).slerp( Dc, 0.33 ) );
+		setBindWorld( rig, 'spine1', _q2.copy( Dp ).slerp( Dc, 0.66 ) );
+		setBindWorld( rig, 'spine2', Dc );
+		for ( let k = 0; k < RAG_AIMS.length; k += 3 ) {
+			const a = RAG_AIMS[ k + 1 ], b = RAG_AIMS[ k + 2 ];
+			_w1.subVectors( cp[ b ], cp[ a ] );
+			rig.aimAt( RAG_AIMS[ k ], _w1.x, _w1.y, _w1.z, 1 );
+		}
+		// (clearOverlays drops pelvisAbs each pose: keep one vector per rig)
+		rig.pelvisAbs = ( rig._pelvisAbsV || ( rig._pelvisAbsV = new THREE.Vector3() ) ).copy( cp[ P_ ] );
 		rig.jawOpen = 0.5;
 		rig.end();
 	}
@@ -667,11 +670,23 @@ export class HumanBody {
 }
 
 const WALL_TEST = [ P_, C_, H_, LH, RH, LF, RF ];
-const _arr3 = [ 0, 0, 0 ];
 const _w1 = new THREE.Vector3(), _w2 = new THREE.Vector3();
 const _qp = new THREE.Quaternion(), _qc = new THREE.Quaternion();
 const _ma = new THREE.Matrix4(), _mb = new THREE.Matrix4();
 const _e1 = new THREE.Vector3(), _e2 = new THREE.Vector3(), _e3 = new THREE.Vector3();
+
+// the ragdoll's limb bones: [ bone, from particle, to particle ] triples
+const RAG_AIMS = [ 'neck', N_, H_, 'head', N_, H_, 'lUpper', LS, LE, 'lFore', LE, LH, 'rUpper', RS, RE, 'rFore', RE, RH,
+	'lThigh', LHP, LK, 'lCalf', LK, LF, 'rThigh', RHP, RK, 'rCalf', RK, RF ];
+
+// a bone's bind position (character space)
+function bindPos( I, k, out ) { return out.fromArray( I.bindPos, I.idx[ k ] * 3 ); }
+// bone k's character-space rotation: its bind rotation turned by D
+function setBindWorld( rig, k, D ) {
+	const I = rig.info, i = I.idx[ k ] * 4;
+	_q3.set( I.bindW[ i ], I.bindW[ i + 1 ], I.bindW[ i + 2 ], I.bindW[ i + 3 ] ).premultiply( D );
+	rig.setWorld( k, _q3.x, _q3.y, _q3.z, _q3.w );
+}
 
 // rotation taking the frame (right0, up0) to (right1, up1): both orthonormalised with up as the primary axis
 function frameDelta( r0, u0, r1, u1, out ) {

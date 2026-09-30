@@ -9,6 +9,7 @@ import { getModel } from './models/index.js';
 import { VehicleVisual, EMIT } from './visual.js';
 import { Body, Engine, makeWheels, hullPoints, hullContacts, stepCar, stepBike, stepBoat, stepHeli, stepPlane, wade, STEP } from './physics.js';
 import { pchip } from './models/shell.js';
+import { Physics } from '../game/Physics.js';
 
 const V3 = THREE.Vector3;
 const _v = new V3(), _w = new V3(), _o = new V3(), _d = new V3(), _q = new THREE.Quaternion(), _e = new THREE.Euler();
@@ -64,6 +65,9 @@ export class Vehicle extends Entity {
 		if ( this.wheeled || kind === 'plane' ) this.wheels = makeWheels( m, spec );
 		if ( kind === 'heli' ) this.wheels = makeWheels( { wheels: m.meta.skids.map( s => ( { x: s[ 0 ], y: 0.02, z: s[ 2 ], R: 0.02, W: 0.1, side: Math.sign( s[ 0 ] ), steer: 0, front: s[ 2 ] < 0, skid: true } ) ) }, spec );
 		for ( const w of this.wheels ) if ( kind === 'heli' ) w.skid = true;
+		// wheelbase (the stability aid's yaw target)
+		const wz = this.wheels.filter( w => ! w.skid ).map( w => w.z );
+		this.wheelbase = wz.length > 1 ? Math.max( 1, Math.max( ...wz ) - Math.min( ...wz ) ) : 2.6;
 		this.hull = this._hullPoints();
 		if ( kind === 'boat' ) this._buoyancy();
 		this.propPoint = new V3( ...( m.meta.prop || [ 0, 0, 0 ] ) );
@@ -132,9 +136,10 @@ export class Vehicle extends Entity {
 		if ( this.kind === 'boat' ) {
 			const wy = g.physics.waterLevel( o.x, o.z );
 			const gy = g.hf.heightAt( o.x, o.z );
-			// afloat, or resting on the sand if the water is too shallow
+			// afloat (riding the waves from here on), or resting on the sand if the water is too shallow
 			const y = Math.max( wy - 0.02, gy - this.bounds.min.y - 0.02 );
 			this.setPose( _o.set( o.x, y, o.z ), null, yaw );
+			if ( wy - 0.02 > gy - this.bounds.min.y - 0.02 && this.sleeping ) this._float();
 			return;
 		}
 		const pts = this.kind === 'heli' ? this.model.meta.skids.map( s => [ s[ 0 ], s[ 2 ] ] ) : this.kind === 'bike' ? this.wheels.flatMap( w => [ [ - 0.2, w.z ], [ 0.2, w.z ] ] ) : this.wheels.map( w => [ w.x, w.z ] );
@@ -143,7 +148,7 @@ export class Vehicle extends Entity {
 		const top = o.y + 2;
 		const hs = pts.map( ( [ x, z ] ) => {
 			const wx = o.x + x * c + z * s, wz = o.z - x * s + z * c;
-			return g.physics.ground( wx, wz, top, 0.6 ).y;
+			return this._groundAt( wx, wz, top + 0.6 );
 		} );
 		// fit pitch and roll through the contact heights
 		let front = 0, rear = 0, left = 0, right = 0, nf = 0, nr = 0, nl = 0, nrr = 0;
@@ -158,6 +163,18 @@ export class Vehicle extends Entity {
 		this.setPose( _o.set( o.x, y, o.z ), _q );
 		for ( const w of this.wheels ) { w.L = this.spec.susp.rest; w.Lprev = w.L; }
 		this.body.v.set( 0, 0, 0 ); this.body.w.set( 0, 0, 0 );
+	}
+
+	// the ground (terrain or a static box) under a point, below `from`, leaving out this vehicle's own collision
+	// boxes (settling onto its own roof would lift it off the ground)
+	_groundAt( x, z, from ) {
+		let best = this.game.hf.heightAt( x, z );
+		for ( const b of this.game.physics.near( x, z, 0.05, _near ) ) {
+			if ( b.owner === this || b.maxY > from || b.maxY < best ) continue;
+			if ( ! Physics.inside( b, x, z, 0 ) ) continue;
+			best = b.maxY;
+		}
+		return best;
 	}
 
 	yawAngle() { _v.set( 0, 0, - 1 ).applyQuaternion( this.body.q ); return Math.atan2( - _v.x, - _v.z ); }
@@ -243,7 +260,64 @@ export class Vehicle extends Entity {
 
 	// ---- simulation -------------------------------------------------------------------------------------------
 
-	wake() { if ( this.sleeping ) { this.sleeping = false; this.still = 0; } }
+	wake() { if ( this.sleeping ) { this.sleeping = false; this.still = 0; this.floating = false; } }
+
+	// ---- the sea under a boat ------------------------------------------------------------------------------------
+
+	// the ocean's height under each buoyancy point and the propeller, once a frame (the substeps reuse it: the
+	// ocean's CPU query costs tens of microseconds)
+	sampleSea() {
+		const P = this.game.physics, b = this.body;
+		const h = this.seaH ||= new Float32Array( this.buoy.length );
+		for ( let i = 0; i < this.buoy.length; i ++ ) { const p = b.toWorld( this.buoy[ i ].p, _v ); h[ i ] = P.waterLevel( p.x, p.z ); }
+		const pp = b.toWorld( this.propPoint, _v );
+		this.propSea = P.waterLevel( pp.x, pp.z );
+	}
+
+	// a boat left alone on the water stops simulating and just rides the waves: its height, pitch and roll follow
+	// the sea at the bow and either side of the stern, sampled a few times a second (woken by anything that
+	// touches it)
+	_float() {
+		const b = this.body, bb = this.bounds;
+		this.floating = true;
+		this.bobT = 0;
+		const hw = ( bb.max.x - bb.min.x ) / 2;
+		this.bobPts = [ [ 0, bb.min.z * 0.65 ], [ - hw * 0.7, bb.max.z * 0.65 ], [ hw * 0.7, bb.max.z * 0.65 ] ];
+		this.bobL = ( bb.max.z - bb.min.z ) * 0.65; this.bobW = hw * 1.4;
+		_e.setFromQuaternion( b.q, 'YXZ' );
+		const B = this.bobBase ||= {};
+		B.yaw = _e.y; B.pitch = _e.x; B.roll = _e.z; B.y = this.pos.y;
+		this._bobSample( B );
+		this.bobCur = { y: B.y, pitch: B.pitch, roll: B.roll };
+		this.bobTgt = { ...this.bobCur };
+	}
+
+	_bobSample( out ) {
+		const P = this.game.physics, o = this.pos, yaw = this.bobBase.yaw;
+		const c = Math.cos( yaw ), s = Math.sin( yaw ), pts = this.bobPts;
+		const h = ( i ) => P.waterLevel( o.x + pts[ i ][ 0 ] * c + pts[ i ][ 1 ] * s, o.z - pts[ i ][ 0 ] * s + pts[ i ][ 1 ] * c );
+		out.bow = h( 0 ); out.l = h( 1 ); out.r = h( 2 );
+		out.mean = ( out.bow + out.l + out.r ) / 3;
+		return out;
+	}
+
+	bob( dt ) {
+		if ( ! this.floating ) return;
+		const B = this.bobBase, T = this.bobTgt, C = this.bobCur;
+		this.bobT -= dt;
+		if ( this.bobT <= 0 ) {
+			this.bobT = 0.15;
+			const S = this._bobSample( this._bobS ||= {} );
+			// (a swell far bigger than the hull's reach: it rides the mean, pitched and rolled by the slopes)
+			T.y = B.y + ( S.mean - B.mean );
+			T.pitch = B.pitch + Math.atan2( ( S.bow - ( S.l + S.r ) / 2 ) - ( B.bow - ( B.l + B.r ) / 2 ), this.bobL ) * 0.8;
+			T.roll = B.roll + Math.atan2( ( S.r - S.l ) - ( B.r - B.l ), this.bobW ) * 0.8;
+		}
+		const k = Math.min( 1, dt * 5 );
+		C.y += ( T.y - C.y ) * k; C.pitch += ( T.pitch - C.pitch ) * k; C.roll += ( T.roll - C.roll ) * k;
+		_q.setFromEuler( _e.set( C.pitch, B.yaw, C.roll, 'YXZ' ) );
+		this.setPose( _o.set( this.pos.x, C.y, this.pos.z ), _q );
+	}
 
 	// fixed-step physics; inp = the driver's input (null: nobody at the controls)
 	simulate( dt, inp ) {
@@ -251,8 +325,12 @@ export class Vehicle extends Entity {
 		const game = this.game;
 		const I = inp || NO_INPUT;
 		this.acc = Math.min( this.acc + dt, STEP * 8 );
-		this.altitudeAGL = this.pos.y - Math.max( game.hf.heightAt( this.pos.x, this.pos.z ), game.physics.waterLevel( this.pos.x, this.pos.z ) );
-		let crash = null;
+		const gh = game.hf.heightAt( this.pos.x, this.pos.z );
+		// (the sea only where the ground is low: the ocean query is costly)
+		this.altitudeAGL = this.pos.y - ( gh < 3 ? Math.max( gh, game.physics.waterLevel( this.pos.x, this.pos.z ) ) : gh );
+		const crash = this._crash ||= { speed: 0, what: null, point: new V3() };
+		let crashed = false;
+		if ( this.kind === 'boat' ) this.sampleSea();
 		while ( this.acc >= STEP ) {
 			this.acc -= STEP;
 			const b = this.body;
@@ -267,12 +345,12 @@ export class Vehicle extends Entity {
 			if ( k !== 'boat' ) this.inWater = wade( this, STEP );
 			b.integrate( STEP );
 			const c = hullContacts( this, STEP );
-			if ( c.speed > CRASH_MIN && ( ! crash || c.speed > crash.speed ) ) crash = c;
+			if ( c.speed > CRASH_MIN && ( ! crashed || c.speed > crash.speed ) ) { crashed = true; crash.speed = c.speed; crash.what = c.what; crash.point.copy( c.point ); }
 			// rotor strike: blade tips into anything solid
 			if ( k === 'heli' && this.rotor > 0.3 ) this._rotorStrike();
 		}
 		this._sync();
-		if ( crash ) this.onCrash( crash );
+		if ( crashed ) this.onCrash( crash );
 		for ( const w of this.wheels ) w.spin += w.spinV * dt;
 		// a drowned engine: the air intake under water
 		if ( this.kind !== 'boat' && this.inWater > 0 && ! this.flooded ) {
@@ -282,11 +360,16 @@ export class Vehicle extends Entity {
 				if ( this.engine.running ) this.game.vehicles?.stall?.( this, 'Engine flooded' );
 			}
 		}
-		// fall asleep when nothing is happening (parked, nobody inside)
-		const moving = this.body.v.lengthSq() > 0.02 || this.body.w.lengthSq() > 0.01;
-		if ( ! this.driver && ! this.engine.running && ! moving && ( this.kind !== 'boat' || ! this.inWater ) && this.rotor < 0.05 && ! this.burning ) {
+		// fall asleep when nothing is happening (parked, nobody inside); a boat on the water only has to stop drifting
+		// (the waves keep it rocking) and then just rides them (bob)
+		const bv = this.body.v, boat = this.kind === 'boat';
+		const moving = boat ? bv.x * bv.x + bv.z * bv.z > 0.25 || Math.abs( this.body.w.y ) > 0.1 : bv.lengthSq() > 0.02 || this.body.w.lengthSq() > 0.01;
+		if ( ! this.driver && ! this.engine.running && ! moving && this.rotor < 0.05 && ! this.burning ) {
 			this.still += dt;
-			if ( this.still > 1.5 ) { this.sleeping = true; this.body.v.set( 0, 0, 0 ); this.body.w.set( 0, 0, 0 ); }
+			if ( this.still > ( boat ? 3 : 1.5 ) ) {
+				this.sleeping = true; this.body.v.set( 0, 0, 0 ); this.body.w.set( 0, 0, 0 );
+				if ( boat && this.inWater > 0.1 ) this._float();
+			}
 		} else this.still = 0;
 		// out of the world: fell through the ground
 		const gy = game.hf.heightAt( this.pos.x, this.pos.z );
@@ -317,23 +400,34 @@ export class Vehicle extends Entity {
 	onCrash( c ) {
 		const g = this.game;
 		const s = c.speed;
+		const at = c.point.clone(); // (the contact record is reused every step)
 		const kind = this.kind;
-		// aircraft are fragile, big trucks shrug off bumps
-		const k = ( kind === 'heli' || kind === 'plane' ? 3 : kind === 'boat' ? 0.6 : kind === 'bike' ? 1.4 : 1 ) * ( 1500 / Math.max( 800, this.spec.mass ) ) ** 0.3;
-		const dmg = ( s - CRASH_MIN ) * ( s - CRASH_MIN ) * 9 * k;
-		if ( dmg > 2 ) this.damage( dmg, { kind: 'crash', zone: 'body', point: c.point } );
+		// aircraft are fragile, big trucks shrug off bumps. A car takes about a third of its health hitting a wall at
+		// 70 km/h, most of it at 100; a wreck catches fire rather than blowing up on the spot (see damage)
+		const k = ( kind === 'heli' || kind === 'plane' ? 2.5 : kind === 'boat' ? 0.6 : kind === 'bike' ? 1.4 : 1 ) * ( 1500 / Math.max( 800, this.spec.mass ) ) ** 0.3;
+		const dmg = ( s - CRASH_MIN ) * ( s - CRASH_MIN ) * 1.5 * k * ( this.maxHealth / 1000 ) ** 0.5;
+		if ( dmg > 2 ) this.damage( dmg, { kind: 'crash', zone: 'body', point: at } );
 		this.touch();
-		if ( c.what && c.what.isVehicle ) c.what.touch();
+		// the other vehicle in a collision takes its share (its own contact test sees no closing speed: the impulse
+		// has already been shared out)
+		if ( c.what && c.what.isVehicle ) {
+			const o = c.what;
+			const ko = ( o.kind === 'heli' || o.kind === 'plane' ? 2.5 : o.kind === 'bike' ? 1.4 : 1 ) * ( 1500 / Math.max( 800, o.spec.mass ) ) ** 0.3;
+			const share = this.spec.mass / ( this.spec.mass + o.spec.mass ) * 2;
+			const d2 = ( s - CRASH_MIN ) * ( s - CRASH_MIN ) * 1.5 * ko * share * ( o.maxHealth / 1000 ) ** 0.5;
+			if ( d2 > 2 ) o.damage( d2, { kind: 'crash', zone: 'body', point: at, source: this.driver || this } );
+			o.touch();
+		}
 		if ( s > 5 ) {
-			g.audio?.play( s > 11 ? 'crash' : 'hit_metal', { pos: c.point || this.pos, vol: Math.min( 1.3, s / 12 ), max: 250, rate: s > 11 ? 1 : 0.7 } );
+			g.audio?.play( s > 11 ? 'crash' : 'hit_metal', { pos: at, vol: Math.min( 1.3, s / 12 ), max: 250, rate: s > 11 ? 1 : 0.7 } );
 			g.events.emit( 'noise', { pos: this.pos.clone(), radius: Math.min( 120, s * 8 ), source: this.driver || this, kind: 'crash' } );
-			if ( c.point && g.fx?.sparks ) g.fx.sparks( c.point, _v.copy( this.body.v ).normalize().negate().clone(), Math.min( 24, Math.round( s ) ), { speed: 8 } );
+			if ( g.fx?.sparks ) g.fx.sparks( at, _v.copy( this.body.v ).normalize().negate().clone(), Math.min( 24, Math.round( s ) ), { speed: 8 } );
 			if ( s > 9 ) { this.crack = Math.min( 1, this.crack + ( s - 8 ) * 0.08 ); this.visual.setLook( { crack: this.crack } ); }
 		}
 		// the people inside feel it (a biker is thrown clear by the manager)
 		if ( this.driver && s > 9 ) {
 			g.player.shake = Math.max( g.player.shake || 0, Math.min( 1.2, s / 16 ) );
-			if ( s > 13 ) g.survival?.hurt( ( s - 12 ) * ( s - 12 ) * ( kind === 'bike' ? 2 : 0.9 ), 'vehicle', { cause: 'a crash' } );
+			if ( s > 15 ) g.survival?.hurt( ( s - 15 ) * ( s - 15 ) * ( kind === 'bike' ? 1.6 : 0.6 ), 'vehicle', { cause: 'a crash' } );
 		} else if ( this.driver && s > 5 ) g.player.shake = Math.max( g.player.shake || 0, s / 25 );
 		if ( this.driver && kind === 'bike' && s > 11 ) g.vehicles?.throwOff?.( this );
 	}
@@ -368,6 +462,8 @@ export class Vehicle extends Entity {
 			}
 		}
 		this.touch();
+		// a crash that would finish it off sets it on fire instead (time to get out), unless it was already done for
+		if ( kind === 'crash' && this.health - body <= 0 && this.health > this.maxHealth * 0.03 && ! this.burning ) body = this.health - this.maxHealth * 0.02;
 		this.health = Math.max( 0, this.health - body );
 		this._dents();
 		if ( this.health <= 0 ) this.destroy( info );
@@ -512,7 +608,7 @@ export class Vehicle extends Entity {
 		if ( ! loose ) return false;
 		loose.data = { ...( loose.data || {} ), vehicle: this.key };
 		inv.changed?.();
-		this.game.toast?.( 'The keys fit', 'good' );
+		this.game.toast?.( 'Keys fit', 'good' );
 		return true;
 	}
 
@@ -528,7 +624,6 @@ export class Vehicle extends Entity {
 		v.setLOD( lod );
 		v.setShadow( d < 90 );
 		if ( lod !== 'active' ) return lod;
-		const S = this.spec.susp;
 		for ( let i = 0; i < v.wheels.length && i < this.wheels.length; i ++ ) {
 			const w = this.wheels[ i ], W = v.wheels[ i ];
 			W.pivot.position.y = w.lp.y - w.L - ( w.flat ? w.R * 0.18 : 0 );
@@ -536,7 +631,10 @@ export class Vehicle extends Entity {
 			W.spin.rotation.x = - w.spin;
 			W.spin.scale.y = w.flat ? 0.86 : 1;
 		}
-		if ( S ) v.setSteeringWheel( this.kind === 'bike' ? this.steer : this.steer / Math.max( 0.1, this.spec.steer || 0.6 ) * 2.4 );
+		// the steering part: a wheel turns up to about a quarter turn each way (the hands stay on it), handlebars by the
+		// steering angle, the aeroplane's yoke with the ailerons
+		const St = this.model.P.steer;
+		if ( St ) v.setSteeringWheel( this.kind === 'bike' ? this.steer : St.axis === 'y' ? this.steer / Math.max( 0.1, this.spec.steer || 0.5 ) * 0.45 : this.kind === 'plane' ? ( this.aileron || 0 ) * 0.75 : this.steer / Math.max( 0.1, this.spec.steer || 0.6 ) * 1.45 );
 		const pt = v.parts;
 		if ( this.kind === 'heli' ) {
 			const r = this.rotor;

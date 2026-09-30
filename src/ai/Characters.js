@@ -72,7 +72,7 @@ const VERT_PARS = /* glsl */`
 const FRAG_PARS = /* glsl */`
 	varying vec3 vBind;
 	uniform sampler2D uMask, uPrint;
-	uniform float uInfect, uRot, uHue, uDirt, uBlood, uSeed, uWetBody, uHandBlood, uMouthBlood, uAloha, uAtlasK, uTear, uEyeRed;
+	uniform float uInfect, uRot, uHue, uDirt, uBlood, uSeed, uWetBody, uHandBlood, uMouthBlood, uAloha, uAtlasK, uTear, uEyeRed, uDetail;
 	uniform vec3 uSkinTone, uClothTint, uMouth, uHandL, uHandR, uFwd, uEyeL, uEyeR, uPrintA, uPrintB, uPrintC, uPrintD;
 	uniform vec4 uBite;
 	uniform vec4 uWounds[ ${MAX_WOUNDS} ];
@@ -114,20 +114,24 @@ const BLOOD_FN = /* glsl */`
 		float bw = ( zfbm( p * 7.0 + uSeed * 1.7 ) - 0.5 ) * 0.14 + ( zn3( p * 40.0 + uSeed ) - 0.5 ) * 0.03;
 		float tongue = smoothstep( 0.5, 0.8, zn3( vec3( lat * 34.0 + uSeed, 0.0, uSeed ) ) ) * smoothstep( 0.62, 0.3, below ) * step( 0.3, below );
 		float bib = smoothstep( 0.15 + bw, 0.04, length( vec2( lat * 1.15, ( below - 0.3 ) * ( below > 0.3 ? 1.4 - tongue * 1.1 : 0.85 ) ) ) ) * front;
+		// soaked unevenly: thinner where the cloth wicked it, rivulets through it
+		bib *= 0.55 + 0.45 * smoothstep( 0.3, 0.6, zfbm( vec3( lat * 22.0, below * 6.0, uSeed ) + p * 3.0 ) );
 		b += ( smear + run + bib * 0.85 ) * uMouthBlood;
-		// hands and forearms: gore up to the elbows, patchy
-		float hl = length( p - uHandL ), hr = length( p - uHandR );
-		float hn = zfbm( p * 14.0 + uSeed );
-		b += smoothstep( 0.32, 0.04, min( hl, hr ) ) * smoothstep( 0.35, 0.62, hn + 0.2 ) * uHandBlood;
-		// the bite: a ragged hole, the flesh around it torn and dark, blood soaked all round and run down below
+		// hands and forearms: fingers and palms caked, streaks and flecks up towards the elbows
+		float hd = min( length( p - uHandL ), length( p - uHandR ) );
+		float hn = zfbm( p * 16.0 + uSeed );
+		b += smoothstep( 0.14, 0.05, hd ) * smoothstep( 0.32, 0.55, hn + 0.12 ) * uHandBlood;
+		b += smoothstep( 0.36, 0.1, hd ) * smoothstep( 0.6, 0.74, hn ) * uHandBlood * 0.85;
+		// the bite: a ragged torn wound, a stain soaked out round it with a wandering edge, runs down below
 		if ( uBite.w > 0.0 ) {
 			vec3 q = p - uBite.xyz;
 			float r = length( q ) / uBite.w;
-			float ragged = zn3( q * 70.0 + uSeed ) * 0.35;
-			b += smoothstep( 1.0 + ragged, 0.25, r * 0.55 ) * 0.9;
-			float drip = step( q.y, 0.0 ) * smoothstep( uBite.w * 0.9, 0.0, length( q - vec3( 0.0, q.y, 0.0 ) ) ) * smoothstep( - 0.55, 0.0, q.y ) * step( 0.4, zn3( vec3( q.x * 60.0, q.y * 4.0, q.z * 60.0 ) ) );
-			b += drip * 0.9;
-			fresh = max( fresh, smoothstep( 1.2, 0.3, r ) );
+			float ragged = ( zn3( q * 60.0 + uSeed ) - 0.5 ) * 0.8 + ( zfbm( q * 16.0 + uSeed ) - 0.5 ) * 1.4;
+			b += smoothstep( 1.4 + ragged, 0.75 + ragged * 0.5, r ) * 0.85;
+			float drip = step( q.y, 0.0 ) * smoothstep( uBite.w * 0.7, 0.0, length( q - vec3( 0.0, q.y, 0.0 ) ) - zn3( vec3( q.x * 40.0, 0.0, q.z * 40.0 ) + uSeed ) * uBite.w * 0.6 )
+				* smoothstep( - 0.45, 0.0, q.y ) * step( 0.45, zn3( vec3( q.x * 60.0, q.y * 4.0, q.z * 60.0 ) ) );
+			b += drip * 0.8;
+			fresh = max( fresh, smoothstep( 0.8, 0.2, r + ragged * 0.25 ) * 0.6 );
 		}
 		// bullet / blade wounds: dark holes with a run below, fresh
 		for ( int i = 0; i < ${MAX_WOUNDS}; i ++ ) {
@@ -148,15 +152,16 @@ const BLOOD_FN = /* glsl */`
 			if ( zh3( vec3( uSeed, fi, 5.3 ) ) * 1.3 < 1.0 - uBlood ) continue;
 			float rr = 0.04 + zh3( vec3( uSeed, fi, 4.1 ) ) * 0.065;
 			vec2 dq = vec2( p.x - c.x, ( p.y - c.y ) * ( p.y < c.y ? 0.45 : 1.0 ) );
-			float fray = ( zn3( p * 55.0 + fi * 3.1 ) - 0.5 ) * 0.5 + ( zn3( p * 14.0 + fi ) - 0.5 ) * 0.6;
+			float fray = ( zn3( p * 14.0 + fi ) - 0.5 ) * 0.6;
+			if ( uDetail > 0.5 ) fray += ( zn3( p * 55.0 + fi * 3.1 ) - 0.5 ) * 0.5;
 			b += smoothstep( rr * ( 1.0 + fray ), rr * 0.45, length( dq ) ) * frontHalf * 0.9;
 		}
-		// kneeling in it: the knees and shins of the ones that fed
-		float knee = smoothstep( 0.14, 0.03, abs( p.y - 0.47 ) ) * frontHalf * smoothstep( 0.4, 0.65, zfbm( p * 9.0 + uSeed ) );
-		b += knee * uMouthBlood * uBlood * 0.8;
+		// kneeling in it: smudges on the knees and shins of the ones that fed
+		float knee = smoothstep( 0.12, 0.03, abs( p.y - 0.47 ) ) * frontHalf * smoothstep( 0.5, 0.72, zfbm( p * 9.0 + uSeed ) );
+		b += knee * uMouthBlood * uBlood * 0.6;
 		// fine spray over the chest and arms around the mouth
 		float spray = smoothstep( 0.45, 0.1, length( ( p - uMouth - vec3( 0.0, - 0.32, 0.0 ) ) * vec3( 0.8, 0.6, 1.0 ) ) ) * frontHalf * step( p.y, uMouth.y - 0.08 );
-		b += smoothstep( 0.93, 0.96, zn3( p * 120.0 + uSeed ) ) * spray * uMouthBlood;
+		if ( uDetail > 0.5 ) b += smoothstep( 0.93, 0.96, zn3( p * 120.0 + uSeed ) ) * spray * uMouthBlood;
 		// old stains here and there
 		float sp = zfbm( p * 7.0 + uSeed * 3.1 ) + zn3( p * 45.0 + uSeed ) * 0.1;
 		b += smoothstep( 0.8 - uBlood * 0.05, 0.84 - uBlood * 0.05, sp ) * 0.6;
@@ -179,21 +184,28 @@ const FRAG_MAP = /* glsl */`
 	float zLum = dot( zBase, vec3( 0.3, 0.59, 0.11 ) );
 	vec3 zp = vBind;
 	float zN1 = zfbm( zp * 6.0 + uSeed ), zN2 = zn3( zp * 21.0 + uSeed * 2.0 ), zN3 = zfbm( zp * 2.2 + uSeed * 0.7 );
-	// ---- infected skin: bloodless and waxy, ashen with a sallow grey-green cast, keeping the skin's own shading
-	vec3 zAsh = uSkinTone * ( 0.03 + zLum * 0.84 );
-	// lividity and bruising (purple-brown blotches), rot (yellow-green), and a blotchy unevenness overall
-	zAsh = mix( zAsh, zAsh * vec3( 0.84, 0.66, 0.74 ), smoothstep( 0.52, 0.8, zN1 ) * ( 0.3 + uRot * 0.6 ) );
-	zAsh = mix( zAsh, zAsh * vec3( 0.82, 0.86, 0.5 ), smoothstep( 0.55, 0.85, zN2 ) * uRot * 0.7 );
-	zAsh *= 0.82 + zN3 * 0.36;
-	// dark veins, strongest on the throat, temples, chest and forearms
-	float zVz = smoothstep( 0.42, 0.1, length( zp - uMouth - vec3( 0.0, - 0.12, 0.0 ) ) ) + smoothstep( 0.42, 0.12, min( length( zp - uHandL ), length( zp - uHandR ) ) ) + 0.35;
-	float zVein = 1.0 - abs( zn3( zp * vec3( 45.0, 90.0, 45.0 ) + uSeed ) * 2.0 - 1.0 );
-	zAsh = mix( zAsh, zAsh * vec3( 0.45, 0.42, 0.55 ), smoothstep( 0.955, 0.99, zVein ) * min( 1.0, zVz ) * 0.55 );
+	// ---- infected skin: bloodless, waxy and grey, a little of the living skin's own colour left under the pallor
+	// (lips, knuckles, the texture's shading), tinted by the instance's tone (ashen, sallow, cold or mottled)
+	vec3 zAsh = uSkinTone * ( 0.03 + mix( vec3( zLum ), zBase, 0.2 ) * 0.86 );
+	// livor and bruises: dusky purple-red blotches; decay: a sallow yellow-grey; an uneven, blotchy pallor overall
+	zAsh = mix( zAsh, zAsh * vec3( 0.78, 0.58, 0.66 ), smoothstep( 0.48, 0.78, zN1 ) * ( 0.4 + uRot * 0.55 ) );
+	zAsh = mix( zAsh, zAsh * vec3( 0.95, 0.85, 0.68 ), smoothstep( 0.58, 0.85, zN2 ) * uRot * 0.55 );
+	zAsh *= 0.8 + zN3 * 0.4;
+	// marbling: fine blue-grey veins under the skin of the throat, the temples and chest, the forearms
+	// (these and the other fine marks only up close: uDetail is 0 on the far LOD, where they would not show)
+	if ( uDetail > 0.5 ) {
+		float zVz = smoothstep( 0.36, 0.08, length( zp - uMouth - vec3( 0.0, - 0.14, 0.0 ) ) ) + smoothstep( 0.36, 0.1, min( length( zp - uHandL ), length( zp - uHandR ) ) ) * 0.8;
+		float zVein = 1.0 - abs( ( zn3( zp * vec3( 62.0, 115.0, 62.0 ) + uSeed ) * 0.7 + zn3( zp * 23.0 + uSeed * 1.7 ) * 0.3 ) * 2.0 - 1.0 );
+		zAsh = mix( zAsh, zAsh * vec3( 0.55, 0.52, 0.64 ), smoothstep( 0.93, 0.985, zVein ) * min( 1.0, zVz ) * ( 0.25 + uRot * 0.3 ) );
+		// sores: small raw, dark patches
+		zAsh = mix( zAsh, vec3( 0.12, 0.045, 0.04 ) + zAsh * 0.2, smoothstep( 0.8, 0.87, zn3( zp * 34.0 + uSeed * 3.0 ) ) * uRot * 0.75 );
+	}
 	// sunken eyes: dark, bruised sockets; cracked dark lips
-	float zSock = smoothstep( 0.048, 0.016, min( length( zp - uEyeL ), length( zp - uEyeR ) ) );
-	zAsh = mix( zAsh, zAsh * vec3( 0.32, 0.22, 0.25 ), zSock * ( 1.0 - zm.g ) );
+	// (bruised and hollow, not a painted mask: strongest in the inner corner under the brow)
+	float zSock = smoothstep( 0.044, 0.014, min( length( zp - uEyeL ), length( zp - uEyeR ) ) );
+	zAsh = mix( zAsh, zAsh * vec3( 0.52, 0.4, 0.44 ), zSock * ( 1.0 - zm.g ) * ( 0.75 + 0.25 * zN2 ) );
 	float zLip = smoothstep( 0.03, 0.01, length( ( zp - uMouth ) * vec3( 0.75, 1.6, 0.9 ) ) );
-	zAsh = mix( zAsh, vec3( 0.07, 0.035, 0.04 ), zLip * 0.75 );
+	zAsh = mix( zAsh, vec3( 0.11, 0.05, 0.055 ) + zAsh * 0.15, zLip * 0.6 );
 	// grime on the skin (the hands and feet most)
 	float zSkinDirt = smoothstep( 0.5, 0.8, zfbm( zp * 5.0 + uSeed * 4.0 ) + ( 0.5 - zp.y ) * 0.2 ) * uDirt;
 	zAsh = mix( zAsh, zAsh * vec3( 0.6, 0.55, 0.48 ), zSkinDirt * 0.8 );
@@ -210,40 +222,50 @@ const FRAG_MAP = /* glsl */`
 		float fold = mix( 1.0, clamp( zLum / max( zLumB, 0.03 ), 0.55, 1.3 ), 0.4 );
 		zCloth = mix( zCloth, pc * fold, zShirt * zBodyCell );
 	}
-	// a week in the tropics: faded, filthy, darker towards the ground and at the knees
-	zCloth = mix( zCloth, vec3( dot( zCloth, vec3( 0.33 ) ) ), 0.3 * uInfect );
-	zCloth *= 1.0 - 0.14 * uDirt;
-	float zGround = smoothstep( 0.7, 0.05, zp.y ) * 0.4 + smoothstep( 0.1, 0.02, abs( zp.y - 0.5 ) ) * 0.25;
-	float zDirt = smoothstep( 0.5, 0.78, zfbm( zp * 3.6 + uSeed * 5.0 ) + zGround ) * uDirt;
-	zCloth = mix( zCloth, zCloth * vec3( 0.58, 0.53, 0.46 ) + vec3( 0.012, 0.01, 0.007 ), zDirt );
-	// sweat and grease marks: darker blotches
-	zCloth *= 1.0 - smoothstep( 0.62, 0.8, zN1 ) * 0.22 * uDirt;
+	// weeks in the tropics: faded, sun-bleached and filthy, caked towards the ground and at the knees
+	zCloth = mix( zCloth, vec3( dot( zCloth, vec3( 0.33 ) ) ), 0.32 * uInfect );
+	zCloth = mix( zCloth, zCloth * vec3( 0.86, 0.8, 0.68 ) + vec3( 0.02, 0.018, 0.012 ), 0.35 * uDirt * uInfect );
+	float zGround = smoothstep( 0.75, 0.05, zp.y ) * 0.45 + smoothstep( 0.1, 0.02, abs( zp.y - 0.5 ) ) * 0.25;
+	float zDirt = smoothstep( 0.45, 0.75, zfbm( zp * 3.6 + uSeed * 5.0 ) + zGround ) * uDirt;
+	zCloth = mix( zCloth, zCloth * vec3( 0.5, 0.45, 0.38 ) + vec3( 0.014, 0.011, 0.007 ), zDirt );
+	// mud flecks on the legs, sweat and grease marks: darker blotches
+	if ( uDetail > 0.5 ) zCloth *= 1.0 - smoothstep( 0.72, 0.8, zn3( zp * 26.0 + uSeed * 7.0 ) ) * smoothstep( 0.6, 0.2, zp.y ) * 0.5 * uDirt;
+	zCloth *= 1.0 - smoothstep( 0.6, 0.8, zN1 ) * 0.28 * uDirt;
 	// rips: the fabric torn open on the grey skin under it, a dark frayed edge round the hole
 	float zT = zn3( zp * vec3( 7.0, 2.6, 7.0 ) + uSeed * 1.3 ) * 0.75 + zn3( zp * 38.0 + uSeed ) * 0.25;
 	float zTearK = uTear * zBodyCell * ( 1.0 - zSkin ) * step( 0.25, zp.y ) * step( zp.y, 1.45 ) * uInfect;
 	float zHole = smoothstep( 0.8, 0.83, zT ) * zTearK;
 	float zFray = smoothstep( 0.74, 0.8, zT ) * zTearK;
-	vec3 zUnder = uSkinTone * 0.2 * ( 0.8 + zN3 * 0.4 );
-	zCloth = mix( zCloth, zCloth * 0.35, zFray * ( 1.0 - zHole ) );
-	zCloth = mix( zCloth, mix( zUnder, zUnder * vec3( 0.7, 0.4, 0.42 ), zN2 ), zHole );
+	// (the grey skin shows through the hole, grazed and bruised in places, shaded a little by the cloth)
+	vec3 zUnder = uSkinTone * 0.3 * ( 0.8 + zN3 * 0.4 );
+	zCloth = mix( zCloth, zCloth * 0.4, zFray * ( 1.0 - zHole ) );
+	zCloth = mix( zCloth, mix( zUnder, zUnder * vec3( 0.62, 0.36, 0.38 ), smoothstep( 0.4, 0.8, zN2 ) ), zHole );
 	zCol = mix( zCloth, zCol, zSkin );
-	// ---- milky, clouded eyes (or bloodshot red), a grey film over the iris
-	vec3 zMilk = mix( vec3( 0.36, 0.36, 0.31 ), vec3( 0.2, 0.02, 0.015 ), uEyeRed ) * ( 0.75 + 0.5 * smoothstep( 0.02, 0.35, zLum ) );
-	zCol = mix( zCol, zMilk, zm.g * ( 1.0 - zBodyCell ) * uInfect );
+	// ---- dead eyes: dull yellowed whites, the iris clouded over grey but still faintly there, no shine; some bloodshot
+	float zEye = zm.g * ( 1.0 - zBodyCell ) * uInfect;
+	if ( zEye > 0.001 ) {
+		float irisK = smoothstep( 0.5, 0.2, zLum ); // the eye texture's darker iris and pupil
+		vec3 eWhite = vec3( 0.46, 0.42, 0.33 ) * ( 0.55 + 0.45 * zLum );
+		vec3 eCloud = mix( vec3( 0.27, 0.28, 0.28 ), vec3( zLum * 0.55 ), 0.4 );
+		vec3 eCol = mix( eWhite, eCloud, irisK );
+		eCol = mix( eCol, vec3( 0.3, 0.045, 0.035 ) * ( 0.6 + 0.4 * zLum ), uEyeRed * ( 1.0 - irisK * 0.6 ) * 0.85 );
+		zCol = mix( zCol, eCol * 0.78, zEye );
+	}
 	// ---- blood: wet and red where fresh, soaked dark brown into cloth, flaking black-brown on skin
 	float zFresh;
 	float zB = zBlood( zp, zFresh ) * ( 0.3 + 0.7 * max( uInfect, zFresh ) );
 	float zAge = clamp( zFresh * 0.85 + zn3( zp * 11.0 + 4.0 ) * 0.3, 0.0, 1.0 );
 	// dried blood is nearly black-brown, fresh is deep red; soaked into cloth it keeps the weave (a filter over the fabric)
-	vec3 zBloodSkin = mix( vec3( 0.03, 0.009, 0.007 ), vec3( 0.1, 0.006, 0.004 ), zAge );
-	vec3 zBloodCloth = min( zCloth, vec3( 0.55 ) ) * mix( vec3( 0.13, 0.04, 0.032 ), vec3( 0.22, 0.025, 0.018 ), zAge ) + mix( vec3( 0.018, 0.006, 0.005 ), vec3( 0.035, 0.003, 0.002 ), zAge );
+	vec3 zBloodSkin = mix( vec3( 0.045, 0.011, 0.008 ), vec3( 0.1, 0.008, 0.005 ), zAge );
+	vec3 zBloodCloth = min( zCloth, vec3( 0.5 ) ) * mix( vec3( 0.13, 0.04, 0.032 ), vec3( 0.17, 0.022, 0.016 ), zAge ) + mix( vec3( 0.024, 0.007, 0.005 ), vec3( 0.034, 0.004, 0.003 ), zAge );
 	// a darker tide line where a stain dried at its edge
 	float zRim = smoothstep( 0.12, 0.35, zB ) * ( 1.0 - smoothstep( 0.45, 0.85, zB ) ) * ( 1.0 - zAge );
 	zCol = mix( zCol, mix( zBloodCloth, zBloodSkin, zSkin ), smoothstep( 0.05, 0.75, zB ) );
 	zCol *= 1.0 - zRim * 0.35;
 	diffuseColor.rgb = zCol;
 	// waxy skin, matte fabric, glossy fresh blood
-	float zRough = mix( mix( 0.86, 0.58, zSkin * ( 0.4 + 0.6 * uInfect ) ), mix( 0.62, 0.24, zAge ), smoothstep( 0.05, 0.75, zB ) );
+	float zRough = mix( mix( 0.86, 0.58, zSkin * ( 0.4 + 0.6 * uInfect ) ), mix( 0.66, 0.34, zAge ), smoothstep( 0.05, 0.75, zB ) );
+	zRough = mix( zRough, 0.7, zEye );
 	zRough = mix( zRough, 0.25, uWetBody );
 `;
 
@@ -324,7 +346,7 @@ function makeUniforms() {
 		uMouth: { value: new THREE.Vector3() }, uHandL: { value: new THREE.Vector3() }, uHandR: { value: new THREE.Vector3() },
 		uEyeL: { value: new THREE.Vector3( 0, - 9, 0 ) }, uEyeR: { value: new THREE.Vector3( 0, - 9, 0 ) },
 		uFwd: { value: new THREE.Vector3( 0, 0, 1 ) }, uWounds: { value: w }, uBite: { value: new THREE.Vector4( 0, 0, 0, 0 ) },
-		uTear: { value: 0 }, uEyeRed: { value: 0 },
+		uTear: { value: 0 }, uEyeRed: { value: 0 }, uDetail: { value: 1 },
 	};
 }
 
@@ -366,6 +388,11 @@ function findMeshes( root ) {
 
 // ---- library -------------------------------------------------------------------------------------------------
 
+function freeTemplate( t ) {
+	t.scene.traverse( o => { if ( o.isMesh ) { o.geometry.dispose(); o.material?.dispose?.(); } } );
+	for ( const k in t.tex ) t.tex[ k ].dispose();
+}
+
 export class CharacterLib {
 	// opts.base: URL prefix of public/models/characters/ (the game runs from the site root)
 	constructor( game, opts = {} ) {
@@ -401,7 +428,10 @@ export class CharacterLib {
 
 	load( id ) {
 		if ( this.templates.has( id ) ) return this.templates.get( id );
-		const p = this._load( id ).then( t => { this.templates.set( id, t ); this.lastUse.set( id, performance.now() ); return t; } ).catch( e => {
+		const p = this._load( id ).then( t => {
+			if ( this.disposed ) { freeTemplate( t ); return null; } // arrived after the game was left
+			this.templates.set( id, t ); this.lastUse.set( id, performance.now() ); return t;
+		} ).catch( e => {
 			console.warn( 'character', id, e.message ); this.failed.add( id ); this.templates.delete( id ); return null;
 		} );
 		this.templates.set( id, p );
@@ -508,10 +538,20 @@ export class CharacterLib {
 		if ( ! t || t.then || this.inUse( id ) ) return false;
 		for ( const inst of this.pools.get( id ) || [] ) inst.dispose();
 		this.pools.delete( id );
-		t.scene.traverse( o => { if ( o.isMesh ) { o.geometry.dispose(); o.material?.dispose?.(); } } );
-		for ( const k in t.tex ) t.tex[ k ].dispose();
+		freeTemplate( t );
 		this.templates.delete( id );
 		return true;
+	}
+
+	// everything off the GPU (leaving the game): live and pooled instances, templates, the shared print
+	dispose() {
+		this.disposed = true;
+		for ( const set of this.live.values() ) for ( const inst of set ) inst.dispose();
+		this.live.clear();
+		for ( const id of this.loadedIds() ) this.unload( id );
+		this.templates.clear();
+		printTex?.dispose();
+		printTex = null;
 	}
 
 	// unload the least recently used idle templates above `keep`
@@ -579,6 +619,7 @@ export class CharacterInstance {
 		this.shadow = true;
 		this.nextWound = 0;
 		this.scale = 1;
+		this.build = 1;
 	}
 
 	// root transform: feet position, yaw, uniform scale, and an optional extra rotation (crawling, lying)
@@ -587,7 +628,8 @@ export class CharacterInstance {
 		r.position.copy( pos );
 		if ( tilt ) r.quaternion.setFromAxisAngle( _v3.set( 0, 1, 0 ), yaw ).multiply( tilt );
 		else r.quaternion.setFromAxisAngle( _v3.set( 0, 1, 0 ), yaw );
-		r.scale.setScalar( this.scale );
+		// height by the uniform scale; build (slight to stocky) widens and deepens the body only
+		r.scale.set( this.scale * this.build, this.scale, this.scale * this.build );
 		r.updateMatrix();
 	}
 
@@ -623,6 +665,7 @@ export class CharacterInstance {
 		const m = this.meshes;
 		if ( l !== this.lod ) {
 			this.lod = l;
+			this.u.uDetail.value = l === 0 ? 1 : 0;
 			m.skin.visible = l === 0 || ! m.lod;
 			if ( m.cards ) m.cards.visible = l === 0;
 			if ( m.lod ) m.lod.visible = l === 1;
@@ -665,6 +708,7 @@ export class CharacterInstance {
 
 	// back to a clean state for the pool
 	reset() {
+		this.build = 1;
 		for ( const w of this.u.uWounds.value ) w.set( 0, 0, 0, 0 );
 		this.nextWound = 0;
 		this.rig.clearOverlays();

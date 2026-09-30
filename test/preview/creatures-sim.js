@@ -142,9 +142,8 @@ window.shot = ( c = null ) => {
 	cam.updateMatrixWorld();
 	G.uCamPos.value.copy( cam.position );
 	scene.updateMatrixWorld();
-	// (lavapipe drops freshly re-skinned characters from the first render after a step: render twice)
-	renderer.render( scene, cam );
-	renderer.render( scene, cam );
+	// (lavapipe drops some freshly re-skinned characters from a render: a few renders make the shot reliable)
+	for ( let i = 0; i < 3; i ++ ) renderer.render( scene, cam );
 	return { calls: renderer.info.render.calls, tris: renderer.info.render.triangles };
 };
 

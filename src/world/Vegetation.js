@@ -70,18 +70,22 @@ export const SPEC = {
 	[ SP.DRIFTWOOD ]: { kind: KIND.ROCK, build: PG.buildDriftwood, near: 55, tint: [ W, W ], bark: W, leaf: [ 0.8, 0.3, 0, 0 ], shadow: true },
 	[ SP.NUTS ]: { kind: KIND.ROCK, build: PG.buildFallenNuts, near: 35, tint: [ W, W ], shadow: false },
 	[ SP.FROND ]: { kind: KIND.ROCK, build: PG.buildFallenFrond, near: 45, tint: [ [ 0.85, 0.85, 0.8 ], [ 1.1, 1.05, 0.95 ] ], leaf: [ 0.75, 0.3, 0.1, 0 ], shadow: false },
+	// broadleaf understory (Tidewater's monstera and elephant ear: procedural blades, VegMaterial BROAD_GLSL)
+	[ SP.MONSTERA ]: { kind: KIND.SMALL, build: PG.buildMonstera, near: 55, imp: 150, tint: [ W, W ], leaf: [ 0.46, 0.42, 0.2, 0 ], shadow: true },
+	[ SP.KALO ]: { kind: KIND.SMALL, build: PG.buildElephantEar, near: 55, imp: 160, tint: [ W, W ], leaf: [ 0.58, 0.42, 0.2, 0 ], shadow: true },
 	// (the grass layer carries the ground data of the grass field: no instances, see GrassField)
 	[ SP.GRASS ]: { kind: KIND.GRASS, build: null, near: 0, tint: [ W, W ], shadow: false },
 };
 
-// dist: LOD distance scale, density: share of the scattered plants drawn, far: share of the render
-// distance the trees reach, blend: impostor three-frame blending distance (m). The grass field and the
-// pebbles have their own quality tables (GrassField GRASS_QUALITY, PebbleField PEBBLE_QUALITY).
+// dist: LOD distance scale, mid: extra scale of the mid models' end, density: share of the scattered
+// plants drawn, far: share of the render distance the trees reach, blend: impostor three-frame blending
+// distance (m). The grass field and the pebbles have their own quality tables (GrassField GRASS_QUALITY,
+// PebbleField PEBBLE_QUALITY).
 const QUALITY = {
-	low: { dist: 0.55, density: 0.5, far: 0.6, blend: 0 },
-	medium: { dist: 0.78, density: 0.75, far: 0.85, blend: 500 },
-	high: { dist: 1, density: 1, far: 1, blend: 1e5 },
-	ultra: { dist: 1.3, density: 1, far: 1, blend: 1e5 },
+	low: { dist: 0.55, mid: 0.8, density: 0.5, far: 0.6, blend: 0 },
+	medium: { dist: 0.78, mid: 0.88, density: 0.75, far: 0.85, blend: 500 },
+	high: { dist: 1, mid: 1, density: 1, far: 1, blend: 1e5 },
+	ultra: { dist: 1.3, mid: 1, density: 1, far: 1, blend: 1e5 },
 };
 
 // cross-fade band, share of the switch distance: short (every plant jitters its switch distances, see
@@ -306,7 +310,9 @@ export class Vegetation {
 		for ( let s = 0; s < NSP; s ++ ) {
 			const cfg = SPEC[ s ], T = this.spTargets[ s ];
 			const near = cfg.near * q.dist;
-			const mid = cfg.mid ? Math.max( near + 20, cfg.mid * q.dist ) : 0;
+			// (the mid models of the closed rain forest are most of its triangles: the lower levels hand
+			// over to the impostors sooner, Tidewater's trees go straight from near to impostor at 75 m)
+			const mid = cfg.mid ? Math.max( near + 20, cfg.mid * q.dist * q.mid ) : 0;
 			let imp = null;
 			if ( cfg.imp === 'far' ) imp = [ mid || near, Math.max( ( mid || near ) + 50, rd * q.far ) ];
 			else if ( cfg.imp ) imp = [ near, Math.max( near + 20, cfg.imp * q.dist ) ];

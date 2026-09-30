@@ -38,7 +38,7 @@ export const PALM_BARK_GLSL = /* glsl */`
 		float yn = y / H;
 		// rings: phase grows faster toward the crown, jittered per ring band and around the trunk
 		float wob = ( vegNoise( vec2( ca * 1.3 + y * 0.35, sa * 1.3 + seed * 9.0 ) ) - 0.5 ) * 0.7 + sin( A * 2.0 + y * 1.1 + seed * 5.0 ) * 0.1;
-		float phase = y * mix( 8.5, 11.0, iv ) + pow( yn, 2.2 ) * H * 5.5 + vegNoise( vec2( y * 0.8, seed * 7.3 ) ) * 3.2
+		float phase = y * mix( 8.5, 11.0, iv ) + pow( max( yn, 0.0 ), 2.2 ) * H * 5.5 + vegNoise( vec2( y * 0.8, seed * 7.3 ) ) * 3.2
 			+ vegNoise( vec2( y * 3.1, seed * 2.9 ) ) * 0.9 + wob;
 		float k0 = floor( phase );
 		// ragged ring edges: the scar line wanders a little around the trunk
@@ -90,6 +90,115 @@ export const PALM_BARK_GLSL = /* glsl */`
 	}
 `;
 
+// Broadleaf understory blades (parts 6 monstera, 7 elephant ear / kalo), ported from Tidewater
+// VegMaterials.js BROAD (vegBroadShape / vegBroadAlbedo / vegBroadStem): blade coordinates y along the
+// midrib (0 back of the basal lobes .. 1 tip), x across in units of the half-width W (m); the outline,
+// the monstera's slits and holes, ragged and damaged margins are cut per fragment. Needs vegNoise / vegHash.
+export const BROAD_GLSL = /* glsl */`
+	// outline half-width (x units) at y (x: w, y: 1 when a hole / slit / tear is cut at ( y, x ))
+	vec2 vegBroadShape( float part, float y, float x, float age, float W, float fseed, float seed ) {
+		float ax = abs( x );
+		float w = 0.0;
+		bool cut = false;
+		// ragged, slightly irregular margin on every leaf (more on old ones)
+		float rag = 1.0 - ( vegNoise( vec2( y * 38.0 + ( x > 0.0 ? 17.0 : 0.0 ), fseed * 31.0 ) ) * 0.05 + age * age * 0.12 * vegNoise( vec2( y * 11.0, fseed * 7.0 + x ) ) );
+		if ( part < 6.5 ) {
+			// monstera: cordate blade, basal lobes behind the petiole, V sinus; mature leaves are split from
+			// the margin between the primary veins, with a row of holes (fenestrations) inside
+			float yb = 0.16;
+			float g = ( y - yb ) / ( 1.0 - yb );
+			if ( y >= yb ) {
+				w = pow( max( sin( 3.14159 * min( 1.0, 0.4 + 0.6 * g ) ), 0.0 ), 0.8 ) * ( 1.0 - 0.15 * smoothstep( 0.8, 1.0, g ) );
+			} else {
+				float q = ( yb - y ) / yb;
+				w = sqrt( max( 1.0 - q * q * q, 0.0 ) ) * 0.96;
+				cut = ax < 0.3 * ( 1.0 - y / yb );
+			}
+			w *= rag;
+			float matK = smoothstep( 0.28, 0.45, age );
+			if ( matK > 0.0 && y > yb * 0.4 && y < 0.93 ) {
+				float L = W / 0.47;
+				float X = ax * W;
+				float Y = ( y - yb ) * L;
+				float p = ( Y - 0.55 * X ) / ( L * 0.8 / 5.5 ) + fseed * 0.37;
+				float k = floor( p + 0.5 );
+				float e = abs( p - k ); // 0 on the gap between two primary veins
+				float hk = vegHash( vec2( k + ( x > 0.0 ? 50.0 : 0.0 ), fseed * 19.3 ) );
+				float r = ax / max( w, 0.05 );
+				float depth = mix( 0.42, 0.75, hk ) + ( 1.0 - matK ) * 0.4;
+				// slits widen toward the margin, their inner end rounded
+				bool slit = e < 0.035 + 0.1 * smoothstep( depth, 1.0, r ) && r > depth - 0.03;
+				// fenestrations: one or two elongated holes along the gap line, inside the slit
+				float r0 = 0.14; float r1 = depth - 0.1;
+				float qh = ( r - r0 ) / max( r1 - r0, 0.05 );
+				float nh = hk > 0.45 ? 2.0 : 1.0;
+				float qq = fract( qh * nh );
+				bool hole = qh > 0.0 && qh < 1.0 && e < 0.16 * pow( sin( 3.14159 * qq ), 0.6 ) * matK && hk > 0.12;
+				cut = cut || slit || hole;
+			}
+		} else {
+			// elephant ear: peltate blade (petiole joins inside it), rounded basal lobes, acute tip
+			float yb = 0.3;
+			float g = ( y - yb ) / ( 1.0 - yb );
+			if ( y >= yb ) {
+				w = pow( max( sin( 3.14159 * min( 1.0, 0.5 + 0.5 * g ) ), 0.0 ), 0.85 );
+			} else {
+				float q = ( yb - y ) / yb;
+				w = sqrt( max( 1.0 - pow( q, 1.6 ), 0.0 ) ) * 0.98;
+				cut = y < 0.1 && ax < 0.2 * ( 1.0 - y / 0.1 );
+			}
+			w *= rag;
+		}
+		float dmg = vegNoise( vec2( y * 26.0 + fseed * 17.0, x * 11.0 + seed * 9.0 ) );
+		cut = cut || dmg > 0.95 - age * 0.08;
+		return vec2( w, cut ? 1.0 : 0.0 );
+	}
+
+	vec3 vegBroadAlbedo( float part, float y, float x, float age, float W, float fseed, float seed, float iv, float hGround ) {
+		float ax = abs( x );
+		float fr = vegHash( vec2( fseed * 51.3, seed * 17.9 ) );
+		float n1 = vegNoise( vec2( y * 9.0 + fseed * 13.0, x * 4.0 ) );
+		float n2 = vegNoise( vec2( y * 37.0 + fseed * 3.0, x * 17.0 + seed * 5.0 ) );
+		vec3 c;
+		if ( part < 6.5 ) {
+			// monstera: deep glossy green, juvenile leaves lighter yellow-green, old ones yellowing
+			vec3 g = mix( ${ HEX( 0x223b15 ) }, ${ HEX( 0x324f1d ) }, iv * 0.6 + fr * 0.4 );
+			g = mix( ${ HEX( 0x4f6f28 ) }, g, smoothstep( 0.1, 0.35, age ) );
+			g = mix( g, ${ HEX( 0x9a913e ) }, smoothstep( 0.85, 0.97, age ) * ( 0.6 + 0.4 * n1 ) );
+			c = g * ( n1 * 0.16 + 0.92 );
+			// primary veins a touch paler, midrib pale
+			float L = W / 0.47;
+			float p = ( ( y - 0.16 ) * L - 0.55 * ax * W ) / ( L * 0.8 / 5.5 ) + fseed * 0.37;
+			float rib = smoothstep( 0.1, 0.0, abs( fract( p ) - 0.5 ) ) * step( 0.16, y );
+			c *= 1.0 + rib * 0.12;
+			c = mix( c, ${ HEX( 0x80994a ) }, smoothstep( 0.03, 0.0, ax * W ) * 0.7 );
+		} else {
+			// elephant ear: mid green, pale veins radiating from where the petiole joins
+			vec3 g = mix( ${ HEX( 0x33581e ) }, ${ HEX( 0x4a7128 ) }, iv * 0.6 + fr * 0.4 );
+			g = mix( g, ${ HEX( 0x98913f ) }, smoothstep( 0.85, 0.97, age ) * ( 0.6 + 0.4 * n1 ) );
+			float ang = atan( ax * W, ( y - 0.3 ) * W / 0.4 );
+			float vein = smoothstep( 0.1, 0.0, abs( fract( ang * 2.6 ) - 0.5 ) - 0.38 ) * 0.7;
+			c = g * ( n1 * 0.14 + 0.93 );
+			c = mix( c, ${ HEX( 0x7f9658 ) }, vein * 0.35 + smoothstep( 0.025, 0.0, ax * W ) * step( 0.3, y ) * 0.5 );
+		}
+		// weathering: browned dry margins and tips, fungal spots, splashed soil on low leaves
+		float edge = smoothstep( 0.8, 1.0, ax + n2 * 0.25 - 0.1 ) * ( 0.25 + age * 0.9 );
+		c = mix( c, mix( ${ HEX( 0x7b6639 ) }, ${ HEX( 0x5a4528 ) }, n2 ), clamp( edge, 0.0, 1.0 ) * 0.85 );
+		float spot = vegNoise( vec2( y * 14.0 + fseed * 9.0, x * 6.0 + seed * 3.0 ) );
+		c = mix( c, ${ HEX( 0x5e5433 ) }, smoothstep( 0.86, 0.93, spot ) * 0.5 * ( 0.4 + age ) );
+		c = mix( c, ${ HEX( 0x6c5c45 ) }, smoothstep( 0.55, 0.0, hGround ) * smoothstep( 0.5, 0.75, n2 ) * 0.5 );
+		// dead leaves: brown and papery
+		c = mix( c, mix( ${ HEX( 0x6e5634 ) }, ${ HEX( 0x8f7a4e ) }, n1 ), smoothstep( 0.93, 0.99, age ) );
+		return c;
+	}
+
+	vec3 vegBroadStem( float part, float a, float f, float seed, float age ) {
+		float n = vegNoise( vec2( a * 6.0, f * 30.0 + seed * 11.0 ) );
+		if ( part < 6.5 ) return mix( ${ HEX( 0x4a6a2a ) }, ${ HEX( 0x5c7c33 ) }, n ) * mix( 1.0, 0.8, smoothstep( 0.7, 1.0, age ) );
+		return mix( ${ HEX( 0x566a34 ) }, ${ HEX( 0x5d4a3c ) }, n * 0.5 );
+	}
+`;
+
 // uniforms shared by every vegetation material
 export const VG = {
 	uWindStr: { value: 0.45 },
@@ -117,7 +226,7 @@ const VERT_PARS = /* glsl */`
 	uniform float uWindStr; uniform float uDensity; uniform vec3 uPlayer; uniform float uShadowFar;
 	uniform sampler2D tDetail; uniform float uDetailOn; uniform vec4 uGustOff;
 	varying vec2 vVegUv; varying vec4 vVegMat; varying vec3 vVegCol; varying vec2 vVegFade; varying vec4 vVegInst; varying vec4 vVegGround;
-	varying vec4 vVegX; // x height fraction (aVeg.x), y under the rain-forest canopy (understory), zw -
+	varying vec4 vVegX; // x height fraction (aVeg.x), y under the rain-forest canopy (understory), z base height (world), w -
 	varying vec3 vVegT; // palm trunk axis (world)
 
 	float vegHash( vec2 p ) { vec3 p3 = fract( vec3( p.xyx ) * 0.1031 ); p3 += dot( p3, p3.yzx + 33.33 ); return fract( ( p3.x + p3.y ) * p3.z ); }
@@ -166,7 +275,7 @@ const VERT_PARS = /* glsl */`
 		#endif
 		vVegInst = vec4( rank, pa, pb, s );
 		// the understory scatter packs its rain-forest shade into whole turns of the yaw (scatter.js)
-		vVegX = vec4( aVeg.x, floor( yaw / 6.2832 + 1e-3 ) / 15.0, 0.0, 0.0 );
+		vVegX = vec4( aVeg.x, floor( yaw / 6.2832 + 1e-3 ) / 15.0, wbase.y, 0.0 );
 		vVegT = vec3( 0.0, 1.0, 0.0 );
 		vVegMat = aMat;
 		vVegCol = aCol;
@@ -276,12 +385,13 @@ const FRAG_PARS = /* glsl */`
 	varying vec2 vVegUv; varying vec4 vVegMat; varying vec3 vVegCol; varying vec2 vVegFade; varying vec4 vVegInst; varying vec4 vVegGround;
 	varying vec4 vVegX; varying vec3 vVegT;
 	uniform vec4 uLeaf;
-	#ifndef VEG_DEPTH
 	float vegHash( vec2 p ) { vec3 p3 = fract( vec3( p.xyx ) * 0.1031 ); p3 += dot( p3, p3.yzx + 33.33 ); return fract( ( p3.x + p3.y ) * p3.z ); }
 	float vegNoise( vec2 p ) {
 		vec2 i = floor( p ), f = fract( p ); vec2 u = f * f * ( 3.0 - 2.0 * f );
 		return mix( mix( vegHash( i ), vegHash( i + vec2( 1, 0 ) ), u.x ), mix( vegHash( i + vec2( 0, 1 ) ), vegHash( i + vec2( 1, 1 ) ), u.x ), u.y );
 	}
+	${ BROAD_GLSL }
+	#ifndef VEG_DEPTH
 	${ PALM_BARK_GLSL }
 	#endif
 	// Per-pixel threshold of the LOD cross-fades. A dither only under temporal anti-aliasing, where the
@@ -325,6 +435,13 @@ const FRAG_PARS = /* glsl */`
 			#else
 			if ( c.a < th ) discard;
 			#endif
+		} else if ( part > 5.5 ) {
+			// broadleaf blades (petioles, uv.x < 0, are kept whole): Tidewater's procedural outline
+			c = vec4( 1.0 );
+			if ( uv.x >= 0.0 ) {
+				vec2 sh = vegBroadShape( part, uv.x, uv.y, vVegMat.y, vVegMat.z, vVegMat.w, vVegInst.x );
+				if ( abs( uv.y ) >= sh.x || sh.y > 0.5 ) discard;
+			}
 		} else c = textureGrad( tRock, uv, dx, dy );
 		#ifdef ALPHA_TO_COVERAGE
 		cov *= min( 1.0, 2.0 * vVegFade.x ) * min( 1.0, 2.0 - 2.0 * vVegFade.y );
@@ -413,6 +530,19 @@ const FRAG_COLOR = /* glsl */`
 		vegAoI = smoothstep( 0.0, 0.75, hfB ) * 0.45 + 0.4;
 		vegRough = 0.92;
 		vegSpec = 0.3;
+	} else if ( vegPart > 5.5 ) {
+		// broadleaf understory (monstera, elephant ear): Tidewater's procedural blades and petioles;
+		// monstera glossy, elephant ear waxy-matte, dead leaves dull; the underside duller and bluer
+		float bAge = vVegMat.y, bW = vVegMat.z, bSeed = vVegMat.w;
+		float bIv = vegHash( vec2( vVegInst.x * 37.1, 1.7 ) );
+		if ( vVegUv.x < 0.0 ) vegC = vegBroadStem( vegPart, vVegUv.y, ( vVegUv.x + 1.0 ) * 2.0, bSeed, bAge );
+		else {
+			vegC = vegBroadAlbedo( vegPart, vVegUv.x, vVegUv.y, bAge, bW, bSeed, vVegInst.x, bIv, vWorldPos.y - vVegX.z );
+			if ( ! gl_FrontFacing ) vegC *= vec3( 0.74, 0.8, 0.84 );
+			vegTrans = 0.2;
+		}
+		vegRough = mix( vegPart < 6.5 ? 0.46 : 0.58, 0.85, smoothstep( 0.9, 0.98, bAge ) );
+		vegSpec = 0.42;
 	} else {
 		// rock: grey-brown boulders, black lava. The texture only brings the detail: divided by its
 		// own mean (the last mip) so the tints set the albedo whatever the texture's brightness
@@ -440,7 +570,7 @@ const FRAG_NORMAL = /* glsl */`
 	// shade edge-on; crowns of leaf cards read as one soft volume, fronds and big leaves keep more of
 	// their own shape (Tidewater: + V * 0.7 canopy, + V * 0.15 plants, + V * 0.4 grass)
 	if ( vegCanopy ) normal = normalize( normalize( vNormal ) + normalize( vViewPosition ) * 0.7 );
-	else if ( vegLeaf ) normal = normalize( normal + normalize( vViewPosition ) * 0.15 );
+	else if ( vegLeaf || ( vegPart > 5.5 && vVegUv.x >= 0.0 ) ) normal = normalize( normal + normalize( vViewPosition ) * 0.15 );
 	else if ( vegBump != 0.0 || vegBumpA != 0.0 ) {
 		// palm bark relief along the trunk axis and around it
 		vec3 Tv = normalize( ( viewMatrix * vec4( vVegT, 0.0 ) ).xyz );

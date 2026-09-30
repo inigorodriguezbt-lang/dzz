@@ -454,9 +454,9 @@ function buildJetski( P ) {
 // ---- tour helicopter (AS350 class) ------------------------------------------------------------------------------------
 
 CRAFT.helicopter = () => ( {
-	kind: 'heli', L: 10.9, W: 2.2, H: 3.3,
+	kind: 'heli', L: 10.9, W: 2.2, H: 3.3, glassTint: 0.08,
 	pod: [
-		[ 2.55, 0.04, 0.04, 1.08, 2 ], [ 2.45, 0.36, 0.44, 1.12, 2.2 ], [ 2.2, 0.62, 0.7, 1.26, 2.3 ], [ 1.8, 0.8, 0.85, 1.36, 2.4 ], [ 1.2, 0.88, 0.94, 1.41, 2.5 ],
+		[ 2.575, 0.03, 0.03, 1.09, 2 ], [ 2.54, 0.17, 0.2, 1.1, 2 ], [ 2.5, 0.27, 0.32, 1.11, 2.1 ], [ 2.45, 0.36, 0.44, 1.12, 2.2 ], [ 2.2, 0.62, 0.7, 1.26, 2.3 ], [ 1.8, 0.8, 0.85, 1.36, 2.4 ], [ 1.2, 0.88, 0.94, 1.41, 2.5 ],
 		[ 0.0, 0.9, 0.97, 1.43, 2.6 ], [ - 0.9, 0.88, 0.95, 1.44, 2.6 ], [ - 1.35, 0.72, 0.78, 1.55, 2.4 ], [ - 1.85, 0.42, 0.45, 1.78, 2.2 ],
 		[ - 2.35, 0.28, 0.3, 1.88, 2 ], [ - 6.6, 0.16, 0.17, 1.96, 2 ], [ - 6.95, 0.1, 0.12, 2.0, 2 ], [ - 7.05, 0.02, 0.02, 2.0, 2 ],
 	],
@@ -473,10 +473,11 @@ function buildHeli( P ) {
 			const R = rings[ i ];
 			const rel = ( y - R.cy ) / Math.max( 0.05, R.h ); // -1 bottom .. 1 top
 			// the bubble: the front of the cabin above the floor line, a centre frame down the middle
-			if ( f > 1.02 && f < 2.42 && rel > - 0.85 ) {
-				if ( Math.abs( x ) < 0.035 && rel > 0.2 ) return MAT.gloss;
-				// frames: the rim, and the floor line between the bubble and the chin windows
-				if ( f > 2.37 || f < 1.07 || rel < - 0.8 || Math.abs( rel + 0.42 ) < 0.04 ) return MAT.gloss;
+			if ( f > 1.02 && f < 2.56 && rel > - 0.85 ) {
+				if ( Math.abs( x ) < 0.035 && rel > 0.2 && f < 2.3 ) return MAT.gloss;
+				// frames: the rim, and the floor line between the bubble and the chin windows (the bubble runs out to a
+				// small cap on the nose)
+				if ( f < 1.07 || rel < - 0.8 || Math.abs( rel + 0.42 ) < 0.04 ) return MAT.gloss;
 				return 'GLASS';
 			}
 			// side windows (front doors and rear doors) and roof windows over the front seats
@@ -531,10 +532,23 @@ function buildHeli( P ) {
 	} );
 	// the cabin: panel, seats (the pilot sits on the right), cyclic and collective
 	k.with( 'near', () => {
+		// the floor runs forward to the pedals over the chin windows
 		k.box( 1.4, 0.05, 1.9, MAT.carpet, { p: [ 0, 0.55, - 0.2 ] } );
-		k.box( 1.3, 0.3, 0.3, MAT.dash, { p: [ 0, 1.2, - 1.62 ], r: [ - 0.3, 0, 0 ] }, 0.05 );
-		k.quad( [ 0.62, 1.23, - 1.46 ], [ - 0.62, 1.23, - 1.46 ], [ - 0.62, 1.4, - 1.55 ], [ 0.62, 1.4, - 1.55 ], mat( 'gauge', { uv: ATLAS.panel } ) );
-		k.box( 0.12, 0.45, 0.12, MAT.dash, { p: [ 0, 0.85, - 1.45 ] }, 0.03 );
+		k.box( 1.3, 0.05, 0.6, MAT.carpet, { p: [ 0, 0.56, - 1.43 ] } );
+		// the instrument panel: a T across the cabin under a dark glare shield, on a pedestal between the seats
+		const pm = MAT.dash;
+		k.box( 1.2, 0.34, 0.1, pm, { p: [ 0, 1.2, - 1.55 ], r: [ - 0.28, 0, 0 ] }, 0.03 );
+		k.quad( [ 0.56, 1.07, - 1.445 ], [ - 0.56, 1.07, - 1.445 ], [ - 0.56, 1.35, - 1.525 ], [ 0.56, 1.35, - 1.525 ], mat( 'gauge', { uv: ATLAS.panel } ) );
+		k.box( 1.26, 0.035, 0.26, mat( 'trim', { c: 0x0c0c0d, r: 0.85 } ), { p: [ 0, 1.39, - 1.56 ], r: [ 0.06, 0, 0 ] }, 0.015 );
+		k.box( 1.2, 0.08, 0.04, pm, { p: [ 0, 1.36, - 1.39 ] }, 0.02 );
+		k.box( 0.3, 0.52, 0.34, pm, { p: [ 0, 0.83, - 1.38 ], r: [ - 0.12, 0, 0 ] }, 0.03 );
+		k.quad( [ 0.12, 0.66, - 1.19 ], [ - 0.12, 0.66, - 1.19 ], [ - 0.12, 1.0, - 1.24 ], [ 0.12, 1.0, - 1.24 ], mat( 'gloss', { c: 0x0a0c10, e: 8, uv: ATLAS.gauges } ) );
+		for ( let i = 0; i < 4; i ++ ) k.cyl( 0.012, 0.012, 0.02, MAT.alu, { p: [ ( i - 1.5 ) * 0.06, 0.62, - 1.2 ], r: [ Math.PI / 2 - 0.12, 0, 0 ] }, 8 );
+		// anti-torque pedals for both seats
+		for ( const sx of [ - 0.42, 0.42 ] ) for ( const d of [ - 0.1, 0.1 ] ) {
+			k.rod( [ sx + d, 0.58, - 1.55 ], [ sx + d, 0.72, - 1.5 ], 0.012, MAT.darksteel, 6 );
+			k.box( 0.08, 0.14, 0.03, MAT.rubber, { p: [ sx + d, 0.74, - 1.5 ], r: [ - 0.35, 0, 0 ] }, 0.01 );
+		}
 		const sm = mat( 'seat', { c: 0x3a3632 } );
 		seat( k, 0.42, 0.98, 0.55, sm, 0.48 );
 		seat( k, - 0.42, 0.98, 0.55, sm, 0.48 );
@@ -573,7 +587,7 @@ function buildHeli( P ) {
 // ---- light aircraft (Cessna 172 class) ----------------------------------------------------------------------------------
 
 CRAFT.plane = () => ( {
-	kind: 'plane', L: 8.28, W: 11.0, H: 2.72,
+	kind: 'plane', L: 8.28, W: 11.0, H: 2.72, glassTint: 0.1,
 	pod: [
 		[ 2.55, 0.38, 0.34, 1.28, 2.2 ], [ 2.1, 0.5, 0.47, 1.33, 2.4 ], [ 1.4, 0.55, 0.6, 1.44, 2.6 ], [ 0.8, 0.56, 0.69, 1.5, 2.8 ], [ - 0.4, 0.56, 0.69, 1.5, 2.8 ],
 		[ - 1.0, 0.47, 0.6, 1.52, 2.6 ], [ - 2.0, 0.3, 0.44, 1.54, 2.4 ], [ - 3.6, 0.13, 0.28, 1.64, 2.2 ], [ - 4.35, 0.05, 0.18, 1.72, 2 ], [ - 4.5, 0.02, 0.04, 1.75, 2 ],
@@ -642,8 +656,19 @@ function buildPlane( P ) {
 	} );
 	k.with( 'near', () => {
 		k.box( 1.0, 0.04, 2.2, MAT.carpet, { p: [ 0, 0.9, 0.2 ] } );
-		k.box( 1.06, 0.3, 0.12, MAT.dash, { p: [ 0, 1.6, - 1.25 ] }, 0.03 );
-		k.quad( [ 0.5, 1.5, - 1.18 ], [ - 0.5, 1.5, - 1.18 ], [ - 0.5, 1.72, - 1.2 ], [ 0.5, 1.72, - 1.2 ], mat( 'gauge', { uv: ATLAS.panel } ) );
+		// the firewall and the footwell close off the engine bay; the panel spans the cabin under a glare shield
+		k.box( 1.12, 0.62, 0.05, MAT.dash, { p: [ 0, 1.2, - 1.36 ] } );
+		k.box( 1.0, 0.04, 0.5, MAT.carpet, { p: [ 0, 0.92, - 1.1 ], r: [ 0.3, 0, 0 ] } );
+		k.box( 1.12, 0.3, 0.14, MAT.dash, { p: [ 0, 1.6, - 1.26 ] }, 0.03 );
+		k.quad( [ 0.5, 1.5, - 1.185 ], [ - 0.5, 1.5, - 1.185 ], [ - 0.5, 1.72, - 1.2 ], [ 0.5, 1.72, - 1.2 ], mat( 'gauge', { uv: ATLAS.panel } ) );
+		k.box( 1.14, 0.03, 0.22, mat( 'trim', { c: 0x0c0c0d, r: 0.85 } ), { p: [ 0, 1.765, - 1.24 ], r: [ 0.08, 0, 0 ] }, 0.012 );
+		// throttle and mixture knobs in the middle of the panel
+		k.rod( [ 0, 1.55, - 1.19 ], [ 0, 1.55, - 1.1 ], 0.006, MAT.chrome, 6 );
+		k.sphere( 0.018, MAT.gloss, { p: [ 0, 1.55, - 1.09 ] } );
+		k.rod( [ 0.06, 1.55, - 1.19 ], [ 0.06, 1.55, - 1.12 ], 0.005, MAT.chrome, 6 );
+		k.sphere( 0.016, mat( 'gloss', { c: 0xb01010 } ), { p: [ 0.06, 1.55, - 1.11 ] } );
+		// rudder pedals
+		for ( const sx of [ - 0.27, 0.27 ] ) for ( const d of [ - 0.08, 0.08 ] ) k.box( 0.07, 0.12, 0.03, MAT.rubber, { p: [ sx + d, 1.02, - 1.18 ], r: [ - 0.5, 0, 0 ] }, 0.01 );
 		const sm = mat( 'seat', { c: 0x4a4038 } );
 		seat( k, - 0.27, 1.2, 0.2, sm, 0.46 );
 		seat( k, 0.27, 1.2, 0.2, sm, 0.46 );

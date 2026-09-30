@@ -324,12 +324,24 @@ function canopy( ctx ) {
 		W[ 6 ] = 0.15 * sstep( 0.33, 0.12, m ) * band( h, 0.8, 2, 130, 180 ) * ( 1 - fresh * 0.6 );
 		let sum = 0;
 		for ( let k = 0; k < 7; k ++ ) sum += W[ k ];
-		const p = Math.min( 0.88, sum * alt * slopeK * ( pasture ? 0.25 : 1 ) * ( 1 - fresh * 0.75 ) ) * wild * wild;
-		if ( p <= 0 || hash2( gi, gj, 111 ) >= p ) return;
-		// species by weight
+		const p0 = Math.min( 0.88, sum * alt * slopeK * ( pasture ? 0.25 : 1 ) * ( 1 - fresh * 0.75 ) ) * wild * wild;
+		let p = p0;
+		// the canopy closes where the terrain paints the rain forest's floor (Terrain.js jungleW: the ground
+		// darkens under a canopy it expects to be there)
+		if ( sum > 0 ) {
+			const D = detailData(), mcr = macroA( D, x, z ) * 0.6 + macroB( D, x, z ) * 0.4;
+			const wetM = Math.min( 1, m * 1.15 + 0.14 ), slope01 = 1 - 1 / Math.sqrt( 1 + e.sl * e.sl );
+			const jungle = Math.min( 1, sstep( 0.52, 0.8, wetM + ( mcr - 0.5 ) * 0.3 ) + sstep( 0.18, 0.36, slope01 ) * sstep( 0.3, 0.55, wetM ) ) * alt * sstep( 1.5, 5, h )
+				* ( 1 - pasture * 0.85 ) * ( 1 - sstep( 0.35, 0.6, lava ) );
+			p = Math.max( p, Math.min( 0.88, jungle * 0.8 ) * slopeK * wild * wild );
+		}
+		const roll = hash2( gi, gj, 111 );
+		if ( p <= 0 || roll >= p ) return;
+		// species by weight; the trees that close the rain forest are its own (ʻōhiʻa up the slopes, kukui
+		// in the lowland valleys)
 		let r = hash2( gi, gj, 112 ) * sum, k = 0;
 		while ( k < 6 && r > W[ k ] ) { r -= W[ k ]; k ++; }
-		const sp = CAN_SPECIES[ k ];
+		const sp = roll < p0 ? CAN_SPECIES[ k ] : h > 45 && hash2( gi, gj, 113 ) < 0.8 ? SP.OHIA : SP.KUKUI;
 		const big = sp === SP.MONKEYPOD || sp === SP.PINE;
 		if ( ! clearGround( ctx, x, z, big ? 6 : 3.5, e.flags ) ) return;
 		if ( nearBuilding( ctx.bld, x, z, big ? 9 : sp === SP.PALM ? 2 : 5 ) || nearRoad( ctx.seg, x, z, big ? 5 : 2.5 ) ) return;
@@ -450,8 +462,8 @@ function yardTrees( ctx ) {
 // ---- understory, shrubs, rocks ------------------------------------------------------------------------
 
 const UND_SP = 2.3;
-const U = new Float32Array( 9 );
-const UND_SPECIES = [ SP.FERN, SP.TREEFERN, SP.BANANA, SP.TI, SP.SHRUB, SP.NAUPAKA, SP.TALLGRASS, SP.ROCK, SP.SHRUB ];
+const U = new Float32Array( 11 );
+const UND_SPECIES = [ SP.FERN, SP.TREEFERN, SP.BANANA, SP.TI, SP.SHRUB, SP.NAUPAKA, SP.TALLGRASS, SP.ROCK, SP.SHRUB, SP.MONSTERA, SP.KALO ];
 
 function understory( ctx ) {
 	const { env, e, hf } = ctx;
@@ -478,12 +490,15 @@ function understory( ctx ) {
 		U[ 6 ] = ( 0.07 * open * sstep( 0.1, 0.25, m ) + 0.09 * sstep( 0.28, 0.12, m ) * ( 1 - fresh * 0.5 ) + 0.06 * band( lava, 0.15, 0.25, 0.6, 0.8 ) ) * band( h, 2, 5, 330, 420 ) * ( 1 - sand ) * ( e.use === 3 ? 0.15 : 1 );
 		U[ 7 ] = 0.004 + 0.06 * sstep( 0.45, 0.9, sl ) + 0.045 * sstep( 0.3, 0.6, lava ) + 0.1 * ( sd < 16 && sl > 0.22 ? 1 : 0 ) + 0.05 * sstep( 440, 520, h ) + 0.012 * sstep( 0.22, 0.1, m );
 		U[ 8 ] = 0.035 * sstep( 520, 560, h ) * ( 1 - sstep( 585, 615, h ) ); // sparse alpine scrub, bare summits
+		// broadleaf understory: monstera in the wet forest, kalo (elephant ear) in the wet lowlands
+		U[ 9 ] = 0.05 * sstep( 0.55, 0.8, m ) * band( h, 3, 10, 300, 380 ) * ( 0.4 + clump );
+		U[ 10 ] = 0.03 * sstep( 0.45, 0.75, m ) * band( h, 1.5, 3, 120, 200 ) * ( 0.2 + 2 * clump ) * ( 1 - sand );
 		let sum = 0;
-		for ( let k = 0; k < 9; k ++ ) sum += U[ k ];
+		for ( let k = 0; k < 11; k ++ ) sum += U[ k ];
 		const p = Math.min( 0.8, sum * alt * ( 1 - sstep( 0.9, 1.3, sl ) * 0.8 ) );
 		if ( p <= 0 || hash2( gi, gj, 211 ) >= p ) return;
 		let r = hash2( gi, gj, 212 ) * sum, k = 0;
-		while ( k < 8 && r > U[ k ] ) { r -= U[ k ]; k ++; }
+		while ( k < 10 && r > U[ k ] ) { r -= U[ k ]; k ++; }
 		const sp = UND_SPECIES[ k ];
 		if ( sp === SP.TREEFERN || sp === SP.ROCK || sp === SP.BANANA ) { if ( ! clearGround( ctx, x, z, 2, e.flags ) ) return; }
 		// houses out in the country keep a cleared yard, road shoulders stay open
@@ -506,6 +521,7 @@ function understory( ctx ) {
 			case SP.TI: s = 0.7 + 0.6 * r1; y -= 0.05; break;
 			case SP.SHRUB: s = ( 0.55 + 0.8 * r1 ) * ( h > 480 ? 0.55 : 1 ); a = m > 0.5 ? r2 : 0; y -= 0.1; break;
 			case SP.NAUPAKA: s = 0.7 + 0.6 * r1; y -= 0.15; break;
+			case SP.MONSTERA: case SP.KALO: s = 0.75 + 0.6 * r1; y -= 0.05; break;
 			case SP.TALLGRASS: s = ( 0.6 + 0.6 * r1 ) * ( m < 0.25 ? 0.7 : 1 ); a = Math.min( 1, Math.max( 0, 1 - sstep( 0.12, 0.5, m ) + ( r2 - 0.5 ) * 0.3 + lava * 0.4 ) ); y -= 0.05; break;
 			case SP.ROCK: {
 				// boulders on steep ground and rocky shores, lava chunks on the flows
@@ -692,7 +708,7 @@ function groundData( ctx ) {
 			const clump = nz( x / 7.5, z / 7.5, 417 ) * 0.65 + nz( x / 19, z / 19, 418 ) * 0.35;
 			const grassHere = sstep( 2.5, 4.5, hb ) * ( 1 - sstep( 0.45, 0.85, jungleW ) ) * ( 1 - Math.min( 1, spSand * 1.6 ) ) * ( 1 - sstep( 0.3, 0.7, sandW ) );
 			let meadow = grassHere * ( 0.75 + 0.25 * sstep( - 0.4, 0.3, clump ) );
-			meadow *= ( 0.55 + 0.45 * sstep( 0.06, 0.38, moist ) ) * ( 1 - sstep( 0.35, 0.6, lava ) * 0.85 ) * ( 1 - sstep( 0.6, 0.95, e.sl ) ) * ( 1 - sstep( 480, 600, y ) * 0.8 );
+			meadow *= ( 0.72 + 0.28 * sstep( 0.06, 0.38, moist ) ) * ( 1 - sstep( 0.35, 0.6, lava ) * 0.85 ) * ( 1 - sstep( 0.6, 0.95, e.sl ) ) * ( 1 - sstep( 480, 600, y ) * 0.8 );
 			if ( pasture ) meadow = Math.min( meadow, 0.55 );
 			// backshore vegetation edge: follows the top of the beach sand (a lobed, noisy edge with tongues
 			// reaching seaward and isolated clumps ahead of it); e > 0 behind the edge, in Tidewater's beach

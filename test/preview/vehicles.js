@@ -7,6 +7,8 @@ import { G } from '../../src/render/Materials.js';
 import { VehicleVisual, EMIT } from '../../src/vehicles/visual.js';
 import { modelNames, getModel } from '../../src/vehicles/models/index.js';
 import { SPECS, seatsFromModel } from '../../src/vehicles/specs.js';
+import { DriverArms } from '../../src/vehicles/driver.js';
+import { RiderBody } from '../../src/vehicles/rider.js';
 
 const q = new URLSearchParams( location.search );
 const W = + ( q.get( 'w' ) || 1280 ), H = + ( q.get( 'h' ) || 720 );
@@ -111,6 +113,61 @@ window.view = ( p, t, fov ) => {
 	r.render( scene, cam );
 	return true;
 };
+// the first-person seat with the modelled arms on the controls:
+//   window.drive( { name, seat, steer (wheel angle, rad), yaw, pitch (look, rad), fov, style: { sleeve, long, glove } } )
+const driver = new DriverArms();
+window.__driver = driver;
+window.armsReady = () => driver.ready;
+window.drive = async ( o ) => {
+	const spec = SPECS[ o.name ];
+	window.show( [ { name: o.name, lod: 'active', rider: o.seat ?? 0, head: false, paint: o.paint ?? 0x7a1414, emit: o.emit } ] );
+	const vis = shown[ 0 ];
+	const seats = spec.seats || seatsFromModel( vis.model.P );
+	const seat = seats[ o.seat ?? 0 ];
+	vis.setRider( seats, spec.kind, o.seat ?? 0, false, ! driver.ready );
+	vis.setSteeringWheel( o.steer ?? 0 );
+	const v = { kind: spec.kind, model: vis.model, visual: vis, object: vis.group };
+	driver.setStyle( o.style || { sleeve: 0x3a4a5a, long: true, glove: null } );
+	driver.attach( v );
+	vis.group.updateMatrixWorld( true );
+	driver.update( v, seat, 0.016 );
+	const eye = new THREE.Vector3( ...seat.eye );
+	cam.position.copy( eye );
+	cam.rotation.set( o.pitch ?? - 0.12, o.yaw ?? 0, 0, 'YXZ' );
+	cam.fov = o.fov ?? 60; cam.near = 0.05; cam.updateProjectionMatrix();
+	cam.layers.enable( 1 );
+	G.uCamPos.value.copy( cam.position );
+	// (the first frame after new materials compiles them and can leave some out)
+	await r.compileAsync( scene, cam );
+	r.render( scene, cam );
+	return { ready: driver.ready, what: DriverArms.controls( v, seat ), eye: seat.eye };
+};
+// the seated body seen from outside: window.rider( { name, seat, steer, cam: [ x, y, z ], target: [ x, y, z ], fov, first } )
+const body = new RiderBody();
+window.__body = body;
+window.bodyReady = () => body.ready;
+window.rider = async ( o ) => {
+	const spec = SPECS[ o.name ];
+	window.show( [ { name: o.name, lod: 'active', paint: o.paint ?? 0x7a1414, rider: - 1 } ] );
+	const vis = shown[ 0 ];
+	const seats = spec.seats || seatsFromModel( vis.model.P );
+	const seat = seats[ o.seat ?? 0 ];
+	vis.setSteeringWheel( o.steer ?? 0 );
+	const v = { kind: spec.kind, model: vis.model, visual: vis, object: vis.group };
+	body.attach( v );
+	body.pose( v, seat, !! o.first );
+	if ( o.arms ) { driver.setStyle( o.style || { sleeve: 0x3a4a5a, long: true, glove: null } ); driver.attach( v ); driver.update( v, seat, 0.016 ); } else driver.attach( null );
+	cam.fov = o.fov ?? 40; cam.near = 0.05; cam.updateProjectionMatrix();
+	cam.layers.enable( 1 );
+	if ( o.first ) { cam.position.set( ...seat.eye ); cam.rotation.set( o.pitch ?? - 0.3, o.yaw ?? 0, 0, 'YXZ' ); } else { cam.position.set( ...o.cam ); cam.lookAt( ...o.target ); }
+	G.uCamPos.value.copy( cam.position );
+	await r.compileAsync( scene, cam );
+	r.render( scene, cam );
+	return { ready: body.ready, len: body.len };
+};
 window.models = () => modelNames();
+// debug: the colour at a pixel after a render ( x, y from the top-left )
+window.pixel = ( x, y ) => { const gl = r.getContext(); const b = new Uint8Array( 4 ); gl.readPixels( x, H - 1 - y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, b ); return Array.from( b ); };
+window.__scene = scene; window.__cam = cam; window.__r = r; window.__shown = shown; window.THREE = THREE;
 window.getModel = getModel;
 window.__ready = true;

@@ -17,6 +17,8 @@ import { loadModel, hasModel } from './models/index.js';
 import { Spawner, vehicleState } from './spawner.js';
 import { VehicleCamera } from './camera.js';
 import { ensureVehicleSounds } from './sounds.js';
+import { DriverArms, armStyle } from './driver.js';
+import { RiderBody } from './rider.js';
 import { getItem } from '../game/items/ItemDB.js';
 
 const V3 = THREE.Vector3;
@@ -64,6 +66,11 @@ export class Vehicles {
 		this.spot.castShadow = false;
 		this.spot.visible = true;
 		game.scene.add( this.spot, this.spot.target );
+		// the player's arms on the controls in the first-person seat
+		this.arms = new DriverArms();
+		this.armsVer = - 1;
+		// ... and the rest of them (the whole seated figure from outside, the lap from inside)
+		this.body = new RiderBody();
 		this.unprovide = game.interact.addProvider( ( ray ) => this.provide( ray ) );
 		this.offDeath = game.events.on( 'playerDeath', () => { if ( game.player.vehicle ) this.exit( true ); } );
 		// the models people are most likely to meet first, built in the background
@@ -315,7 +322,12 @@ export class Vehicles {
 		this.t += dt;
 		if ( ! this.soundsOk ) this.soundsOk = ensureVehicleSounds( g.audio );
 		// vehicles removed from outside (/killall): gone for good
-		for ( const v of this.list.slice() ) if ( v.removed ) { this._forget( v ); this.gone.add( v.key ); this.records.delete( v.key ); if ( v === this.driving ) this._clearSeat( true ); }
+		for ( let i = this.list.length - 1; i >= 0; i -- ) {
+			const v = this.list[ i ];
+			if ( ! v.removed ) continue;
+			this._forget( v ); this.gone.add( v.key ); this.records.delete( v.key );
+			if ( v === this.driving ) this._clearSeat( true );
+		}
 		// the seat the player was saved in
 		if ( this.pendingEnter ) this._resumeSeat();
 		this.streamT -= dt;
@@ -340,16 +352,30 @@ export class Vehicles {
 				this._noise( u, dt );
 				this._hits( u );
 				this._updateBoxes( u );
-			}
+			} else if ( u.floating && u.pos.distanceToSquared( camPos ) < 250000 ) { u.bob( dt ); this._updateBoxes( u ); }
 			if ( u.removed ) continue;
 			u.updateLamps( this.t, night );
 			u.updateEffects( dt, camPos );
 		}
-		// the player rides along (drawn in the seat: whole from outside, without the head from inside)
+		// the player rides along (drawn in the seat: whole from outside; from inside without the head, the modelled
+		// arms on the controls)
 		if ( v && p.vehicle && ! v.removed ) {
 			this._ride( v, dt );
-			if ( this.driving === v ) v.visual.setRider( v.seats, v.kind, this.seat, this.cam.mode === 'third' );
-		}
+			if ( this.driving === v ) {
+				const first = this.cam.mode === 'first', seat = v.seats[ this.seat ];
+				this.arms.attach( first ? v : null );
+				if ( first ) {
+					const inv = p.inventory;
+					if ( inv && inv.version !== this.armsVer ) { this.armsVer = inv.version; this.arms.setStyle( armStyle( inv ) ); }
+					this.arms.update( v, seat, dt );
+				}
+				this.body.attach( v );
+				this.body.pose( v, seat, first );
+				// the simple figure only until the modelled one has loaded
+				if ( this.body.ready ) v.visual.setRider( v.seats, v.kind, - 1 );
+				else v.visual.setRider( v.seats, v.kind, this.seat, ! first, ! ( first && this.arms.ready ) );
+			}
+		} else { this.arms.attach( null ); this.body.attach( null ); }
 		for ( const u of this.list ) {
 			if ( u.removed ) continue;
 			const inside = u === v && this.cam.mode === 'first';
@@ -595,6 +621,8 @@ export class Vehicles {
 
 	_clearSeat( resetPlayer ) {
 		const g = this.game, p = g.player, v = this.driving;
+		this.arms.attach( null );
+		this.body.attach( null );
 		if ( v ) {
 			const i = this.seat;
 			v.visual.setRider( v.seats, v.kind, - 1 );
@@ -728,7 +756,7 @@ export class Vehicles {
 			const aim = AIR[ v.kind ] ? _w.set( 0, v.kind === 'heli' ? - 6 : - 2, - 30 ) : _w.set( 0, - 1.2, bb.min.z - 22 );
 			b.toWorld( aim, s.target.position );
 			s.target.updateMatrixWorld();
-			s.intensity = ( v.kind === 'bike' ? 180 : 340 ) * ( 0.35 + night * 0.65 );
+			s.intensity = ( v.kind === 'bike' ? 150 : 260 ) * ( 0.35 + night * 0.65 );
 			s.angle = v.kind === 'bike' ? 0.55 : 0.72;
 		}
 		// the light bar lights up the street at night
@@ -739,7 +767,7 @@ export class Vehicles {
 				if ( ! u.siren || ! u.spec.siren || u.burnt || u.needs.battery || u.pos.distanceToSquared( cam ) > 90 * 90 ) continue;
 				const ph = ( this.t * 2.6 ) % 1;
 				const red = ph < 0.25 || ( ph > 0.5 && ph < 0.6 );
-				fx.lightNow( u.body.toWorld( _o.set( red ? - 0.4 : 0.4, u.bounds.max.y + 0.2, - 0.3 ), new V3() ), red ? RED : BLUE, 35 * night, 22 );
+				fx.lightNow( u.body.toWorld( _o.set( red ? - 0.4 : 0.4, u.bounds.max.y + 0.2, - 0.3 ), _lp ), red ? RED : BLUE, 35 * night, 22 );
 			}
 		}
 	}
@@ -770,7 +798,7 @@ export class Vehicles {
 		const zone = this._zone( v, L );
 		if ( v.burnt ) return C.trunk && zone === 'rear' ? base( 'trunk', trunkLabel, () => this.openContainer( v, 'trunk' ) ) : null;
 		// on its roof or side
-		if ( v.upY() < 0.4 && spec.mass < 4000 && v.speed < 1 ) return base( 'flip', 'Flip vehicle', () => this.flip( v ), { hold: 1.2 } );
+		if ( v.upY() < 0.4 && spec.mass < 4000 && v.speed < 1 ) return base( 'flip', 'Flip', () => this.flip( v ), { hold: 1.2 } );
 		// what's in the hands comes first
 		const held = inv.hands ? inv.findUid( inv.hands ) : null;
 		const hd = held ? getItem( held.id ) : null;
@@ -866,6 +894,9 @@ export class Vehicles {
 			if ( Math.sign( s.exit ) !== side ) d += 5;
 			if ( d < bd ) { bd = d; best = i; }
 		} );
+		// in by the front passenger door with nobody at the wheel: slide across and drive (as in GTA); the rear doors
+		// are for passengers
+		if ( best >= 0 && di >= 0 && best !== di && free( di ) && Math.abs( v.seats[ best ].pos[ 2 ] - v.seats[ di ].pos[ 2 ] ) < 0.3 ) return di;
 		return best;
 	}
 
@@ -985,11 +1016,51 @@ export class Vehicles {
 		return Math.max( 0, cap - ( this.pumpUsed.get( p.station ) || 0 ) );
 	}
 
+	// the gas pumps: where the buildings module draws them (game.city.gasPumps()), else the spawner's own layout of
+	// the same stations
+	pumps() {
+		if ( this._pumps ) return this._pumps;
+		let list = null;
+		try {
+			const cp = this.game.city?.gasPumps?.();
+			if ( cp && cp.length ) {
+				const n = new Map();
+				list = cp.map( p => {
+					const k = n.get( p.i ) || 0;
+					n.set( p.i, k + 1 );
+					return { key: `pump:${p.i}:${k}`, station: `gas:${p.i}`, x: p.x, y: p.y, z: p.z };
+				} );
+			}
+		} catch ( e ) { console.warn( 'gas pumps', e ); }
+		// (the city may not be up yet: keep asking until it is)
+		if ( ! list ) return this.spawner?.pumps || [];
+		this._pumps = list;
+		this.pumpGrid = new Map();
+		for ( const p of list ) {
+			const k = Math.floor( p.x / 64 ) * 100003 + Math.floor( p.z / 64 );
+			let a = this.pumpGrid.get( k );
+			if ( ! a ) this.pumpGrid.set( k, a = [] );
+			a.push( p );
+		}
+		return list;
+	}
+
+	// pumps within 4 m of a point (the few near the player, not all ~1000 of them each frame)
+	_pumpsNear( x, z ) {
+		const all = this.pumps();
+		if ( ! this.pumpGrid ) return all;
+		const out = _pumpList;
+		out.length = 0;
+		for ( let a = Math.floor( ( x - 4 ) / 64 ); a <= Math.floor( ( x + 4 ) / 64 ); a ++ ) for ( let b = Math.floor( ( z - 4 ) / 64 ); b <= Math.floor( ( z + 4 ) / 64 ); b ++ ) {
+			const l = this.pumpGrid.get( a * 100003 + b );
+			if ( l ) for ( const p of l ) out.push( p );
+		}
+		return out;
+	}
+
 	_pumpPrompt( ray, out ) {
-		const sp = this.spawner;
-		if ( ! sp ) return;
 		const o = ray.origin, d = ray.dir;
-		for ( const p of sp.pumps ) {
+		for ( const p of this._pumpsNear( o.x, o.z ) ) {
 			const dx = p.x - o.x, dz = p.z - o.z;
 			if ( dx * dx + dz * dz > 16 ) continue;
 			// ray against the pump body (a 0.45 m cylinder, 1.7 m tall)
@@ -1011,7 +1082,7 @@ export class Vehicles {
 				const dd = Math.hypot( v.pos.x - p.x, v.pos.z - p.z ) - v.radius * 0.5;
 				if ( dd < vd ) { vd = dd; veh = v; }
 			}
-			if ( veh ) { out.push( { t, id: 'pump-' + p.key + '-' + veh.id, label: 'Refuel ' + veh.name.toLowerCase(), noOcclusion: true, action: () => this.pumpInto( p, veh ) } ); continue; }
+			if ( veh ) { out.push( { t, id: 'pump-' + p.key + '-' + veh.id, label: 'Refuel', sub: veh.name, noOcclusion: true, action: () => this.pumpInto( p, veh ) } ); continue; }
 			const inv = this.game.player.inventory;
 			const can = inv.find( ( s, dd ) => dd?.fuel && dd.fuel.kind !== 'propane' && ( s.data?.amount || 0 ) < dd.fuel.litres - 0.1 );
 			if ( can ) out.push( { t, id: 'pump-' + p.key + '-can', label: 'Fill ' + getItem( can.id ).name.toLowerCase(), noOcclusion: true, action: () => this.pumpInto( p, null, can ) } );
@@ -1032,7 +1103,7 @@ export class Vehicles {
 				if ( v ) { if ( v.removed ) return; v.fuel += r2; v.touch(); }
 				else { if ( ! g.player.inventory.findUid( can.uid ) ) return; can.data.liquid = 'fuel'; can.data.amount = ( can.data.amount || 0 ) + r2; g.player.inventory.changed(); }
 				this.pumpUsed.set( p.station, ( this.pumpUsed.get( p.station ) || 0 ) + r2 );
-				g.toast( this._pumpReserve( p ) < 0.5 ? 'The pump ran dry' : `Pumped ${Math.max( 1, Math.round( r2 ) )} L`, 'good' );
+				g.toast( this._pumpReserve( p ) < 0.5 ? 'Pump empty' : `Pumped ${Math.max( 1, Math.round( r2 ) )} L`, 'good' );
 			},
 		} );
 	}
@@ -1110,6 +1181,8 @@ export class Vehicles {
 		this._horn( null, false );
 		this.game.scene.remove( this.spot, this.spot.target );
 		this.spot.dispose?.();
+		this.arms.dispose();
+		this.body.dispose();
 		for ( const v of this.list ) v.stopSounds();
 		this.list.length = 0;
 		this.active.clear();
@@ -1117,6 +1190,8 @@ export class Vehicles {
 }
 
 const RED = new THREE.Color( 1, 0.1, 0.08 ), BLUE = new THREE.Color( 0.1, 0.25, 1 );
+const _pumpList = [];
+const _lp = new V3();
 
 // 2-D overlap of an oriented rectangle (centre x, z, half extents hx, hz, rotation cos c / sin s as a physics box
 // yaw) with a physics box, by separating axes

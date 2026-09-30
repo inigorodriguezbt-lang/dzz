@@ -771,56 +771,6 @@ export function buildFern( lod = 0, seed = 111 ) {
 	return b.build();
 }
 
-// Grass clump for the dense ground cover: geometric blades (no alpha test, cheap to fill), after
-// Tidewater's GrassField (MIT). Nine blades in three tiers: with distance the tier 2 and then the tier 1
-// blades narrow away while the survivors widen, so the sward keeps its cover with a third of the
-// blades (VegMaterial). lod 1 (the far level) is the three tier 0 blades, one triangle each: by then
-// the near level shows the same three blades, so the hand-over doesn't show.
-// Vertex layout (kind GRASS): position = point on the blade's centre line, uv = sideways offset of the
-// vertex from it (xz, m), aVeg = ( height fraction, -, -, phase ), aMat.w = tier.
-export function buildGrassClump( lod = 0, seed = 121 ) {
-	const rand = mulberry32( seed );
-	const b = new GeoBuilder();
-	const blades = 9;
-	for ( let k = 0; k < blades; k ++ ) {
-		// the same random numbers for both levels: tier 0 blades are identical in both
-		const tier = k % 3;
-		const a = rand() * Math.PI * 2;
-		const r = Math.sqrt( rand() ) * 0.2;
-		const bx = Math.cos( a ) * r, bz = Math.sin( a ) * r;
-		const dirA = rand() * Math.PI * 2;
-		const dx = Math.cos( dirA ), dz = Math.sin( dirA );
-		const lean = 0.15 + rand() * 0.45;
-		const h = ( 0.3 + rand() * 0.32 ) * ( tier === 0 ? 1.08 : 1 );
-		const wd = ( 0.02 + rand() * 0.012 ) * ( tier === 0 ? 1.15 : 1 );
-		const curve = 0.2 + rand() * 0.35;
-		const ph = rand();
-		const tone = 0.82 + rand() * 0.36;
-		const cr = rand();
-		if ( lod === 1 && tier > 0 ) continue;
-		const col = [ tone, tone, tone ];
-		const rows = lod === 1 ? [ 0, 1 ] : tier === 0 ? [ 0, 0.38, 0.72, 1 ] : [ 0, 0.55, 1 ];
-		// normals mostly up: the sward is lit like the ground under it
-		const n = new THREE.Vector3( dx * 0.3, 1, dz * 0.3 ).normalize();
-		const ids = [];
-		for ( let q = 0; q < rows.length; q ++ ) {
-			const f = rows[ q ];
-			const out = ( Math.sin( lean ) * f + curve * f * f ) * h;
-			const up = ( Math.cos( lean ) * f - curve * 0.3 * f * f ) * h;
-			const p = new THREE.Vector3( bx + dx * out, up, bz + dz * out );
-			// a single triangle (far level) is a little wider at the base: the same area as the blade
-			const w = wd * ( 1 - f * 0.85 ) * ( lod === 1 ? 1.3 : 1 );
-			const mat = [ PART.SOLID, 0.35 + 0.65 * f, cr, tier ];
-			if ( q === rows.length - 1 ) ids.push( b.vertex( p, n, 0, 0, [ f, 0, 0, ph ], mat, col ) );
-			else for ( const sd of [ - 1, 1 ] ) ids.push( b.vertex( p, n, - dz * w * sd, dx * w * sd, [ f, 0, 0, ph ], mat, col ) );
-		}
-		for ( let q = 0; q < rows.length - 2; q ++ ) b.quad( ids[ q * 2 ], ids[ q * 2 + 1 ], ids[ q * 2 + 3 ], ids[ q * 2 + 2 ] );
-		const t = ( rows.length - 2 ) * 2;
-		b.tri( ids[ t ], ids[ t + 1 ], ids[ t + 2 ] );
-	}
-	return b.build();
-}
-
 // ---- crops ------------------------------------------------------------------------------------------------------
 
 // pineapple row segment (2.4 m of a double row): spiky rosettes, some with a fruit (crown id 99)
@@ -957,5 +907,166 @@ export function buildFallenFrond( lod = 0, seed = 181 ) {
 		droop: () => 0.12, curl: - 0.05, minWidth: 0.045,
 		veg: { u0: 0, flutter: 0, phase: 0 }, mat: [ PART.LEAF, 0.8, 0.5, 0 ], col: [ 1, 1, 1 ],
 	} );
+	return b.build();
+}
+
+// ---- broadleaf understory (ported from Tidewater PlantGeometry.js: addTube, petiolePoints, addBlade,
+// buildMonstera, buildElephantEar). The blades' outline, slits, holes and colours are cut / painted in the
+// fragment shader (VegMaterial BROAD_GLSL) from their blade coordinates: uv = ( y along 0..1, x across in
+// units of the half-width W ), petioles uv.x < 0; aMat = ( part 6 monstera | 7 elephant ear, age, W, seed ).
+const BROAD = { MONSTERA: 6, ELEPHANT: 7 };
+const _t0 = new THREE.Vector3(), _t1 = new THREE.Vector3(), _t2 = new THREE.Vector3(), _t3 = new THREE.Vector3();
+
+function broadTube( b, pts, { radius, radial = 4, part, age = 0, seed = 0, phase = 0, s0 = 0, s1 = 0.5, W = 0.1 } ) {
+	const start = b.count;
+	const n = pts.length;
+	const T = new THREE.Vector3(), X = new THREE.Vector3(), Y = new THREE.Vector3();
+	for ( let i = 0; i < n; i ++ ) {
+		T.subVectors( pts[ Math.min( n - 1, i + 1 ) ], pts[ Math.max( 0, i - 1 ) ] ).normalize();
+		X.crossVectors( T, UP );
+		if ( X.lengthSq() < 1e-4 ) X.set( 1, 0, 0 );
+		X.normalize();
+		Y.crossVectors( X, T ).normalize();
+		const f = i / ( n - 1 );
+		const r = radius( f );
+		for ( let j = 0; j <= radial; j ++ ) {
+			const a = ( j / radial ) * Math.PI * 2;
+			_t1.copy( X ).multiplyScalar( Math.cos( a ) ).addScaledVector( Y, Math.sin( a ) );
+			_t0.copy( pts[ i ] ).addScaledVector( _t1, r );
+			b.vertex( _t0, _t1, - 1 + 0.5 * f, j / radial, [ 1, s0 + ( s1 - s0 ) * f, 0, phase ], [ part, age, W, seed ], [ 1, 1, 1 ] );
+		}
+	}
+	for ( let i = 0; i < n - 1; i ++ ) for ( let j = 0; j < radial; j ++ ) {
+		const a = start + i * ( radial + 1 ) + j, c = a + radial + 1;
+		b.quad( a, a + 1, c + 1, c );
+	}
+}
+
+// petiole: arches from `origin` (elevation el0) to el1, horizontal direction `dirH`
+function petiolePoints( origin, dirH, length, el0, el1, segs = 6 ) {
+	const pts = [ origin.clone() ];
+	const p = origin.clone();
+	for ( let k = 0; k < segs; k ++ ) {
+		const f = ( k + 0.5 ) / segs;
+		const el = el0 + ( el1 - el0 ) * f * f;
+		_t0.copy( dirH ).multiplyScalar( Math.cos( el ) ).addScaledVector( UP, Math.sin( el ) );
+		p.addScaledVector( _t0, length / segs );
+		pts.push( p.clone() );
+	}
+	return pts;
+}
+
+// Blade: attach point, horizontal azimuth `dirH`, pitch at the attach (negative: tip down), `bend`
+// further down toward the tip, `yBack` share behind the attach (basal lobes / peltate leaves), `env( y )`
+// outline envelope (half-width / W), `cup` (edges up +), `roll`, `wave` (margin undulation)
+function broadBlade( b, o ) {
+	const { attach, dirH, pitch, bend, L, W, yBack = 0, env, cup = 0, roll = 0, wave = 0, segsY = 8, segsX = 2, part, age = 0, seed = 0, phase = 0, s0 = 0.5, flutter = 0.6 } = o;
+	const S = new THREE.Vector3( - dirH.z, 0, dirH.x ).normalize();
+	const rollQ = new THREE.Quaternion();
+	const T = new THREE.Vector3(), N = new THREE.Vector3(), Sr = new THREE.Vector3();
+	// midrib: straight behind the attach, bending down in front of it
+	const mid = [];
+	const back = attach.clone().addScaledVector( _t0.copy( dirH ).multiplyScalar( Math.cos( pitch ) ).addScaledVector( UP, Math.sin( pitch ) ), - yBack * L );
+	const p = back.clone();
+	for ( let k = 0; k <= segsY; k ++ ) {
+		const y = k / segsY;
+		const f = Math.max( 0, ( y - yBack ) / ( 1 - yBack ) );
+		const el = pitch - bend * Math.pow( f, 1.4 );
+		T.copy( dirH ).multiplyScalar( Math.cos( el ) ).addScaledVector( UP, Math.sin( el ) ).normalize();
+		rollQ.setFromAxisAngle( T, roll * ( 0.4 + 0.6 * f ) );
+		Sr.copy( S ).applyQuaternion( rollQ );
+		N.crossVectors( Sr, T ).normalize();
+		mid.push( { p: p.clone(), S: Sr.clone(), N: N.clone(), y } );
+		if ( k < segsY ) p.addScaledVector( T, L / segsY );
+	}
+	const grid = [];
+	for ( let k = 0; k <= segsY; k ++ ) {
+		const m = mid[ k ];
+		const e = Math.max( env( m.y ), 0.02 );
+		const row = [];
+		for ( let j = - segsX; j <= segsX; j ++ ) {
+			const x = j / segsX, xa = Math.abs( x );
+			const wv = wave * Math.sin( m.y * 23 + seed * 40 + ( x > 0 ? 1.7 : 0 ) ) * xa;
+			const q = m.p.clone().addScaledVector( m.S, x * e * W ).addScaledVector( m.N, ( cup * xa * xa + wv ) * e * W );
+			row.push( { q, x: x * e, y: m.y, n: m.N } );
+		}
+		grid.push( row );
+	}
+	const nx = 2 * segsX;
+	const idx = [];
+	for ( let k = 0; k <= segsY; k ++ ) {
+		const r = [];
+		for ( let j = 0; j <= nx; j ++ ) {
+			const g = grid[ k ][ j ];
+			_t1.subVectors( grid[ Math.min( segsY, k + 1 ) ][ j ].q, grid[ Math.max( 0, k - 1 ) ][ j ].q );
+			_t2.subVectors( grid[ k ][ Math.min( nx, j + 1 ) ].q, grid[ k ][ Math.max( 0, j - 1 ) ].q );
+			_t3.crossVectors( _t2, _t1 );
+			if ( _t3.lengthSq() < 1e-12 ) _t3.copy( g.n );
+			_t3.normalize();
+			if ( _t3.dot( g.n ) < 0 ) _t3.negate();
+			const fl = flutter * Math.abs( g.x ) * smooth( 0.0, 0.6, g.y );
+			r.push( b.vertex( g.q, _t3, g.y, g.x, [ 1, s0 + ( 1 - s0 ) * g.y, fl, phase ], [ part, age, W, seed ], [ 1, 1, 1 ] ) );
+		}
+		idx.push( r );
+	}
+	for ( let k = 0; k < segsY; k ++ ) for ( let j = 0; j < nx; j ++ ) b.quad( idx[ k ][ j ], idx[ k ][ j + 1 ], idx[ k + 1 ][ j + 1 ], idx[ k + 1 ][ j ] );
+}
+
+// outline envelopes (half-width / W at y); the shader cuts the exact outline inside them
+const heartEnv = ( yBack ) => ( y ) => y < yBack ? 0.75 + 0.3 * ( y / yBack ) : Math.pow( Math.sin( Math.PI * Math.min( 1, 0.5 + 0.5 * ( y - yBack ) / ( 1 - yBack ) ) ), 0.75 ) * 1.02 + 0.02;
+
+// Monstera deliciosa clump: long petioles arching out of the ground, big glossy heart-shaped blades with
+// slits and holes (mature), small entire juvenile leaves, one old yellowing leaf
+export function buildMonstera( lod = 0, seed = 191 ) {
+	const rand = mulberry32( seed );
+	const b = new GeoBuilder();
+	const n = 8;
+	const dirH = new THREE.Vector3();
+	for ( let i = 0; i < n; i ++ ) {
+		const az = i * 2.39996 + rand() * 0.5;
+		dirH.set( Math.cos( az ), 0, Math.sin( az ) );
+		// age: juvenile (entire, small, pale) .. mature .. old (yellowing, drooping)
+		const age = i === 1 || i === 5 ? 0.1 : i === 6 ? 0.95 : 0.4 + rand() * 0.4;
+		const mature = age > 0.3;
+		const Lp = ( mature ? 0.65 + rand() * 0.45 : 0.35 + rand() * 0.2 ) * ( age > 0.9 ? 0.8 : 1 );
+		const origin = new THREE.Vector3( dirH.x * 0.06, 0.02, dirH.z * 0.06 );
+		const pts = petiolePoints( origin, dirH, Lp, 1.35 - rand() * 0.2, ( age > 0.9 ? 0.0 : 0.55 ) + rand() * 0.25, lod === 0 ? 6 : 3 );
+		const L = mature ? 0.55 + rand() * 0.35 : 0.28 + rand() * 0.1;
+		const W = L * 0.47;
+		const ph = rand();
+		broadTube( b, pts, { radius: ( f ) => 0.016 - 0.005 * f, radial: lod === 0 ? 4 : 3, part: BROAD.MONSTERA, age, seed: rand(), phase: ph, s0: 0, s1: 0.45 } );
+		broadBlade( b, {
+			attach: pts[ pts.length - 1 ], dirH, pitch: ( age > 0.9 ? - 0.9 : - 0.15 - rand() * 0.35 ), bend: 0.35 + rand() * 0.35,
+			L, W, yBack: 0.16, env: heartEnv( 0.16 ), cup: 0.12, roll: ( rand() - 0.5 ) * 0.5, wave: 0.03,
+			segsY: lod === 0 ? 10 : 5, segsX: lod === 0 ? 4 : 2, part: BROAD.MONSTERA, age, seed: rand(), phase: ph, s0: 0.45, flutter: 0.35,
+		} );
+	}
+	return b.build();
+}
+
+// Elephant ear / kalo (Colocasia, taro): tall upright petioles, huge peltate heart / arrow blades hanging
+// tip down
+export function buildElephantEar( lod = 0, seed = 201 ) {
+	const rand = mulberry32( seed );
+	const b = new GeoBuilder();
+	const n = 8;
+	const dirH = new THREE.Vector3();
+	for ( let i = 0; i < n; i ++ ) {
+		const az = i * 2.39996 + rand() * 0.4;
+		dirH.set( Math.cos( az ), 0, Math.sin( az ) );
+		const age = i === 6 ? 0.95 : i === 7 ? 0.1 : 0.2 + rand() * 0.5;
+		const Lp = ( 0.8 + rand() * 0.6 ) * ( age > 0.9 ? 0.75 : 1 );
+		const origin = new THREE.Vector3( dirH.x * 0.05, 0.02, dirH.z * 0.05 );
+		const pts = petiolePoints( origin, dirH, Lp, 1.45, ( age > 0.9 ? 0.5 : 1.05 ) + rand() * 0.25, lod === 0 ? 6 : 3 );
+		const L = ( 0.75 + rand() * 0.5 ) * ( age < 0.15 ? 0.6 : 1 );
+		const W = L * 0.42;
+		const ph = rand();
+		broadTube( b, pts, { radius: ( f ) => 0.03 - 0.014 * f, radial: lod === 0 ? 5 : 3, part: BROAD.ELEPHANT, age, seed: rand(), phase: ph, s0: 0, s1: 0.5 } );
+		broadBlade( b, {
+			attach: pts[ pts.length - 1 ], dirH, pitch: - 0.45 - rand() * 0.45 - ( age > 0.9 ? 0.5 : 0 ), bend: 0.3 + rand() * 0.25,
+			L, W, yBack: 0.3, env: heartEnv( 0.3 ), cup: - 0.1, roll: ( rand() - 0.5 ) * 0.4, wave: 0.05,
+			segsY: lod === 0 ? 9 : 5, segsX: lod === 0 ? 3 : 2, part: BROAD.ELEPHANT, age, seed: rand(), phase: ph, s0: 0.5, flutter: 0.3,
+		} );
+	}
 	return b.build();
 }

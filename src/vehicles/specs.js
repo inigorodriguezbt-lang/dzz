@@ -34,7 +34,7 @@ const car = ( o ) => Object.assign( {
 	engine: { power: 150, torque: 250, idle: 750, redline: 6400, gears: [ 3.3, 2.05, 1.45, 1.1, 0.86, 0.69 ], reverse: 3.2, final: 3.9, drive: 'fwd', sound: 'engine_car', pitch: 1 },
 	brake: 12000, handbrake: 7500, steer: 0.62, steerSpeed: 2.6,
 	susp: { k: 34000, c: 3400, rest: 0.18, travel: 0.13 },
-	grip: 1.05, rollInfluence: 0.25, antiRoll: 14000, dragArea: 0.72, downforce: 0, offroad: 0,
+	grip: 1.05, rollInfluence: 0.75, pitchInfluence: 0.9, antiRoll: 8500, dragArea: 0.72, downforce: 0, offroad: 0, assist: 1,
 	fuel: { tank: 55, burn: 0.042, idleBurn: 0.0018 },
 	containers: { trunk: 40, glovebox: 6, trunkLabel: 'Trunk' },
 	paints: PAINTS.civil, metallic: [ 0.1, 0.65 ],
@@ -88,7 +88,7 @@ export const SPECS = {
 	bus: car( {
 		name: 'Bus', model: 'bus', mass: 13000, health: 3000,
 		engine: { power: 210, torque: 1350, idle: 600, redline: 2400, gears: [ 3.5, 1.9, 1.4, 1.0, 0.75 ], reverse: 4.5, final: 5.1, drive: 'rwd', sound: 'engine_truck', pitch: 0.72 },
-		susp: { k: 420000, c: 32000, rest: 0.2, travel: 0.12 }, brake: 110000, handbrake: 60000, steer: 0.62, steerSpeed: 1.6, antiRoll: 250000, dragArea: 6.0, rollInfluence: 0.2,
+		susp: { k: 420000, c: 32000, rest: 0.2, travel: 0.12 }, brake: 110000, handbrake: 60000, steer: 0.62, steerSpeed: 1.6, antiRoll: 250000, dragArea: 6.0, rollInfluence: 0.45, pitchInfluence: 0.5,
 		fuel: { tank: 300, burn: 0.09, idleBurn: 0.004 },
 		containers: { trunk: 40, glovebox: 10, trunkLabel: 'Luggage' }, paints: [ 0xf4f4f0 ], metallic: [ 0, 0.1 ],
 	} ),
@@ -109,7 +109,7 @@ export const SPECS = {
 		fuel: { tank: 15, burn: 0.02, idleBurn: 0.0008 },
 		containers: { trunk: 8, glovebox: 0, trunkLabel: 'Top box' },
 		seats: [
-			{ pos: [ 0, 0.84, 0.08 ], eye: [ 0, 1.5, - 0.12 ], exit: - 1, driver: true },
+			{ pos: [ 0, 0.84, 0.08 ], eye: [ 0, 1.49, 0.06 ], exit: - 1, driver: true },
 			{ pos: [ 0, 0.9, 0.46 ], eye: [ 0, 1.6, 0.4 ], exit: 1 },
 		],
 		paints: [ 0x0e0f10, 0xc81d1d, 0x1d5fd1, 0xf2f2f0, 0x2e8b57, 0xe0591b, 0x55595e ], paints2: [ 0x0e0f10, 0x1b1c1e, 0x9ea2a8 ], metallic: [ 0.3, 0.7 ],
@@ -158,7 +158,7 @@ export const SPECS = {
 	helicopter: {
 		kind: 'heli', name: 'Helicopter', model: 'helicopter', mass: 1950, health: 1100,
 		engine: { power: 632, idle: 0, redline: 1, sound: 'rotor', pitch: 1 },
-		lift: 2.1, climb: 6, tilt: 0.42, yawRate: 1.3, drag: 1.6, rotorR: 5.35, spool: 6,
+		lift: 2.1, climb: 6, tilt: 0.42, yawRate: 1.3, drag: 1.6, rotorR: 5.35, spool: 4,
 		susp: { k: 70000, c: 7000, rest: 0.12, travel: 0.1 }, grip: 1.2,
 		fuel: { tank: 540, burn: 0.16, idleBurn: 0.05 },
 		containers: { trunk: 30, glovebox: 6, trunkLabel: 'Baggage', loot: 'hangar' },

@@ -96,7 +96,7 @@ ${ fftCode }					return d;
 					float along = ph.along;
 					float ground = waterGroundAt( pc );
 					float depth = uWaterLevel - ground;
-					float A = shoreWaveAmp( m, along );
+					float A = shoreWaveAmpK( m, along, ph.barK );
 					vec4 cr = shoreCrest( A, depth ); // ( b, H, trough, lipThrow )
 					float b = cr.x;
 					float env = smoothstep( 26.0, 13.0, depth ) * sSat( ph.exposure * 1.4 ) * uShoreEnabled;

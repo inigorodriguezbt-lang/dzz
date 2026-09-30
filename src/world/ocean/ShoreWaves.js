@@ -81,8 +81,8 @@ function evaluateCode( name, mode ) {
 		float m = floor( s + 0.5 );
 		float u = s - m;
 		// wave height with smooth hand-over between consecutive waves at the trough
-		float A0 = shoreWaveAmp( m, along );
-		float An = shoreWaveAmp( m + sign( u ), along );
+		float A0 = shoreWaveAmpK( m, along, ph.barK );
+		float An = shoreWaveAmpK( m + sign( u ), along, ph.barK );
 		float A = mix( A0, An, smoothstep( 0.32, 0.5, abs( u ) ) * 0.5 );
 		// the breaking state of the whole wave comes from the depth under its crest
 		float dB = shoreBreakDepth( xz, dir, u, lam, d );
@@ -118,15 +118,20 @@ function evaluateCode( name, mode ) {
 			float t = uOceanTime;
 			float mW = floor( ph.s + 0.5 );
 			// (the lumps only exist on the roller: amp is 0 elsewhere)
+			// (ours) each octave band-limited to the mesh spacing like the FFT cascades: on the 0.25-1 m grid
+			// a few metres from the camera the ~0.6 m octave (and the ~1.4 m one further out) aliased into a
+			// field of single-vertex spikes over the whole bore
+			float w1 = smoothstep( 0.8, 0.4, shoreLumpSpacing ) * 0.7;
+			float w2 = smoothstep( 0.4, 0.2, shoreLumpSpacing ) * 0.3;
 			if ( roller != 0.0 ) {
 				float lumpy = sSat( perlin2( vec2( along * 0.045, mW * 3.7 ) ) * 1.2 + 0.55 );
 				float amp = roller * mix( 0.25, 0.7, lumpy );
 				vec2 q1 = vec2( along * 0.28, sx * 0.7 - t * 0.8 );
 				vec2 q2 = vec2( along * 0.8 + 11.3, sx * 1.6 - t * 1.5 );
 				float eL = 0.25;
-				float L0 = perlin2( q1 ) * 0.7 + perlin2( q2 ) * 0.3;
-				float La = perlin2( q1 + vec2( eL * 0.28, 0.0 ) ) * 0.7 + perlin2( q2 + vec2( eL * 0.8, 0.0 ) ) * 0.3;
-				float Ls = perlin2( q1 + vec2( 0.0, eL * 0.7 ) ) * 0.7 + perlin2( q2 + vec2( 0.0, eL * 1.6 ) ) * 0.3;
+				float L0 = perlin2( q1 ) * w1 + perlin2( q2 ) * w2;
+				float La = perlin2( q1 + vec2( eL * 0.28, 0.0 ) ) * w1 + perlin2( q2 + vec2( eL * 0.8, 0.0 ) ) * w2;
+				float Ls = perlin2( q1 + vec2( 0.0, eL * 0.7 ) ) * w1 + perlin2( q2 + vec2( 0.0, eL * 1.6 ) ) * w2;
 				// lumps stand up from the roller (rounded caps, flatter troughs between them)
 				float lump = max( L0 * 1.5 + 0.2, -0.3 );
 				disp.y += lump * amp;
@@ -140,7 +145,7 @@ function evaluateCode( name, mode ) {
 			}
 		}` : '' }
 		// ---- swash: run-up of the most recent wave on the sand
-		ShoreRunup swr = shoreSwashRunup( sh, along, groundH );
+		ShoreRunup swr = shoreSwashRunupB( sh, along, groundH, ph.barK, ph.barRip );
 		float front = swr.Rt - swr.inland; // signed distance to the leading edge (m), > 0 under the sheet
 		bool covered = front > 0.0;
 		// leading edge velocity along the slope (m/s), positive = uphill
@@ -190,10 +195,13 @@ export const SHORE_GLSL = /* glsl */`
 	const float SHORE_SWASH_OVERSHOOT = ${ f( SWASH_OVERSHOOT ) };
 	#define SHORE_PI 3.141592653589793
 	float sSat( float x ) { return clamp( x, 0.0, 1.0 ); }
+	// (ours) grid spacing (m) of the mesh vertex being displaced, set by the water mesh before shoreEvaluate:
+	// band-limits the roller lumps. 0 = full detail.
+	float shoreLumpSpacing = 0.0;
 	struct ShoreSample { vec3 disp; vec3 nShore; float env; float foam; float breaking; float u; vec2 dir; float exposure; float swashLevel; float swashCovered;
 		float thick; float swashFoam; float runup; float inland; float dRdt; float tau; vec2 flow; float flowSpeed; float face; float roller; };
 	struct ShoreMedium { vec3 scatter; vec3 absorb; };
-	struct ShorePhase { vec4 sh; float T; vec2 dir; float exposure; float along; float s; };
+	struct ShorePhase { vec4 sh; float T; vec2 dir; float exposure; float along; float s; float barK; float barRip; };
 	struct ShoreBreak { float db; float b; float Ash; float p; float meanP; float crestPeak; float yc; float yt;
 		float H; float wBore; float Xi; float Hb; float ycB; float ytB; float Xc; float Wt; };
 	struct ShoreProfile { float x; float y; float b; float foam; float face; float roller; };
@@ -242,13 +250,16 @@ export const SHORE_GLSL = /* glsl */`
 		return o;
 	}
 	// along-shore phase wobble (in periods): crests bend over the uneven bottom (and run ahead in the rips)
-	float shoreWobble( float along ) {
+	// (rip: shoreBar( along ).rip, passed in: the callers have it already)
+	float shoreWobbleR( float along, float rip ) {
 		return sin( along * 0.029 + 0.7 ) * 0.07 + sin( along * 0.083 + 2.1 ) * 0.035
 			+ sin( along * 0.19 + 0.4 ) * 0.022 + sin( along * 0.37 + 2.6 ) * 0.011
-			+ shoreBar( along ).rip * 0.045;
+			+ rip * 0.045;
 	}
+	float shoreWobble( float along ) { return shoreWobbleR( along, shoreBar( along ).rip ); }
 	// ---- per-wave height
-	float shoreWaveAmp( float m, float along ) {
+	// (barK: shoreBar( along ).k)
+	float shoreWaveAmpK( float m, float along, float barK ) {
 		// sets: groups of ~7 waves with larger ones in the middle, plus per-wave randomness
 		float waveSet = abs( sin( m * ${ f( Math.PI / 7 ) } ) ) * 0.6 + 0.55;
 		float rnd = ( shoreHash1( m ) - 0.5 ) * 2.0;
@@ -260,8 +271,9 @@ export const SHORE_GLSL = /* glsl */`
 		// (plus a shorter ~20 m variation: bores that rise and sag along the crest, more peel sections)
 		float a3 = sin( along * 0.29 + m * 2.3 + warp * 0.5 ) * 0.6 + sin( along * 0.47 + m * 5.9 + 0.8 ) * 0.4;
 		float alongV = a1 * 0.6 + a2 * 0.4 + a3 * 0.28;
-		return max( uShoreAmplitude * waveSet * ( 1.0 + rnd * uShoreVariation * 0.5 + alongV * uShoreVariation * 0.7 ) * shoreBar( along ).k, 0.02 );
+		return max( uShoreAmplitude * waveSet * ( 1.0 + rnd * uShoreVariation * 0.5 + alongV * uShoreVariation * 0.7 ) * barK, 0.02 );
 	}
+	float shoreWaveAmp( float m, float along ) { return shoreWaveAmpK( m, along, shoreBar( along ).k ); }
 	// ---- cross-section shape
 	ShoreBreak shoreBreakParams( float A, float d ) {
 		ShoreBreak P;
@@ -415,8 +427,9 @@ export const SHORE_GLSL = /* glsl */`
 		float exposure = length( dirE );
 		vec2 dir = dirE / max( exposure, 1e-4 );
 		float along = dot( xz, vec2( - dir.y, dir.x ) );
-		float s = ( uOceanTime - T ) / uShorePeriod + shoreWobble( along );
-		ShorePhase o; o.sh = sh; o.T = T; o.dir = dir; o.exposure = exposure; o.along = along; o.s = s;
+		ShoreBar br = shoreBar( along );
+		float s = ( uOceanTime - T ) / uShorePeriod + shoreWobbleR( along, br.rip );
+		ShorePhase o; o.sh = sh; o.T = T; o.dir = dir; o.exposure = exposure; o.along = along; o.s = s; o.barK = br.k; o.barRip = br.rip;
 		return o;
 	}
 	// Water path (m) along the refracted view ray Tv from the surface point with rest position p until the ray
@@ -434,7 +447,7 @@ export const SHORE_GLSL = /* glsl */`
 			float lam = sqrt( clamp( d, 0.3, 25.0 ) * SHORE_GRAVITY ) * uShorePeriod;
 			float m = floor( ph.s + 0.5 );
 			float u = ph.s - m;
-			float A = shoreWaveAmp( m, ph.along );
+			float A = shoreWaveAmpK( m, ph.along, ph.barK );
 			ShoreBreak P = shoreBreakParams( A, shoreBreakDepth( p, ph.dir, u, lam, d ) );
 			ShoreProfile s0 = shoreProfile( u, lam, P, false );
 			float y0 = s0.y * env;
@@ -467,15 +480,15 @@ export const SHORE_GLSL = /* glsl */`
 	// ---- swash: run-up of the most recent wave at a point on the beach (distances in metres up the beach
 	// face), compared with the height of the sand (converted with the nominal beach slope), so the front is
 	// exact at the waterline and follows the contours of the sand. sh: shoreFieldSample( xz ).
-	ShoreRunup shoreSwashRunup( vec4 sh, float along, float groundH ) {
+	ShoreRunup shoreSwashRunupB( vec4 sh, float along, float groundH, float barK, float barRip ) {
 		float Tp = uShorePeriod;
 		float exposure = length( vec2( sh.y, sh.z ) );
 		float Ts = sh.w;
 		float inland = max( groundH - uWaterLevel, 0.0 ) / SHORE_BEACH_SLOPE;
-		float ss = ( uOceanTime - Ts ) / Tp + shoreWobble( along );
+		float ss = ( uOceanTime - Ts ) / Tp + shoreWobbleR( along, barRip );
 		float ms = floor( ss );
 		float tau = ss - ms; // 0..1 time since that wave's bore reached the shoreline
-		float Am = shoreWaveAmp( ms, along );
+		float Am = shoreWaveAmpK( ms, along, barK );
 		// vertical run-up ~ H on this gentle beach, converted to a horizontal excursion
 		float RhMax = Am * 2.1 * uShoreRunup * sSat( exposure * 1.4 ) / SHORE_BEACH_SLOPE;
 		// decelerating uprush, then a backwash that starts slowly and accelerates as the sheet drains
@@ -491,6 +504,7 @@ export const SHORE_GLSL = /* glsl */`
 		ShoreRunup o; o.tau = tau; o.Rt = Rt; o.inland = inland; o.RhMax = RhMax; o.su = su; o.sb = sb; o.isUp = isUp;
 		return o;
 	}
+	ShoreRunup shoreSwashRunup( vec4 sh, float along, float groundH ) { ShoreBar br = shoreBar( along ); return shoreSwashRunupB( sh, along, groundH, br.k, br.rip ); }
 	// Water film thickness clipped at the leading edge of the swash sheet, for the water shader's edge fade:
 	// ( clipped thickness, distance to the swash front (m, > 0 on the water side; 1e3 away from the swash),
 	// tau, run-up Rt ). Only evaluated where the film is thin.
@@ -500,7 +514,7 @@ export const SHORE_GLSL = /* glsl */`
 			float g = waterGroundAt( p );
 			if ( g > uWaterLevel - 0.8 ) {
 				ShorePhase ph = shorePhaseAt( p );
-				ShoreRunup r = shoreSwashRunup( ph.sh, ph.along, g );
+				ShoreRunup r = shoreSwashRunupB( ph.sh, ph.along, g, ph.barK, ph.barRip );
 				float front = r.Rt - r.inland;
 				// the lapping region reaches down the beach face past where the sea's edge sits in the trough of
 				// the backwash, and fades in from there and from 0.3 m of film instead of switching on; the front

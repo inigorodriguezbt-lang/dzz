@@ -20,11 +20,15 @@ export class VehicleCamera {
 		this.sway = new V3();
 		this.prevV = new V3();
 		this.fov = null;
+		// the pull-in ray skips the vehicle's own boxes (one options object, no closure a frame)
+		this.rayV = null;
+		this.rayOpts = { filter: ( b ) => b.owner !== this.rayV, water: false };
 	}
 
 	// a fresh view on getting in (or switching mode)
 	reset( v ) {
-		this.look.yaw = 0; this.look.pitch = v.kind === 'heli' || v.kind === 'plane' ? - 0.05 : - 0.06;
+		// (on two wheels and a jet ski the bars sit low under the eye: look down a little more to keep them in view)
+		this.look.yaw = 0; this.look.pitch = v.kind === 'heli' || v.kind === 'plane' ? - 0.05 : v.spec.open ? - 0.3 : - 0.06;
 		this.orbit.yaw = 0; this.orbit.pitch = v.kind === 'heli' ? - 0.25 : - 0.18; this.orbit.idle = 9;
 		this.heading = v.yawAngle();
 		this.pitchF = 0;
@@ -86,7 +90,8 @@ export class VehicleCamera {
 			// pull in against anything between the vehicle and the camera (its own boxes excluded)
 			let d = want;
 			const back = _eye.copy( _d ).negate();
-			const hit = g.physics.raycast( _t, back, want + 0.5, { filter: b => b.owner !== v, water: false } );
+			this.rayV = v;
+			const hit = g.physics.raycast( _t, back, want + 0.5, this.rayOpts );
 			if ( hit ) d = Math.max( 1.2, hit.t - 0.35 );
 			this.dist = this.dist === null || d < this.dist ? d : this.dist + ( d - this.dist ) * Math.min( 1, dt * 2.5 );
 			cam.position.copy( _t ).addScaledVector( _d, - this.dist );

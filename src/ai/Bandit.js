@@ -9,6 +9,8 @@ import { Mover, steer, move, stuckCheck } from './Steer.js';
 import { avatarsFor } from './Characters.js';
 import { ITEMS, getItem, makeStack } from '../game/items/ItemDB.js';
 import { rollLoot } from '../game/items/Loot.js';
+// (Math.hypot boxes its arguments in V8: garbage on hot paths)
+const hyp = ( a, b ) => Math.sqrt( a * a + b * b );
 
 const rnd = Math.random;
 const clamp = ( v, a, b ) => v < a ? a : v > b ? b : v;
@@ -104,7 +106,7 @@ export class Bandit extends Entity {
 			if ( d < range ) {
 				const fx = - Math.sin( this.yaw ), fz = - Math.cos( this.yaw );
 				const dx = pi.pos.x - this.pos.x, dz = pi.pos.z - this.pos.z;
-				const cos = ( dx * fx + dz * fz ) / ( Math.hypot( dx, dz ) || 1 );
+				const cos = ( dx * fx + dz * fz ) / ( hyp( dx, dz ) || 1 );
 				if ( cos > 0.1 || d < 6 || this.state === 'combat' ) {
 					_eye.set( this.pos.x, this.pos.y + 1.6, this.pos.z );
 					if ( g.physics.lineOfSight( _eye, pi.chest ) && ! g.fx?.smokeBlocks?.( _eye, pi.chest ) ) seen = pi.entity;
@@ -207,7 +209,7 @@ export class Bandit extends Entity {
 			const low = stand && P.lineOfSight( _v, _tgt );
 			let cover = false;
 			for ( const b of P.near( x, z, 1.3, _boxes ) ) if ( b.maxY > y + 0.6 && b.minY < y + 1.2 ) { cover = true; break; }
-			const nd = Math.hypot( tp.x - x, tp.z - z );
+			const nd = hyp( tp.x - x, tp.z - z );
 			return { s: ( stand ? 3 : - 2 ) + ( stand && ! low ? 2 : 0 ) + ( cover ? 1 : 0 ) - Math.abs( nd - ideal ) / 15 - ( nd < 8 ? 3 : 0 ), peek: stand && ! low };
 		};
 		const here = score( this.pos.x, this.pos.y, this.pos.z );
@@ -345,7 +347,7 @@ export class Bandit extends Entity {
 		if ( T && this.state === 'combat' ) {
 			const tp = T === M.pi.entity ? M.pi.chest : T.pos;
 			body.look.copy( tp ); body.lookW = 1;
-			body.aimPitch = clamp( Math.atan2( tp.y - ( this.pos.y + 1.4 ), Math.hypot( tp.x - this.pos.x, tp.z - this.pos.z ) ), - 0.6, 0.6 );
+			body.aimPitch = clamp( Math.atan2( tp.y - ( this.pos.y + 1.4 ), hyp( tp.x - this.pos.x, tp.z - this.pos.z ) ), - 0.6, 0.6 );
 		} else { body.lookW = 0; body.aimPitch = - 0.35; }
 		this.anim.acc += dt;
 		const every = d < 40 ? 1 : d < 90 ? 2 : 4;

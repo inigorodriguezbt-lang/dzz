@@ -487,8 +487,9 @@ const FRAG_COLOR = /* glsl */`
 	vec3 grass0 = mix( gBase, gTip, smoothstep( 0.05, 0.95, gHf ) );
 	// dead blades: straw to brown
 	grass0 = mix( grass0, mix( MEADOW_straw, MEADOW_soil * 1.8, gRnd * 0.6 ) * ( smoothstep( 0.0, 0.5, gHf ) * 0.4 + 0.6 ), dryBlade * ( 1.0 - duneF ) );
-	// pale midrib
-	grass0 *= pow( 1.0 - abs( across ), 6.0 ) * smoothstep( 0.05, 0.4, gHf ) * 0.18 + 1.0;
+	// pale midrib (the interpolated edge value can overshoot 1 by a rounding error: pow of a negative
+	// base is NaN, a black pixel that the TAA resolve spreads into a block)
+	grass0 *= pow( max( 1.0 - abs( across ), 0.0 ), 6.0 ) * smoothstep( 0.05, 0.4, gHf ) * 0.18 + 1.0;
 	// wind sheen: blades flattened by a gust show their paler undersides, so gusts read as bright waves
 	// rolling across the grass
 	vec3 grass = mix( grass0, grass0 * vec3( 1.3, 1.28, 1.1 ) + vec3( 0.03, 0.03, 0.015 ), vVegGust * smoothstep( 0.15, 0.9, gHf ) * 0.6 );

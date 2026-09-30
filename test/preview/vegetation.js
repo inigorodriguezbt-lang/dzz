@@ -25,7 +25,7 @@ const q = new URLSearchParams( location.search );
 const SET = q.get( 'set' ) || 'trees';
 const SETS = {
 	trees: { list: [ SP.PALM, SP.PALM, SP.PALM, SP.MONKEYPOD, SP.KUKUI, SP.OHIA, SP.PINE, SP.IRONWOOD, SP.KIAWE ], gap: 20 },
-	small: { list: [ SP.TREEFERN, SP.BANANA, SP.TI, SP.SHRUB, SP.NAUPAKA, SP.TALLGRASS, SP.PINEAPPLE, SP.CANE, SP.ROCK, SP.FERN, SP.DRIFTWOOD, SP.NUTS, SP.FROND ], gap: 4.5 },
+	small: { list: [ SP.TREEFERN, SP.BANANA, SP.TI, SP.SHRUB, SP.NAUPAKA, SP.TALLGRASS, SP.PINEAPPLE, SP.CANE, SP.ROCK, SP.FERN, SP.DRIFTWOOD, SP.NUTS, SP.FROND, SP.MONSTERA, SP.KALO ], gap: 4.5 },
 	// a lowland forest of far impostors seen from a mountainside (the game's far band)
 	forest: { list: [], gap: 20 },
 	// the grass field: backshore (left) beside a meadow (right), at eye height

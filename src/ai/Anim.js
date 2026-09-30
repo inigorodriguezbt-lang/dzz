@@ -7,6 +7,9 @@
 // quaternion; the rig runs forward kinematics over the 22 animated bones so a rotation expressed in
 // character space can be applied to any bone and its children follow.
 import * as THREE from 'three';
+// (Math.hypot boxes its arguments in V8: garbage on hot paths)
+const hyp3 = ( a, b, c ) => Math.sqrt( a * a + b * b + c * c );
+const hyp4 = ( a, b, c, d ) => Math.sqrt( a * a + b * b + c * c + d * d );
 
 export class ClipBank {
 	static async load( url ) {
@@ -290,7 +293,7 @@ export class Rig {
 	// point bone k's axis towards a character-space direction with weight w (0..1)
 	aimAt( k, dx, dy, dz, w ) {
 		const i = this.info.idx[ k ] * 4;
-		const l = Math.hypot( dx, dy, dz ) || 1;
+		const l = hyp3( dx, dy, dz ) || 1;
 		this.aim[ i ] = dx / l; this.aim[ i + 1 ] = dy / l; this.aim[ i + 2 ] = dz / l; this.aim[ i + 3 ] = Math.min( 1, w );
 		this.hasOv[ i / 4 ] = 1;
 	}
@@ -300,7 +303,7 @@ export class Rig {
 		const B = this.bank.B, q = this.q, W = this.w, info = this.info, par = info.parent, ov = this.ov, aim = this.aim;
 		if ( this.wsum <= 1e-4 ) { q.set( info.bindL ); this.p.fill( 0 ); this.wsum = 1; }
 		for ( let k = 0; k < B * 4; k += 4 ) {
-			const l = Math.hypot( q[ k ], q[ k + 1 ], q[ k + 2 ], q[ k + 3 ] ) || 1;
+			const l = hyp4( q[ k ], q[ k + 1 ], q[ k + 2 ], q[ k + 3 ] ) || 1;
 			q[ k ] /= l; q[ k + 1 ] /= l; q[ k + 2 ] /= l; q[ k + 3 ] /= l;
 		}
 		const ws = 1 / this.wsum;

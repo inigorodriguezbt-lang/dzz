@@ -6,6 +6,9 @@ import * as THREE from 'three';
 import { Entity, rayCylinder, raySphere } from '../game/Entities.js';
 import { HumanBody } from './Body.js';
 import { Mover, steer, move, stuckCheck } from './Steer.js';
+import { getItem } from '../game/items/ItemDB.js';
+// (Math.hypot boxes its arguments in V8: garbage on hot paths)
+const hyp = ( a, b ) => Math.sqrt( a * a + b * b );
 
 // what each kind of infected is: health, loot table, which avatars can wear it, armour, speed class
 export const ZTYPES = {
@@ -45,7 +48,9 @@ export const ALOHA_ITEM = [ 'aloha_shirt', 'aloha_shirt_blue', 'aloha_shirt_blac
 
 // a random infected look (plain numbers, so a corpse or a save can keep it): skin family, rot, grime, blood,
 // clothes hue, torn clothes, the bite that turned them, milky or bloodshot eyes, an aloha print on tourists' shirts
-const SKINS = [ [ 0.6, 0.65, 0.54 ], [ 0.68, 0.66, 0.5 ], [ 0.6, 0.62, 0.62 ], [ 0.66, 0.6, 0.6 ], [ 0.56, 0.62, 0.5 ], [ 0.62, 0.62, 0.56 ] ];
+// skin tones: waxy, ashen, jaundiced sallow, cold grey, mottled mauve, grey going off. Kept on the warm side of
+// grey: a neutral grey picks up the green of lawns and the blue of the sky and reads as a cartoon zombie
+const SKINS = [ [ 0.7, 0.62, 0.56 ], [ 0.66, 0.6, 0.57 ], [ 0.7, 0.63, 0.5 ], [ 0.64, 0.6, 0.61 ], [ 0.69, 0.58, 0.58 ], [ 0.65, 0.61, 0.53 ] ];
 export function rollLook( T = ZTYPES.civilian, kind = 'civilian', r = Math.random ) {
 	const sk = SKINS[ Math.floor( r() * SKINS.length ) ];
 	const tint = 0.78 + r() * 0.2;
@@ -67,6 +72,9 @@ const clamp = ( v, a, b ) => v < a ? a : v > b ? b : v;
 const wrap = ( a ) => Math.atan2( Math.sin( a ), Math.cos( a ) );
 const rnd = Math.random;
 const pick = ( a ) => a[ Math.floor( rnd() * a.length ) ];
+// the least a round to the head (after the head multiplier) must carry to kill outright: every pistol and rifle
+// round, a buckshot pellet up close; a spent pellet or a ricochet only wounds
+export const HEADSHOT = 45;
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3(), _push = new THREE.Vector3();
 const _eye = new THREE.Vector3(), _tgt = new THREE.Vector3();
 const _q = new THREE.Quaternion();
@@ -86,6 +94,7 @@ export class Zombie extends Entity {
 		this.maxHealth = this.health = T.hp * ( 0.85 + rnd() * 0.3 );
 		const inst = this.inst = mgr.lib.acquire( t );
 		inst.scale = T.brute ? 1.1 + rnd() * 0.07 : 0.93 + rnd() * 0.12;
+		inst.build = T.brute ? 1.1 + rnd() * 0.08 : 0.92 + rnd() * 0.16;
 		this.standH = this.height = t.height * inst.scale;
 		this.female = t.sex === 'f';
 		this.look = o.look || rollLook( T, kind );
@@ -102,10 +111,9 @@ export class Zombie extends Entity {
 		} );
 		this.body.yaw = this.yaw;
 		this.mover = new Mover( 0.3, 1.7 );
-		// speeds (m/s): shuffling about, chasing
-		const dm = mgr.diff.speed;
-		this.wanderV = ( 0.45 + rnd() * 0.35 ) * dm;
-		this.chaseV = ( runner ? 4.6 + rnd() * 1.0 : brute ? 2.3 + rnd() * 0.4 : rnd() < 0.3 ? 3.2 + rnd() * 0.7 : 2.1 + rnd() * 0.8 ) * dm;
+		// speeds (m/s) on normal difficulty: shuffling about, chasing (mgr.diff.speed scales them when used)
+		this.wanderV = 0.45 + rnd() * 0.35;
+		this.chaseV = runner ? 4.6 + rnd() * 1.0 : brute ? 2.3 + rnd() * 0.4 : rnd() < 0.3 ? 3.2 + rnd() * 0.7 : 2.1 + rnd() * 0.8;
 		this.turnRate = runner ? 5 : brute ? 2.2 : 3.2;
 		this.pitch = ( this.female ? 1.2 : 0.9 ) + ( rnd() - 0.5 ) * 0.2;
 		// AI
@@ -220,11 +228,11 @@ export class Zombie extends Entity {
 		const now = mgr.time;
 		this.stateT += dt;
 		// candidates: the player (or the car they're in), survivors nearby
-		let best = null, bestD = 1e9, seen = false;
+		let best = null, bestD = 1e9, seen = false, vis = 0;
 		if ( P.alive ) {
 			const d = this.pos.distanceTo( P.pos );
 			if ( d < 160 ) {
-				const vis = this._canSee( P, d );
+				vis = this._canSee( P, d );
 				if ( vis > 0 ) {
 					// awareness builds faster the closer and more visible the player is
 					this.aware += dt * vis * ( 1.5 + Math.max( 0, 1 - d / 30 ) * 6 ) * mgr.diff.sense;
@@ -245,7 +253,7 @@ export class Zombie extends Entity {
 			}
 		}
 		if ( seen ) {
-			const first = this.state !== 'chase' && this.state !== 'attack' && this.state !== 'bash';
+			const first = this.state !== 'chase' && this.state !== 'attack' && ( this.state !== 'bash' || ! this.target );
 			this.target = best;
 			this.lastSeen.copy( best === P.entity ? P.pos : best.pos );
 			this.lastSeenT = now;
@@ -262,7 +270,17 @@ export class Zombie extends Entity {
 			if ( seen && bestD < 18 ) { this.body.action = null; this._setState( 'chase' ); }
 			else { this.wantV = 0; return; }
 		}
+		// something half-seen: stop, turn to it and stare while it sinks in (a tell to back away slowly)
+		if ( ! seen && vis > 0 && this.aware > 0.3 && ( st === 'idle' || st === 'wander' || st === 'search' ) ) {
+			if ( st === 'wander' ) this._setState( 'idle' );
+			this.wantV = 0;
+			this.facing = Math.atan2( - ( P.pos.x - this.pos.x ), - ( P.pos.z - this.pos.z ) );
+			this.body.look.set( P.pos.x, P.pos.y + 1.5, P.pos.z ); this.body.lookW = 0.8;
+			this.body.aggro = Math.max( this.body.aggro, 0.3 );
+			return;
+		}
 		if ( this.target && ( this.state === 'chase' || this.state === 'attack' || this.state === 'bash' || seen ) ) this._hunt( now );
+		else if ( st === 'bash' ) { if ( ! this._bashing() ) this._setState( 'investigate' ); }
 		else if ( st === 'investigate' || st === 'search' ) this._investigate();
 		else this._idle();
 	}
@@ -275,7 +293,7 @@ export class Zombie extends Entity {
 		// field of view (wide; close things are noticed all around)
 		const dx = P.pos.x - this.pos.x, dz = P.pos.z - this.pos.z;
 		const fx = - Math.sin( this.yaw ), fz = - Math.cos( this.yaw );
-		const cos = ( dx * fx + dz * fz ) / ( Math.hypot( dx, dz ) || 1 );
+		const cos = ( dx * fx + dz * fz ) / ( hyp( dx, dz ) || 1 );
 		if ( cos < 0.35 && d > 4 ) return 0;
 		if ( cos < - 0.2 && d > 2 ) return 0;
 		// line of sight from the eyes to the chest (walls, terrain, smoke)
@@ -287,6 +305,7 @@ export class Zombie extends Entity {
 
 	_detected( t ) {
 		const mgr = this.mgr;
+		if ( this.body.action?.kind === 'bash' ) this.body.action = null;
 		this._setState( 'chase' );
 		this.body.aggro = 1;
 		// the scream carries: others close by come running
@@ -327,7 +346,7 @@ export class Zombie extends Entity {
 		this.body.lookW = 0;
 		if ( st === 'wander' ) {
 			const d = steer( this.game, this, this.mover, this.goal.x, this.goal.z, 0.2, this._neighbours() );
-			this.wantV = this.wanderV * ( 1 + this.mgr.night * 0.35 );
+			this.wantV = this.wanderV * ( 1 + this.mgr.night * 0.35 ) * this.mgr.diff.speed;
 			if ( d < 1.2 || this.stateT > 40 ) { this._setState( 'idle' ); this.wantV = 0; }
 			return;
 		}
@@ -345,9 +364,21 @@ export class Zombie extends Entity {
 		const d = steer( this.game, this, this.mover, this.goal.x, this.goal.z, 0.2, this._neighbours() );
 		this.body.lookW = 0;
 		if ( this.state === 'investigate' ) {
-			this.wantV = this.urgent ? Math.min( this.chaseV, 2.2 + ( this.T.runner ? 1.5 : 0 ) ) : Math.max( this.wanderV * 1.6, 1.0 );
+			this.wantV = ( this.urgent ? Math.min( this.chaseV, 2.2 + ( this.T.runner ? 1.5 : 0 ) ) : Math.max( this.wanderV * 1.6, 1.0 ) ) * this.mgr.diff.speed;
 			this.body.aggro = this.urgent ? 0.7 : 0.4;
-			if ( d < 2 || this.stateT > 60 ) { this._setState( 'search' ); this.wantV = 0; }
+			// drawn by a shot or a scream to a closed door: break it down to get in
+			const b = this.mover.blocked;
+			if ( this.urgent && d > 1.5 && this.body.mode === 'stand' && closedDoor( b ) ) { this._startBash( b ); return; }
+			if ( this.feedOn && d < 0.7 ) {
+				// kneel over the body and eat
+				this.facing = Math.atan2( - ( this.feedOn.x - this.pos.x ), - ( this.feedOn.z - this.pos.z ) );
+				this.feedOn = null;
+				this.wantV = 0;
+				this._setState( 'feed' );
+				this.body.act( 'eat', 1e6 );
+				return;
+			}
+			if ( ( d < 2 && ! this.feedOn ) || this.stateT > 60 ) { this.feedOn = null; this._setState( 'search' ); this.wantV = 0; }
 		} else {
 			// looking about where the noise was
 			this.wantV = 0;
@@ -363,7 +394,19 @@ export class Zombie extends Entity {
 	// chase / attack / bash
 	_hunt( now ) {
 		const g = this.game, mgr = this.mgr, T = this.target;
-		if ( ! T || ( T.alive === false && T !== mgr.pi.entity ) || ( T === mgr.pi.entity && ! mgr.pi.alive ) ) { this.target = null; this._setState( 'search' ); this.goal.copy( this.lastSeen ); return; }
+		if ( ! T || ( T.alive === false && T !== mgr.pi.entity ) || ( T === mgr.pi.entity && ! mgr.pi.alive ) ) {
+			// the prey is down: the ones close by gather round the body to feed, the rest search
+			const bp = T === mgr.pi.entity ? mgr.pi.pos : T?.pos;
+			this.target = null;
+			if ( bp && hyp( bp.x - this.pos.x, bp.z - this.pos.z ) < 14 && this.body.mode === 'stand' ) {
+				const dx = this.pos.x - bp.x, dz = this.pos.z - bp.z, l = hyp( dx, dz ) || 1;
+				this.goal.set( bp.x + dx / l * 0.8, bp.y, bp.z + dz / l * 0.8 );
+				this.feedOn = bp;
+				this.urgent = true;
+				this._setState( 'investigate' );
+			} else { this._setState( 'search' ); this.goal.copy( this.lastSeen ); }
+			return;
+		}
 		const isPlayer = T === mgr.pi.entity;
 		const vehicle = isPlayer ? mgr.pi.vehicle : null;
 		// in a car: the closest point of its body is what they claw at
@@ -372,7 +415,7 @@ export class Zombie extends Entity {
 		if ( lost > 12 ) { this.target = null; this.goal.copy( this.lastSeen ); this._setState( 'investigate' ); this.urgent = true; return; }
 		this.body.aggro = 1;
 		this.body.look.set( tp.x, tp.y + ( vehicle ? 1.0 : 1.5 ), tp.z ); this.body.lookW = 1;
-		const d = Math.hypot( tp.x - this.pos.x, tp.z - this.pos.z );
+		const d = hyp( tp.x - this.pos.x, tp.z - this.pos.z );
 		// close in to arm's length (from the player's centre; from a car's skin)
 		const reach = vehicle ? 0.7 : 0.35 + ( this.body.mode === 'crawl' ? 0.85 : 0.85 );
 		this.body.reachW = d < 7 && this.body.style.arms !== 'reach' ? clamp( 1 - ( d - 1 ) / 6, 0, 1 ) : 0;
@@ -386,9 +429,13 @@ export class Zombie extends Entity {
 			return;
 		}
 		if ( this.state === 'attack' && this.body.action ) { this.wantV = 0.3; return; }
-		// a door in the way: pound on it
+		// a door in the way: pound on it (unless the prey is in plain view on this side)
 		if ( this.state === 'bash' ) {
-			if ( ! this._bashing( d ) ) this._setState( 'chase' );
+			_eye.set( this.pos.x, this.pos.y + 0.9, this.pos.z );
+			_tgt.set( tp.x, tp.y + 0.9, tp.z );
+			const clear = lost < 0.5 && g.physics.lineOfSight( _eye, _tgt );
+			if ( clear && this.body.action?.kind === 'bash' ) this.body.action = null;
+			if ( clear || ! this._bashing() ) this._setState( 'chase' );
 			else return;
 		}
 		this._setState( 'chase' );
@@ -405,39 +452,43 @@ export class Zombie extends Entity {
 			}
 		} else if ( ! seenNow ) { gx = this.lastSeen.x; gz = this.lastSeen.z; }
 		steer( g, this, this.mover, gx, gz, 0.15, this._neighbours() );
-		const nightK = 1 + mgr.night * 0.12;
-		this.wantV = ( d < 2.5 ? Math.max( 1.2, this.chaseV * 0.6 ) : this.chaseV ) * nightK;
+		const nightK = ( 1 + mgr.night * 0.12 ) * mgr.diff.speed;
+		// ease off in the last couple of metres so they don't overshoot, but keep pace with someone backing away
+		this.wantV = ( d < 2.2 ? Math.max( 1.6, this.chaseV * 0.75 ) : this.chaseV ) * nightK;
 		// blocked by a door while the target is on the other side
 		const b = this.mover.blocked;
-		if ( b && b.kind === 'door' && this.body.mode !== 'crawl' && d < 25 ) this._startBash( b );
+		if ( this.body.mode !== 'crawl' && d < 25 && closedDoor( b ) ) this._startBash( b );
 	}
 
 	_startBash( box ) {
 		this.bashBox = box;
-		this.bashT = 0;
+		this.bashT = 0.5;
 		this._setState( 'bash' );
 		this.wantV = 0;
 		this.facing = Math.atan2( - ( box.x - this.pos.x ), - ( box.z - this.pos.z ) );
 		this.body.act( 'bash', 1e6 );
 	}
 
-	_bashing( d ) {
+	// pounding on a door; false once it gives way, opens, or there is nothing left to pound on
+	_bashing() {
 		const g = this.game, box = this.bashBox;
-		// the door opened, broke or is gone
-		if ( ! box || ! g.physics.boxes.has( box.id ) || this.stateT > 40 ) { this.body.action = null; return false; }
-		if ( Math.hypot( box.x - this.pos.x, box.z - this.pos.z ) > 2.5 ) { this.body.action = null; return false; }
+		const door = box && box.owner && box.owner.bash ? box.owner : null;
+		const done = ! box || ! g.physics.boxes.has( box.id ) || this.stateT > 40 || ( door && ( door.broken || door.isOpen ) )
+			|| hyp( box.x - this.pos.x, box.z - this.pos.z ) > 2.5;
+		if ( done ) { if ( this.body.action?.kind === 'bash' ) this.body.action = null; this.bashBox = null; return false; }
 		this.wantV = 0;
 		this.bashT += this.thinkDt || 0.15;
 		if ( this.bashT > 0.9 ) {
 			this.bashT = 0;
 			_v.set( box.x, box.y, box.z );
-			const door = g.city?.doorAt?.( _v, 1.5 );
+			// the door the box belongs to, else whatever door the city finds there (none: a door that can't be broken)
+			const d = door || g.city?.doorAt?.( _v, 1.5 );
+			if ( ! d?.bash ) { this.stateT = Math.max( this.stateT, 30 ); }
 			const amt = ( this.T.brute ? 40 : 9 ) * ( 0.7 + rnd() * 0.6 );
-			door?.bash?.( amt, { source: this, kind: 'zombie' } );
-			g.audio?.play( 'hit_wood', { pos: _v, vol: 0.7, max: 60, rate: 0.8 + rnd() * 0.2 } );
+			d?.bash?.( amt, { source: this, kind: 'zombie' } );
+			g.audio?.play( box.mat === 'metal' ? 'hit_metal' : 'hit_wood', { pos: _v, vol: 0.7, max: 60, rate: 0.8 + rnd() * 0.2 } );
 			g.events.emit( 'noise', { pos: _v.clone(), radius: 18, source: this, kind: 'bash' } );
 		}
-		void d;
 		return true;
 	}
 
@@ -467,7 +518,7 @@ export class Zombie extends Entity {
 			const veh = isPlayer && a.vehicle && mgr.pi.vehicle === a.vehicle ? a.vehicle : null;
 			const tp = veh ? vehicleNearest( veh, this.pos, _vn ) : isPlayer ? mgr.pi.pos : T.pos;
 			const dx = tp.x - this.pos.x, dz = tp.z - this.pos.z;
-			const d = Math.hypot( dx, dz );
+			const d = hyp( dx, dz );
 			const reach = ( veh ? 0.3 : 0.35 ) + 1.3;
 			const ang = d < 0.3 ? 0 : Math.abs( wrap( Math.atan2( - dx, - dz ) - this.yaw ) );
 			// the rider of a motorbike, a jet ski or an open boat is in reach of the hands
@@ -507,7 +558,7 @@ export class Zombie extends Entity {
 		if ( ballistic && zone === 'head' && T.helmet && amount < 160 && rnd() < T.helmet ) {
 			amount *= 0.15;
 			g.audio?.play( 'hit_metal', { pos: info.point || this.pos, vol: 0.7, max: 60 } );
-		} else if ( ballistic && zone === 'head' ) amount = Math.max( amount, this.health + 1 ); // a round through the head drops them
+		} else if ( ballistic && zone === 'head' && amount >= HEADSHOT ) amount = Math.max( amount, this.health + 1 ); // a round through the head drops them (a spent pellet only wounds)
 		if ( ballistic && ( zone === 'torso' || zone === 'chest' ) && T.armor && ARMOURED.has( this.avatar ) ) amount *= 1 - T.armor;
 		if ( kind === 'melee' && zone === 'head' ) amount *= 1.4;
 		if ( this.state === 'dormant' ) this._wake();
@@ -532,7 +583,11 @@ export class Zombie extends Entity {
 		// reactions: flinch, stagger, knockdown (shotguns and big hits), legs giving out
 		this.body.flinch( dir, clamp( amount / 35, 0.3, 1.6 ), zone );
 		if ( this.down ) { if ( info.point ) this.body.ragdollImpulse( info.point, dir, Math.min( 5, amount / 12 ) ); return; }
-		if ( this.hitAcc > ( T.brute ? 160 : 55 ) && ( kind === 'bullet' || kind === 'melee' || kind === 'explosion' ) ) this.knockdown( dir, Math.min( 7, this.hitAcc / 14 ), info.point );
+		// a shotgun blast up close or a burst at once puts them down; so does a heavy blow (the weapons module reports
+		// pellets as bullets: the gun's pellet count tells them apart)
+		const buck = kind === 'bullet' && info.weapon && ( getItem( info.weapon )?.firearm?.pellets || 1 ) > 1;
+		const floor = ( T.brute ? 2.8 : 1 ) * ( kind === 'bullet' && ! buck ? 90 : 50 );
+		if ( this.hitAcc > floor && ( kind === 'bullet' || kind === 'melee' || kind === 'explosion' ) ) this.knockdown( dir, Math.min( 7, this.hitAcc / 14 ), info.point );
 		else if ( amount > 25 && rnd() < 0.35 ) this.stagger( dir, 0.6 );
 		if ( ! this.T.crawler && this.body.mode !== 'crawl' && this.legDmg > this.maxHealth * 0.55 && ! T.brute && this.alive ) this._toCrawler( dir );
 	}
@@ -730,3 +785,10 @@ export function vehicleNearest( v, p, out ) {
 	return out.set( v.pos.x + cx * c + cz * s, p.y, v.pos.z - cx * s + cz * c );
 }
 const _hitInfo = { point: new THREE.Vector3(), dir: new THREE.Vector3(), strength: 1 };
+
+// a physics box that is a closed door (a leaf swung open or a broken one is just in the way)
+export function closedDoor( b ) {
+	if ( ! b || b.kind !== 'door' ) return false;
+	const d = b.owner;
+	return ! d || ! ( d.broken || d.isOpen );
+}

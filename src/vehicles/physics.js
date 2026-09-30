@@ -142,9 +142,11 @@ export function hullPoints( bounds, o = {} ) {
 }
 
 // resolve the hull points; returns the hardest normal impact speed (m/s) and what was hit
+const _contact = { speed: 0, what: null, point: new V3() };
 export function hullContacts( veh, h ) {
 	const b = veh.body, game = veh.game, P = game.physics;
-	let hardest = 0, hitWhat = null, hitPoint = null;
+	let hardest = 0, hitWhat = null;
+	const hitPoint = _contact.point;
 	const r = veh.radius + 1;
 	const boxes = P.near( b.pos.x, b.pos.z, r, _boxes );
 	const moving = b.v.lengthSq() > 64;
@@ -157,7 +159,7 @@ export function hullContacts( veh, h ) {
 			game.hf.normalAt( p.x, p.z, _n, 0.8 );
 			const pen = ( gy - p.y ) * _n.y;
 			const s = resolve( b, p, _n, pen, veh.spec.kind === 'boat' ? 0.9 : 0.6, 0.1, h );
-			if ( s > hardest ) { hardest = s; hitWhat = 'ground'; hitPoint = p.clone(); }
+			if ( s > hardest ) { hardest = s; hitWhat = 'ground'; hitPoint.copy( p ); }
 		}
 		// boxes (the vehicle's own box and boxes it is standing on from above are left out)
 		for ( const bx of boxes ) {
@@ -173,7 +175,7 @@ export function hullContacts( veh, h ) {
 			const other = bx.owner && bx.owner.isVehicle ? bx.owner : null;
 			const s = resolve( b, p, _n, pen, 0.5, 0.15, h, other?.body );
 			if ( other ) other.wake();
-			if ( s > hardest ) { hardest = s; hitWhat = other || bx; hitPoint = p.clone(); }
+			if ( s > hardest ) { hardest = s; hitWhat = other || bx; hitPoint.copy( p ); }
 		}
 		// fast movers: sweep the leading points so thin walls can't be skipped
 		if ( moving && veh.lastHull && i < veh.lastHull.length ) {
@@ -185,7 +187,7 @@ export function hullContacts( veh, h ) {
 				const hit = P.raycastBoxes( prev, _d, len, x => x.owner !== veh );
 				if ( hit ) {
 					const s = resolve( b, p, hit.normal, ( len - hit.t ) * Math.max( 0, - hit.normal.dot( _d ) ), 0.4, 0.15, h, hit.box.owner?.isVehicle ? hit.box.owner.body : null );
-					if ( s > hardest ) { hardest = s; hitWhat = hit.box.owner?.isVehicle ? hit.box.owner : hit.box; hitPoint = p.clone(); }
+					if ( s > hardest ) { hardest = s; hitWhat = hit.box.owner?.isVehicle ? hit.box.owner : hit.box; hitPoint.copy( p ); }
 				}
 			}
 		}
@@ -193,7 +195,9 @@ export function hullContacts( veh, h ) {
 	// remember this step's points for the sweep
 	veh.lastHull ||= veh.hull.map( () => new V3() );
 	for ( let i = 0; i < veh.hull.length; i ++ ) b.toWorld( veh.hull[ i ], veh.lastHull[ i ] );
-	return { speed: hardest, what: hitWhat, point: hitPoint };
+	// (one shared result: the caller copies what it keeps)
+	_contact.speed = hardest; _contact.what = hitWhat;
+	return _contact;
 }
 const _boxes = [];
 
@@ -259,6 +263,7 @@ export function wheelForces( veh, h, input ) {
 	b.up( _up ); _down.copy( _up ).negate();
 	let grounded = 0;
 	const wet = 1 - ( game.weather?.rain || 0 ) * 0.18;
+	const rollK = spec.rollInfluence ?? 0.25, pitchK = spec.pitchInfluence ?? rollK;
 	for ( const w of W ) {
 		b.toWorld( w.lp, _mount );
 		w.grounded = false;
@@ -313,19 +318,31 @@ export function wheelForces( veh, h, input ) {
 		// longitudinal: drive, brakes, handbrake, rolling resistance
 		let fx = 0;
 		const damp = mEff / h * 0.5;
-		if ( w.driven && input.drive ) fx += input.drive;
-		const brake = input.brake * ( spec.brake || 0 ) / n + ( input.hand && ! w.front ? input.hand * ( spec.handbrake || 0 ) / ( n / 2 ) : 0 );
+		// (the handbrake drags the rear wheels rather than locking them solid: the tail steps out and the car keeps
+		// most of its speed, as in a handbrake turn)
+		const hb = input.hand && ! w.front ? Math.min( input.hand * ( spec.handbrake || 0 ) / ( n / 2 ), fmax * ( veh.kind === 'car' ? 0.5 : 1 ) ) : 0;
+		const brake = input.brake * ( spec.brake || 0 ) / n + hb;
 		if ( brake > 0 ) fx -= Math.sign( vLong ) * Math.min( brake, Math.abs( vLong ) * damp );
 		fx -= Math.sign( vLong ) * Math.min( w.surface.roll * w.fz + ( w.flat ? 0.05 * w.fz : 0 ), Math.abs( vLong ) * damp );
 		// lateral: slip-angle curve at speed, a stiff damper near standstill (whichever is gentler)
 		const alpha = Math.atan2( vLat, Math.abs( vLong ) + 0.5 );
-		let latK = ( input.hand && ! w.front ? 0.55 : 1 );
+		let latK = ( input.hand && ! w.front ? ( veh.kind === 'car' ? 0.34 : 0.55 ) : 1 );
 		if ( w.skid ) latK = 1;
 		const curve = Math.sin( 1.55 * Math.atan( 9 * alpha ) );
 		let fy = - fmax * curve * latK;
 		const fyD = - vLat * damp;
 		if ( Math.abs( fyD ) < Math.abs( fy ) ) fy = fyD;
 		if ( w.skid ) { fx = - vLong * damp; }
+		// drive: traction control keeps the push within what the tyre has left beside its cornering force (spec.tcs > 1
+		// lets a lively car spin its wheels and step out a little)
+		let spin = 0;
+		if ( w.driven && input.drive ) {
+			const room = Math.sqrt( Math.max( 0, fmax * fmax - fy * fy ) );
+			const cap = Math.max( room, fmax * 0.3 ) * ( spec.tcs ?? 1.05 );
+			const d = clamp( input.drive, - cap, cap );
+			spin = Math.abs( input.drive ) - Math.abs( d );
+			fx += d;
+		}
 		// friction circle
 		const tot = Math.hypot( fx, fy );
 		w.slip = 0;
@@ -334,16 +351,23 @@ export function wheelForces( veh, h, input ) {
 			w.slip = Math.min( 1, ( tot - fmax ) / Math.max( 1, fmax ) + Math.abs( alpha ) * 0.8 );
 			fx *= k; fy *= k;
 		}
+		w.fx = fx; w.fy = fy; w.alpha = alpha;
 		w.lat = Math.abs( vLat ) > 1.2 ? Math.min( 1, ( Math.abs( vLat ) - 1.2 ) / 4 ) : 0;
 		// wheelspin / lock-up for the visuals and the skid sound
 		w.spinV = vLong / w.R;
-		if ( input.hand && ! w.front && Math.abs( vLong ) > 0.5 ) { w.spinV = 0; w.slip = Math.max( w.slip, 0.6 ); }
-		if ( w.driven && input.drive && Math.abs( input.drive ) > fmax * 1.1 ) { w.spinV += Math.sign( input.drive ) * 18; w.slip = Math.max( w.slip, 0.5 ); }
-		// suspension along the ground normal at the contact, tyre forces a little above it (less body roll)
+		if ( input.hand && ! w.front && Math.abs( vLong ) > 0.5 ) { w.spinV *= 0.2; w.slip = Math.max( w.slip, 0.6 ); }
+		if ( spin > fmax * 0.15 || tot > fmax * 1.15 && w.driven && input.drive ) { w.spinV += Math.sign( input.drive ) * Math.min( 18, 4 + spin / Math.max( 1, fmax ) * 14 ); w.slip = Math.max( w.slip, 0.5 ); }
+		// suspension along the ground normal at the contact; the tyre forces act part of the way up towards the centre
+		// of mass: rollInfluence / pitchInfluence set how much the body rolls in corners and dives / squats under
+		// braking and power (1 = all of it, as at the contact patch)
 		_F.copy( _gn ).multiplyScalar( w.fz );
 		b.force( _F, w.contact );
-		_pt.copy( w.contact ).addScaledVector( _gn, Math.max( 0, _a.subVectors( b.pos, w.contact ).dot( _gn ) ) * ( 1 - ( spec.rollInfluence ?? 0.25 ) ) );
-		_F.copy( _fw ).multiplyScalar( fx ).addScaledVector( _rt, fy );
+		const hc = Math.max( 0, _a.subVectors( b.pos, w.contact ).dot( _gn ) );
+		_pt.copy( w.contact ).addScaledVector( _gn, hc * ( 1 - rollK ) );
+		_F.copy( _rt ).multiplyScalar( fy );
+		b.force( _F, _pt );
+		_pt.copy( w.contact ).addScaledVector( _gn, hc * ( 1 - pitchK ) );
+		_F.copy( _fw ).multiplyScalar( fx );
 		b.force( _F, _pt );
 	}
 	return grounded;
@@ -407,10 +431,17 @@ export function stepCar( veh, h, inp ) {
 	const b = veh.body, spec = veh.spec, eng = veh.engine;
 	b.fwd( _fw );
 	const speed = b.v.dot( _fw );
-	// speed-sensitive steering: the full lock only near standstill
-	const maxSteer = spec.steer * ( 1 / ( 1 + Math.abs( speed ) * 0.045 ) );
+	// speed-sensitive steering: the full lock only near standstill; at speed no more than the angle that gives the
+	// tyres their best grip (the turn the car can hold plus the peak slip angle), so full lock at 100 km/h carves a
+	// fast corner instead of scrubbing the front tyres (bikes lean instead)
+	const av = Math.abs( speed );
+	let maxSteer = spec.steer / ( 1 + av * 0.03 );
+	// (a motorcycle turns by leaning: its bars move only a degree or two at speed)
+	if ( av > 4 ) maxSteer = Math.min( maxSteer, veh.wheelbase * gripNow( veh ) * G / ( av * av ) + ( veh.kind === 'bike' ? 0.05 : 0.16 ) );
 	const target = inp.steer * maxSteer;
-	const rate = spec.steerSpeed * ( Math.abs( target ) < Math.abs( veh.steer ) || Math.sign( target ) !== Math.sign( veh.steer ) ? 1.6 : 1 );
+	// keyboard steering eases in: about a quarter of a second to the (speed-limited) lock at speed, faster when
+	// parking; back to the centre quicker than away from it
+	const rate = Math.min( spec.steerSpeed, Math.max( 0.5, maxSteer / 0.26 ) ) * ( Math.abs( target ) < Math.abs( veh.steer ) || Math.sign( target ) !== Math.sign( veh.steer ) ? 1.8 : 1 );
 	veh.steer += clamp( target - veh.steer, - rate * h, rate * h );
 	// gear selection: reverse when holding back at a standstill, forward again with the throttle
 	if ( inp.back && speed < 0.8 && eng.gear > 0 && eng.running ) eng.gear = - 1;
@@ -420,13 +451,17 @@ export function stepCar( veh, h, inp ) {
 	if ( eng.gear < 0 ) { throttle = inp.back ? 1 : 0; brake = inp.forward ? 1 : 0; }
 	else { throttle = inp.forward ? 1 : 0; brake = inp.back ? 1 : 0; }
 	if ( ! eng.running || veh.fuel <= 0 ) throttle = 0;
+	// reverse is slow (a governor, as the gearbox would feel at the rev limit in a real reverse gear)
+	if ( eng.gear < 0 && speed < - ( spec.reverseMax ?? 11 ) ) throttle = 0;
+	// traction / stability control backs off the throttle while the tail is out
+	throttle *= veh.tcs ?? 1;
 	// hill hold: stopped with nothing pressed, an automatic stays put (in park, or on the brake)
 	if ( veh.driver && throttle === 0 && brake === 0 && Math.abs( speed ) < 1.2 ) brake = 0.6;
 	// parked with nobody at the wheel: the handbrake is on
 	const hand = inp.hand ? 1 : ( veh.driver ? 0 : 1 );
 	const R = veh.wheels[ 0 ]?.R || 0.33;
 	const Fdrive = eng.update( h, speed, R, throttle * ( veh.health <= veh.spec.health * 0.15 ? 0.5 : 1 ), veh );
-	const nd = veh.wheels.filter( w => w.driven ).length || 1;
+	const nd = veh.nDriven ||= veh.wheels.filter( w => w.driven ).length || 1;
 	veh.throttle = throttle; veh.braking = brake > 0 || ( inp.back && eng.gear > 0 && speed > 0.5 );
 	const grounded = wheelForces( veh, h, { drive: Fdrive / nd, brake, hand, steer: veh.steer } );
 	// air drag and downforce
@@ -438,7 +473,50 @@ export function stepCar( veh, h, inp ) {
 	}
 	// a little help staying upright in the air (arcade): damp the spin
 	if ( ! grounded ) b.w.multiplyScalar( 1 - h * 0.3 );
+	else assist( veh, h, inp, speed, grounded );
 	return speed;
+}
+
+// the grip the tyres have right now: the car's own times the surface under its wheels (wet roads included)
+function gripNow( veh ) {
+	let g = 0, n = 0;
+	for ( const w of veh.wheels ) if ( w.grounded ) { g += w.surface.grip; n ++; }
+	return ( veh.spec.grip ?? 1 ) * ( n ? g / n : 1 ) * ( 1 - ( veh.game.weather?.rain || 0 ) * 0.18 );
+}
+
+// Arcade driving aids for cars (what makes them feel planted rather than twitchy): a yaw control that stops the car
+// rotating faster than the steering asks (so a powerful rear-drive car can be floored in a bend without spinning, and
+// a slide straightens up once the handbrake is let go), traction control from the same measure, and a flick of yaw
+// when the handbrake is pulled with the wheel turned. spec.assist 0..1 (sports cars let the tail out more).
+function assist( veh, h, inp, speed, grounded ) {
+	const b = veh.body, spec = veh.spec;
+	const k = spec.assist ?? 1;
+	b.up( _up );
+	const wy = b.w.dot( _up );
+	// (the planar speed: a car sliding sideways is still moving)
+	const av = Math.max( Math.abs( speed ), Math.hypot( b.v.x, b.v.z ) );
+	let over = 0, under = 0;
+	if ( av > 3 && grounded >= Math.min( 3, veh.wheels.length ) ) {
+		// the yaw rate the front wheels ask for, and the most the tyres can hold at this speed
+		const rMax = gripNow( veh ) * G / av * 1.1;
+		const rCmd = clamp( speed * Math.tan( veh.steer ) / veh.wheelbase, - rMax, rMax );
+		// oversteer: turning faster than asked, or the wrong way
+		const err = wy - rCmd;
+		if ( Math.sign( wy ) !== Math.sign( rCmd ) ) over = Math.abs( wy ) > 0.05 ? Math.abs( err ) : 0;
+		else if ( Math.abs( wy ) > Math.abs( rCmd ) ) over = Math.abs( err );
+		// understeer: the nose ploughs on (too much speed for the grip): the throttle eases off so the front bites again
+		else if ( av > 8 ) under = Math.abs( rCmd ) - Math.abs( wy );
+		if ( ! inp.hand && over > 0.04 ) {
+			// the aid fades in with speed (a parking lot pirouette is fine)
+			const f = k * 7 * smoothstep( 3, 9, av ) * Math.min( 1, over * 4 );
+			b.torque( _F.copy( _up ).multiplyScalar( - err * f * b.Ib.y ) );
+		}
+		// the handbrake with the wheel turned throws the tail out
+		if ( inp.hand && inp.steer && av > 5 && Math.abs( wy ) < 1.3 && veh.kind === 'car' ) b.torque( _F.copy( _up ).multiplyScalar( Math.sign( speed ) * inp.steer * 1.4 * smoothstep( 5, 12, av ) * b.Ib.y ) );
+	}
+	const tcs = inp.hand ? 1 : 1 - clamp( ( over - 0.08 ) * 2.5 * k + ( under - 0.15 ) * 1.2 * k, 0, 0.85 );
+	const cur = veh.tcs ?? 1;
+	veh.tcs = cur + ( tcs - cur ) * Math.min( 1, h * ( tcs < cur ? 30 : 4 ) );
 }
 
 // motorcycles: a narrow car on two wheels (the tyre forces act at the centre of mass height, so they never tip
@@ -477,6 +555,8 @@ export function wade( veh, h ) {
 	let wet = 0;
 	for ( let i = 0; i < n; i ++ ) {
 		const p = b.toWorld( veh.hull[ i ], _c );
+		// (the sea's surface query is costly: not for points well above any wave, or over high ground)
+		if ( p.y > 4 || game.hf.heightAt( p.x, p.z ) > 1.5 ) continue;
 		const wy = P.waterLevel( p.x, p.z );
 		const d = wy - p.y;
 		// the ocean function runs on over the low coastal plain too: only water that stands over the ground counts
@@ -502,9 +582,12 @@ export function stepBoat( veh, h, inp ) {
 	veh.steer += clamp( target - veh.steer, - spec.steerSpeed * h, spec.steerSpeed * h );
 	let wet = 0;
 	const depthMax = veh.hullDepth;
-	for ( const bp of veh.buoy ) {
+	// (the sea's height at each point was sampled once this frame: Vehicle.sampleSea; the ocean query is costly)
+	const seaH = veh.seaH;
+	for ( let i = 0; i < veh.buoy.length; i ++ ) {
+		const bp = veh.buoy[ i ];
 		const p = b.toWorld( bp.p, _c );
-		const wy = P.waterLevel( p.x, p.z );
+		const wy = seaH ? seaH[ i ] : P.waterLevel( p.x, p.z );
 		const d = wy - p.y;
 		if ( d <= 0 ) continue;
 		wet ++;
@@ -550,7 +633,7 @@ export function stepBoat( veh, h, inp ) {
 	const E = spec.engine;
 	eng.rpm += ( ( eng.running ? E.idle + Math.abs( throttle ) * ( E.redline - E.idle ) : 0 ) - eng.rpm ) * Math.min( 1, h * 3 );
 	const prop = b.toWorld( veh.propPoint, _c );
-	veh.propWet = P.waterLevel( prop.x, prop.z ) > prop.y + 0.02;
+	veh.propWet = ( seaH ? veh.propSea : P.waterLevel( prop.x, prop.z ) ) > prop.y + 0.02;
 	if ( throttle && veh.propWet ) {
 		// the motor swings its thrust towards the side the stern has to go: the bow turns the other way
 		const st = spec.rudder ? 0 : veh.steer;
@@ -673,6 +756,8 @@ export function stepPlane( veh, h, inp ) {
 	const wl = _e.copy( b.w ).applyMatrix3( b.Rt );
 	const pIn = ( inp.back ? 1 : 0 ) - ( inp.forward ? 1 : 0 ); // pull back = nose up
 	const rIn = ( inp.right ? 1 : 0 ) - ( inp.left ? 1 : 0 );
+	// the yoke's roll, drawn (left positive)
+	veh.aileron = ( veh.aileron || 0 ) + ( - rIn - ( veh.aileron || 0 ) ) * Math.min( 1, h * 8 );
 	const yIn = ( inp.rollL ? 1 : 0 ) - ( inp.rollR ? 1 : 0 );
 	const air = V > 15 ? 1 : 0;
 	let pCmd = pIn * spec.pitchRate;

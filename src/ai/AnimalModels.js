@@ -308,7 +308,7 @@ const SPECIES = {
 			neck: { len: 0.22, rise: 0.02, r: 0.2 }, head: { len: 0.5, drop: 0.85, r: 0.15, rs: 0.1 },
 			legR: 0.045, hindAngle: 0.8, tail: { len: 0.8, r: 0.03, droop: 0.97, tuft: true }, ears: { len: 0.14, w: 0.06, up: - 0.1 },
 			colours: o.hereford ? { coat: 0x7a3a1c, belly: 0x8a4a2a, dark: 0x5a2a14, nose: 0xc8a8a0, leg: 0x6a3218, hoof: 0x201a14 }
-				: { coat: 0x1a1816, belly: 0x242220, dark: 0x0e0d0c, nose: 0x2a2624, leg: 0x161412, hoof: 0x0e0c0a },
+				: { coat: 0x302b27, belly: 0x38322d, dark: 0x1c1916, nose: 0x3a3430, leg: 0x2a2521, hoof: 0x14110e }, // black Angus (black fur still reflects a little)
 		}, B );
 		if ( o.hereford ) {
 			// the white face
@@ -504,6 +504,12 @@ export function animalTemplate( species, o = {} ) {
 	t = { key, species, geo, bones: B.bones, k, bound: geo.boundingSphere.clone() };
 	cache.set( key, t );
 	return t;
+}
+
+// free the cached animal geometries (leaving the game)
+export function disposeAnimalTemplates() {
+	for ( const t of cache.values() ) t.geo.dispose();
+	cache.clear();
 }
 
 // a skinned mesh with its own skeleton and material; bones by name in .bone

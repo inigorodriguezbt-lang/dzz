@@ -84,7 +84,7 @@ export function farWheelKit( R, W, style = 'alloy' ) {
 // the steering wheel, centred at the origin in its own plane (x right, y up, facing the driver along +z)
 export function steeringKit( r = 0.19, style = 'car' ) {
 	const k = new Kit();
-	const m = style === 'wood' ? MAT.wood : mat( 'gloss', { c: 0x141416, r: 0.55 } );
+	const m = style === 'wood' ? MAT.wood : mat( 'gloss', { c: 0x1c1d20, r: 0.55 } );
 	k.torus( r, style === 'bus' ? 0.02 : 0.017, m, null, 8, 36 );
 	const spokes = style === 'bus' ? [ 0, Math.PI ] : style === 'sport' ? [ 0, Math.PI, - Math.PI / 2 ] : [ - Math.PI / 2, 0.12, Math.PI - 0.12 ];
 	for ( const a of spokes ) k.beam( [ Math.cos( a ) * 0.05, Math.sin( a ) * 0.05, 0.01 ], [ Math.cos( a ) * r, Math.sin( a ) * r, 0 ], 0.04, 0.014, m );
@@ -127,7 +127,7 @@ const RIDER = {
 };
 
 // the middle joint of a two-bone limb (shoulder -> elbow -> hand, hip -> knee -> foot) bent towards `bend`
-function joint( a, b, len, bend ) {
+export function joint( a, b, len, bend ) {
 	const A = new THREE.Vector3( ...a ), B = new THREE.Vector3( ...b );
 	const d = A.distanceTo( B );
 	const mid = A.clone().add( B ).multiplyScalar( 0.5 );
@@ -141,7 +141,7 @@ function joint( a, b, len, bend ) {
 
 // a seated figure for the third-person view: hips at the seat, hands on the wheel / bars / yoke, feet down.
 // pose: { hip, eye, hands: [ L, R ] | null, feet: [ L, R ] | null, lean } in the model frame
-export function riderKit( pose, head = true ) {
+export function riderKit( pose, head = true, arms = true ) {
 	const k = new Kit();
 	const [ hx, hy, hz ] = pose.hip;
 	const eye = pose.eye;
@@ -159,7 +159,7 @@ export function riderKit( pose, head = true ) {
 	}
 	// arms
 	const sh = [ - 1, 1 ].map( s => [ neck[ 0 ] + s * 0.19, neck[ 1 ] - 0.05, neck[ 2 ] ] );
-	for ( let i = 0; i < 2; i ++ ) {
+	for ( let i = 0; i < ( arms ? 2 : 0 ); i ++ ) {
 		const s = i ? 1 : - 1;
 		const hand = pose.hands ? pose.hands[ i ] : [ hx + s * 0.16, hy + 0.1, hz - 0.3 ];
 		const el = joint( sh[ i ], hand, 0.29, [ s * 0.5, - 0.8, 0.2 ] );

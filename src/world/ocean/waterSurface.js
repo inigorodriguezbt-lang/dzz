@@ -97,16 +97,20 @@ export function waterSurfaceGLSL( opts ) {
 	${ SH ? /* glsl */`
 		// Offshore of WATER_SHORE_DEEP the shore waves have faded out completely (their envelope is 0 from 26 m
 		// of depth, see ShoreWaves) and there is no swash: most of the sea skips their evaluation.
-		bool nearShore = depth < WATER_SHORE_DEEP;
+		// (ours) band-limited to the mesh spacing like the FFT cascades: the breakers' metre-scale shapes alias on
+		// the 8 m+ grid beyond ~300 m (the islands' coasts reach far further out than Tidewater's one bay)
+		float shoreBand = smoothstep( 8.0, 4.0, spacing );
+		bool nearShore = depth < WATER_SHORE_DEEP && shoreBand > 0.0;
 		float swashLevel = -1e4;
 		if ( nearShore ) {
+			shoreLumpSpacing = spacing;
 			ShoreSample sw = shoreEvaluate( worldXZ, depth, ground );
-			extra += sw.disp;
-			shoreN = clamp( sw.nShore, vec3( -1.0 ), vec3( 1.0 ) );
+			extra += sw.disp * shoreBand;
+			shoreN = normalize( mix( vec3( 0.0, 1.0, 0.0 ), clamp( sw.nShore, vec3( -1.0 ), vec3( 1.0 ) ), shoreBand ) );
 			// (the foam line on the swash front is added per pixel in the water shader: on this coarse mesh
 			// it would end short of the front and follow the triangles)
-			shoreFoam = sw.foam;
-			surfMask = vec2( sw.face, sw.roller );
+			shoreFoam = sw.foam * shoreBand;
+			surfMask = vec2( sw.face, sw.roller ) * shoreBand;
 			swashLevel = sw.swashLevel;
 		}` : '' }
 		vec3 total = disp + extra;
@@ -115,10 +119,14 @@ export function waterSurfaceGLSL( opts ) {
 		if ( nearShore ) {
 			// thin run-up sheet on the sand: take whichever surface is higher (smooth max)
 			float k = 0.04;
-			// no run-up sheet on steep rock (cliffs, sea stacks): waves break against it instead
-			vec2 nr = waterGroundSlope( worldXZ );
-			float gentle = smoothstep( 0.45, 0.25, length( nr ) );
-			float hmx = clamp( ( swashLevel - y ) / k * 0.5 + 0.5, 0.0, 1.0 ) * gentle;
+			// no run-up sheet on steep rock (cliffs, sea stacks): waves break against it instead (the slope only
+			// where the sheet can be the surface)
+			float hmx = clamp( ( swashLevel - y ) / k * 0.5 + 0.5, 0.0, 1.0 );
+			vec2 nr = vec2( 0.0 );
+			if ( hmx > 0.0 ) {
+				nr = waterGroundSlope( worldXZ );
+				hmx *= smoothstep( 0.45, 0.25, length( nr ) );
+			}
 			float smax = mix( y, swashLevel, hmx ) + hmx * ( 1.0 - hmx ) * k;
 			swash = smoothstep( -0.02, 0.03, swashLevel - y );
 			y = smax;

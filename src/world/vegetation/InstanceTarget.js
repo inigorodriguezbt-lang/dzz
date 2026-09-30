@@ -13,11 +13,7 @@ export class InstanceTarget {
 		this.base = geometry;
 		this.material = material;
 		this.depthMaterial = depthMaterial;
-		this.geometry = new THREE.InstancedBufferGeometry();
-		this.geometry.index = geometry.index;
-		for ( const k in geometry.attributes ) this.geometry.setAttribute( k, geometry.attributes[ k ] );
-		// the vertex shader places every instance: never cull the mesh as a whole
-		this.geometry.boundingSphere = new THREE.Sphere( new THREE.Vector3(), 1e7 );
+		this.geometry = this._geometry();
 		this.mesh = new THREE.Mesh( this.geometry, material );
 		this.mesh.name = 'veg-' + name;
 		this.mesh.frustumCulled = false;
@@ -28,6 +24,16 @@ export class InstanceTarget {
 		this.count = 0;
 		this.n = 0;
 		this._alloc( cap );
+	}
+
+	// an instanced geometry over the model's own attributes (shared: other targets draw the same model)
+	_geometry() {
+		const g = new THREE.InstancedBufferGeometry();
+		g.index = this.base.index;
+		for ( const k in this.base.attributes ) g.setAttribute( k, this.base.attributes[ k ] );
+		// the vertex shader places every instance: never cull the mesh as a whole
+		g.boundingSphere = new THREE.Sphere( new THREE.Vector3(), 1e7 );
+		return g;
 	}
 
 	_alloc( cap ) {
@@ -44,17 +50,25 @@ export class InstanceTarget {
 	// copy instance o of src (STRIDE floats) with its position made relative to ( ox, oy, oz );
 	// rankOverride replaces the rank field (impostors pack their atlas slot in there)
 	push( src, o, ox, oy, oz, rankOverride = - 1 ) {
-		if ( this.n >= this.cap ) {
-			// grow ×2: a new GPU buffer (the old one is released with its attribute)
-			const old = this.data;
-			this.geometry.dispose();
-			this._alloc( this.cap * 2 );
-			this.data.set( old.subarray( 0, this.n * STRIDE ) );
-		}
+		if ( this.n >= this.cap ) this._grow();
 		const d = this.data, k = this.n * STRIDE;
 		d[ k ] = src[ o ] - ox; d[ k + 1 ] = src[ o + 1 ] - oy; d[ k + 2 ] = src[ o + 2 ] - oz; d[ k + 3 ] = src[ o + 3 ];
 		d[ k + 4 ] = src[ o + 4 ]; d[ k + 5 ] = rankOverride >= 0 ? rankOverride : src[ o + 5 ]; d[ k + 6 ] = src[ o + 6 ]; d[ k + 7 ] = src[ o + 7 ];
 		this.n ++;
+	}
+
+	// ×2 in a new geometry. The old one is disposed with only its instance buffer left on it: a geometry's
+	// dispose deletes the GPU buffers of every attribute it holds, and the targets sharing the model (the
+	// two impostor bands share one quad) would keep drawing the deleted buffers through their cached
+	// vertex arrays (WebGL INVALID_OPERATION, the whole band vanishes)
+	_grow() {
+		const old = this.geometry, data = this.data;
+		this.geometry = this.mesh.geometry = this._geometry();
+		this._alloc( this.cap * 2 );
+		this.data.set( data.subarray( 0, this.n * STRIDE ) );
+		old.setIndex( null );
+		for ( const k in this.base.attributes ) old.deleteAttribute( k );
+		old.dispose();
 	}
 
 	end( origin ) {

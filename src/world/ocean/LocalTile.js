@@ -39,12 +39,27 @@ export const groundGLSL = ( fragment ) => /* glsl */`
 	}
 	// whether xz lies on the fine tile
 	bool waterOnTile( vec2 xz ) { vec2 f; return waterLocalWeight( xz, f ) > 0.999; }
-	// ground slope ( dh/dx, dh/dz ) -> the xz of the ground normal ( -dh/dx, -dh/dz ) / len
+	// the xz of the ground normal ( -dh/dx, -dh/dz ) / len: the gradient of the bilinear patch on the tile (one
+	// lookup of 4 texels), a central difference of the coarse heights off it
 	vec2 waterGroundSlope( vec2 xz ) {
-		float e = ${ TILE_STEP.toFixed( 1 ) };
-		float hx = waterGroundAt( xz + vec2( e, 0.0 ) ) - waterGroundAt( xz - vec2( e, 0.0 ) );
-		float hz = waterGroundAt( xz + vec2( 0.0, e ) ) - waterGroundAt( xz - vec2( 0.0, e ) );
-		vec3 n = normalize( vec3( - hx, 2.0 * e, - hz ) );
+		vec2 f;
+		float w = waterLocalWeight( xz, f );
+		vec2 g;
+		if ( w > 0.0 ) {
+			float res = uLocalRect.w, stp = uLocalRect.z / res;
+			vec2 fc = clamp( f, vec2( 0.0 ), vec2( res - 1.001 ) );
+			ivec2 i = ivec2( floor( fc ) );
+			vec2 t = fract( fc );
+			float a = texelFetch( uLocalH, i, 0 ).r;
+			float b = texelFetch( uLocalH, i + ivec2( 1, 0 ), 0 ).r;
+			float c = texelFetch( uLocalH, i + ivec2( 0, 1 ), 0 ).r;
+			float d = texelFetch( uLocalH, i + ivec2( 1, 1 ), 0 ).r;
+			g = vec2( mix( b - a, d - c, t.y ), mix( c - a, d - b, t.x ) ) / stp;
+		} else {
+			float e = 16.0;
+			g = vec2( waterGroundAt( xz + vec2( e, 0.0 ) ) - waterGroundAt( xz - vec2( e, 0.0 ) ), waterGroundAt( xz + vec2( 0.0, e ) ) - waterGroundAt( xz - vec2( 0.0, e ) ) ) / ( 2.0 * e );
+		}
+		vec3 n = normalize( vec3( - g.x, 1.0, - g.y ) );
 		return n.xz;
 	}
 `;

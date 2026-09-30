@@ -124,8 +124,10 @@ export class Shell {
 		const tum = this.fTum( f ), tuck = B.tuck ?? 0.04, rb = B.rb ?? 0.05, re = B.re ?? 0.035;
 		const ya = Math.max( yb, this.archY( f ) );
 		let sh = ye - this.fSh( f );
-		if ( ya + rb + 0.03 > sh ) sh = ya + rb + 0.03;
-		if ( sh + re + 0.02 > ye ) ye = sh + re + 0.02;
+		// the side clears the wheel arch (a low sports car keeps tighter gaps: B.archGap / B.edgeGap)
+		const ag = B.archGap ?? 0.03, eg = B.edgeGap ?? 0.02;
+		if ( ya + rb + ag > sh ) sh = ya + rb + ag;
+		if ( sh + re + eg > ye ) ye = sh + re + eg;
 		const hwb = hw * ( 1 - tuck ), xE = hw - tum;
 		return { f, hw, yb, ye, yt, tum, rb, re, ya, sh, hwb, xE, ...this.openAt( f ) };
 	}
@@ -222,6 +224,8 @@ export class Shell {
 			const seg = SEG[ oi ];
 			const w = ringA.o > 0.5 ? ringA.well : null;
 			if ( seg === 'under' || seg === 'well' ) return MAT.under;
+			// (in the cabin the inner half of the door's rounded top is the black window seal, not paint)
+			if ( w && ( oi === 14 || oi === 15 ) ) return MAT[ w.sill || 'trim' ];
 			if ( oi >= 16 ) {
 				if ( w ) {
 					// the fold: sill, door card, then the floor

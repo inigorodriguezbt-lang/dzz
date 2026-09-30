@@ -175,15 +175,16 @@ export class VehicleVisual {
 		this.parts = o.parts || {};
 	}
 
-	// the player's figure in a seat (-1: nobody); `head` false for the first-person view from inside it
-	setRider( seats, kind, i, head = true ) {
-		const key = i < 0 ? null : `${this.model.name}:${i}:${head ? 1 : 0}`;
+	// the player's figure in a seat (-1: nobody); `head` false for the first-person view from inside it, `arms` false
+	// when the modelled first-person arms (driver.js) take their place
+	setRider( seats, kind, i, head = true, arms = true ) {
+		const key = i < 0 ? null : `${this.model.name}:${i}:${head ? 1 : 0}:${arms ? 1 : 0}`;
 		if ( key === this.riderKey ) return;
 		this.riderKey = key;
 		if ( this.rider ) { this.group.remove( this.rider ); this.rider = null; }
 		if ( ! key ) return;
 		let g = riderCache.get( key );
-		if ( ! g ) { g = riderKit( riderPose( this.model, kind, seats[ i ] ), head ); riderCache.set( key, g ); }
+		if ( ! g ) { g = riderKit( riderPose( this.model, kind, seats[ i ] ), head, arms ); riderCache.set( key, g ); }
 		const m = new THREE.Mesh( g, this.mat );
 		m.castShadow = true; m.receiveShadow = true;
 		m.matrixAutoUpdate = false; m.updateMatrix();
@@ -210,7 +211,7 @@ export class VehicleVisual {
 	}
 
 	// the steering wheel turns about its hub (z), handlebars about their column (y)
-	setSteeringWheel( a ) { if ( this.steering ) this.steering.rotation[ this.model.P.steer?.axis || 'z' ] = a; }
+	setSteeringWheel( a ) { this.steerAngle = a; if ( this.steering ) this.steering.rotation[ this.model.P.steer?.axis || 'z' ] = a; }
 
 	setLook( look ) {
 		const u = this.mat.userData.u;
