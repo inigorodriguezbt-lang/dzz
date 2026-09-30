@@ -12,8 +12,9 @@ export const STRIDE = 8;
 export const SP = {
 	PALM: 0, MONKEYPOD: 1, KUKUI: 2, OHIA: 3, PINE: 4, IRONWOOD: 5, KIAWE: 6, TREEFERN: 7, BANANA: 8, TI: 9,
 	SHRUB: 10, NAUPAKA: 11, TALLGRASS: 12, PINEAPPLE: 13, CANE: 14, ROCK: 15, FERN: 16, GRASS: 17,
+	DRIFTWOOD: 18, NUTS: 19, FROND: 20,
 };
-export const NSP = 18;
+export const NSP = 21;
 
 // Which streamed layer a species lives in: 0 canopy (64 m cells out to the render distance), 1 detail
 // (64 m cells near the camera: understory, crops, rocks), 2 grass (32 m cells right around the player)
@@ -40,7 +41,11 @@ export const SPECIES = [
 	{ id: SP.CANE, name: 'sugar cane', layer: 1, collider: null, params: 'a -, b tint' },
 	{ id: SP.ROCK, name: 'rock', layer: 1, collider: { r: 0.8, h: 1.1, mat: 'rock' }, params: 'a squash, b lava (0 grey .. 1 black)' },
 	{ id: SP.FERN, name: 'fern', layer: 1, collider: null, params: 'a -, b tint' },
-	{ id: SP.GRASS, name: 'grass', layer: 2, collider: null, params: 'a moisture, slope, south exposure (8 bits each), b grazed pasture (1)' },
+	{ id: SP.GRASS, name: 'grass', layer: 2, collider: null, params: 'the grass layer carries ground data (scatter.js groundData), no instances' },
+	// beach clutter along the wrack line and under the palms (after Tidewater's DebrisPlacement)
+	{ id: SP.DRIFTWOOD, name: 'driftwood', layer: 1, collider: null, params: 'a bleaching, b -' },
+	{ id: SP.NUTS, name: 'fallen coconuts', layer: 1, collider: null, params: 'a how many (0..1), b ripeness' },
+	{ id: SP.FROND, name: 'fallen frond', layer: 1, collider: null, params: 'a -, b -' },
 ];
 
 export const SPECIES_OF_LAYER = [ 0, 1, 2 ].map( l => SPECIES.filter( s => s.layer === l ).map( s => s.id ) );

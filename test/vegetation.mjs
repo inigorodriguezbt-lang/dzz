@@ -1,5 +1,7 @@
 // Vegetation placement checks (Node, no browser): runs the worker-side scatter on the real terrain
-// at the test spots and checks the ecology rules (species by place, nothing on pavement / in the sea).
+// at the test spots and checks the ecology rules (species by place, nothing on pavement / in the sea),
+// and the ground layer's flora masks (grass field and beach pebbles: meadows, backshore, no grass on the
+// town blocks, streets and sidewalks).
 //   node test/vegetation.mjs [x,z ...]
 import fs from 'node:fs';
 import zlib from 'node:zlib';
@@ -35,19 +37,32 @@ function scatterArea( cx, cz, R, layer ) {
 	const size = LAYER_CELL[ layer ];
 	const counts = new Array( NSP ).fill( 0 );
 	const all = [];
+	const ground = []; // grass layer: mask texels [ x, z, dune, meadow, oats, creeper, pebbles, cobbles, grit ]
 	let ms = 0, cells = 0;
 	for ( let j = Math.floor( ( cz - R ) / size ); j <= Math.floor( ( cz + R ) / size ); j ++ ) for ( let i = Math.floor( ( cx - R ) / size ); i <= Math.floor( ( cx + R ) / size ); i ++ ) {
 		const o = obstacles( i * size, j * size, size );
 		const t0 = performance.now();
 		const r = scatterCell( hf, { layer, i, j, bld: o.bld, seg: o.seg, cty: o.cty } );
 		ms += performance.now() - t0; cells ++;
-		ok( r.transfer && r.transfer.length === 2, 'scatter returns transfer buffers' );
+		ok( r.transfer && r.transfer.length === ( r.ground ? 6 : 2 ), 'scatter returns transfer buffers' );
+		if ( layer === LAYER.GRASS && r.ground ) {
+			const g = r.ground;
+			ok( g.h.length === 16 * 16 * 4 && g.gm.length === 32 * 32 * 4 && g.pm.length === 32 * 32 * 4 && g.cells.length === 8 * 8 * 4, 'ground data sizes' );
+			for ( let t = 0; t < 32 * 32; t ++ ) {
+				const o = t * 4;
+				if ( g.gm[ o ] | g.gm[ o + 1 ] | g.gm[ o + 2 ] | g.gm[ o + 3 ] | g.pm[ o ] | g.pm[ o + 1 ] | g.pm[ o + 2 ] ) ground.push( [ i * size + ( t % 32 ) + 0.5, j * size + Math.floor( t / 32 ) + 0.5, g.gm[ o ], g.gm[ o + 1 ], g.gm[ o + 2 ], g.gm[ o + 3 ], g.pm[ o ], g.pm[ o + 1 ], g.pm[ o + 2 ] ] );
+			}
+			// heights at the terrain's 2 m vertices
+			let bad = 0;
+			for ( let q = 0; q < 256; q += 37 ) if ( Math.abs( g.h[ q * 4 ] - hf.heightAt( i * size + ( q % 16 ) * 2, j * size + Math.floor( q / 16 ) * 2 ) ) > 1e-3 ) bad ++;
+			ok( bad === 0, 'ground heights at the terrain vertices' );
+		}
 		for ( let s = 0; s < NSP; s ++ ) for ( let n = r.off[ s ]; n < r.off[ s + 1 ]; n ++ ) {
 			counts[ s ] ++;
 			all.push( [ s, ...r.data.subarray( n * STRIDE, n * STRIDE + STRIDE ) ] );
 		}
 	}
-	return { counts, all, ms, cells };
+	return { counts, all, ground, ms, cells };
 }
 
 const fmt = ( counts ) => counts.map( ( c, s ) => c ? `${SPECIES[ s ].name} ${c}` : null ).filter( Boolean ).join( ', ' );
@@ -96,6 +111,10 @@ for ( const [ name, x, z, want ] of extra.length ? extra : SPOTS ) {
 		ok( sea === 0, `${name} layer ${layer}: ${sea} plants in the sea` );
 	}
 	for ( const sp of want ) ok( seen.has( sp ), `${name}: expected ${SPECIES[ sp ].name}` );
+	const gr = scatterArea( x, z, 40, LAYER.GRASS ).ground;
+	const avg = ( c ) => gr.reduce( ( a, t ) => a + t[ c ], 0 ) / Math.max( 1, gr.length ) / 255;
+	console.log( `  ground flora: ${gr.length} texels, dune ${avg( 2 ).toFixed( 2 )} meadow ${avg( 3 ).toFixed( 2 )} oats ${avg( 4 ).toFixed( 2 )} creeper ${avg( 5 ).toFixed( 2 )} pebbles ${avg( 6 ).toFixed( 2 )} grit ${avg( 8 ).toFixed( 2 )}` );
+	for ( const [ gx, gz, ...m ] of gr ) if ( hf.baseHeight( gx, gz ) < - 1 && m.some( v => v > 20 ) ) { ok( false, `${name}: flora in the sea at ${gx}, ${gz}` ); break; }
 }
 
 // ---- towns: lawns, yard and street trees only; no wild understory, no meadow grass off the lawns, the
@@ -103,19 +122,37 @@ for ( const [ name, x, z, want ] of extra.length ? extra : SPOTS ) {
 for ( const [ name, x, z ] of [ [ 'Waikiki city', - 3880, - 9660 ], [ 'Waikiki hotels', - 3850, - 9640 ], [ 'Honolulu downtown', - 4390, - 10255 ], [ 'Hilo town', 31722, 11967 ], [ 'Kailua-Kona', 19997, 13038 ], [ 'Haleiwa', - 7530, - 14151 ] ] ) {
 	const can = scatterArea( x, z, 120, LAYER.CANOPY ), det = scatterArea( x, z, 120, LAYER.DETAIL ), gr = scatterArea( x, z, 40, LAYER.GRASS );
 	const area = Math.PI * 120 * 120;
-	console.log( `\n${name}: canopy ${fmt( can.counts )} | detail ${fmt( det.counts )} | grass ${gr.all.length}` );
+	console.log( `\n${name}: canopy ${fmt( can.counts )} | detail ${fmt( det.counts )} | ground flora texels ${gr.ground.length}` );
 	const inCity = ( a ) => hf.flagsNear( a[ 1 ], a[ 3 ] ) & FLAG.CITY;
 	ok( det.all.filter( a => inCity( a ) && a[ 0 ] !== SP.ROCK ).length === 0, `${name}: no wild understory on the town blocks (${fmt( det.counts )})` );
 	const trees = can.all.filter( a => Math.hypot( a[ 1 ] - x, a[ 3 ] - z ) < 120 && inCity( a ) ).length;
 	ok( trees < area / 250, `${name}: sparse town trees (${trees} in ${( area / 1e4 ).toFixed( 1 )} ha)` );
 	// pavement: street (incl. sidewalk) and road surfaces stay clear
 	const onWalk = ( list, gap ) => list.filter( a => roadGap( a[ 1 ], a[ 3 ] ) < gap ).length;
-	ok( onWalk( gr.all, 0.2 ) === 0, `${name}: grass on streets or sidewalks (${onWalk( gr.all, 0.2 )})` );
+	// the grass field's mask: nothing on the streets and sidewalks, nor on the town blocks
+	const grassT = gr.ground.filter( t => t[ 2 ] > 8 || t[ 3 ] > 8 || t[ 4 ] > 8 || t[ 5 ] > 8 );
+	const walkG = grassT.filter( t => roadGap( t[ 0 ], t[ 1 ] ) < 0.2 ).length;
+	ok( walkG === 0, `${name}: grass on streets or sidewalks (${walkG})` );
 	ok( onWalk( det.all, 0.5 ) === 0, `${name}: understory on streets or sidewalks (${onWalk( det.all, 0.5 )})` );
 	ok( onWalk( can.all, 0.5 ) === 0, `${name}: trunks on streets or sidewalks (${onWalk( can.all, 0.5 )})` );
-	// the town blocks are mown lawns the terrain paints: no grass clumps on them
-	const lawn = gr.all.filter( a => inCity( a ) ).length;
-	ok( lawn === 0, `${name}: no grass clumps on the town blocks (${lawn})` );
+	// the town blocks are mown lawns the terrain paints: no grass on them
+	const lawn = grassT.filter( t => hf.flagsNear( t[ 0 ], t[ 1 ] ) & FLAG.CITY ).length;
+	ok( lawn === 0, `${name}: no grass on the town blocks (${lawn})` );
+}
+
+// ---- ground flora: meadows carry the grass field, the North Shore's backshore dune grass, sea oats and
+// creeper and a wrack line of pebbles and shell grit, the Kona lava coast basalt cobbles, forests little grass
+{
+	const texels = ( x, z, R ) => scatterArea( x, z, R, LAYER.GRASS ).ground;
+	const share = ( list, c, v = 40 ) => list.filter( t => t[ c ] > v ).length;
+	const meadow = texels( - 7008, - 12128, 30 );
+	ok( share( meadow, 3 ) > 2000, `meadow: tall grass on the open ground (${share( meadow, 3 )} texels)` );
+	const ns = texels( - 6760, - 15260, 60 );
+	ok( share( ns, 2 ) > 50, `North Shore: dune grass on the backshore (${share( ns, 2 )})` );
+	ok( share( ns, 5 ) > 20, `North Shore: beach creeper (${share( ns, 5 )})` );
+	ok( share( ns, 6, 20 ) + share( ns, 8, 20 ) > 50, `North Shore: pebbles and grit on the beach (${share( ns, 6, 20 )}, ${share( ns, 8, 20 )})` );
+	const forest = texels( - 8928, - 13792, 30 );
+	ok( share( forest, 3, 120 ) < forest.length * 0.3 + 1, `rain forest: little meadow grass (${share( forest, 3, 120 )} of ${forest.length})` );
 }
 
 // ---- altitude: the summits are bare, no trees above the tree line, palms stay low ------------------

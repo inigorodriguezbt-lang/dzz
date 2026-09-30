@@ -167,6 +167,9 @@ export class WorldItems {
 	}
 
 	remove( item, { taken = false, stack = null } = {} ) {
+		// a claimed item lives on as its twin: a pickup from a screen still holding the old one takes the twin (a
+		// plain remove, like a building clearing its streamed loot, must not)
+		while ( taken && item?.replacedBy && ! this.items.has( item ) ) item = item.replacedBy;
 		if ( ! item || ! this.items.has( item ) ) return false;
 		this.items.delete( item );
 		this._hashRemove( item );
@@ -184,7 +187,7 @@ export class WorldItems {
 		if ( item.key == null ) { item.persistent = true; return item; }
 		this.remove( item, { taken: true } );
 		const twin = this.spawn( item.stack, item.pos, { yaw: item.yaw, persistent: true, settle: false, noAuto: item.noAuto } );
-		if ( twin ) twin.quat.copy( item.quat );
+		if ( twin ) { twin.quat.copy( item.quat ); item.replacedBy = twin; }
 		return twin;
 	}
 
@@ -232,8 +235,9 @@ export class WorldItems {
 
 	// F: take it
 	take( item ) {
-		const g = this.game, inv = g.player.inventory, s = item.stack;
-		if ( ! this.items.has( item ) ) return;
+		while ( item?.replacedBy && ! this.items.has( item ) ) item = item.replacedBy;
+		const g = this.game, inv = g.player.inventory, s = item?.stack;
+		if ( ! item || ! this.items.has( item ) ) return;
 		const before = s.qty;
 		// what was picked up: a stack that tops up one you carry is left at qty 0 by the merge
 		const picked = { ...s, qty: before };

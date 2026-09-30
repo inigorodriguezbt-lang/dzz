@@ -524,7 +524,7 @@ const SSS = ( shader ) => {
 		{
 			float ndl = dot( normal, directionalLights[ 0 ].direction );
 			float wrap = max( 0.0, ( ndl + 0.5 ) / 1.5 ) - max( 0.0, ndl );
-			reflectedLight.directDiffuse += directionalLights[ 0 ].color * wrap * diffuseColor.rgb * vec3( 0.4, 0.14, 0.09 );
+			reflectedLight.directDiffuse += directionalLights[ 0 ].color * wrap * diffuseColor.rgb * vec3( 0.26, 0.1, 0.07 );
 		}
 		#endif` );
 };
@@ -618,6 +618,9 @@ export class RigArm {
 		const T = textures();
 		this.cover = { value: - 10 };
 		this.mSkin = viewMat( new THREE.MeshStandardMaterial( { color: 0xffffff, map: tex.col, normalMap: tex.nrm, roughness: 0.52, metalness: 0 } ), 'arms-rig-skin', ( sh ) => { SSS( sh ); COVER( this.cover )( sh ); } );
+		// the painted skin averages linear (0.58, 0.28, 0.18): too saturated for physical light (orange in the sun,
+		// red under the moon). The tint brings its mean to (0.45, 0.30, 0.23)
+		this.mSkin.color.setRGB( 0.776, 1.07, 1.28 );
 		if ( tex.nrm ) this.mSkin.normalScale.set( 0.9, 0.9 );
 		this.mGlove = viewMat( new THREE.MeshStandardMaterial( { color: 0x2a2a2a, roughness: 0.72, metalness: 0 } ), 'arms-rig-glove', INFLATE( 1.3 ) );
 		if ( T.glove ) { this.mGlove.bumpMap = T.glove; this.mGlove.bumpScale = 0.5; }

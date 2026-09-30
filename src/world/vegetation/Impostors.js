@@ -21,7 +21,7 @@ import * as THREE from 'three';
 import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
 import { G, patchMaterial } from '../../render/Materials.js';
 import { SP, NSP, PALM_H } from './species.js';
-import { KIND, VG } from './VegMaterial.js';
+import { KIND, VG, PALM_BARK_GLSL } from './VegMaterial.js';
 import { InstanceTarget } from './InstanceTarget.js';
 
 export const IMP_N = 6; // frames per side of a species block
@@ -48,8 +48,8 @@ const BAKE_VERT = /* glsl */`
 	varying vec2 vUv; varying vec4 vMat; varying vec3 vCol; varying vec3 vN; varying vec3 vP;
 	void main() {
 		vUv = uv;
-		// the palm trunk's ring texture repeats every 1.6 m along the 10 m model trunk (as the near shader)
-		if ( aMat.x < 0.5 ) vUv.y *= ${( PALM_H / 1.6 ).toFixed( 4 )};
+		// the palm trunk's procedural bark: around (0..1), height along the 10 m model trunk (as the near shader)
+		if ( aMat.x < 0.5 ) vUv = vec2( uv.x * 0.5, uv.y * ${PALM_H.toFixed( 1 )} );
 		vMat = aMat; vCol = aCol; vN = normal;
 		vec3 p = position;
 		// fruit and grass seed heads show on some plants only: left out of the shared image
@@ -63,6 +63,12 @@ const BAKE_VERT = /* glsl */`
 const BAKE_FRAG = /* glsl */`
 	uniform sampler2D tLeaf; uniform sampler2D tPalmBark; uniform sampler2D tBark; uniform float uPass; uniform float uEdgeK;
 	varying vec2 vUv; varying vec4 vMat; varying vec3 vCol; varying vec3 vN; varying vec3 vP;
+	float vegHash( vec2 p ) { vec3 p3 = fract( vec3( p.xyx ) * 0.1031 ); p3 += dot( p3, p3.yzx + 33.33 ); return fract( ( p3.x + p3.y ) * p3.z ); }
+	float vegNoise( vec2 p ) {
+		vec2 i = floor( p ), f = fract( p ); vec2 u = f * f * ( 3.0 - 2.0 * f );
+		return mix( mix( vegHash( i ), vegHash( i + vec2( 1, 0 ) ), u.x ), mix( vegHash( i + vec2( 0, 1 ) ), vegHash( i + vec2( 1, 1 ) ), u.x ), u.y );
+	}
+	${ PALM_BARK_GLSL }
 	void main() {
 		float part = vMat.x;
 		// leaf cards seen edge-on are thinned as on the near models (VegMaterial vegEdge); the frame looks
@@ -72,7 +78,7 @@ const BAKE_FRAG = /* glsl */`
 		vec2 dx = dFdx( vUv ), dy = dFdy( vUv );
 		vec4 c;
 		float leaf = 0.0;
-		if ( part < 0.5 ) c = texture2D( tPalmBark, vUv );
+		if ( part < 0.5 ) c = vec4( vegPalmBark( vUv.y, vUv.x, ${PALM_H.toFixed( 1 )}, 0.5, 0.5 ).rgb, 1.0 );
 		else if ( part < 1.5 ) c = vec4( texture2D( tBark, vUv ).rgb / dot( max( textureLod( tBark, vec2( 0.5 ), 12.0 ).rgb, vec3( 1e-4 ) ), vec3( 0.333 ) ), 1.0 ); // as the near shader
 		else {
 			c = textureGrad( tLeaf, vUv, dx, dy );
@@ -84,7 +90,8 @@ const BAKE_FRAG = /* glsl */`
 		}
 		// the near shader's albedo (VegMaterial FRAG_COLOR) before the per-plant tints
 		float ao = vMat.y;
-		vec3 col = c.rgb * vCol * ( part < 1.5 ? vec3( mix( 0.6, 1.0, ao ) ) : mix( 0.55, 1.0, ao ) * mix( vec3( 1.0 ), vec3( 1.16, 1.22, 0.92 ), smoothstep( 0.62, 1.0, ao ) * 0.7 ) );
+		// (bark: no albedo AO, as the near shader: its exposure only dims the indirect light)
+		vec3 col = c.rgb * vCol * ( part < 1.5 ? vec3( 1.0 ) : mix( 0.55, 1.0, ao ) * mix( vec3( 1.0 ), vec3( 1.16, 1.22, 0.92 ), smoothstep( 0.62, 1.0, ao ) * 0.7 ) );
 		if ( uPass < 0.5 ) gl_FragColor = vec4( max( col, vec3( 0.0 ) ), 1.0 );
 		else if ( uPass < 1.5 ) gl_FragColor = vec4( normalize( vN ) * 0.5 + 0.5, leaf );
 		else gl_FragColor = vec4( ao, 0.0, 0.0, 1.0 );
@@ -100,7 +107,7 @@ const VERT_PARS = /* glsl */`
 	uniform vec4 uImpA[ IMP_SLOTS ]; uniform vec4 uImpB[ IMP_SLOTS ]; uniform vec4 uImpRange[ IMP_SLOTS ];
 	uniform vec3 uImpTintA[ IMP_SLOTS ]; uniform vec3 uImpTintB[ IMP_SLOTS ]; uniform vec3 uImpBark[ IMP_SLOTS ];
 	uniform vec4 uImpThin; uniform float uImpFar; uniform vec3 uSunDir; uniform float uShadowFar;
-	varying vec3 vImpC; varying vec4 vImpX; varying vec4 vImpY; varying vec4 vImpZ; varying vec3 vImpTint; varying vec3 vImpBarkC; varying vec2 vImpQ; varying vec3 vImpWP;
+	varying vec3 vImpC; varying vec4 vImpX; varying vec4 vImpY; varying vec4 vImpZ; varying vec3 vImpTint; varying vec3 vImpBarkC; varying vec2 vImpQ; varying vec3 vImpWP; varying float vImpUnder;
 
 	float impHash( vec2 p ) { vec3 p3 = fract( vec3( p.xyx ) * 0.1031 ); p3 += dot( p3, p3.yzx + 33.33 ); return fract( ( p3.x + p3.y ) * p3.z ); }
 	float impNoise( vec2 p ) {
@@ -131,6 +138,8 @@ const VERT_PARS = /* glsl */`
 		vImpZ = vec4( fin, B.x == ${KIND.TREE.toFixed( 1 )} || B.x == ${KIND.PINE.toFixed( 1 )} ? 0.0 : 1.0, B.y, B.z );
 		impN = vec3( 0.0, 1.0, 0.0 );
 		vImpWP = wbase;
+		// understory under the rain-forest canopy (packed in whole turns of the yaw, scatter.js)
+		vImpUnder = floor( yaw / 6.2832 + 1e-3 ) / 15.0;
 		#ifdef IMP_DEPTH
 		// past the sun's shadow maps: nothing to cast
 		if ( d > uShadowFar ) fin = 0.0;
@@ -198,7 +207,7 @@ const VERT_PARS = /* glsl */`
 
 const FRAG_PARS = /* glsl */`
 	uniform sampler2D tImpA; uniform sampler2D tImpB; uniform sampler2D tImpC; uniform vec2 uImpGrid; uniform float uVegFrame; uniform float uVegFadeMode;
-	varying vec3 vImpC; varying vec4 vImpX; varying vec4 vImpY; varying vec4 vImpZ; varying vec3 vImpTint; varying vec3 vImpBarkC; varying vec2 vImpQ; varying vec3 vImpWP;
+	varying vec3 vImpC; varying vec4 vImpX; varying vec4 vImpY; varying vec4 vImpZ; varying vec3 vImpTint; varying vec3 vImpBarkC; varying vec2 vImpQ; varying vec3 vImpWP; varying float vImpUnder;
 	// the same per-pixel cross-fade threshold as the plant models (VegMaterial vegDither): a moving
 	// dither under temporal anti-aliasing only, else a clean swap in the middle of the band
 	float impDither( vec2 p ) {
@@ -287,9 +296,16 @@ const FRAG_COLOR = /* glsl */`
 	// the near models' surface terms (VegMaterial): small specular on leaves, exposure on the indirect
 	// light, translucency
 	bool impCanopy = vImpZ.y < 0.5;
-	float impSpec = mix( 0.3, impCanopy ? 0.15 : 0.4, impLeaf );
+	// (Tidewater Impostors.js: specular intensity 0.12, translucency 0.35)
+	float impSpec = mix( 0.3, 0.12, impLeaf );
 	float impAoI = mix( 0.4, 1.0, impAo );
-	float impTrans = impLeaf * ( impCanopy ? 0.5 * ( impAo * 0.6 + 0.4 ) : 0.3 );
+	float impTrans = impLeaf * 0.35 * ( impCanopy ? impAo * 0.6 + 0.4 : 1.0 );
+	// the understory's forest-floor light, as the near models (VegMaterial vegUnder)
+	if ( vImpUnder > 0.0 ) {
+		impAoI *= mix( 1.0, 0.3, vImpUnder );
+		totalEmissiveRadiance += impCol * uSunColor * vec3( 0.03, 0.05, 0.012 ) * ( max( normalize( uSunDir ).y, 0.0 ) * vImpUnder
+			* cloudShadowAt( vWorldPos ) * terrainSunShadowAt( vWorldPos ) * RECIPROCAL_PI );
+	}
 	// the crown shades itself: the models get that from the sun's shadow map, the impostor (its shadow
 	// lookup sits outside its own crown) from the baked exposure: sunlight fades towards the inside
 	dtSunMod = mix( 0.55, 1.0, smoothstep( 0.3, 0.9, impAo ) );
@@ -547,7 +563,7 @@ export class Impostors {
 				.replace( 'void main() {', defs + FRAG_PARS + FRAG_SAMPLE + '\nvoid main() {' )
 				.replace( '#include <map_fragment>', FRAG_COLOR + ( dtAO ? '\ndtAO = impAoI;' : '' ) )
 				.replace( '#include <normal_fragment_maps>', FRAG_NORMAL )
-				.replace( '#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix( 0.92, impCanopy ? 0.8 : 0.66, impLeaf );' )
+				.replace( '#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix( 0.92, 0.85, impLeaf );' )
 				.replace( '#include <lights_physical_fragment>', '#include <lights_physical_fragment>\n' + FRAG_SPECULAR )
 				.replace( '#include <lights_fragment_maps>', FRAG_TRANSLUCENT + '\n#include <lights_fragment_maps>' );
 			if ( ! dtAO ) shader.fragmentShader = shader.fragmentShader.replace( '#include <aomap_fragment>', '#include <aomap_fragment>\n' + FRAG_AO );

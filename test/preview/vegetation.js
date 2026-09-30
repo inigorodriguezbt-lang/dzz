@@ -1,27 +1,34 @@
 // Standalone vegetation preview (not shipped): the plant models, their mid LOD and impostors side by
 // side on a flat lawn, with the game's vegetation materials, sun shadows and wind.
 //   /test/preview/vegetation.html?set=trees|small|forest|grass&cam=x,y,z&look=x,y,z&hour=..&frames=N&wind=0..1
+//     set=grass: the grass field and pebbles (GrassField / PebbleField) on synthetic ground data: meadow
+//     (moisture &moist=0..1) on the right, the backshore (dune grass, sea oats, creeper) and a pebbly
+//     beach on the left
 //     &aa=msaa|taa|none (LOD fade mode: alpha to coverage, moving dither, clean swap) &sun=..&hemi=.. (light)
 //     &layout=pairs (levels side by side) &atlas=A|B|leaf (texture debug view)
 // Rows (front to back): full model, mid model, impostor; set=forest: a far-band impostor forest seen
 // from a mountainside. window.__ready / __done for test/shot.mjs.
 import * as THREE from 'three';
 import { G, preloadTextures } from '../../src/render/Materials.js';
-import { SP, STRIDE, SPECIES } from '../../src/world/vegetation/species.js';
+import { SP, NSP, STRIDE, SPECIES } from '../../src/world/vegetation/species.js';
 import { buildLeafAtlas } from '../../src/world/vegetation/LeafTextures.js';
 import { VG, vegTextures, vegUniforms, makeVegMaterial, makeVegDepthMaterial } from '../../src/world/vegetation/VegMaterial.js';
 import { Impostors } from '../../src/world/vegetation/Impostors.js';
 import { InstanceTarget } from '../../src/world/vegetation/InstanceTarget.js';
+import { GroundData } from '../../src/world/vegetation/GroundData.js';
+import { GrassField } from '../../src/world/vegetation/GrassField.js';
+import { PebbleField } from '../../src/world/vegetation/PebbleField.js';
+import { getDetailTexture } from '../../src/world/terrain/DetailTextures.js';
 import { SPEC } from '../../src/world/Vegetation.js';
 
 const q = new URLSearchParams( location.search );
 const SET = q.get( 'set' ) || 'trees';
 const SETS = {
 	trees: { list: [ SP.PALM, SP.PALM, SP.PALM, SP.MONKEYPOD, SP.KUKUI, SP.OHIA, SP.PINE, SP.IRONWOOD, SP.KIAWE ], gap: 20 },
-	small: { list: [ SP.TREEFERN, SP.BANANA, SP.TI, SP.SHRUB, SP.NAUPAKA, SP.TALLGRASS, SP.PINEAPPLE, SP.CANE, SP.ROCK, SP.FERN, SP.GRASS ], gap: 4.5 },
+	small: { list: [ SP.TREEFERN, SP.BANANA, SP.TI, SP.SHRUB, SP.NAUPAKA, SP.TALLGRASS, SP.PINEAPPLE, SP.CANE, SP.ROCK, SP.FERN, SP.DRIFTWOOD, SP.NUTS, SP.FROND ], gap: 4.5 },
 	// a lowland forest of far impostors seen from a mountainside (the game's far band)
 	forest: { list: [], gap: 20 },
-	// grass clumps: grazed pasture (left) beside a meadow (right), at eye height
+	// the grass field: backshore (left) beside a meadow (right), at eye height
 	grass: { list: [], gap: 4 },
 };
 const set = SETS[ SET ];
@@ -88,7 +95,7 @@ for ( const s of all ) {
 	const cfg = SPEC[ s ];
 	models[ s ] = cfg.build( 0 );
 	const make = ( g, name, shadow ) => {
-		const U = vegUniforms( cfg.kind, cfg.tint[ 0 ], cfg.tint[ 1 ], cfg.bark, cfg.mode );
+		const U = vegUniforms( cfg.kind, cfg.tint[ 0 ], cfg.tint[ 1 ], cfg.bark, cfg.mode, cfg.leaf );
 		U.uLod.value.set( 0, 0, 1e6, 1e6 );
 		const t = new InstanceTarget( SPECIES[ s ].name + '-' + name, g, makeVegMaterial( U ), shadow ? makeVegDepthMaterial( U ) : null, 16 );
 		t.mesh.castShadow = !! shadow;
@@ -101,7 +108,7 @@ for ( const s of all ) {
 const buildMs = performance.now() - t0;
 window.__targets = targets; window.__renderer = renderer; window.__scene = scene; window.__camera = camera;
 // models[] may have holes for species not in the preview: the impostor atlas only measures its own
-for ( let s = 0; s < 18; s ++ ) if ( ! models[ s ] && SPEC[ s ].imp ) models[ s ] = SPEC[ s ].build( 0 );
+for ( let s = 0; s < NSP; s ++ ) if ( ! models[ s ] && SPEC[ s ].imp ) models[ s ] = SPEC[ s ].build( 0 );
 const imp = new Impostors( renderer, models, SPEC );
 const impT = imp.makeTarget( 'mid' );
 scene.add( impT.mesh );
@@ -118,7 +125,6 @@ function inst( s, x, z, k ) {
 		case SP.PINEAPPLE: return [ x, 0, z, 1, 0.78, 0.3, 0, 0.8 ];
 		case SP.CANE: return [ x, 0, z, 3.2, 0.5, 0.3, 0, 0.3 ];
 		case SP.ROCK: return [ x, 0, z, 1.2, 0.5, 0.3, 0.7, 0.2 ];
-		case SP.GRASS: return [ x, 0, z, 1, 0.5, 0.3, 0.3, 0 ];
 		case SP.SHRUB: return [ x, 0, z, 1, 0.5, 0.3, 0.8, 0.1 ];
 		default: return [ x, 0, z, 1, 0.5, 0.3, 1, 0.3 ];
 	}
@@ -135,7 +141,7 @@ if ( SET === 'forest' ) {
 	scene.add( impF.mesh );
 	const R = + ( q.get( 'rd' ) || 1400 );
 	const ranges = [];
-	for ( let s = 0; s < 18; s ++ ) if ( SPEC[ s ].imp === 'far' ) ranges[ s ] = { imp: [ SPEC[ s ].mid || SPEC[ s ].near, R ] };
+	for ( let s = 0; s < NSP; s ++ ) if ( SPEC[ s ].imp === 'far' ) ranges[ s ] = { imp: [ SPEC[ s ].mid || SPEC[ s ].near, R ] };
 	imp.setRanges( ranges, { far: 1, blend: 1e5 }, 0.03 );
 	let seed = 7;
 	const rnd = () => ( seed = ( seed * 16807 ) % 2147483647 ) / 2147483647;
@@ -172,19 +178,35 @@ set.list.forEach( ( s, k ) => {
 	if ( lods[ s ].mid ) { rec.set( inst( s, x + rowX[ 1 ], rowZ[ 1 ], k ) ); lods[ s ].mid.push( rec, 0, 0, 0, 0 ); }
 	if ( imp.slot[ s ] >= 0 ) { rec.set( inst( s, x + rowX[ 2 ], rowZ[ 2 ], k ) ); impT.push( rec, 0, 0, 0, 0, imp.slot[ s ] + rec[ 5 ] * 0.999 ); }
 } );
+// the shared detail texture (meadow tone, gusts: built on this thread a moment after)
+VG.tDetail.value = getDetailTexture();
+VG.uDetailOn.value = 1;
+let grassF = null, pebF = null, groundD = null;
 if ( SET === 'grass' ) {
-	// scatter.js grass: ~3.7 clumps / m² x density; pasture s 0.5-0.8 (b 1), meadow 0.6-1.15 (b 0)
-	let seed = 3;
-	const rnd = () => ( seed = ( seed * 16807 ) % 2147483647 ) / 2147483647;
-	const rec = new Float32Array( STRIDE );
-	const pk = Math.round( 0.25 * 255 ); // moisture 0.25 (a typical leeward meadow), flat, no south exposure
-	for ( let n = 0; n < 9000; n ++ ) {
-		const x = ( rnd() - 0.5 ) * 30, z = - rnd() * 24;
-		const pasture = x < 0;
-		if ( rnd() > ( pasture ? 0.9 : 0.8 ) ) continue;
-		rec.set( [ x, 0, z, pasture ? 0.5 + 0.3 * rnd() : 0.6 + 0.55 * rnd(), rnd() * 6.28, rnd(), pk + 128 * 65536, pasture ? 1 : 0 ] );
-		lods[ SP.GRASS ].near.push( rec, 0, 0, 0, 0 );
+	// synthetic ground data (scatter.js groundData layout) for the blocks around the origin: flat ground,
+	// a meadow for x > 0, the backshore for x < 0 (dune grass, oats, creeper) with a pebbly beach in front
+	groundD = new GroundData( renderer );
+	const moist = + ( q.get( 'moist' ) ?? 0.35 );
+	for ( let bj = - 4; bj < 4; bj ++ ) for ( let bi = - 4; bi < 4; bi ++ ) {
+		const h = new Float32Array( 16 * 16 * 4 ), gm = new Uint8Array( 32 * 32 * 4 ), pm = new Uint8Array( 32 * 32 * 4 ), cells = new Float32Array( 64 * 4 );
+		for ( let k = 0; k < 256; k ++ ) { h[ k * 4 ] = 0; h[ k * 4 + 1 ] = moist; }
+		for ( let j = 0; j < 32; j ++ ) for ( let i = 0; i < 32; i ++ ) {
+			const x = bi * 32 + i + 0.5, z = bj * 32 + j + 0.5, o = ( j * 32 + i ) * 4;
+			const n = Math.sin( x * 0.7 + z * 0.3 ) * Math.sin( z * 0.9 - x * 0.2 );
+			if ( x > 0 ) gm[ o + 1 ] = 230;
+			else if ( z < - 3 ) { gm[ o ] = n > - 0.3 ? 220 : 60; gm[ o + 2 ] = z > - 8 && n > 0.2 ? 200 : 0; gm[ o + 3 ] = z > - 6 ? 180 : 0; }
+			else { pm[ o ] = 120; pm[ o + 1 ] = 20; pm[ o + 2 ] = 150; pm[ o + 3 ] = 170; }
+		}
+		for ( let k = 0; k < 64; k ++ ) { cells[ k * 4 + 1 ] = 0; cells[ k * 4 + 2 ] = 1; cells[ k * 4 + 3 ] = 1; }
+		groundD.put( bi, bj, { h, gm, pm, cells } );
 	}
+	grassF = new GrassField( groundD );
+	pebF = new PebbleField( groundD );
+	grassF.setQuality( q.get( 'veg' ) || 'high' );
+	pebF.setQuality( q.get( 'veg' ) || 'high' );
+	scene.add( ...grassF.meshes, pebF.mesh );
+	ground.material.color.set( 0x3a3322 );
+	window.__grass = grassF; window.__pebbles = pebF;
 }
 for ( const t of targets ) t.end( origin );
 impT.end( origin );
@@ -217,6 +239,12 @@ if ( q.get( 'atlas' ) ) {
 		const now = performance.now(), dt = ( now - last ) / 1000; last = now;
 		G.uTime.value += dt;
 		G.uCamPos.value.copy( camera.position );
+		if ( grassF ) {
+			camera.updateMatrixWorld();
+			groundD.update( camera.position );
+			grassF.update( camera );
+			pebF.update( camera, 0 );
+		}
 		renderer.render( scene, camera );
 		frames ++;
 		const r = renderer.info.render;

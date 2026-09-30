@@ -1,13 +1,17 @@
-// Vegetation: palms, trees, understory, crops, rocks and grass over all eight islands.
+// Vegetation: palms, trees, understory, crops, rocks, grass and beach clutter over all eight islands.
 //
 // Placement runs in the world workers (scatter.js), deterministic per cell on three layers: canopy
-// (64 m cells out to the render distance), detail (64 m cells near the camera) and grass (32 m cells
+// (64 m cells out to the render distance), detail (64 m cells near the camera) and ground (32 m cells
 // around the player). The main thread keeps the cell results and, whenever the camera has moved a few
 // metres, refills a small set of instance buffers ("bands"):
 //   near  full models with shadows (~30-110 m by species)
 //   mid   simplified models (palms, trees, pineapples, cane, rocks) and impostors of the small plants
 //   far   impostors of the trees and palms out to the render distance, thinned with distance
-//   grass geometric grass clumps within ~35-75 m: a full clump level near, a three-blade level beyond
+// The ground layer's cells carry the ground data (heights, grass and pebble density masks) of the
+// camera-following flora that places itself in the vertex shader (ported from Tidewater): the grass
+// field (vegetation/GrassField.js: meadow and dune grass, sea oats, beach creeper) and the beach
+// pebbles, cobbles and shell grit (vegetation/PebbleField.js), through toroidal textures
+// (vegetation/GroundData.js).
 // The exact per-instance LOD windows happen in the vertex / fragment shaders against the live camera,
 // so the CPU refills are infrequent and never pop: a short cross-fade where one level hands over to
 // the next (alpha to coverage with MSAA, a moving dither under TAA, else a clean swap in the band's
@@ -22,54 +26,74 @@ import * as PG from './vegetation/PlantGeometry.js';
 import { KIND, VG, vegTextures, vegUniforms, makeVegMaterial, makeVegDepthMaterial } from './vegetation/VegMaterial.js';
 import { Impostors } from './vegetation/Impostors.js';
 import { InstanceTarget } from './vegetation/InstanceTarget.js';
+import { GroundData } from './vegetation/GroundData.js';
+import { GrassField } from './vegetation/GrassField.js';
+import { PebbleField } from './vegetation/PebbleField.js';
 import { citiesNear, townAt } from './scatter.js';
 import { FLAG } from './HeightField.js';
 import { makeStack, getItem } from '../game/items/ItemDB.js';
 
 // ---- per species rendering setup ---------------------------------------------------------------------------
 //   kind: vertex deformation, build( lod ): model, near / mid: end distance (m, at 'high'), imp: impostor
-//   level ('far' = out to the render distance with thinning, or an end distance), tints (leaf tint range,
-//   bark tint), mode (see vegUniforms), shadow: the near (and mid) models cast shadows. The sun's shadow
-//   map reaches ~85-120 m, so the mid models of the big plants cast too: no shadow pops at the switch.
+//   level ('far' = out to the render distance with thinning, or an end distance), tint: per plant tint range
+//   (Tidewater's per instance variation: canopy value iv * 0.36 + 0.74, palms yellower / bluer), bark: bark
+//   tint, mode (see vegUniforms; w: leaf-card canopy), leaf: [ roughness, specular intensity, translucency,
+//   bark moss ] (Tidewater VegMaterials.js: canopy 0.82 / 0.65 glossy, 0.15, 0.5; palm fronds 0.62, 0.4,
+//   0.3; plants 0.7, 0.4, 0.3; broad glossy leaves 0.45, 0.42, 0.2), shadow: the near (and mid) models cast
+//   shadows. The sun's shadow map reaches ~85-120 m, so the mid models of the big plants cast too: no
+//   shadow pop at the switch.
 const W = [ 1, 1, 1 ];
+const IV = [ [ 0.74, 0.75, 0.78 ], [ 1.1, 1.1, 1.02 ] ]; // canopy value per tree (Tidewater iv * 0.36 + 0.74)
+const CANOPY = [ 0.82, 0.15, 0.5 ];
+// tall grass: the meadow green, towards Tidewater's MEADOW yellow where it is dry (ratio of the two)
+const lin = ( r, g, b ) => new THREE.Color().setRGB( r, g, b, THREE.SRGBColorSpace ).toArray();
+const DRY = ( () => { const g = lin( 0.25, 0.32, 0.1 ), y = lin( 0.5, 0.46, 0.2 ); return y.map( ( v, i ) => v / g[ i ] ); } )();
 export const SPEC = {
-	[ SP.PALM ]: { kind: KIND.PALM, build: PG.buildPalm, near: 90, mid: 240, imp: 'far', tint: [ [ 0.95, 1, 0.9 ], [ 1.12, 1.08, 0.8 ] ], shadow: true },
-	[ SP.MONKEYPOD ]: { kind: KIND.TREE, build: ( l ) => PG.buildBroadleaf( 'monkeypod', l ), near: 85, mid: 210, imp: 'far', tint: [ [ 0.85, 0.95, 0.85 ], [ 1.05, 1.08, 0.9 ] ], bark: [ 0.9, 0.85, 0.8 ], shadow: true },
-	[ SP.KUKUI ]: { kind: KIND.TREE, build: ( l ) => PG.buildBroadleaf( 'kukui', l ), near: 80, mid: 190, imp: 'far', tint: [ [ 0.74, 0.8, 0.72 ], [ 0.88, 0.95, 0.84 ] ], bark: W, shadow: true },
-	[ SP.OHIA ]: { kind: KIND.TREE, build: ( l ) => PG.buildBroadleaf( 'ohia', l ), near: 80, mid: 190, imp: 'far', tint: [ [ 0.8, 0.92, 0.8 ], [ 1.1, 1.05, 0.85 ] ], bark: W, mode: [ 0, 0, 1, 0 ], shadow: true },
-	[ SP.PINE ]: { kind: KIND.PINE, build: PG.buildPine, near: 100, mid: 250, imp: 'far', tint: [ [ 0.9, 0.95, 0.95 ], [ 1.05, 1.08, 1.0 ] ], bark: W, shadow: true },
-	[ SP.IRONWOOD ]: { kind: KIND.TREE, build: ( l ) => PG.buildBroadleaf( 'ironwood', l ), near: 80, mid: 190, imp: 'far', tint: [ [ 0.9, 0.95, 0.9 ], [ 1.08, 1.05, 0.95 ] ], bark: W, shadow: true },
-	[ SP.KIAWE ]: { kind: KIND.TREE, build: ( l ) => PG.buildBroadleaf( 'kiawe', l ), near: 75, mid: 170, imp: 'far', tint: [ [ 0.95, 0.98, 0.85 ], [ 1.1, 1.08, 0.9 ] ], bark: [ 0.8, 0.75, 0.7 ], shadow: true },
-	[ SP.TREEFERN ]: { kind: KIND.SMALL, build: PG.buildTreeFern, near: 62, imp: 240, tint: [ [ 0.9, 1, 0.9 ], [ 1.1, 1.08, 0.9 ] ], bark: [ 0.8, 0.7, 0.6 ], shadow: true },
-	[ SP.BANANA ]: { kind: KIND.SMALL, build: PG.buildBanana, near: 62, imp: 220, tint: [ [ 0.95, 1, 0.9 ], [ 1.1, 1.1, 0.95 ] ], shadow: true },
-	[ SP.TI ]: { kind: KIND.SMALL, build: PG.buildTi, near: 55, imp: 150, tint: [ [ 0.95, 1, 0.95 ], [ 1.1, 1.05, 0.95 ] ], mode: [ 0, 1, 0, 0 ], shadow: true },
-	[ SP.SHRUB ]: { kind: KIND.SMALL, build: PG.buildShrub, near: 55, imp: 200, tint: [ [ 0.85, 0.95, 0.85 ], [ 1.1, 1.1, 0.9 ] ], mode: [ 0, 0, 2, 0 ], shadow: true },
-	[ SP.NAUPAKA ]: { kind: KIND.SMALL, build: PG.buildNaupaka, near: 65, imp: 200, tint: [ [ 0.95, 1, 0.95 ], [ 1.1, 1.08, 0.95 ] ], shadow: true },
-	[ SP.TALLGRASS ]: { kind: KIND.SMALL, build: PG.buildTallGrass, near: 55, imp: 170, tint: [ [ 0.42, 0.44, 0.36 ], [ 0.66, 0.56, 0.36 ] ], mode: [ 1, 0, 0, 0 ], shadow: true },
-	[ SP.PINEAPPLE ]: { kind: KIND.SMALL, build: PG.buildPineappleRow, near: 30, mid: 70, tint: [ [ 0.95, 1, 1 ], [ 1.05, 1.05, 1 ] ], shadow: false },
-	[ SP.CANE ]: { kind: KIND.CANE, build: PG.buildCanePatch, near: 80, mid: 260, tint: [ [ 0.95, 1, 0.95 ], [ 1.08, 1.05, 0.9 ] ], shadow: true },
+	[ SP.PALM ]: { kind: KIND.PALM, build: PG.buildPalm, near: 90, mid: 240, imp: 'far', tint: [ [ 0.93, 0.99, 1.04 ], [ 1.096, 1.016, 0.824 ] ], leaf: [ 0.62, 0.4, 0.3, 0 ], shadow: true },
+	[ SP.MONKEYPOD ]: { kind: KIND.TREE, build: ( l ) => PG.buildBroadleaf( 'monkeypod', l ), near: 85, mid: 210, imp: 'far', tint: IV, bark: W, mode: [ 0, 0, 0, 1 ], leaf: [ ...CANOPY, 1 ], shadow: true },
+	[ SP.KUKUI ]: { kind: KIND.TREE, build: ( l ) => PG.buildBroadleaf( 'kukui', l ), near: 80, mid: 190, imp: 'far', tint: IV, bark: W, mode: [ 0, 0, 0, 1 ], leaf: [ ...CANOPY, 0.8 ], shadow: true },
+	[ SP.OHIA ]: { kind: KIND.TREE, build: ( l ) => PG.buildBroadleaf( 'ohia', l ), near: 80, mid: 190, imp: 'far', tint: IV, bark: W, mode: [ 0, 0, 1, 1 ], leaf: [ 0.65, 0.15, 0.5, 1 ], shadow: true },
+	[ SP.PINE ]: { kind: KIND.PINE, build: PG.buildPine, near: 100, mid: 250, imp: 'far', tint: IV, bark: W, mode: [ 0, 0, 0, 1 ], leaf: [ ...CANOPY, 0.3 ], shadow: true },
+	[ SP.IRONWOOD ]: { kind: KIND.TREE, build: ( l ) => PG.buildBroadleaf( 'ironwood', l ), near: 80, mid: 190, imp: 'far', tint: IV, bark: W, mode: [ 0, 0, 0, 1 ], leaf: [ ...CANOPY, 0.3 ], shadow: true },
+	[ SP.KIAWE ]: { kind: KIND.TREE, build: ( l ) => PG.buildBroadleaf( 'kiawe', l ), near: 75, mid: 170, imp: 'far', tint: IV, bark: W, mode: [ 0, 0, 0, 1 ], leaf: [ ...CANOPY, 0 ], shadow: true },
+	[ SP.TREEFERN ]: { kind: KIND.SMALL, build: PG.buildTreeFern, near: 62, imp: 240, tint: [ [ 0.85, 0.9, 0.9 ], [ 1.1, 1.08, 0.95 ] ], bark: W, leaf: [ 0.7, 0.4, 0.3, 1 ], shadow: true },
+	[ SP.BANANA ]: { kind: KIND.SMALL, build: PG.buildBanana, near: 62, imp: 220, tint: [ [ 0.9, 0.95, 0.95 ], [ 1.1, 1.08, 0.95 ] ], leaf: [ 0.7, 0.4, 0.3, 0 ], shadow: true },
+	[ SP.TI ]: { kind: KIND.SMALL, build: PG.buildTi, near: 55, imp: 150, tint: [ [ 0.9, 0.95, 0.95 ], [ 1.1, 1.05, 0.95 ] ], mode: [ 0, 1, 0, 0 ], leaf: [ 0.45, 0.42, 0.2, 0 ], shadow: true },
+	[ SP.SHRUB ]: { kind: KIND.SMALL, build: PG.buildShrub, near: 55, imp: 200, tint: IV, mode: [ 0, 0, 2, 1 ], leaf: [ ...CANOPY, 0 ], shadow: true },
+	[ SP.NAUPAKA ]: { kind: KIND.SMALL, build: PG.buildNaupaka, near: 65, imp: 200, tint: IV, mode: [ 0, 0, 0, 1 ], leaf: [ 0.65, 0.15, 0.5, 0 ], shadow: true },
+	[ SP.TALLGRASS ]: { kind: KIND.SMALL, build: PG.buildTallGrass, near: 55, imp: 170, tint: [ W, DRY ], mode: [ 1, 0, 0, 0 ], leaf: [ 0.8, 0.4, 0.3, 0 ], shadow: true },
+	[ SP.PINEAPPLE ]: { kind: KIND.SMALL, build: PG.buildPineappleRow, near: 30, mid: 70, tint: [ [ 0.95, 1, 1 ], [ 1.05, 1.05, 1 ] ], leaf: [ 0.6, 0.4, 0.2, 0 ], shadow: false },
+	[ SP.CANE ]: { kind: KIND.CANE, build: PG.buildCanePatch, near: 80, mid: 260, tint: [ [ 0.95, 1, 0.95 ], [ 1.08, 1.05, 0.9 ] ], leaf: [ 0.8, 0.4, 0.3, 0 ], shadow: true },
 	[ SP.ROCK ]: { kind: KIND.ROCK, build: PG.buildRock, near: 60, mid: 170, tint: [ [ 0.58, 0.55, 0.52 ], [ 0.2, 0.19, 0.2 ] ], shadow: true },
-	[ SP.FERN ]: { kind: KIND.SMALL, build: PG.buildFern, near: 45, tint: [ [ 0.9, 1, 0.9 ], [ 1.1, 1.1, 0.95 ] ], shadow: false },
-	[ SP.GRASS ]: { kind: KIND.GRASS, build: PG.buildGrassClump, near: 55, tint: [ [ 1, 1, 1 ], [ 1, 1, 1 ] ], shadow: false },
+	[ SP.FERN ]: { kind: KIND.SMALL, build: PG.buildFern, near: 45, tint: [ [ 0.85, 0.9, 0.9 ], [ 1.1, 1.1, 0.95 ] ], leaf: [ 0.7, 0.4, 0.3, 0 ], shadow: false },
+	// beach clutter (Tidewater DebrisPlacement): driftwood on the wrack line, coconuts and dead fronds under
+	// the palms; lying still (the rock kind: no wind), near only
+	[ SP.DRIFTWOOD ]: { kind: KIND.ROCK, build: PG.buildDriftwood, near: 55, tint: [ W, W ], bark: W, leaf: [ 0.8, 0.3, 0, 0 ], shadow: true },
+	[ SP.NUTS ]: { kind: KIND.ROCK, build: PG.buildFallenNuts, near: 35, tint: [ W, W ], shadow: false },
+	[ SP.FROND ]: { kind: KIND.ROCK, build: PG.buildFallenFrond, near: 45, tint: [ [ 0.85, 0.85, 0.8 ], [ 1.1, 1.05, 0.95 ] ], leaf: [ 0.75, 0.3, 0.1, 0 ], shadow: false },
+	// (the grass layer carries the ground data of the grass field: no instances, see GrassField)
+	[ SP.GRASS ]: { kind: KIND.GRASS, build: null, near: 0, tint: [ W, W ], shadow: false },
 };
 
-// dist: LOD distance scale, density: share of the scattered plants drawn, grass: grass radius (m),
-// far: share of the render distance the trees reach, blend: impostor three-frame blending distance (m)
+// dist: LOD distance scale, density: share of the scattered plants drawn, far: share of the render
+// distance the trees reach, blend: impostor three-frame blending distance (m). The grass field and the
+// pebbles have their own quality tables (GrassField GRASS_QUALITY, PebbleField PEBBLE_QUALITY).
 const QUALITY = {
-	low: { dist: 0.55, density: 0.5, grass: 0, far: 0.6, blend: 0 },
-	medium: { dist: 0.78, density: 0.75, grass: 36, far: 0.85, blend: 500 },
-	high: { dist: 1, density: 1, grass: 55, far: 1, blend: 1e5 },
-	ultra: { dist: 1.3, density: 1, grass: 75, far: 1, blend: 1e5 },
+	low: { dist: 0.55, density: 0.5, far: 0.6, blend: 0 },
+	medium: { dist: 0.78, density: 0.75, far: 0.85, blend: 500 },
+	high: { dist: 1, density: 1, far: 1, blend: 1e5 },
+	ultra: { dist: 1.3, density: 1, far: 1, blend: 1e5 },
 };
 
 // cross-fade band, share of the switch distance: short (every plant jitters its switch distances, see
 // VegMaterial), so only a few plants are ever mid-way
 const FADE = 0.03;
-const MARGIN = { near: 18, mid: 50, far: 110, grass: 8 };
-const MOVE = { near: 7, mid: 22, far: 55, grass: 4 }; // refill after the camera moved this far
-// grass levels, shares of the grass radius: tier 2 blades narrow away over [ T2 ], tier 1 over [ T1 ],
-// the full clumps hand over to the three-blade clumps at SPLIT, which thin out from THIN on
-const GRASS = { T2: [ 0.14, 0.26 ], T1: [ 0.34, 0.5 ], SPLIT: 0.52, THIN: 0.6 };
+const MARGIN = { near: 18, mid: 50, far: 110 };
+const MOVE = { near: 7, mid: 22, far: 55 }; // refill after the camera moved this far
+// the ground layer reaches past the grass field's far radius by a block and its filter neighbours
+const GROUND_MARGIN = 48;
+// the shaded sward base the terrain draws under the grass field (Terrain.js TerrainGrass.fade.z)
+const SWARD = 0.85;
 const COLLIDE_R = 48;
 const REGROW_H = 48; // in-game hours until a picked palm / banana plant bears again
 const _v = new THREE.Vector3();
@@ -94,14 +118,14 @@ export class Vegetation {
 		this.colliders = new Map();
 		this.picked = {};
 		// cells held, instances per band after the last refill, the last refill's time (ms), frames
-		this.stats = { cells: 0, grass: 0, near: 0, mid: 0, far: 0, rebuildMs: 0, frames: 0 };
+		this.stats = { cells: 0, grass: 0, pebbles: 0, near: 0, mid: 0, far: 0, rebuildMs: 0, frames: 0 };
 		this._lastStream = 0;
 		this._streamPos = new THREE.Vector3( 1e9, 0, 0 );
 		this._want = [];
 		this._wantI = 0;
-		this._bandPos = { near: new THREE.Vector3( 1e9, 0, 0 ), mid: new THREE.Vector3( 1e9, 0, 0 ), far: new THREE.Vector3( 1e9, 0, 0 ), grass: new THREE.Vector3( 1e9, 0, 0 ) };
-		this._bandDirty = { near: true, mid: true, far: true, grass: true };
-		this._bandTime = { near: 0, mid: 0, far: 0, grass: 0 };
+		this._bandPos = { near: new THREE.Vector3( 1e9, 0, 0 ), mid: new THREE.Vector3( 1e9, 0, 0 ), far: new THREE.Vector3( 1e9, 0, 0 ) };
+		this._bandDirty = { near: true, mid: true, far: true };
+		this._bandTime = { near: 0, mid: 0, far: 0 };
 		this._colPos = new THREE.Vector3( 1e9, 0, 0 );
 		this._town = 0; // 0 wild .. 1 town at the camera
 		this._townT = 0;
@@ -130,17 +154,19 @@ export class Vegetation {
 		const atlas = buildLeafAtlas();
 		this.atlas = atlas;
 		vegTextures( atlas.texture );
-		this.targets = { near: [], mid: [], grass: [] };
+		this.targets = { near: [], mid: [] };
 		this.spTargets = []; // species -> { near, mid }
 		this.models = [];
 		this.midModels = [];
 		for ( let s = 0; s < NSP; s ++ ) {
 			const cfg = SPEC[ s ];
 			const lods = {};
+			this.spTargets[ s ] = lods;
+			if ( ! cfg.build ) continue;
 			const g0 = cfg.build( 0 );
 			this.models[ s ] = g0;
 			const make = ( g, name, shadow ) => {
-				const U = vegUniforms( cfg.kind, cfg.tint[ 0 ], cfg.tint[ 1 ], cfg.bark, cfg.mode );
+				const U = vegUniforms( cfg.kind, cfg.tint[ 0 ], cfg.tint[ 1 ], cfg.bark, cfg.mode, cfg.leaf );
 				const t = new InstanceTarget( SPECIES[ s ].name + '-' + name, g, makeVegMaterial( U ), shadow ? makeVegDepthMaterial( U ) : null );
 				t.U = U;
 				t.species = s;
@@ -148,37 +174,38 @@ export class Vegetation {
 				this.group.add( t.mesh );
 				return t;
 			};
-			if ( s === SP.GRASS ) {
-				lods.near = make( g0, 'grass', false );
+			lods.near = make( g0, 'near', cfg.shadow );
+			this.targets.near.push( lods.near );
+			if ( cfg.mid ) {
 				const g1 = cfg.build( 1 );
 				this.midModels.push( g1 );
-				lods.mid = make( g1, 'grass-far', false );
-				this.targets.grass.push( lods.near, lods.mid );
-			} else {
-				lods.near = make( g0, 'near', cfg.shadow );
-				this.targets.near.push( lods.near );
-				if ( cfg.mid ) {
-					const g1 = cfg.build( 1 );
-					this.midModels.push( g1 );
-					lods.mid = make( g1, 'mid', cfg.shadow );
-					this.targets.mid.push( lods.mid );
-				}
+				lods.mid = make( g1, 'mid', cfg.shadow );
+				this.targets.mid.push( lods.mid );
 			}
-			this.spTargets[ s ] = lods;
 		}
+		// the camera-following ground flora (ported from Tidewater): grass field and beach pebbles
+		this.ground = new GroundData( this.game.renderer.gl );
+		this.grassField = new GrassField( this.ground );
+		this.pebbles = new PebbleField( this.ground );
+		this.group.add( ...this.grassField.meshes, this.pebbles.mesh );
 		// impostors: trees far away (one mesh) and the small plants at mid range (another)
 		this.impostors = new Impostors( this.game.renderer.gl, this.models, SPEC );
 		this.impFar = this.impostors.makeTarget( 'far' );
 		this.impMid = this.impostors.makeTarget( 'mid' );
 		this.group.add( this.impFar.mesh, this.impMid.mesh );
 		// what each band refills (fixed lists: refills allocate nothing)
-		this.bandTargets = { grass: this.targets.grass, near: this.targets.near, mid: [ ...this.targets.mid, this.impMid ], far: [ this.impFar ] };
-		this.bandLayers = { grass: [ LAYER.GRASS ], near: [ LAYER.CANOPY, LAYER.DETAIL ], mid: [ LAYER.CANOPY, LAYER.DETAIL ], far: [ LAYER.CANOPY ] };
+		this.bandTargets = { near: this.targets.near, mid: [ ...this.targets.mid, this.impMid ], far: [ this.impFar ] };
+		this.bandLayers = { near: [ LAYER.CANOPY, LAYER.DETAIL ], mid: [ LAYER.CANOPY, LAYER.DETAIL ], far: [ LAYER.CANOPY ] };
 		this.buildMs = performance.now() - t0;
 	}
 
 	// building footprints, roads and streets bucketed on a 128 m grid (sent along with scatter jobs)
+	// building lots appended after the vegetation was installed (city/Buildings.js infill): rebuild the
+	// obstacles and scatter again the cells already streamed, so no tree stands on a new lot
+	rebuildObstacles() { this._buildObstacles(); }
+
 	_buildObstacles() {
+		if ( this.cells?.size ) this._rescatter();
 		const meta = this.world.meta;
 		const B = 128;
 		const grid = new Map();
@@ -222,6 +249,14 @@ export class Vegetation {
 		this._obsKey = key;
 	}
 
+	// forget every streamed cell (they are requested again with the current obstacles)
+	_rescatter() {
+		for ( const c of this.cells.values() ) if ( c.job ) c.job.cancelled = true;
+		this.cells.clear();
+		for ( const b in this._bandDirty ) this._bandDirty[ b ] = true;
+		this._streamPos.set( 1e9, 0, 0 );
+	}
+
 	_obstaclesFor( x0, z0, size ) {
 		const B = 128, m = 14;
 		const bs = new Set(), ss = new Set();
@@ -244,10 +279,10 @@ export class Vegetation {
 	// ---- quality -------------------------------------------------------------------------------------------------
 
 	setQuality() {
-		const q = QUALITY[ this.settings.get( 'vegetation' ) ] || QUALITY.high;
+		const name = QUALITY[ this.settings.get( 'vegetation' ) ] ? this.settings.get( 'vegetation' ) : 'high';
+		const q = QUALITY[ name ];
 		this.q = q;
 		const rd = Math.min( 2600, this.settings.get( 'renderDistance' ) || 1400 );
-		const grassOn = this.settings.get( 'grass' ) !== false && q.grass > 0;
 		VG.uDensity.value = q.density;
 		// LOD cross-fades by anti-aliasing mode: a moving dither under TAA (it resolves into a blend),
 		// alpha to coverage with MSAA (which also softens the cut-out leaf edges), else a clean swap
@@ -271,43 +306,37 @@ export class Vegetation {
 		let nearMax = 0, midMax = 0, detailMax = 0;
 		for ( let s = 0; s < NSP; s ++ ) {
 			const cfg = SPEC[ s ], T = this.spTargets[ s ];
-			const k = s === SP.GRASS ? 1 : q.dist;
-			const near = s === SP.GRASS ? ( grassOn ? q.grass : 0 ) : cfg.near * k;
-			const mid = cfg.mid ? Math.max( near + 20, cfg.mid * k ) : 0;
+			const near = cfg.near * q.dist;
+			const mid = cfg.mid ? Math.max( near + 20, cfg.mid * q.dist ) : 0;
 			let imp = null;
 			if ( cfg.imp === 'far' ) imp = [ mid || near, Math.max( ( mid || near ) + 50, rd * q.far ) ];
-			else if ( cfg.imp ) imp = [ near, Math.max( near + 20, cfg.imp * k ) ];
+			else if ( cfg.imp ) imp = [ near, Math.max( near + 20, cfg.imp * q.dist ) ];
 			this.ranges[ s ] = { near, mid, imp };
+			if ( ! T.near ) continue;
 			win( T.near.U, 0, near, ! T.mid && ! imp );
 			if ( T.mid ) win( T.mid.U, near, mid, ! imp );
-			if ( s !== SP.GRASS ) nearMax = Math.max( nearMax, near );
+			nearMax = Math.max( nearMax, near );
 			midMax = Math.max( midMax, mid, cfg.imp && cfg.imp !== 'far' ? imp[ 1 ] : 0 );
 			if ( SPECIES[ s ].layer === LAYER.DETAIL ) detailMax = Math.max( detailMax, imp ? imp[ 1 ] : mid || near );
 		}
-		// grass: blade tiers narrow away, the full clumps hand over to the three-blade ones at the split
-		// (a hard switch: by then both show the same three blades), which thin out and shrink at the end
-		const gR = this.ranges[ SP.GRASS ].near, gS = gR * GRASS.SPLIT;
-		this.ranges[ SP.GRASS ].split = gS;
-		const gN = this.spTargets[ SP.GRASS ].near, gF = this.spTargets[ SP.GRASS ].mid;
-		for ( const t of [ gN, gF ] ) t.U.uGrass.value.set( gR * GRASS.T2[ 0 ], gR * GRASS.T2[ 1 ], gR * GRASS.T1[ 0 ], gR * GRASS.T1[ 1 ] );
-		gN.U.uShrinkEnd.value = 0;
-		gN.U.uLod.value.set( 0, 0, gR > 0 ? gS : - 2, gR > 0 ? gS + 0.01 : - 1 );
-		gF.U.uShrinkEnd.value = 1;
-		if ( gR > 0 ) gF.U.uLod.value.set( gS, gS + 0.01, gR * 0.88, gR ); else gF.U.uLod.value.set( 0, 0, - 2, - 1 );
-		gF.U.uThin.value.set( gR * GRASS.THIN, gR, 0.45 );
+		// the ground flora: grass field (off with the grass setting) and beach pebbles
+		const grassOn = this.settings.get( 'grass' ) !== false;
+		this.grassField.setQuality( grassOn ? name : 'low' );
+		this.pebbles.setQuality( name );
+		const groundR = Math.max( this.grassField.radius, this.pebbles.radius );
 		// under the grass field the terrain shows the sward's shaded base, fading back to its own meadow
-		// where the blades thin out. Half strength: our meadows are clumpy (and sparse towards the
-		// forest), and a fully dark base reads as bare soil between the clumps
-		// (the strength follows the camera in update: towns have no grass field)
-		this._sward = gR > 0 ? 0.5 : 0;
-		this._terrain?.TerrainGrass?.fade?.value?.set( gR * 0.35, gR * 0.8, this._sward * ( 1 - this._town ) );
+		// over the tier 0 cut-off (Tidewater: 62-87 m); the strength follows the camera in update (towns
+		// have no grass field)
+		const fade = this.grassField.fade;
+		this._sward = this.grassField.enabled ? SWARD : 0;
+		this._terrain?.TerrainGrass?.fade?.value?.set( fade[ 0 ], fade[ 1 ], this._sward * ( 1 - this._town ) );
 		this.impostors.setRanges( this.ranges, q, FADE );
 		this.radius = {
 			[ LAYER.CANOPY ]: Math.max( rd * q.far, midMax ) + 80,
 			[ LAYER.DETAIL ]: detailMax + 40,
-			[ LAYER.GRASS ]: grassOn ? q.grass + 20 : 0,
+			[ LAYER.GRASS ]: groundR > 0 ? groundR + GROUND_MARGIN : 0,
 		};
-		this.bandR = { near: nearMax + MARGIN.near, mid: midMax + MARGIN.mid, far: this.radius[ LAYER.CANOPY ], grass: ( grassOn ? q.grass : 0 ) + MARGIN.grass };
+		this.bandR = { near: nearMax + MARGIN.near, mid: midMax + MARGIN.mid, far: this.radius[ LAYER.CANOPY ] };
 		for ( const b in this._bandDirty ) this._bandDirty[ b ] = true;
 		this._streamPos.set( 1e9, 0, 0 );
 	}
@@ -359,7 +388,11 @@ export class Vegetation {
 				if ( this.cells.has( k ) ) continue;
 				// open sea: nothing to scatter
 				const [ , hi ] = this.hf.rangeOver( i * size, j * size, size );
-				if ( hi < 0.3 ) { this.cells.set( k, { layer, i, j, state: 3, data: null } ); continue; }
+				if ( hi < 0.3 ) {
+					this.cells.set( k, { layer, i, j, state: 3, data: null } );
+					if ( layer === LAYER.GRASS ) this.ground.put( i, j, null );
+					continue;
+				}
 				want.push( { k, layer, i, j, d: d / ( layer === LAYER.GRASS ? 3 : layer === LAYER.DETAIL ? 1.6 : 1 ) } );
 			}
 		}
@@ -380,12 +413,13 @@ export class Vegetation {
 			if ( this.cells.get( w.k ) !== cell ) return; // evicted meanwhile
 			if ( ! r ) { this.cells.delete( w.k ); return; }
 			cell.data = r.data; cell.off = r.off; cell.state = 2;
+			// the ground layer's cells carry the ground flora's data
+			if ( w.layer === LAYER.GRASS ) { this.ground.put( w.i, w.j, r.ground || null ); return; }
 			this._markDirty( cell );
 		} ).catch( () => { this.inFlight --; this.cells.delete( w.k ); } );
 	}
 
 	_markDirty( cell ) {
-		if ( cell.layer === LAYER.GRASS ) { this._bandDirty.grass = true; return; }
 		const size = LAYER_CELL[ cell.layer ];
 		const cam = this._streamPos;
 		const d = Math.hypot( ( cell.i + 0.5 ) * size - cam.x, ( cell.j + 0.5 ) * size - cam.z ) - size * 0.71;
@@ -397,7 +431,7 @@ export class Vegetation {
 	// ---- band refills ----------------------------------------------------------------------------------------------
 
 	_bands( cam, now ) {
-		for ( const band of [ 'grass', 'near', 'mid', 'far' ] ) {
+		for ( const band of [ 'near', 'mid', 'far' ] ) {
 			const moved = this._bandPos[ band ].distanceTo( cam ) > MOVE[ band ];
 			const dirty = this._bandDirty[ band ] && now - this._bandTime[ band ] > ( band === 'far' ? 700 : band === 'mid' ? 350 : 150 );
 			if ( ! moved && ! dirty ) continue;
@@ -433,9 +467,8 @@ export class Vegetation {
 				const a = off[ s ], b = off[ s + 1 ];
 				if ( a === b ) continue;
 				const r = R[ s ];
-				if ( band === 'grass' ) { this._fillGrass( data, a, b, cam, ox, oy, oz, density, r, m ); continue; }
 				let tgt = null, lo = 0, hi = 0, impK = - 1;
-				if ( band === 'near' || band === 'grass' ) { tgt = this.spTargets[ s ].near; hi = r.near + m; } else if ( band === 'mid' ) {
+				if ( band === 'near' ) { tgt = this.spTargets[ s ].near; hi = r.near + m; } else if ( band === 'mid' ) {
 					if ( this.spTargets[ s ].mid ) { tgt = this.spTargets[ s ].mid; lo = r.near - m; hi = r.mid + m; } else if ( r.imp && SPEC[ s ].imp !== 'far' ) { tgt = this.impMid; lo = r.imp[ 0 ] - m; hi = r.imp[ 1 ] + m; impK = imp.slot[ s ]; }
 				} else if ( SPEC[ s ].imp === 'far' ) { tgt = this.impFar; lo = r.imp[ 0 ] - m; hi = r.imp[ 1 ] + m; impK = imp.slot[ s ]; }
 				if ( ! tgt || hi <= 0 ) continue;
@@ -457,21 +490,6 @@ export class Vegetation {
 		let total = 0;
 		for ( const t of targets ) { t.end( o ); total += t.count; }
 		this.stats[ band ] = total;
-	}
-
-	// grass clumps of one cell into the full level (near the camera) and the three-blade level (beyond
-	// the split); the windows overlap by the margin, the shaders make the exact cut
-	_fillGrass( data, a, b, cam, ox, oy, oz, density, r, m ) {
-		const T = this.spTargets[ SP.GRASS ];
-		const n2 = ( r.split + m ) ** 2, f2 = Math.max( 0, r.split - m ) ** 2, e2 = ( r.near + m ) ** 2;
-		for ( let n = a; n < b; n ++ ) {
-			const q = n * STRIDE;
-			if ( data[ q + 5 ] >= density ) continue;
-			const ex = data[ q ] - cam.x, ez = data[ q + 2 ] - cam.z;
-			const d2 = ex * ex + ez * ez;
-			if ( d2 < n2 ) T.near.push( data, q, ox, oy, oz );
-			if ( d2 >= f2 && d2 < e2 ) T.mid.push( data, q, ox, oy, oz );
-		}
 	}
 
 	// ---- physics: trunk boxes around the player -------------------------------------------------------------------
@@ -552,6 +570,11 @@ export class Vegetation {
 		if ( sw ) sw.z += ( this._sward * ( 1 - this._town ) - sw.z ) * Math.min( 1, dt * 1.5 );
 		this._stream( cam, now );
 		this._bands( cam, now );
+		// the ground flora: upload the blocks that arrived, follow the camera
+		const camera = this.world.camera;
+		this.ground.update( cam );
+		if ( this.grassField.update( camera ) ) this.stats.grass = this.grassField.cellCounts.join( '/' );
+		if ( this.pebbles.update( camera, this.hf.heightAt( cam.x, cam.z ) ) ) this.stats.pebbles = this.pebbles.count;
 		this._colliders();
 	}
 
@@ -673,7 +696,10 @@ export class Vegetation {
 		this.game.physics.removeOwner( this );
 		this.colliders.clear();
 		for ( const list of Object.values( this.targets ) ) for ( const t of list ) t.dispose();
-		for ( const g of [ ...this.models, ...this.midModels ] ) g.dispose();
+		this.grassField.dispose();
+		this.pebbles.dispose();
+		this.ground.dispose();
+		for ( const g of [ ...this.models, ...this.midModels ] ) g?.dispose();
 		this.impostors.dispose();
 		this.atlas.texture.dispose();
 		this.game.scene.remove( this.group );

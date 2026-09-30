@@ -31,6 +31,12 @@ export const TILE = {
 	DEADFROND: [ 928, 1536, 1024, 128, 1 ], // dry brown palm frond wing (rotated: v along the canvas x)
 };
 
+// linear mean colour of every tile's covered texels (filled by buildLeafAtlas): the plant builders
+// divide their target colours by it (PlantGeometry leafCol), so the texture only brings the leaf
+// structure and the palette (Tidewater's) sets the albedo, the same in the impostor bakes
+export const TILE_MEAN = {};
+const LIN = Array.from( { length: 256 }, ( _, v ) => { const c = v / 255; return c < 0.04045 ? c / 12.92 : Math.pow( ( c + 0.055 ) / 1.055, 2.4 ); } );
+
 export function atlasUV( tile, u, v, out ) {
 	const t = TILE[ tile ];
 	u = Math.min( 0.998, Math.max( 0.002, u ) ); v = Math.min( 0.998, Math.max( 0.002, v ) );
@@ -97,49 +103,73 @@ function clipTile( ctx, t ) {
 
 // ---- tiles ------------------------------------------------------------------------------------------------
 
-// coconut frond wing: ~64 leaflets leaving the rachis at the left edge, their length varying, a few
-// broken short; young leaflets lighter at the base, darker and yellowing towards the tips
-const GREEN_FROND = { n: 64, base: 0x6a8f2a, tip: 0x46631c, young: 0x9db448, dry: 0x9a8446, broken: 0.05, rachis: [ '#b8a860', '#8f8440' ] };
-const DEAD_FROND = { n: 40, base: 0x8c7046, tip: 0x6c5434, young: 0xa8905c, dry: 0x5e4a30, broken: 0.25, rachis: [ '#a08a5a', '#7a6640' ] };
+// coconut frond wing, ported from Tidewater VegMaterials.js vegPlantMask / vegPlantAlbedo (part 1): ~95
+// narrow leaflets per side separated by gaps that show the sky, bunching and spreading irregularly, some
+// short, split or torn away; darker toward their tips, paler at the base, each a little different, some
+// with browned dry tips; a pale yellow midrib. Drawn per texel (tile u = t across the wing, v = s along
+// the frond) in the mature frond colour: the geometry's vertex colour takes it to each frond's age
+// colour (PlantGeometry buildPalm, Tidewater's age ramp).
+const GREEN_FROND = { leaf: 0x445f27, tipDry: [ 0x8c7a4a, 0x6e5b39 ], rib: 0xb3a660, dryP: 0.3, torn: 0.78, seed: 0.37 };
+const DEAD_FROND = { leaf: 0x6b5638, tipDry: [ 0x5c4a30, 0x7a6440 ], rib: 0x6f5a3a, dryP: 0.8, torn: 0.62, seed: 0.71 };
 
-function drawFrond( ctx, w, h, rnd, pal = GREEN_FROND ) {
-	const N = pal.n;
-	const base = hex( pal.base ), tipc = hex( pal.tip ), young = hex( pal.young ), dry = hex( pal.dry );
-	for ( let k = 0; k < N; k ++ ) {
-		const s = ( k + 0.5 ) / N;
-		const y = s * h;
-		const broken = rnd() < pal.broken;
-		const len = w * ( 0.72 + 0.28 * rnd() ) * ( broken ? 0.45 : 1 );
-		const hw = h / N * ( 0.3 + 0.08 * rnd() );
-		const col = mixc( mixc( base, tipc, 0.3 + 0.4 * rnd() ), young, rnd() * 0.25 );
-		// leaflets angle slightly towards the frond tip and droop at their ends
-		ctx.save();
-		ctx.translate( 0, y );
-		ctx.beginPath();
-		ctx.moveTo( 0, - hw * 0.6 );
-		ctx.quadraticCurveTo( len * 0.5, - hw * 1.1 + len * 0.04, len, len * 0.1 );
-		ctx.quadraticCurveTo( len * 0.5, hw * 1.1 + len * 0.05, 0, hw * 0.6 );
-		ctx.closePath();
-		const g = ctx.createLinearGradient( 0, 0, len, 0 );
-		g.addColorStop( 0, css( mixc( col, young, 0.35 ) ) );
-		g.addColorStop( 0.5, css( col ) );
-		g.addColorStop( 0.85, css( col, 0.86 ) );
-		g.addColorStop( 1, css( rnd() < 0.3 ? mixc( col, dry, 0.7 ) : col, 0.8 ) );
-		ctx.fillStyle = g;
-		ctx.fill();
-		// midrib highlight
-		ctx.strokeStyle = css( mixc( col, young, 0.6 ), 1.1 );
-		ctx.globalAlpha = 0.5;
-		ctx.lineWidth = 1;
-		ctx.beginPath(); ctx.moveTo( 2, 0 ); ctx.quadraticCurveTo( len * 0.5, len * 0.02, len * 0.95, len * 0.09 ); ctx.stroke();
-		ctx.globalAlpha = 1;
-		ctx.restore();
+// Dave Hoskins' hash and value noise, as the shaders' vegHash12 / vegNoise
+function hash12( x, y ) {
+	let a = x * 0.1031, b = y * 0.1031, c = x * 0.1031;
+	a -= Math.floor( a ); b -= Math.floor( b ); c -= Math.floor( c );
+	const d = a * ( b + 33.33 ) + b * ( c + 33.33 ) + c * ( a + 33.33 );
+	a += d; b += d; c += d;
+	const r = ( a + b ) * c;
+	return r - Math.floor( r );
+}
+function noise2( x, y ) {
+	const i = Math.floor( x ), j = Math.floor( y ), fx = x - i, fy = y - j;
+	const u = fx * fx * ( 3 - 2 * fx ), v = fy * fy * ( 3 - 2 * fy );
+	const a = hash12( i, j ), b = hash12( i + 1, j ), c = hash12( i, j + 1 ), d = hash12( i + 1, j + 1 );
+	return ( a + ( b - a ) * u ) * ( 1 - v ) + ( c + ( d - c ) * u ) * v;
+}
+const sstep = ( a, b, x ) => { const t = Math.min( 1, Math.max( 0, ( x - a ) / ( b - a ) ) ); return t * t * ( 3 - 2 * t ); };
+
+// (written per texel with putImageData, which ignores the tile's clip and transform: T places it,
+// rotated tiles swap the axes)
+function drawFrond( ctx, w, h, rnd, pal, T ) {
+	const img = ctx.getImageData( T[ 0 ], T[ 1 ], T[ 2 ], T[ 3 ] );
+	const d = img.data;
+	const at = T[ 4 ] ? ( xx, y ) => ( xx * T[ 2 ] + y ) * 4 : ( xx, y ) => ( y * T[ 2 ] + xx ) * 4;
+	const N = 95, fseed = pal.seed;
+	const leafC = hex( pal.leaf ), dry0 = hex( pal.tipDry[ 0 ] ), dry1 = hex( pal.tipDry[ 1 ] ), rib = hex( pal.rib );
+	const px = N / h; // one texel in leaflet units (edge antialiasing)
+	for ( let y = 0; y < h; y ++ ) {
+		const s = ( y + 0.5 ) / h;
+		const x = s * N + ( noise2( s * 7, fseed * 23 ) - 0.5 ) * 2.2;
+		const k = Math.floor( x );
+		const r1 = hash12( k, fseed * 91.7 ), r2 = hash12( k * 1.37 + 3.1, fseed * 17.3 );
+		const fx = x - k - 0.5 - ( r1 - 0.5 ) * 0.35;
+		const tEnd = ( 0.72 + 0.28 * r2 ) * ( r1 < 0.06 ? 0.45 : 1 );
+		const torn = noise2( k * 0.21, fseed * 37 ) > pal.torn && s > 0.3;
+		const perLeaf = hash12( k, fseed * 13.1 );
+		const tipDry = hash12( k * 1.7, fseed * 5.3 ) < pal.dryP;
+		for ( let xx = 0; xx < w; xx ++ ) {
+			const t = ( xx + 0.5 ) / w;
+			const o = at( xx, y );
+			const tt = t / tEnd;
+			const hw = Math.pow( Math.max( 1 - tt, 0 ), 0.6 ) * 0.22 * ( sstep( 0, 0.1, tt ) * 0.4 + 0.6 );
+			const split = r2 > 0.9 && tt > 0.35 + 0.35 * r1 && Math.abs( fx ) < hw * 0.3;
+			let a = tt < 1 && s > 0.06 && ! split && ! torn ? Math.min( 1, Math.max( 0, ( hw - Math.abs( fx ) ) / px + 0.5 ) ) : 0;
+			const rachis = t < 0.03;
+			if ( rachis ) a = 1;
+			if ( a <= 0 ) { d[ o + 3 ] = 0; continue; }
+			let c;
+			if ( rachis ) c = rib;
+			else {
+				const k1 = ( 1.08 + ( 0.86 - 1.08 ) * sstep( 0.2, 1, t ) ) * ( perLeaf * 0.22 + 0.9 );
+				c = [ leafC[ 0 ] * k1, leafC[ 1 ] * k1, leafC[ 2 ] * k1 ];
+				const tk = tipDry ? sstep( 0.72, 0.97, t ) * 0.85 : 0;
+				if ( tk > 0 ) c = mixc( c, mixc( dry0, dry1, perLeaf ), tk );
+			}
+			d[ o ] = c[ 0 ]; d[ o + 1 ] = c[ 1 ]; d[ o + 2 ] = c[ 2 ]; d[ o + 3 ] = a * 255;
+		}
 	}
-	// the rachis along the left edge
-	const g = ctx.createLinearGradient( 0, 0, 14 * w / 256, 0 );
-	g.addColorStop( 0, pal.rachis[ 0 ] ); g.addColorStop( 1, pal.rachis[ 1 ] );
-	ctx.fillStyle = g;
-	ctx.fillRect( 0, 0, 9 * w / 256, h );
+	ctx.putImageData( img, T[ 0 ], T[ 1 ] );
 }
 
 // fern wing: pinnae with lobed pinnules
@@ -513,8 +543,8 @@ export function buildLeafAtlas() {
 		if ( t[ 4 ] ) { ctx.transform( 0, 1, 1, 0, 0, 0 ); fn( ctx, t[ 3 ], t[ 2 ], rnd ); } else fn( ctx, t[ 2 ], t[ 3 ], rnd );
 		ctx.restore();
 	};
-	tile( 'FROND', drawFrond );
-	tile( 'DEADFROND', ( x, w, h, r ) => drawFrond( x, w, h, r, DEAD_FROND ) );
+	tile( 'FROND', ( x, w, h, r ) => drawFrond( x, w, h, r, GREEN_FROND, TILE.FROND ) );
+	tile( 'DEADFROND', ( x, w, h, r ) => drawFrond( x, w, h, r, DEAD_FROND, TILE.DEADFROND ) );
 	tile( 'FERN', drawFern );
 	tile( 'BANANA', drawBanana );
 	tile( 'BROAD', ( x, w, h, r ) => drawCluster( x, w, h, r, {
@@ -551,12 +581,13 @@ export function buildLeafAtlas() {
 	const d = img.data;
 	for ( const name in TILE ) {
 		const [ tx, ty, tw, th ] = TILE[ name ];
-		let r = 0, g = 0, b = 0, n = 0;
+		let r = 0, g = 0, b = 0, n = 0, lr = 0, lg = 0, lb = 0;
 		for ( let y = ty; y < ty + th; y += 2 ) for ( let x = tx; x < tx + tw; x += 2 ) {
 			const o = ( y * ATLAS + x ) * 4;
-			if ( d[ o + 3 ] > 200 ) { r += d[ o ]; g += d[ o + 1 ]; b += d[ o + 2 ]; n ++; }
+			if ( d[ o + 3 ] > 200 ) { r += d[ o ]; g += d[ o + 1 ]; b += d[ o + 2 ]; n ++; lr += LIN[ d[ o ] ]; lg += LIN[ d[ o + 1 ] ]; lb += LIN[ d[ o + 2 ] ]; }
 		}
 		if ( n ) { r /= n; g /= n; b /= n; } else { r = 80; g = 110; b = 50; }
+		TILE_MEAN[ name ] = n ? [ lr / n, lg / n, lb / n ] : [ LIN[ 80 ], LIN[ 110 ], LIN[ 50 ] ];
 		for ( let y = ty; y < ty + th; y ++ ) for ( let x = tx; x < tx + tw; x ++ ) {
 			const o = ( y * ATLAS + x ) * 4;
 			const a = d[ o + 3 ];

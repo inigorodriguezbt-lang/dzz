@@ -4,6 +4,7 @@
 import { HeightField } from '../HeightField.js';
 import { computeShoreField, pickSwellDir } from './ShoreField.js';
 import { laceData } from './SurfFoam.js';
+import { buildStations } from './breakerStations.js';
 
 let hf = null;
 
@@ -39,9 +40,11 @@ const handlers = {
 		const swellDir = pickSwellDir( ( x, z ) => - heightAt( x, z ), cx, cz, size * 0.5 );
 		let field = null;
 		if ( swellDir ) field = computeShoreField( heightAt, { x0, z0, size, res: fieldRes, swellDir } );
+		// the breakers' shoreline stations near the centre (they need the travel-time field)
+		const stations = field ? buildStations( h, n, step, x0, z0, { cx, cz } ) : null;
 		const transfer = [ h.buffer ];
-		if ( field ) transfer.push( field.data.buffer );
-		return { result: { x0, z0, n, step, h, field }, transfer };
+		if ( field ) transfer.push( field.data.buffer, stations.data.buffer );
+		return { result: { x0, z0, n, step, h, field, stations }, transfer };
 	},
 };
 

@@ -1290,7 +1290,7 @@ export class Hands {
 		const sleeve = c && style !== 'tank' ? ( c.color ?? m?.color ?? 0x777777 ) : null;
 		let print = null;
 		if ( sleeve != null && m?.print && m.print !== 'plain' && ! String( m.print ).startsWith( 'text:' ) ) print = sleevePrint( m );
-		this.vm.setArms( { skin: 0xb98467, sleeve, long, print, glove: gl ? ( gl.clothing?.color ?? gl.model?.color ?? 0x2a2a2a ) : null, gloveStyle: gl?.model?.style || null } );
+		this.vm.setArms( { skin: 0xb29585, sleeve, long, print, glove: gl ? ( gl.clothing?.color ?? gl.model?.color ?? 0x2a2a2a ) : null, gloveStyle: gl?.model?.style || null } );
 	}
 
 	_viewLight() {

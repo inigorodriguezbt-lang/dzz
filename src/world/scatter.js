@@ -8,9 +8,12 @@
 //             1 metro, 2 town, 3 village, 4 resort, 5 military / airport; halfWidth includes the sidewalk),
 //        cty: Float32Array [ x, z, radius, urban ] town discs near the cell (see citiesNear) }
 // Result: { data: Float32Array (instances, STRIDE floats, grouped by species), off: Int32Array (NSP + 1
-//           instance offsets), transfer }
+//           instance offsets), transfer }; grass layer cells return no instances but the ground data of
+//           the camera-following flora instead (ground: see groundData)
 import { FLAG, hash2, vnoise } from './HeightField.js';
 import { SP, NSP, STRIDE, LAYER_CELL } from './vegetation/species.js';
+import { buildDetailData, sampleDetail } from './terrain/detailData.js';
+import { isSea } from './terrain/terrainJobs.js';
 
 const TAU = Math.PI * 2;
 const NO_GROW = FLAG.ROAD | FLAG.STREET | FLAG.RUNWAY | FLAG.BUILDING | FLAG.DIRT;
@@ -247,7 +250,13 @@ export function scatterCell( hf, msg ) {
 	if ( hi < 0.3 || lo > 700 ) return out.finish();
 	const env = new Env( hf, x0, z0, size, msg.cty || null );
 	const ctx = { hf, env, out, x0, z0, size, bld: msg.bld || null, seg: msg.seg || null, e: {}, isl: hf.islandAt( x0 + size / 2, z0 + size / 2 ) };
-	if ( layer === 0 ) { canopy( ctx ); streetTrees( ctx ); yardTrees( ctx ); } else if ( layer === 1 ) { understory( ctx ); crops( ctx ); } else grass( ctx );
+	if ( layer === 0 ) { canopy( ctx ); streetTrees( ctx ); yardTrees( ctx ); } else if ( layer === 1 ) { understory( ctx ); crops( ctx ); wrack( ctx ); } else {
+		const r = out.finish();
+		const g = groundData( ctx );
+		r.ground = g;
+		r.transfer.push( g.h.buffer, g.gm.buffer, g.pm.buffer, g.cells.buffer );
+		return r;
+	}
 	return out.finish();
 }
 
@@ -325,7 +334,27 @@ function canopy( ctx ) {
 		if ( ! clearGround( ctx, x, z, big ? 6 : 3.5, e.flags ) ) return;
 		if ( nearBuilding( ctx.bld, x, z, big ? 9 : sp === SP.PALM ? 2 : 5 ) || nearRoad( ctx.seg, x, z, big ? 5 : 2.5 ) ) return;
 		placeTree( ctx, sp, x, z, gi, gj, e );
+		if ( sp === SP.PALM ) palmLitter( ctx, x, z, gi, gj );
 	} );
+}
+
+// fallen coconuts and a dead frond or two around a wild palm (Tidewater DebrisPlacement: "fallen fronds
+// and coconuts under the palms")
+function palmLitter( ctx, x, z, gi, gj ) {
+	const hf = ctx.hf;
+	for ( let k = 0; k < 3; k ++ ) {
+		const r = hash2( gi, gj, 151 + k );
+		if ( r > ( k === 2 ? 0.35 : 0.38 ) ) continue;
+		const a = hash2( gi, gj, 155 + k ) * TAU, d = 0.8 + 2.6 * hash2( gi, gj, 158 + k );
+		const px = x + Math.cos( a ) * d, pz = z + Math.sin( a ) * d;
+		if ( px < ctx.x0 || pz < ctx.z0 || px >= ctx.x0 + ctx.size || pz >= ctx.z0 + ctx.size ) continue;
+		if ( hf.flagsNear( px, pz ) & NO_GROW ) continue;
+		const y = hf.heightAt( px, pz );
+		if ( y < 0.5 ) continue;
+		const sp = k === 2 ? SP.NUTS : SP.FROND;
+		const yaw = hash2( gi, gj, 161 + k ) * TAU;
+		ctx.out.add( sp, px, y - 0.02, pz, 0.8 + 0.4 * hash2( gi, gj, 164 + k ), yaw, hash2( gi, gj, 167 + k ), 1, hash2( gi, gj, 170 + k ) );
+	}
 }
 
 // one tree: height, lean, tint from the lattice hashes; the base sinks a little into slopes
@@ -461,7 +490,13 @@ function understory( ctx ) {
 		if ( nearBuilding( ctx.bld, x, z, 9 ) || nearRoad( ctx.seg, x, z, 1.5 ) ) return;
 		const r0 = hash2( gi, gj, 221 ), r1 = hash2( gi, gj, 222 ), r2 = hash2( gi, gj, 223 ), r3 = hash2( gi, gj, 224 );
 		const rank = hash2( gi, gj, 225 );
-		const yaw = r0 * TAU;
+		// under the rain-forest canopy (the terrain's jungleW, Terrain.js): the plant sits in the forest
+		// floor's light (VegMaterial vegUnder), packed into whole turns of the yaw (15 steps)
+		const D = detailData(), mcr = macroA( D, x, z ) * 0.6 + macroB( D, x, z ) * 0.4;
+		const wetM = Math.min( 1, m * 1.15 + 0.14 ), slope01 = 1 - 1 / Math.sqrt( 1 + sl * sl );
+		const jungle = Math.min( 1, sstep( 0.52, 0.8, wetM + ( mcr - 0.5 ) * 0.3 ) + sstep( 0.18, 0.36, slope01 ) * sstep( 0.3, 0.55, wetM ) ) * treeAlt( h ) * sstep( 1.5, 5, h )
+			* ( 1 - ( e.use === 3 ? 0.85 : 0 ) ) * ( 1 - sstep( 0.35, 0.6, lava ) );
+		const yaw = r0 * TAU + TAU * Math.round( jungle * 15 );
 		let y = hf.heightAt( x, z ), s = 1, a = 0, b = r3;
 		if ( y < 0.35 ) return;
 		switch ( sp ) {
@@ -530,48 +565,196 @@ function crops( ctx ) {
 	void env; void e;
 }
 
-// ---- grass clumps (32 m cells around the player) --------------------------------------------------------
-
-// ~3.7 clumps / m² (x 9 blades near the camera, see buildGrassClump)
-const GRASS_SP = 0.52;
-function grass( ctx ) {
-	const { env, e, x0, z0, size } = ctx;
-	const ground = new MeshGround( ctx.hf, x0, z0, size );
-	const roads = new SegGrid( ctx.seg, x0, z0, size, 0.4 );
-	lattice( ctx, GRASS_SP, 401, ( x, z, gi, gj ) => {
+// ---- the wrack line: driftwood, coconuts and dead fronds washed up along the upper swash limit of the
+// beaches (Tidewater DebrisPlacement: h 1.15 - 2.1 beach metres; ours are compressed, see BEACH_V) ------------
+function wrack( ctx ) {
+	const { env, e, hf } = ctx;
+	lattice( ctx, 3.2, 501, ( x, z, gi, gj ) => {
+		const y = hf.heightAt( x, z );
+		const hb = y * 1.8 + ( vnoise( x / 9, z / 9, 502 ) - 0.5 ) * 0.5;
+		if ( hb < 1.1 || hb > 2.3 ) return;
 		env.at( x, z, e );
-		const h = e.h;
-		if ( h < 0.9 || h > 610 ) return;
-		if ( e.flags & ( NO_GROW | FLAG.FIELD ) ) return;
-		if ( e.sd < 45 && h < 3.4 ) return; // beach sand
-		const m = e.m;
-		// towns keep mown lawns only, which the terrain paints (short, even, no blades to see): no grass
-		// clumps on the town blocks, none in the rest of a town, none in the cleared yards of country houses
-		if ( e.flags & FLAG.CITY ) return;
-		if ( hash2( gi, gj, 416 ) < e.u || nearBuilding( ctx.bld, x, z, 6 ) ) return;
-		let d = 0.3 + 0.7 * sstep( 0.06, 0.38, m );
-		// where the terrain paints the rain forest's floor (Terrain.js jungleW) only a little grass grows
-		const wetM = Math.min( 1, m * 1.15 + 0.14 );
-		d *= 1 - sstep( 0.52, 0.8, wetM ) * ( e.use === 3 ? 0.15 : 0.8 );
-		d *= 1 - sstep( 0.35, 0.6, e.lava ) * 0.85;
-		d *= 1 - sstep( 0.6, 0.95, e.sl );
-		d *= 1 - sstep( 480, 600, h ) * 0.8;
-		d *= 0.5 + 0.5 * sstep( 0.2, 0.6, vnoise( x / 6.5, z / 6.5, 41 ) ); // clumpy meadows
-		if ( e.use === 3 ) d = Math.max( d, 0.9 );
-		if ( hash2( gi, gj, 411 ) >= d ) return;
-		// clear of the pavement (the flag grid is 8 m coarse): streets, their sidewalks and road shoulders
-		if ( roads.near( x, z, 0.25 ) ) return;
-		const r1 = hash2( gi, gj, 412 );
-		const s = e.use === 3 ? 0.5 + 0.3 * r1 : ( 0.6 + 0.55 * r1 ) * ( 0.8 + 0.4 * sstep( 0.2, 0.6, m ) );
-		const gy = ground.at( x, z );
-		if ( gy < 0.4 ) return;
-		// the ground's slope and south exposure (the terrain's meadow tone depends on them)
-		const hx = ground.at( x + 1, z ) - ground.at( x - 1, z ), hz = ground.at( x, z + 1 ) - ground.at( x, z - 1 );
-		const nl = Math.hypot( hx, 2, hz );
-		const slope = 1 - 2 / nl, south = - hz / nl;
-		// a: moisture, slope and south exposure packed in 8 bits each (the blades take the terrain's tone
-		// there, see VegMaterial vegGroundTone), b: grazed pasture (short)
-		const pk = Math.round( m * 255 ) + Math.round( Math.min( 1, slope ) * 255 ) * 256 + Math.round( ( south * 0.5 + 0.5 ) * 255 ) * 65536;
-		ctx.out.add( SP.GRASS, x, gy - 0.03, z, s, hash2( gi, gj, 414 ) * TAU, hash2( gi, gj, 415 ), pk, e.use === 3 ? 1 : 0 );
+		if ( e.sd > 45 || e.u > 0.5 || ( e.flags & NO_GROW ) || e.lava > 0.35 || e.sl > 0.35 ) return;
+		// clusters along the line (storms drop the wrack in drifts)
+		const drift = sstep( 0.45, 0.75, vnoise( x / 40, z / 40, 503 ) );
+		const r = hash2( gi, gj, 504 );
+		if ( r > 0.04 + 0.12 * drift ) return;
+		const k = hash2( gi, gj, 505 );
+		const sp = k < 0.45 ? SP.DRIFTWOOD : k < 0.75 ? SP.NUTS : SP.FROND;
+		const s = sp === SP.DRIFTWOOD ? 0.45 + 0.9 * Math.pow( hash2( gi, gj, 506 ), 1.5 ) : 0.8 + 0.4 * hash2( gi, gj, 506 );
+		ctx.out.add( sp, x, y - ( sp === SP.DRIFTWOOD ? 0.05 * s : 0.02 ), z, s, hash2( gi, gj, 507 ) * TAU, hash2( gi, gj, 508 ), 0.9 + 0.2 * hash2( gi, gj, 509 ), hash2( gi, gj, 510 ) );
 	} );
+}
+
+// ---- ground data for the camera-following flora (grass layer, 32 m cells) --------------------------------
+//
+// The grass field and the beach pebbles (vegetation/GrassField.js, PebbleField.js, after Tidewater's
+// GrassField / PebbleField) place their blades and stones in the vertex shader from camera-centred
+// textures (vegetation/GroundData.js). A cell gives:
+//   h     Float32Array 16 x 16 x 4 at the terrain's 2 m vertex lattice (x0 + 2 i, z0 + 2 j): ground height,
+//         rainfall (moisture), slope ( 1 - N.y ), south exposure ( N.z ), as the terrain's vertices carry them
+//   gm    Uint8Array 32 x 32 x 4 at 1 m texel centres: R dune grass, G tall meadow grass, B sea oats,
+//         A beach creeper (Tidewater Scatter.js buildGrassMask)
+//   pm    Uint8Array 32 x 32 x 4: R pebbles, G cobbles, B shell / coral grit, A stone palette (0 basalt ..
+//         1 coral limestone) (Tidewater DebrisPlacement.js _mask)
+//   cells Float32Array 8 x 8 x 4 per 4 m square: min / max ground height, grass present, pebbles present
+// The masks follow the terrain's own weights (Terrain.js TERRAIN_ALBEDO: the sand, its beach top from the
+// macro variation, the forest floor, the meadow) from the same detail texture, so the flora stops where
+// the ground stops painting it.
+
+// the shared detail texture's texels (terrain/detailData.js), built once per worker on first use
+let _detail = null;
+const detailData = () => _detail || ( _detail = buildDetailData() );
+const dS = ( D, x, z, a, sc, off, c ) => {
+	const cs = Math.cos( a ), sn = Math.sin( a );
+	return sampleDetail( D, ( cs * x - sn * z ) / sc + off, ( sn * x + cs * z ) / sc + off, c );
+};
+// Terrain.js TerrainMacro: two incommensurate tiles per macro field
+const macroA = ( D, x, z ) => Math.min( 1, Math.max( 0, ( dS( D, x, z, 0.7, 173, 0, 3 ) + dS( D, x, z, 2.9, 131, 0.61, 3 ) - 1 ) * 0.7071 + 0.5 ) );
+const macroB = ( D, x, z ) => Math.min( 1, Math.max( 0, ( dS( D, x, z, 2.1, 47, 0, 3 ) + dS( D, x, z, 0.15, 59, 0.29, 3 ) - 1 ) * 0.7071 + 0.5 ) );
+// the world worker's shore weight of a terrain vertex (world.worker.js shoreness)
+const SHORE_DIRS = Array.from( { length: 10 }, ( _, i ) => [ Math.cos( i / 10 * Math.PI * 2 ), Math.sin( i / 10 * Math.PI * 2 ) ] );
+function shoreness( hf, x, z, y ) {
+	if ( y > 9 ) return 0;
+	if ( y < 0.2 ) return isSea( hf, x, z );
+	for ( const r of [ 6, 14, 24, 34, 46 ] ) {
+		for ( const [ dx, dz ] of SHORE_DIRS ) if ( hf.baseHeight( x + dx * r, z + dz * r ) < 0 && isSea( hf, x + dx * r, z + dz * r ) ) return 1 - r / 52;
+	}
+	return 0;
+}
+// value noise in [ -1, 1 ] (Tidewater's Noise2D role)
+const nz = ( x, z, s ) => vnoise( x, z, s ) * 2 - 1;
+
+export const GROUND = { N: 16, M: 32, C: 8 }; // height texels, mask texels, 4 m cells per side
+function groundData( ctx ) {
+	const { hf, env, e, x0, z0, size } = ctx;
+	const D = detailData();
+	const N = GROUND.N, M = GROUND.M, V = N + 1;
+	// the 2 m lattice (one extra row / column for the texels between the last vertex and the next cell)
+	const hv = new Float32Array( ( V + 2 ) * ( V + 2 ) ), sh = new Float32Array( V * V ), sl = new Float32Array( V * V );
+	const H = ( i, j ) => hv[ ( j + 1 ) * ( V + 2 ) + i + 1 ];
+	for ( let j = - 1; j <= V; j ++ ) for ( let i = - 1; i <= V; i ++ ) hv[ ( j + 1 ) * ( V + 2 ) + i + 1 ] = hf.heightAt( x0 + i * 2, z0 + j * 2 );
+	for ( let j = 0; j < V; j ++ ) for ( let i = 0; i < V; i ++ ) {
+		const x = x0 + i * 2, z = z0 + j * 2, y = H( i, j );
+		sh[ j * V + i ] = Math.round( shoreness( hf, x, z, y ) * 255 ) / 255;
+		const hx = H( i + 1, j ) - H( i - 1, j ), hz = H( i, j + 1 ) - H( i, j - 1 );
+		sl[ j * V + i ] = 1 - 4 / Math.hypot( hx, 4, hz );
+	}
+	const h = new Float32Array( N * N * 4 );
+	const s4 = [ 0, 0, 0, 0 ];
+	for ( let j = 0; j < N; j ++ ) for ( let i = 0; i < N; i ++ ) {
+		const k = ( j * N + i ) * 4;
+		const hx = H( i + 1, j ) - H( i - 1, j ), hz = H( i, j + 1 ) - H( i, j - 1 ), l = Math.hypot( hx, 4, hz );
+		h[ k ] = H( i, j );
+		h[ k + 1 ] = hf.surfaceAt( x0 + i * 2, z0 + j * 2, s4 )[ 0 ];
+		h[ k + 2 ] = 1 - 4 / l;
+		h[ k + 3 ] = - hz / l;
+	}
+	const ground = new MeshGround( hf, x0, z0, size );
+	const roads = new SegGrid( ctx.seg, x0, z0, size, 0.6 );
+	const gm = new Uint8Array( M * M * 4 ), pm = new Uint8Array( M * M * 4 );
+	const lerpV = ( a, fx, fz ) => {
+		const i = Math.min( V - 2, Math.floor( fx ) ), j = Math.min( V - 2, Math.floor( fz ) ), tx = fx - i, tz = fz - j;
+		return ( a[ j * V + i ] * ( 1 - tx ) + a[ j * V + i + 1 ] * tx ) * ( 1 - tz ) + ( a[ ( j + 1 ) * V + i ] * ( 1 - tx ) + a[ ( j + 1 ) * V + i + 1 ] * tx ) * tz;
+	};
+	for ( let j = 0; j < M; j ++ ) for ( let i = 0; i < M; i ++ ) {
+		const x = x0 + i + 0.5, z = z0 + j + 0.5;
+		const y = ground.at( x, z );
+		if ( y < - 0.6 || y > 640 ) continue;
+		const o = ( j * M + i ) * 4;
+		env.at( x, z, e );
+		const shoreV = lerpV( sh, ( i + 0.5 ) / 2, ( j + 0.5 ) / 2 ), slope = lerpV( sl, ( i + 0.5 ) / 2, ( j + 0.5 ) / 2 );
+		const moist = e.m, lava = e.lava, use = e.use;
+		const fl = e.flags;
+		// ---- the terrain's weights at this texel (Terrain.js TERRAIN_ALBEDO)
+		const mA = macroA( D, x, z ), mB = macroB( D, x, z ), mcr = mA * 0.6 + mB * 0.4;
+		const dMz = dS( D, x, z, 1.3, 6.7, 0.21, 2 ), dMw = dS( D, x, z, 1.3, 6.7, 0.21, 3 );
+		const hb = y * 1.8; // BEACH_V
+		const cityV = ( fl & ( FLAG.CITY | FLAG.BUILDING | FLAG.STREET ) ) ? 1 : 0;
+		const lavaW = sstep( 0.35, 0.6, lava + ( dMw - 0.5 ) * 0.35 + ( mB - 0.5 ) * 0.3 );
+		const beachTop = 2 + mB * 1.6;
+		const spSand = ( 1 - sstep( beachTop - 0.9, beachTop, y ) ) * sstep( 0.15, 0.6, shoreV ) * ( 1 - sstep( 0.2, 0.42, slope ) ) * ( 1 - cityV ) * ( 1 - lavaW * 0.7 );
+		const sandW = sstep( 0.3, 0.72, spSand + ( dMz - 0.5 ) * 0.5 + ( mcr - 0.5 ) * 0.35 );
+		const wetM = Math.min( 1, moist * 1.15 + 0.14 );
+		const field = ( fl & FLAG.FIELD ) ? 1 : 0, pasture = use === 3 ? 1 : 0;
+		const jungleW = Math.min( 1, sstep( 0.52, 0.8, wetM + ( mcr - 0.5 ) * 0.3 ) + sstep( 0.18, 0.36, slope ) * sstep( 0.3, 0.55, wetM ) ) * treeAlt( y ) * sstep( 1.5, 5, y )
+			* ( 1 - pasture * 0.85 ) * ( 1 - field ) * ( 1 - cityV ) * ( 1 - lavaW );
+		// ---- exclusions: pavement, buildings and yards, towns, fields (+ a margin for the bilinear filter)
+		// (the flags as the terrain paints them: bilinear over their 8 m cells, so the grass stops where the
+		// worn road shoulders and yards start, not in 8 m steps)
+		const worn = hf.flagAt( x, z, NO_GROW );
+		const paved = ( fl & FLAG.FIELD ) || roads.near( x, z, 0.8 ) || nearBuilding( ctx.bld, x, z, 5 ) ? 1 : 0;
+		const keep = paved ? 0 : ( 1 - e.u ) * ( 1 - sstep( 0.2, 0.5, worn ) ) * ( fl & FLAG.CITY ? 0 : 1 );
+		const rockyK = Math.max( lavaW, sstep( 0.3, 0.55, slope ) );
+		if ( keep > 0 && y > 0.4 ) {
+			// tall meadow grass on the open ground, thinning into the forest, patchier where it's dry and on
+			// fresh lava, shorter and sparser on the grazed pasture; not on the sand
+			const clump = nz( x / 7.5, z / 7.5, 417 ) * 0.65 + nz( x / 19, z / 19, 418 ) * 0.35;
+			const grassHere = sstep( 2.5, 4.5, hb ) * ( 1 - sstep( 0.45, 0.85, jungleW ) ) * ( 1 - Math.min( 1, spSand * 1.6 ) ) * ( 1 - sstep( 0.3, 0.7, sandW ) );
+			let meadow = grassHere * ( 0.75 + 0.25 * sstep( - 0.4, 0.3, clump ) );
+			meadow *= ( 0.55 + 0.45 * sstep( 0.06, 0.38, moist ) ) * ( 1 - sstep( 0.35, 0.6, lava ) * 0.85 ) * ( 1 - sstep( 0.6, 0.95, e.sl ) ) * ( 1 - sstep( 480, 600, y ) * 0.8 );
+			if ( pasture ) meadow = Math.min( meadow, 0.55 );
+			// backshore vegetation edge: follows the top of the beach sand (a lobed, noisy edge with tongues
+			// reaching seaward and isolated clumps ahead of it); e > 0 behind the edge, in Tidewater's beach
+			// metres (x BEACH_V)
+			let dune = 0, oats = 0, vine = 0;
+			const shoreK = sstep( 0.08, 0.3, shoreV ) * ( 1 - lavaW ) * ( 1 - rockyK * 0.8 );
+			if ( shoreK > 0 ) {
+				const lobe = nz( x / 16 + 4.4, z / 16 - 2.2, 421 ) * 0.6 + nz( x / 6 - 1.7, z / 6 + 8.1, 422 ) * 0.4;
+				const eE = ( y - ( beachTop - 0.45 ) ) * 1.8 + lobe * 0.4;
+				const main = sstep( 0, 0.35, eE );
+				const ahead = sstep( - 0.45, - 0.1, eE ) * ( 1 - main ) * sstep( 0.35, 0.6, nz( x / 2.6 + 9.3, z / 2.6 - 4.1, 423 ) );
+				const inland = 1 - sstep( 2.6, 4.3, eE );
+				// patchy sward: dense clumps (a few metres), thinner stretches and bare sand gaps
+				const patch = nz( x / 4.2 + 5.5, z / 4.2 - 3.3, 424 ) * 0.6 + nz( x / 11 - 7.1, z / 11 + 1.9, 425 ) * 0.4;
+				const clumpD = ( 0.3 + 0.7 * sstep( - 0.45, 0.25, patch ) ) * ( 0.6 + 0.4 * sstep( - 0.35, 0.35, clump ) );
+				dune = Math.max( main * clumpD, ahead * 0.85 ) * inland * ( 1 - sstep( 0.4, 0.8, jungleW ) ) * shoreK;
+				// sea oats: fore-dune tufts just behind the edge; creepers (beach morning glory, pōhuehue):
+				// runners mat the ground at the edge and reach further seaward than the grass
+				oats = sstep( 0, 0.25, eE ) * ( 1 - sstep( 1.4, 2.2, eE ) ) * sstep( 0, 0.45, nz( x / 13 + 3.1, z / 13 - 7.7, 426 ) ) * shoreK;
+				vine = sstep( - 0.6, - 0.15, eE ) * ( 1 - sstep( 1.2, 2.0, eE ) ) * sstep( - 0.15, 0.3, nz( x / 9 - 2.3, z / 9 + 5.3, 427 ) ) * shoreK;
+				meadow *= 1 - sstep( 0, 2.6, 2.6 - eE ) * shoreK; // the dune grass takes over the backshore
+			}
+			gm[ o ] = Math.round( 255 * Math.min( 1, dune * keep ) );
+			gm[ o + 1 ] = Math.round( 255 * Math.min( 1, meadow * keep * ( 1 - dune ) ) );
+			gm[ o + 2 ] = Math.round( 255 * Math.min( 1, oats * keep ) );
+			gm[ o + 3 ] = Math.round( 255 * Math.min( 1, vine * keep ) );
+		}
+		// ---- pebbles, cobbles and grit: the wrack band on the beach, the swash zone, a few on the dry sand,
+		// rocky shores (lava coasts, steep shore), dirt tracks
+		if ( y < 45 && ! ( fl & ( FLAG.ROAD | FLAG.STREET | FLAG.RUNWAY | FLAG.BUILDING ) ) ) {
+			const n1 = nz( x / 9, z / 9, 431 ), n2 = nz( x / 3.1 + 5, z / 3.1, 432 );
+			const bandW = sstep( 1.05, 1.35, hb ) * sstep( 2.3, 1.8, hb ) * sstep( 0.4, 0.7, sandW );
+			const swash = sstep( 0.3, 0.6, hb ) * sstep( 1.2, 0.95, hb ) * sandW;
+			const dry = sstep( 2.0, 2.6, hb ) * sandW * ( 1 - sstep( 6, 10, hb ) );
+			const shore = sstep( - 0.4, 0.1, hb ) * sstep( 3.5, 2.2, hb ) * sstep( 0.1, 0.4, shoreV );
+			const path = ( fl & FLAG.DIRT ) ? 1 : 0;
+			const town = cityV || e.u > 0.5 ? 0.35 : 1;
+			const peb = ( bandW * ( 0.25 + 0.45 * sstep( - 0.3, 0.5, n1 ) ) + swash * 0.12 + dry * 0.06 * sstep( 0.2, 0.7, n2 ) + shore * sstep( 0.25, 0.5, rockyK ) * 0.6 + path * 0.45 * sstep( 1.0, 2.0, hb ) ) * town;
+			const cob = ( shore * sstep( 0.3, 0.6, rockyK ) * ( 0.35 + 0.5 * sstep( - 0.4, 0.4, n1 ) ) + bandW * 0.06 + path * 0.08 * sstep( 1.5, 2.5, hb ) ) * town;
+			const grit = ( bandW * ( 0.35 + 0.5 * sstep( - 0.2, 0.6, n2 ) ) + swash * 0.25 + dry * 0.08 + shore * sstep( 0.25, 0.5, rockyK ) * 0.1 ) * town;
+			// palette: coral limestone on the white-sand beaches, basalt on the rocky and lava shores
+			const pal = Math.max( 0, Math.min( 1, 0.22 + sandW * 0.5 - rockyK * 0.35 - lava * 0.3 + n2 * 0.12 ) );
+			pm[ o ] = Math.min( 255, peb * 255 );
+			pm[ o + 1 ] = Math.min( 255, cob * 255 );
+			pm[ o + 2 ] = Math.min( 255, grit * 255 );
+			pm[ o + 3 ] = pal * 255;
+		}
+	}
+	// per 4 m square: height range (for culling), whether any grass / pebble texel is set (with a one-texel
+	// border: the shaders filter the masks bilinearly)
+	const C = GROUND.C;
+	const cells = new Float32Array( C * C * 4 );
+	for ( let cj = 0; cj < C; cj ++ ) for ( let ci = 0; ci < C; ci ++ ) {
+		let mn = Infinity, mx = - Infinity, g = 0, p = 0;
+		for ( let j = cj * 2; j <= cj * 2 + 2; j ++ ) for ( let i = ci * 2; i <= ci * 2 + 2; i ++ ) { const v = H( i, j ); mn = Math.min( mn, v ); mx = Math.max( mx, v ); }
+		for ( let j = Math.max( 0, cj * 4 - 1 ); j <= Math.min( M - 1, cj * 4 + 4 ); j ++ ) for ( let i = Math.max( 0, ci * 4 - 1 ); i <= Math.min( M - 1, ci * 4 + 4 ); i ++ ) {
+			const o = ( j * M + i ) * 4;
+			if ( gm[ o ] > 8 || gm[ o + 1 ] > 8 || gm[ o + 2 ] > 8 || gm[ o + 3 ] > 8 ) g = 1;
+			if ( pm[ o ] > 6 || pm[ o + 1 ] > 6 || pm[ o + 2 ] > 6 ) p = 1;
+		}
+		const k = ( cj * C + ci ) * 4;
+		cells[ k ] = mn; cells[ k + 1 ] = mx; cells[ k + 2 ] = g; cells[ k + 3 ] = p;
+	}
+	return { h, gm, pm, cells };
 }

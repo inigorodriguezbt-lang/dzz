@@ -512,6 +512,8 @@ console.log( 'world items' );
 	const now = W.byStack( spam );
 	ok( taken.some( t => t.key === '12:0:s3' ), 'eating from a loot item marks its spot looted' );
 	ok( now && now !== loot && now.persistent && now.key === null && ! W.items.has( loot ) && spam.data.left === 2, 'the part-eaten item is now a persistent twin (the building drops the original)' );
+	ok( ! W.remove( loot ) && W.items.has( now ), 'the building clearing its old loot item leaves the twin' );
+	ok( W.remove( loot, { taken: true } ) && ! W.items.has( now ), 'taking the old item (a screen still holding it) takes its twin' );
 	// used up where it lies: taken
 	taken.length = 0;
 	const kit = makeStack( 'first_aid_kit', 1 );

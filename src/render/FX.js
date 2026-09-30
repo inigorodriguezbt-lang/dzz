@@ -1,7 +1,8 @@
 // World effects: pooled billboard particles (sparks, dust, smoke, blood, flames, debris, splashes), fading
 // decals (bullet holes, blood, scorch marks), tracer beams, short-lived and flickering point lights, fires,
-// smoke screens and ejected brass. Everything is drawn in a handful of instanced draw calls on render layer 1
-// (after the water composite, depth-tested against the opaque scene).
+// smoke screens and ejected brass. Everything is drawn in a handful of instanced draw calls, depth-tested against the
+// opaque scene: decals and the alpha particles on render layer 1 (after the water composite), the additive particles
+// (sparks, flashes, fire) and the tracers on LAYER_OVERLAY (after the TAA resolve, so they don't ghost).
 //
 //   game.fx = new FX( game )
 //   impact( point, normal, mat, opts )   bullet / melee hit on a surface (particles + decal + sound)
@@ -16,6 +17,7 @@
 //   decal( point, normal, kind, size )
 import * as THREE from 'three';
 import { G, COMMON_GLSL, patchMaterial } from './Materials.js';
+import { LAYER_OVERLAY } from './Renderer.js';
 
 export const FX_LAYER = 1;
 const N = 4; // atlas cells per side
@@ -314,7 +316,8 @@ class Pool {
 		} );
 		this.mesh = new THREE.Mesh( geo, mat );
 		this.mesh.frustumCulled = false;
-		this.mesh.layers.set( FX_LAYER );
+		// (the additive pool: sparks, flashes, fire. They move too fast for the TAA history: drawn after its resolve)
+		this.mesh.layers.set( additive ? LAYER_OVERLAY : FX_LAYER );
 		this.mesh.renderOrder = additive ? 12 : 10;
 		this.geo = geo;
 		// simulation state (struct of arrays)
@@ -501,7 +504,7 @@ export class FX {
 		const mat = new THREE.ShaderMaterial( { name: 'FXBeam', vertexShader: BEAM_VS, fragmentShader: BEAM_FS, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending } );
 		this.beams = new THREE.Mesh( geo, mat );
 		this.beams.frustumCulled = false;
-		this.beams.layers.set( FX_LAYER );
+		this.beams.layers.set( LAYER_OVERLAY ); // tracers: after the TAA resolve, they'd ghost through its history
 		this.beams.renderOrder = 13;
 		this.scene.add( this.beams );
 		this.bMax = MAX; this.bN = 0;

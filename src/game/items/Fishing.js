@@ -19,7 +19,8 @@ const CATCH = {
 const JUNK = [ 'slippers', 'empty_bottle', 'water_bottle', 'rope', 'scrap_metal', 'tabi' ];
 const BIG = new Set( [ 'raw_ahi', 'raw_shark', 'raw_ulua', 'raw_mahimahi' ] );
 const MAX_CAST = 14;
-const SHORT = 0.88; // casts land a little short of where you look, so the crosshair and prompt do not hide the bobber
+const DROP = 0.045; // (rad) casts land this far below the crosshair, so neither it nor the prompt hides the bobber
+const BOB_PX = 7; // the bobber never gets smaller than this on screen (a real one is a speck at 14 m)
 const LINE_PX = 1.6; // on-screen line width (px)
 const LINE_N = 16; // line segments
 
@@ -57,12 +58,13 @@ export class Fishing {
 		const g = this.game, P = g.physics;
 		const o = ray.origin, d = ray.dir;
 		const water = P.waterLevel( o.x, o.z );
-		let t;
-		if ( d.y < - 0.03 ) t = ( o.y - water ) / - d.y;
-		else t = MAX_CAST * 0.75;
-		// looking far out or up: cast as far as the rod reaches
 		const flat = Math.hypot( d.x, d.z ) || 1;
-		const reach = Math.min( t * flat * SHORT, MAX_CAST );
+		let reach;
+		if ( d.y < - 0.03 ) {
+			// where the view meets the water, seen a little lower (beyond the rod's reach it lands short anyway)
+			const h = o.y - water, full = h / - d.y * flat;
+			reach = full > MAX_CAST ? MAX_CAST : h / Math.tan( Math.atan2( - d.y, flat ) + DROP );
+		} else reach = MAX_CAST * 0.75 * flat; // looking out or up: a long cast, well below the crosshair
 		if ( reach < 2.5 ) return null;
 		const x = o.x + d.x / flat * reach, z = o.z + d.z / flat * reach;
 		const lvl = P.waterLevel( x, z );
@@ -226,6 +228,8 @@ export class Fishing {
 		this.rings.length = 0;
 	}
 
+	_bobK() { return this.obj ? this.obj.scale.x : 1; }
+
 	// rings spreading on the water from the bobber (landing, nibbles, the bite)
 	_ring( strength = 1 ) {
 		const g = this.game;
@@ -285,7 +289,7 @@ export class Fishing {
 		if ( this.state === 'wait' ) {
 			this.waitT -= dt;
 			// nibbles before the real bite
-			if ( this.waitT < 3 && Math.random() < dt * 0.8 ) { y -= 0.03; if ( ! this.rings.length ) this._ring( 0.45 ); }
+			if ( this.waitT < 3 && Math.random() < dt * 0.8 ) { y -= 0.015 * this._bobK(); if ( ! this.rings.length ) this._ring( 0.45 ); }
 			if ( this.waitT <= 0 ) {
 				this.state = 'bite';
 				this.biteT = 1.5;
@@ -295,7 +299,8 @@ export class Fishing {
 				g.player.shake = Math.max( g.player.shake, 0.15 );
 			}
 		} else if ( this.state === 'bite' ) {
-			y -= 0.07 + Math.abs( Math.sin( this.t * 17 ) ) * 0.05;
+			// it jerks under and back (sized to the bobber, so the cap still flashes red at full reach)
+			y -= 0.05 * this._bobK() * ( 0.4 + Math.abs( Math.sin( this.t * 17 ) ) * 0.7 );
 			if ( this.rings.length < 2 && Math.random() < dt * 3 ) this._ring( 0.8 );
 			this.biteT -= dt;
 			if ( this.biteT <= 0 ) {
@@ -312,6 +317,10 @@ export class Fishing {
 			y = base - 0.05 + Math.sin( this.t * 23 ) * 0.03;
 		}
 		this.obj.position.set( b.x, y, b.z );
+		// a floor on its size on screen, so a cast at full reach still shows
+		const cam = g.camera, H = typeof innerHeight === 'number' ? innerHeight : 900;
+		const px = 2 * Math.tan( cam.fov * Math.PI / 360 ) / Math.max( 200, H );
+		this.obj.scale.setScalar( Math.max( 1, cam.position.distanceTo( this.obj.position ) * px * BOB_PX / 0.1 ) );
 		this._drawLine( b, y );
 	}
 
@@ -326,7 +335,7 @@ export class Fishing {
 		const P = this._pts;
 		for ( let i = 0; i <= LINE_N; i ++ ) {
 			const t = i / LINE_N, bow = Math.sin( t * Math.PI );
-			P[ i ].set( tip.x + ( b.x - tip.x ) * t, tip.y + ( y + 0.1 - tip.y ) * t - bow * sag + bow * twitch, tip.z + ( b.z - tip.z ) * t );
+			P[ i ].set( tip.x + ( b.x - tip.x ) * t, tip.y + ( y + 0.1 * this.obj.scale.x - tip.y ) * t - bow * sag + bow * twitch, tip.z + ( b.z - tip.z ) * t );
 		}
 		const H = typeof innerHeight === 'number' ? innerHeight : 900;
 		const perPx = 2 * Math.tan( cam.fov * Math.PI / 360 ) / Math.max( 200, H );

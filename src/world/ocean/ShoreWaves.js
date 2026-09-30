@@ -110,7 +110,11 @@ function evaluateCode( name, mode ) {
 			// the whitewater roller is not a smooth tube: lumps of foam tumble along its front and over its top
 			// (relief of a few decimetres, with its slope in the normal). Noise, not a sum of sines: regular
 			// bumps along the crest read as a row of identical puffs.
-			float sx = u * lam; // rest position along the wave direction (m, seaward)
+			// position along the wave direction relative to the crest (m, seaward). (Ours: Tidewater takes the rest
+			// position u * lam; the plunging / bore front squeezes ~2 m of rest positions into a few decimetres,
+			// and there its lumps aliased into single-vertex spikes on the mesh. The displaced position tumbles at
+			// the same rate relative to the crest.)
+			float sx = u * lam - s0.x * env;
 			float t = uOceanTime;
 			float mW = floor( ph.s + 0.5 );
 			// (the lumps only exist on the roller: amp is 0 elsewhere)

@@ -75,10 +75,11 @@ const BOLT_KNOB = grip( [ - 0.09, - 0.034, 0.054 ], [ 0.35, 0.93, 0 ], [ 0.1, 0.
 // elbows for anything held that isn't a gun
 // (out to the side and not far below the hand: the forearm comes into the frame from the bottom corner)
 const ITEM_ELBOW_R = V( 0.42, - 0.3, - 0.12 ), ITEM_ELBOW_L = V( - 0.3, - 0.3, - 0.15 );
-// sprinting: where the gun frame goes (view space) and its turn (a pistol at a low ready: muzzle down, barely canted)
+// sprinting: where the gun frame goes (view space) and its turn (a pistol at a one-handed low ready: muzzle down,
+// barely canted)
 const SPRINT = {
 	rifleP: V( 0.1, - 0.18, - 0.41 ), rifleQ: E( 0.25, 0.6, 0.45 ),
-	pistolP: V( 0.1, - 0.12, - 0.4 ), pistolQ: E( - 0.5, 0.3, 0.05 ),
+	pistolP: V( 0.08, - 0.12, - 0.4 ), pistolQ: E( - 0.55, 0.25, 0.05 ),
 	itemQ: E( - 0.2, 0.1, 0 ),
 };
 // melee holds: where the right hand's grip sits in view space and how the item points
@@ -941,6 +942,13 @@ export class ViewModel {
 			const pistol = !! gL?.support;
 			thumbR = this._thR = this._gunThumb( this._thR, this.handR, 1, O, pistol ? GUN_THUMB.pistolR : GUN_THUMB.grip, pistol ? THUMB_POSE.forward : THUMB_POSE.wrap );
 			if ( gL && ! gL.thumb && ! gL.vert && ! gL.under ) thumbL = this._thL = this._gunThumb( this._thL, this.handL, - 1, O, pistol ? GUN_THUMB.pistolL : GUN_THUMB.along, pistol ? THUMB_POSE.forward : THUMB_POSE.along );
+		}
+		// sprinting with a pistol: the support hand lets go and swings down out of the frame
+		if ( it.kind === 'gun' && gL?.support && s.sprint > 0 ) {
+			const k = smooth( s.sprint ), e = this.handL.elements;
+			e[ 12 ] += ( - 0.22 - e[ 12 ] ) * k; e[ 13 ] += ( - 0.5 - e[ 13 ] ) * k; e[ 14 ] += ( - 0.18 - e[ 14 ] ) * k;
+			curlL = curlFor( 0.03, 0.6 );
+			if ( k > 0.95 ) showL = false;
 		}
 		if ( it.kind === 'gun' ) {
 			// the trigger finger lies along the frame until the gun is aimed or fired

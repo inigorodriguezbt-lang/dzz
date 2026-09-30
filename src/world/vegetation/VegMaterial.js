@@ -6,7 +6,8 @@
 // rank, a, b ) (see species.js). Every drawn mesh gets its own material instance (its own LOD window,
 // kind and tints) but all share one shader program.
 //
-// Kinds (uKind): 0 tree, 1 coconut palm, 2 small plant, 3 rock, 4 Cook pine, 5 sugar cane, 6 grass
+// Kinds (uKind): 0 tree, 1 coconut palm, 2 small plant, 3 rock, 4 Cook pine, 5 sugar cane (6 grass: the grass
+// field has its own material, GrassField.js)
 import * as THREE from 'three';
 import { G, patchMaterial, tex } from '../../render/Materials.js';
 import { PALM_H } from './species.js';
@@ -14,10 +15,80 @@ import { PALM_H } from './species.js';
 export const KIND = { TREE: 0, PALM: 1, SMALL: 2, ROCK: 3, PINE: 4, CANE: 5, GRASS: 6 };
 
 // linear GLSL constant of an sRGB triplet
-function SRGB( r, g, b ) {
+export function SRGB( r, g, b ) {
 	const c = new THREE.Color().setRGB( r, g, b, THREE.SRGBColorSpace );
 	return `vec3( ${ c.r.toFixed( 5 ) }, ${ c.g.toFixed( 5 ) }, ${ c.b.toFixed( 5 ) } )`;
 }
+
+// linear GLSL constant of an sRGB hex colour (Tidewater's C( hex ))
+export function HEX( h ) {
+	const c = new THREE.Color( h );
+	return `vec3( ${ c.r.toFixed( 6 ) }, ${ c.g.toFixed( 6 ) }, ${ c.b.toFixed( 6 ) } )`;
+}
+
+// Coconut palm bark, ported from Tidewater VegMaterials.js PALM_BARK (vegPalmBark): irregular leaf-scar
+// rings (uneven spacing, closer below the crown, wavy, partial), fine vertical fissures, grey-brown to
+// silver weathering, lichen, dark stains and the root mass at the base, the fibrous old frond bases
+// under the crown. Returns the albedo (xyz) and a relief height (w, m) for the bump. y: height along
+// the stem (m), a: 0..1 around, H: stem height, seed / iv: per palm randoms. Needs vegNoise / vegHash.
+export const PALM_BARK_GLSL = /* glsl */`
+	vec4 vegPalmBark( float y, float a, float H, float seed, float iv ) {
+		float A = a * 6.2832;
+		float ca = cos( A ), sa = sin( A );
+		float yn = y / H;
+		// rings: phase grows faster toward the crown, jittered per ring band and around the trunk
+		float wob = ( vegNoise( vec2( ca * 1.3 + y * 0.35, sa * 1.3 + seed * 9.0 ) ) - 0.5 ) * 0.7 + sin( A * 2.0 + y * 1.1 + seed * 5.0 ) * 0.1;
+		float phase = y * mix( 8.5, 11.0, iv ) + pow( yn, 2.2 ) * H * 5.5 + vegNoise( vec2( y * 0.8, seed * 7.3 ) ) * 3.2
+			+ vegNoise( vec2( y * 3.1, seed * 2.9 ) ) * 0.9 + wob;
+		float k0 = floor( phase );
+		// ragged ring edges: the scar line wanders a little around the trunk
+		float phaseR = phase + ( vegNoise( vec2( a * 38.0, k0 * 2.3 + seed * 5.0 ) ) - 0.5 ) * 0.22;
+		float k = floor( phaseR );
+		float fr = phaseR - k;
+		// each ring scar has its own width and depth
+		float rk = vegHash( vec2( k, seed * 13.7 ) );
+		float gw = mix( 0.05, 0.14, rk );
+		float groove = ( smoothstep( gw, 0.0, fr ) + smoothstep( 1.0 - gw * 0.6, 1.0, fr ) ) * mix( 0.45, 1.0, vegHash( vec2( k * 1.3, seed * 3.1 ) ) );
+		float ridge = smoothstep( 0.07, 0.15, fr ) * smoothstep( 0.45, 0.16, fr );
+		// partial rings: each ring fades out around part of the circumference
+		float amp = smoothstep( 0.28, 0.6, vegNoise( vec2( ca * 1.8 + k * 3.17, sa * 1.8 + k * 1.71 + seed * 11.0 ) ) ) * 0.75 + 0.25;
+		// fine vertical fissures (short, broken splits) and bark plates
+		float nf = vegNoise( vec2( a * 54.0, y * 1.6 + seed * 41.0 ) );
+		float nf2 = vegNoise( vec2( a * 110.0, y * 3.4 + seed * 29.0 ) );
+		float segA = smoothstep( 0.45, 0.62, vegNoise( vec2( a * 30.0, y * 4.5 + seed * 9.0 ) ) );
+		float segB = smoothstep( 0.5, 0.66, vegNoise( vec2( a * 60.0 + 3.7, y * 9.0 + seed * 21.0 ) ) );
+		float crack = max( smoothstep( 0.09, 0.0, abs( nf - 0.5 ) ) * segA, smoothstep( 0.06, 0.0, abs( nf2 - 0.5 ) ) * segB * 0.7 );
+		float plate = vegNoise( vec2( a * 24.0, y * 3.5 + seed * 17.0 ) );
+		float blotch = vegNoise( vec2( a * 6.0, y * 0.4 + seed * 13.0 ) );
+		// grey-brown bark weathering to silver-grey, per palm
+		vec3 bark = mix( ${ HEX( 0x5e554a ) }, ${ HEX( 0xa49a88 ) }, clamp( blotch * 0.55 + plate * 0.25 + ( iv - 0.5 ) * 0.5 + yn * 0.15, 0.0, 1.0 ) );
+		// warmer tan on some trees and in patches, dark weathered (rain-soaked) blotches
+		bark = mix( bark, bark * vec3( 1.12, 1.0, 0.82 ), clamp( ( vegNoise( vec2( a * 4.0, y * 0.25 + seed * 31.0 ) ) - 0.4 ) * 2.0, 0.0, 1.0 ) * iv );
+		bark *= mix( 1.0, 0.72, smoothstep( 0.6, 0.8, vegNoise( vec2( a * 5.0, y * 0.7 + seed * 43.0 ) ) ) );
+		// fine mottling (rough, fibrous surface) and pale sun-bleached patches
+		float mott = vegNoise( vec2( a * 90.0, y * 80.0 + seed * 7.0 ) ) * 0.6 + vegNoise( vec2( a * 35.0, y * 30.0 + seed * 3.0 ) ) * 0.4;
+		bark *= ( mott * 0.45 + 0.78 ) * ( plate * 0.25 + 0.88 );
+		bark = mix( bark, ${ HEX( 0xb3ad9f ) }, smoothstep( 0.55, 0.75, vegNoise( vec2( a * 8.0, y * 1.3 + seed * 61.0 ) ) ) * 0.35 * ( 1.0 - yn * 0.5 ) );
+		bark *= mix( 1.0, 0.7, groove * amp ) * ( ridge * amp * 0.1 + 1.0 ) * mix( 1.0, 0.5, crack );
+		// lichen: pale grey-green crusts; darker rain streaks
+		float lic = smoothstep( 0.6, 0.72, vegNoise( vec2( a * 9.0, y * 2.1 + seed * 23.0 ) ) + ( vegNoise( vec2( a * 31.0, y * 7.0 ) ) - 0.5 ) * 0.3 ) * smoothstep( 0.9, 0.2, yn );
+		bark = mix( bark, mix( ${ HEX( 0x8e917f ) }, ${ HEX( 0xa9a799 ) }, plate ), lic * 0.5 );
+		float streak = smoothstep( 0.62, 0.8, vegNoise( vec2( a * 16.0, y * 0.12 + seed * 5.0 ) ) ) * smoothstep( 1.0, 0.6, yn );
+		bark *= 1.0 - streak * 0.28;
+		// damp, dark base (splash of sand and soil) and the mass of exposed roots at the ground
+		float baseK = smoothstep( 1.4, 0.2, y + ( blotch - 0.5 ) * 0.8 );
+		bark = mix( bark, bark * vec3( 0.62, 0.56, 0.48 ), baseK );
+		float rootN = vegNoise( vec2( a * 26.0, y * 2.2 + seed * 19.0 ) );
+		float roots = smoothstep( 0.42, 0.05, y ) * smoothstep( 0.35, 0.6, rootN );
+		bark = mix( bark, mix( ${ HEX( 0x3a2e22 ) }, ${ HEX( 0x5e4a36 ) }, rootN ), smoothstep( 0.5, 0.0, y ) * 0.85 );
+		// fibrous old frond bases (boot) under the crown: criss-cross fibre mat, brown
+		float boot = smoothstep( H - 1.0, H - 0.35, y + ( blotch - 0.5 ) * 0.3 );
+		float fib = sin( A * 34.0 + y * 30.0 ) * sin( A * 34.0 - y * 30.0 ) * 0.5 + 0.5;
+		bark = mix( bark, mix( ${ HEX( 0x4d3722 ) }, ${ HEX( 0x8a744c ) }, fib * 0.6 + plate * 0.4 ), boot );
+		float hd = ( ridge * amp * 0.004 - groove * amp * 0.008 - crack * 0.006 + plate * 0.004 + mott * 0.004 + roots * 0.01 ) * ( 1.0 - boot ) + boot * fib * 0.004;
+		return vec4( bark, hd );
+	}
+`;
 
 // uniforms shared by every vegetation material
 export const VG = {
@@ -44,8 +115,10 @@ const VERT_PARS = /* glsl */`
 	uniform float uTime; uniform vec3 uCamPos; uniform vec2 uWind; uniform vec3 uSunDir;
 	uniform vec4 uLod; uniform float uKind; uniform vec3 uThin; uniform float uShrinkEnd;
 	uniform float uWindStr; uniform float uDensity; uniform vec3 uPlayer; uniform float uShadowFar;
-	uniform vec4 uGrass; uniform sampler2D tDetail; uniform float uDetailOn; uniform vec4 uGustOff;
+	uniform sampler2D tDetail; uniform float uDetailOn; uniform vec4 uGustOff;
 	varying vec2 vVegUv; varying vec4 vVegMat; varying vec3 vVegCol; varying vec2 vVegFade; varying vec4 vVegInst; varying vec4 vVegGround;
+	varying vec4 vVegX; // x height fraction (aVeg.x), y under the rain-forest canopy (understory), zw -
+	varying vec3 vVegT; // palm trunk axis (world)
 
 	float vegHash( vec2 p ) { vec3 p3 = fract( vec3( p.xyx ) * 0.1031 ); p3 += dot( p3, p3.yzx + 33.33 ); return fract( ( p3.x + p3.y ) * p3.z ); }
 	float vegNoise( vec2 p ) {
@@ -60,42 +133,6 @@ const VERT_PARS = /* glsl */`
 	float vegGust( vec2 xz, vec2 wd ) {
 		if ( uDetailOn > 0.5 ) return smoothstep( 0.46, 0.6, vegDetail( uGustOff.xy + xz / 140.0 ).w * 0.62 + vegDetail( uGustOff.zw + xz / 61.0 + 0.37 ).w * 0.38 );
 		return smoothstep( 0.3, 0.75, vegNoise( xz / 45.0 - wd * uTime * 0.3 ) );
-	}
-	// The meadow tone the terrain paints (terrain/TerrainShading.js terrainMeadowTone, Tidewater's MEADOW
-	// palette; Terrain.js feeds it the detail texture's fbm at 173 m and 47 m, shifted by the rainfall):
-	// the grass blades grow out of the same colour and fade into it at the end of their range.
-	// packed: moisture | slope << 8 | south exposure << 16 (8 bits each, see scatter.js grass)
-	vec4 vegGroundTone( vec2 xz, float packed, float lawn ) {
-		float moist = mod( packed, 256.0 ) / 255.0;
-		float slope = mod( floor( packed / 256.0 ), 256.0 ) / 255.0;
-		float south = floor( packed / 65536.0 ) / 255.0 * 2.0 - 1.0;
-		float mA, mB, det;
-		if ( uDetailOn > 0.5 ) {
-			mA = vegDetail( vegRot2( xz, 0.7 ) / 173.0 ).w;
-			mB = vegDetail( vegRot2( xz, 2.1 ) / 47.0 ).w;
-			det = vegDetail( vegRot2( xz, 1.3 ) / 6.7 + 0.21 ).w * 0.65 + vegDetail( xz / 1.9 ).w * 0.35;
-		} else {
-			// standalone pages: noise of the same scales and spread
-			mA = 0.5 + ( vegFbm( xz / 173.0 ) - 0.5 ) * 0.45;
-			mB = 0.5 + ( vegFbm( xz / 47.0 + 3.1 ) - 0.5 ) * 0.45;
-			det = 0.5 + ( vegNoise( xz / 5.0 ) - 0.5 ) * 0.3;
-		}
-		float wetM = clamp( moist * 1.15 + 0.14, 0.0, 1.0 );
-		float dryShift = ( 0.42 - wetM ) * 0.35;
-		mA += dryShift; mB += dryShift;
-		float m = mA * 0.55 + mB * 0.45 + slope * 0.25 + south * 0.04 + ( det - 0.5 ) * 0.28;
-		float olive = smoothstep( 0.52, 0.6, m );
-		float yellow = smoothstep( 0.6, 0.67, m );
-		float straw = smoothstep( 0.66, 0.73, m + ( mB - 0.5 ) * 0.2 );
-		float lush = smoothstep( 0.46, 0.37, mB * 0.7 + mA * 0.3 + slope * 0.2 + ( det - 0.5 ) * 0.2 );
-		vec3 c = mix( ${ SRGB( 0.25, 0.32, 0.1 ) }, ${ SRGB( 0.36, 0.37, 0.14 ) }, olive );
-		c = mix( c, ${ SRGB( 0.5, 0.46, 0.2 ) }, yellow * 0.8 );
-		c = mix( c, ${ SRGB( 0.62, 0.54, 0.33 ) }, straw * 0.55 );
-		c = mix( c, ${ SRGB( 0.13, 0.2, 0.05 ) }, lush * 0.75 );
-		// the rain forest's floor where the terrain paints it (the scatter keeps the grass sparse there)
-		float jungle = smoothstep( 0.52, 0.8, wetM + ( mA * 0.6 + mB * 0.4 - 0.5 ) * 0.3 ) * ( 1.0 - lawn );
-		c = mix( c, ${ SRGB( 0.1, 0.16, 0.05 ) }, jungle * 0.7 );
-		return vec4( c, ( olive * 0.4 + yellow * 0.6 ) * ( 1.0 - jungle ) );
 	}
 	// rotation taking +y to the unit vector T
 	vec3 vegRotUpTo( vec3 v, vec3 T ) { vec3 k = vec3( T.z, 0.0, - T.x ); vec3 c1 = cross( k, v ); return v + c1 + cross( k, c1 ) / ( T.y + 1.0 ); }
@@ -128,6 +165,9 @@ const VERT_PARS = /* glsl */`
 		if ( d > uShadowFar ) vVegFade.x = 0.0;
 		#endif
 		vVegInst = vec4( rank, pa, pb, s );
+		// the understory scatter packs its rain-forest shade into whole turns of the yaw (scatter.js)
+		vVegX = vec4( aVeg.x, floor( yaw / 6.2832 + 1e-3 ) / 15.0, 0.0, 0.0 );
+		vVegT = vec3( 0.0, 1.0, 0.0 );
 		vVegMat = aMat;
 		vVegCol = aCol;
 		vVegUv = uv;
@@ -163,7 +203,9 @@ const VERT_PARS = /* glsl */`
 				vec3 radial = vegRotY( vec3( p.x, 0.0, p.z ), cy, sy );
 				lp = vec3( 0.0, u * H, 0.0 ) + ( leanDir * lean * f + windOff * u * u ) * H + vegRotUpTo( radial, T );
 				ln = vegRotUpTo( vegRotY( n, cy, sy ), T );
-				vVegUv = vec2( uv.x, uv.y * H / 1.6 );
+				// procedural bark (vegPalmBark): around (0..1), height along the stem (m)
+				vVegUv = vec2( uv.x * 0.5, u * H );
+				vVegT = T;
 			} else {
 				vec3 o = vegRotY( p - vec3( 0.0, ${PALM_H.toFixed( 1 )}, 0.0 ), cy, sy );
 				vec3 Ttop = normalize( vec3( 0.0, 1.0, 0.0 ) + leanDir * lean * ( 1.0 - c ) + windOff * 2.0 );
@@ -190,25 +232,13 @@ const VERT_PARS = /* glsl */`
 			vec3 sc3 = vec3( s );
 			if ( uKind == 0.0 || uKind == 3.0 ) sc3.y *= pa;
 			else if ( uKind == 5.0 ) sc3 = vec3( 1.0, s, 1.0 );
-			else if ( uKind == 6.0 ) {
-				sc3 = vec3( 0.65 + 0.35 * s, s, 0.65 + 0.35 * s );
-				// grass tiers: tier 2 and then tier 1 blades narrow away with distance, the survivors
-				// widen so the sward keeps its cover (uGrass: tier 2 fade start / end, tier 1 start / end)
-				float gone2 = smoothstep( uGrass.x, uGrass.y, dl ), gone1 = smoothstep( uGrass.z, uGrass.w, dl );
-				float tk = aMat.w > 1.5 ? 1.0 - gone2 : aMat.w > 0.5 ? 1.0 - gone1 : 1.0;
-				p += vec3( uv.x, 0.0, uv.y ) * tk * ( 1.0 + gone2 * 0.45 + gone1 * 0.6 );
-				vVegUv = vec2( ${( ( 776 + 8 ) / 2048 ).toFixed( 5 )}, ${( ( 1544 + 8 ) / 2048 ).toFixed( 5 )} ); // the atlas' white tile
-				vec4 tone = vegGroundTone( wbase.xz, pa, pb );
-				vVegGround = vec4( tone.rgb, gust * clamp( w - 0.2, 0.0, 1.0 ) );
-				vVegInst.y = tone.a; // dryness
-			}
 			sc3 *= grow;
 			lp = vegRotY( p * sc3, cy, sy );
 			ln = normalize( vegRotY( n / sc3, cy, sy ) );
 			if ( uKind == 4.0 ) lp.xz += vec2( cos( pb ), sin( pb ) ) * pa * lp.y; // Cook pines lean
 			float h01 = aVeg.x;
-			if ( uKind == 6.0 || uKind == 5.0 ) {
-				// grass and cane: blades bend from the ground, pushed aside around the player
+			if ( uKind == 5.0 ) {
+				// cane: blades bend from the ground, pushed aside around the player
 				float bendG = ( w * w * 0.35 * ( 0.25 + gust ) + sin( t * 2.3 + wbase.x * 0.35 + wbase.z * 0.27 ) * w * 0.12 * ( 0.4 + gust ) ) * h01 * h01;
 				lp += ( wd3 * bendG + wp3 * sin( t * 1.7 + ph0 ) * 0.03 * w * h01 ) * max( lp.y, 0.3 );
 				vec2 away = wbase.xz + lp.xz - uPlayer.xz;
@@ -244,6 +274,16 @@ const FRAG_PARS = /* glsl */`
 	uniform float uVegFadeMode;
 	uniform float uKind; uniform vec3 uTintA; uniform vec3 uTintB; uniform vec3 uBarkTint; uniform vec4 uMode;
 	varying vec2 vVegUv; varying vec4 vVegMat; varying vec3 vVegCol; varying vec2 vVegFade; varying vec4 vVegInst; varying vec4 vVegGround;
+	varying vec4 vVegX; varying vec3 vVegT;
+	uniform vec4 uLeaf;
+	#ifndef VEG_DEPTH
+	float vegHash( vec2 p ) { vec3 p3 = fract( vec3( p.xyx ) * 0.1031 ); p3 += dot( p3, p3.yzx + 33.33 ); return fract( ( p3.x + p3.y ) * p3.z ); }
+	float vegNoise( vec2 p ) {
+		vec2 i = floor( p ), f = fract( p ); vec2 u = f * f * ( 3.0 - 2.0 * f );
+		return mix( mix( vegHash( i ), vegHash( i + vec2( 1, 0 ) ), u.x ), mix( vegHash( i + vec2( 0, 1 ) ), vegHash( i + vec2( 1, 1 ) ), u.x ), u.y );
+	}
+	${ PALM_BARK_GLSL }
+	#endif
 	// Per-pixel threshold of the LOD cross-fades. A dither only under temporal anti-aliasing, where the
 	// pattern moves every frame and resolves into a smooth blend (interleaved gradient noise, Jimenez
 	// 2014; both levels of a plant use the same threshold, so their pixels stay complementary). Otherwise
@@ -271,7 +311,7 @@ const FRAG_PARS = /* glsl */`
 		// (the alpha ramp's screen-space width, in uniform control flow: read for every part)
 		float aw = max( fwidth( textureGrad( tLeaf, uv, dx, dy ).a ), 1e-3 );
 		#endif
-		if ( part < 0.5 ) c = textureGrad( tPalmBark, uv, dx, dy );
+		if ( part < 0.5 ) c = vec4( 1.0 ); // procedural (vegPalmBark)
 		else if ( part < 1.5 ) c = textureGrad( tBark, uv, dx, dy );
 		else if ( part < 3.5 ) {
 			c = textureGrad( tLeaf, uv, dx, dy );
@@ -297,15 +337,18 @@ const FRAG_PARS = /* glsl */`
 	}
 `;
 
-// Surface terms after Tidewater's vegetation shading (VegMaterials.js, MIT): the leaf exposure (aMat.y,
-// 0 deep inside a crown .. 1 outer) darkens the albedo a little and the indirect light a lot, so crowns
-// get dark interiors; leaves and grass get a small specular (a full dielectric F0 / F90 puts a grey sky
-// sheen on every blade at grazing angles); leaf cards seen edge-on are thinned.
+// Surface terms ported from Tidewater's vegetation shading (VegMaterials.js, MIT): the leaf exposure
+// (aMat.y, 0 deep inside a crown .. 1 outer) darkens the albedo x mix( 0.55, 1, ao ) and the indirect
+// light (dtAO = mix( 0.35, 1, ao )), so crowns get dark interiors, the sunlit outer leaves are lighter
+// and warmer; small per-material specular intensities (uLeaf); leaf cards seen edge-on are thinned;
+// palm trunks carry Tidewater's procedural bark, tree bark its palette, moss and trunk AO.
+// uLeaf: x leaf roughness, y leaf specular intensity, z leaf translucency, w moss on the bark
+// uMode.w: 1 leaf-card canopy (trees, shrubs: spherical normals, canopy translucency)
 const FRAG_COLOR = /* glsl */`
 	float vegPart = vVegMat.x;
 	float vegAo = vVegMat.y;
 	bool vegLeaf = vegPart > 1.5 && vegPart < 2.5;
-	bool vegCanopy = vegLeaf && ( uKind == 0.0 || uKind == 4.0 );
+	bool vegCanopy = vegLeaf && uMode.w > 0.5;
 	// cards seen edge-on show as flat slivers: raise their alpha cut (true face normal from derivatives)
 	// (derivatives outside the branch: they must run in uniform control flow)
 	vec3 vegFN = cross( dFdx( vViewPosition ), dFdy( vViewPosition ) );
@@ -316,25 +359,10 @@ const FRAG_COLOR = /* glsl */`
 	}
 	vec4 vegTx = vegTexel( vegEdge );
 	vec3 vegC = vegTx.rgb * vVegCol;
-	float vegRough = 0.72, vegSpec = 0.4, vegAoI = 1.0, vegTrans = 0.0;
+	float vegRough = 0.72, vegSpec = 0.4, vegAoI = 1.0, vegTrans = 0.0, vegBump = 0.0, vegBumpA = 0.0;
 	float vegSeed = fract( vVegInst.x * 7.31 + vVegInst.z * 3.7 );
-	if ( uKind == 6.0 ) {
-		// grass: the ground tone darkened at the base, lighter and warmer at the tips (after Tidewater's
-		// GrassField), straw-tipped where it is dry; a passing gust lays the blades over and shows
-		// their lighter side
-		float f = clamp( ( vegAo - 0.35 ) / 0.65, 0.0, 1.0 );
-		vec3 tone = vVegGround.rgb * vVegCol;
-		// base: mix( tone * 0.5, soil, 0.3 ) (Tidewater GrassField), tip: lighter and, where the meadow
-		// is dry, towards straw
-		vec3 base = mix( tone * 0.5, ${ SRGB( 0.17, 0.13, 0.08 ) }, 0.3 );
-		vec3 tip = mix( tone * vec3( 1.25, 1.25, 1.05 ), ${ SRGB( 0.62, 0.54, 0.33 ) }, vVegInst.y * 0.35 * ( 1.0 - vVegInst.z ) );
-		vegC = mix( base, tip, smoothstep( 0.0, 0.9, f ) );
-		vegC = mix( vegC, vegC * vec3( 1.3, 1.28, 1.1 ) + vec3( 0.03, 0.03, 0.015 ), vVegGround.a * 0.6 * f );
-		vegAoI = mix( 0.32, 1.0, smoothstep( 0.0, 0.75, f ) );
-		vegRough = 0.8;
-		vegSpec = 0.4;
-		vegTrans = 0.3 * smoothstep( 0.2, 1.0, f );
-	} else if ( vegPart > 1.5 && vegPart < 3.5 ) {
+	float vegUnder = vVegX.y;
+	if ( vegPart > 1.5 && vegPart < 3.5 ) {
 		// per-plant tint: by a random (trees, shrubs) or by dryness (grasses)
 		vec3 tint = uMode.x > 0.5 ? mix( uTintA, uTintB, clamp( vVegInst.y, 0.0, 1.0 ) ) : mix( uTintA, uTintB, vegSeed );
 		if ( vegPart > 2.5 ) tint = vec3( 1.0 );
@@ -346,23 +374,43 @@ const FRAG_COLOR = /* glsl */`
 			if ( fl < 0.12 ) flower = vec3( dot( vegTx.rgb, vec3( 0.5, 0.4, 0.1 ) ) ) * vec3( 1.9, 1.35, 0.25 ); // yellow
 			else if ( fl < 0.24 && uMode.z > 1.5 ) flower = vegTx.rgb * vec3( 1.1, 0.55, 0.9 ); // pink
 			bool show = uMode.z > 1.5 ? vVegInst.y > 0.45 : fl < 0.55;
-			vegC = mix( vegC * tint, show ? flower : vec3( 0.07, 0.1, 0.04 ) * tint, red );
+			vegC = mix( vegC * tint, show ? flower : vec3( 0.03, 0.05, 0.02 ) * tint, red );
 		} else vegC *= tint;
 		// ti: some plants are the red-leaved kind
 		if ( uMode.y > 0.5 && vVegInst.z > 0.72 ) vegC *= vec3( 1.25, 0.3, 0.4 );
+		// the underside of fronds and leaves is duller and a little bluer than the waxy upper side
+		if ( vegLeaf && ! vegCanopy && ! gl_FrontFacing ) vegC *= vec3( 0.74, 0.8, 0.84 );
 		// sunlit outer leaves are a touch lighter and warmer, the inside of a crown darker
 		vegC *= mix( 0.55, 1.0, vegAo ) * mix( vec3( 1.0 ), vec3( 1.16, 1.22, 0.92 ), smoothstep( 0.62, 1.0, vegAo ) * 0.7 );
 		vegAoI = mix( 0.35, 1.0, vegAo );
-		vegRough = vegCanopy ? 0.8 : 0.66;
-		vegSpec = vegCanopy ? 0.15 : 0.4;
-		if ( vegLeaf ) vegTrans = vegCanopy ? 0.5 * ( vegAo * 0.6 + 0.4 ) : uKind == 1.0 ? 0.3 : 0.22;
+		vegRough = vegLeaf ? uLeaf.x : 0.7;
+		vegSpec = vegLeaf ? uLeaf.y : 0.4;
+		if ( vegLeaf ) vegTrans = uLeaf.z * ( vegCanopy ? vegAo * 0.6 + 0.4 : 1.0 );
 		if ( uKind == 5.0 ) { vegRough = 0.8; vegTrans = 0.3 * smoothstep( 0.35, 1.0, vegAo ); }
+	} else if ( vegPart < 0.5 ) {
+		// coconut palm trunk: Tidewater's procedural bark, its relief bumped near the camera
+		float pH = vVegInst.w, pSeed = fract( vVegInst.x * 7.31 ), pIv = vegHash( vec2( pSeed * 37.1, 1.7 ) );
+		vec4 pb = vegPalmBark( vVegUv.y, vVegUv.x, pH, pSeed, pIv );
+		vegC = pb.rgb;
+		float fadeB = 1.0 - smoothstep( 10.0, 32.0, length( vViewPosition ) );
+		if ( fadeB > 0.0 ) {
+			vegBump = ( vegPalmBark( vVegUv.y + 0.004, vVegUv.x, pH, pSeed, pIv ).w - pb.w ) / 0.004 * fadeB;
+			vegBumpA = ( vegPalmBark( vVegUv.y, vVegUv.x + 0.0015, pH, pSeed, pIv ).w - pb.w ) / ( 0.0015 * 1.1 ) * fadeB;
+		}
+		vegAoI = mix( 0.5, 1.0, vegAo );
+		vegRough = 0.92;
+		vegSpec = 0.3;
 	} else if ( vegPart < 1.5 ) {
 		// tree bark: the texture brings the detail only (divided by its own mean, the last mip), the
-		// vertex colour sets the albedo. The palm bark texture is used as it is.
-		if ( vegPart > 0.5 ) vegC = vegTx.rgb / dot( max( textureLod( tBark, vec2( 0.5 ), 12.0 ).rgb, vec3( 1e-4 ) ), vec3( 0.333 ) ) * vVegCol;
-		vegC *= uBarkTint * ( 0.85 + 0.3 * vegSeed ) * mix( 0.6, 1.0, vegAo );
-		vegAoI = mix( 0.4, 1.0, vegAo );
+		// vertex colour sets the albedo (Tidewater's vegBarkColor palette); moss and epiphytes on the
+		// humid lower trunk; the trunk under the crown sees little of the sky
+		vegC = vegTx.rgb / dot( max( textureLod( tBark, vec2( 0.5 ), 12.0 ).rgb, vec3( 1e-4 ) ), vec3( 0.333 ) ) * vVegCol;
+		vegC *= uBarkTint * ( 0.85 + 0.3 * vegSeed );
+		float hfB = vVegX.x;
+		float n2 = vegNoise( vec2( vVegUv.x * 6.0, vVegUv.y * 0.7 ) );
+		float moss = smoothstep( 0.45, 0.7, vegNoise( vec2( vVegUv.x * 9.0, vVegUv.y * 1.3 + vegSeed * 11.0 ) ) + ( 0.35 - hfB ) * 0.6 ) * 0.7 * uLeaf.w;
+		vegC = mix( vegC, mix( ${ HEX( 0x2c3a18 ) }, ${ HEX( 0x44552a ) }, n2 ), moss );
+		vegAoI = smoothstep( 0.0, 0.75, hfB ) * 0.45 + 0.4;
 		vegRough = 0.92;
 		vegSpec = 0.3;
 	} else {
@@ -375,6 +423,14 @@ const FRAG_COLOR = /* glsl */`
 		vegRough = 0.88;
 		vegSpec = 0.6;
 	}
+	// understory under the rain-forest canopy (scatter.js): the canopy hides most of the sky, and the
+	// light that passes down through the leaves is green and diffuse (as the terrain's forest floor,
+	// Terrain.js underCanopy: cloud and hill shadowed, not in the sun's shadow map)
+	if ( vegUnder > 0.0 ) {
+		vegAoI *= mix( 1.0, 0.3, vegUnder );
+		totalEmissiveRadiance += vegC * uSunColor * vec3( 0.03, 0.05, 0.012 ) * ( max( normalize( uSunDir ).y, 0.0 ) * vegUnder
+			* cloudShadowAt( vWorldPos ) * terrainSunShadowAt( vWorldPos ) * RECIPROCAL_PI );
+	}
 	diffuseColor.rgb = vegC;
 	diffuseColor.a = vegTx.a;
 `;
@@ -382,9 +438,14 @@ const FRAG_COLOR = /* glsl */`
 const FRAG_NORMAL = /* glsl */`
 	// foliage: canopy normals (not flipped on back faces) bent towards the viewer so leaves never
 	// shade edge-on; crowns of leaf cards read as one soft volume, fronds and big leaves keep more of
-	// their own shape
-	if ( vegLeaf ) normal = normalize( normalize( vNormal ) + normalize( vViewPosition ) * ( vegCanopy ? 0.7 : 0.2 ) );
-	else if ( uKind == 6.0 ) normal = normalize( normalize( vNormal ) + normalize( vViewPosition ) * 0.4 );
+	// their own shape (Tidewater: + V * 0.7 canopy, + V * 0.15 plants, + V * 0.4 grass)
+	if ( vegCanopy ) normal = normalize( normalize( vNormal ) + normalize( vViewPosition ) * 0.7 );
+	else if ( vegLeaf ) normal = normalize( normal + normalize( vViewPosition ) * 0.15 );
+	else if ( vegBump != 0.0 || vegBumpA != 0.0 ) {
+		// palm bark relief along the trunk axis and around it
+		vec3 Tv = normalize( ( viewMatrix * vec4( vVegT, 0.0 ) ).xyz );
+		normal = normalize( normal - Tv * vegBump - cross( normal, Tv ) * vegBumpA );
+	}
 `;
 
 // the small specular of leaves and grass: F0 and F90 both scaled (MeshPhysicalMaterial's specularIntensity)
@@ -394,16 +455,20 @@ const FRAG_SPECULAR = /* glsl */`
 	material.specularF90 = vegSpec;
 `;
 
-// sunlight shining through leaves and blades lit from behind (uses the shadowed sun colour of the
-// light loop: leaves in shadow don't glow)
+// Leaf translucency, ported from Tidewater VegNodes.js vegTranslucency: sunlight transmitted through a
+// leaf lit from behind (relative to the viewer), ( albedo * ( 1.25, 1.45, 0.55 ) + ( 0.012, 0.018, 0 ) )
+// * sat( -N.L ) * ( pow( sat( -V.L ), 3 ) * 0.7 + 0.3 ) * strength, times the shadowed light colour of
+// the light loop (leaves in shadow don't glow). Canopies use their unflipped crown normals, plants the
+// face normal; blades (grass, cane) Tidewater's grass term.
 const FRAG_TRANSLUCENT = /* glsl */`
 	#if NUM_DIR_LIGHTS > 0
 	if ( vegTrans > 0.0 ) {
-		vec3 gN = normalize( vNormal ) * faceDirection;
-		float back = uKind == 6.0 || uKind == 5.0 ? 1.0 : clamp( dot( - gN, directLight.direction ), 0.0, 1.0 );
+		vec3 gN = vegCanopy ? normalize( vNormal ) : normalize( vNormal ) * faceDirection;
+		bool vegBlade = uKind == 5.0;
+		float back = vegBlade ? 1.0 : clamp( dot( - gN, directLight.direction ), 0.0, 1.0 );
 		float VL = clamp( dot( - geometryViewDir, directLight.direction ), 0.0, 1.0 );
-		float fwd = uKind == 6.0 || uKind == 5.0 ? pow( VL, 4.0 ) : pow( VL, 3.0 ) * 0.7 + 0.3;
-		vec3 tcol = diffuseColor.rgb * vec3( 1.25, 1.45, 0.55 ) + vec3( 0.012, 0.018, 0.0 );
+		float fwd = vegBlade ? pow( VL, 4.0 ) : pow( VL, 3.0 ) * 0.7 + 0.3;
+		vec3 tcol = vegBlade ? diffuseColor.rgb * vec3( 1.1, 1.3, 0.6 ) : diffuseColor.rgb * vec3( 1.25, 1.45, 0.55 ) + vec3( 0.012, 0.018, 0.0 );
 		reflectedLight.directDiffuse += tcol * directLight.color * back * fwd * vegTrans * ( 1.0 - uNight );
 	}
 	#endif
@@ -428,15 +493,16 @@ export function vegTextures( leafAtlas ) {
 
 
 // per-mesh uniforms: LOD window, kind, far thinning, tints
-// mode: [ tint by dryness, red-leaf variety, flowers (1 by b, 2 by a), - ]
-export function vegUniforms( kind, tintA, tintB, barkTint, mode = [ 0, 0, 0, 0 ] ) {
+// mode: [ tint by dryness, red-leaf variety, flowers (1 by b, 2 by a), leaf-card canopy ]
+// leaf: [ leaf roughness, leaf specular intensity, leaf translucency, bark moss ] (Tidewater's per material values)
+export function vegUniforms( kind, tintA, tintB, barkTint, mode = [ 0, 0, 0, 0 ], leaf = [ 0.7, 0.4, 0.3, 0 ] ) {
 	return {
+		uLeaf: { value: new THREE.Vector4( ...leaf ) },
 		uMode: { value: new THREE.Vector4( ...mode ) },
 		uLod: { value: new THREE.Vector4( 0, 0, 1e6, 1e6 ) },
 		uShrinkEnd: { value: 0 },
 		uKind: { value: kind },
 		uThin: { value: new THREE.Vector3( 0, 0, 1 ) },
-		uGrass: { value: new THREE.Vector4( 1e6, 1e6, 1e6, 1e6 ) },
 		uTintA: { value: new THREE.Color( ...tintA ) },
 		uTintB: { value: new THREE.Color( ...tintB ) },
 		uBarkTint: { value: new THREE.Color( ...( barkTint || [ 1, 1, 1 ] ) ) },

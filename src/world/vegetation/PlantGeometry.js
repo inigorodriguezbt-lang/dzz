@@ -7,7 +7,7 @@
 // canvas leaf atlas and WebGL2.
 import * as THREE from 'three';
 import { GeoBuilder, PART, mulberry32, lin } from './GeoBuilder.js';
-import { atlasUV } from './LeafTextures.js';
+import { atlasUV, TILE_MEAN } from './LeafTextures.js';
 import { PALM_H } from './species.js';
 
 const UP = new THREE.Vector3( 0, 1, 0 );
@@ -15,6 +15,49 @@ const _uv = [ 0, 0 ];
 const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3(), _d = new THREE.Vector3();
 const smooth = ( a, b, x ) => { const t = Math.min( 1, Math.max( 0, ( x - a ) / ( b - a ) ) ); return t * t * ( 3 - 2 * t ); };
 const WHITE = atlasUV( 'WHITE', 0.5, 0.5, [ 0, 0 ] );
+
+// ---- palette (ported from Tidewater VegMaterials.js vegCanopyLeafColor / vegPlantAlbedo / vegBarkColor) --
+// Leaf colours are Tidewater's (sRGB hex pairs mixed by a per-card random), desaturated 15 % like its
+// canopy, and reach the albedo through the vertex colour divided by the tile's mean colour: the atlas
+// texture only brings the leaf structure. The impostor bakes read the same vertex colours.
+const LEAF_BRIGHT = 0.94; // mean of Tidewater's leaf brightness structure (LeafTextures vegRosette)
+export const PALETTE = {
+	monkeypod: [ 0x34491f, 0x485c27 ], // t1 fresh mid green
+	kiawe: [ 0x4f5a27, 0x646a31 ], // t2 yellow-green
+	kukui: [ 0x33473a, 0x485a45 ], // t3 blue-green, lighter (the pale kukui)
+	ohia: [ 0x283a1b, 0x364a23 ], // t0 dark glossy (bronze flush on a few cards)
+	ironwood: [ 0x2a3b2a, 0x3a4a36 ], // t3 blue-green
+	pine: [ 0x283a1e, 0x384a30 ], // t0 / t3
+	shrub: [ 0x34521c, 0x466624 ], // s2 hibiscus
+	naupaka: [ 0x3f5522, 0x52662a ], // s0 sea grape
+	fern: [ 0x345c20, 0x55802c ],
+	banana: [ 0x3f5f24, 0x55742d ],
+	ti: [ 0x3a5a26, 0x4f6f2e ],
+};
+const linHex = ( h ) => { const c = new THREE.Color( h ); return [ c.r, c.g, c.b ]; };
+const desat = ( c, k = 0.85 ) => { const l = c[ 0 ] * 0.2126 + c[ 1 ] * 0.7152 + c[ 2 ] * 0.0722; return c.map( ( v ) => l + ( v - l ) * k ); };
+const mix3 = ( a, b, t ) => [ a[ 0 ] + ( b[ 0 ] - a[ 0 ] ) * t, a[ 1 ] + ( b[ 1 ] - a[ 1 ] ) * t, a[ 2 ] + ( b[ 2 ] - a[ 2 ] ) * t ];
+// vertex colour that turns a tile's mean colour into the linear colour c
+export function leafCol( tile, c ) {
+	const m = TILE_MEAN[ tile ] || [ 0.08, 0.16, 0.04 ];
+	return [ c[ 0 ] / Math.max( m[ 0 ], 1e-3 ), c[ 1 ] / Math.max( m[ 1 ], 1e-3 ), c[ 2 ] / Math.max( m[ 2 ], 1e-3 ) ];
+}
+// canopy / understory leaf colour of a card (cr: its random)
+export function paletteCol( name, cr, k = 1 ) {
+	const [ a, b ] = PALETTE[ name ];
+	let c = mix3( linHex( a ), linHex( b ), cr );
+	if ( name === 'ohia' ) c = mix3( c, linHex( 0x5e4a2e ), sstep01( 0.96, 0.995, cr ) * 0.5 );
+	return desat( c ).map( ( v ) => v * LEAF_BRIGHT * k );
+}
+const sstep01 = ( a, b, x ) => smooth( a, b, x );
+// coconut frond by age a (0 youngest .. 1 oldest; Tidewater vegPlantAlbedo part 1, age = a * 0.55)
+export function frondCol( a, fr ) {
+	let g = mix3( linHex( 0x728c33 ), linHex( 0x445f27 ), smooth( 0, 0.35, a ) );
+	g = mix3( g, linHex( 0x69702f ), smooth( 0.55, 1, a ) );
+	return g.map( ( v ) => v * ( 0.82 + 0.28 * fr ) );
+}
+// tree bark (Tidewater vegBarkColor at its mean), k: species brightness
+export const barkLin = ( k = 1, warm = 0 ) => mix3( linHex( 0x302a22 ), linHex( 0x5c5549 ), 0.5 ).map( ( v, i ) => v * k * ( 1 + warm * [ 0.12, 0, - 0.12 ][ i ] ) );
 
 // ---- primitives ------------------------------------------------------------------------------------------
 
@@ -71,7 +114,7 @@ function bezier( p0, c, p1, n ) {
 // cross, leafLen( s ), leafAngle( s ), droop( s ), curl, tile, veg: { u0 (trunk sway weight), flutter,
 // phase }, mat: [ part, ao, cr, crown ], col, wings (default both)
 function frond( b, o ) {
-	const { origin, azimuth, elevation, bend, twist = 0, length, segs = 8, cross = 2, curl = 0.2, bendPow = 1.4, tile, minWidth = 0.03 } = o;
+	const { origin, azimuth, elevation, bend, twist = 0, length, segs = 8, cross = 2, curl = 0.2, bendPow = 1.4, tile, minWidth = 0.03, roll = 0 } = o;
 	const pts = [];
 	const p = origin.clone();
 	for ( let k = 0; k <= segs; k ++ ) {
@@ -94,7 +137,8 @@ function frond( b, o ) {
 			S.normalize();
 			N.crossVectors( S, T ).normalize();
 			const Ll = Math.max( o.leafLen( s ), minWidth );
-			const al = o.leafAngle( s ), be = o.droop( s );
+			// the frond rolls about its rachis toward the tip: one wing hangs lower than the other
+			const al = o.leafAngle( s ), be = o.droop( s ) + sigma * roll * s * s;
 			side.copy( S ).multiplyScalar( sigma * Math.cos( be ) ).addScaledVector( N, - Math.sin( be ) );
 			ld.copy( T ).multiplyScalar( Math.cos( al ) ).addScaledVector( side, Math.sin( al ) ).normalize();
 			const row = [];
@@ -116,8 +160,9 @@ function frond( b, o ) {
 				if ( _d.lengthSq() < 1e-12 ) _d.copy( g.nup );
 				_d.normalize();
 				if ( _d.dot( g.nup ) < 0 ) _d.negate();
-				// normals lean up a little: fronds are lit like a canopy, not like flat planes
-				_d.lerp( UP, 0.25 ).normalize();
+				// normals lean up a little: fronds are lit like a canopy, not like flat planes (palm fronds:
+				// Tidewater's plain grid normals)
+				_d.lerp( UP, o.upBias ?? 0.25 ).normalize();
 				atlasUV( tile, g.t, g.s, _uv );
 				const fl = g.t * smooth( 0.05, 0.3, g.s ) * ( o.veg.flutter ?? 1 );
 				r.push( b.vertex( g.q, _d, _uv[ 0 ], _uv[ 1 ], [ o.veg.u0 ?? 1, g.s, fl, o.veg.phase ?? 0 ], o.mat, o.col ) );
@@ -209,28 +254,40 @@ function lobeClumps( b, lobe, o, rand ) {
 
 // ---- coconut palm -----------------------------------------------------------------------------------------
 
+// (ported from Tidewater PlantGeometry.js palmRadius / palmRootLumps)
 const palmRadius = ( u ) => {
 	const y = u * PALM_H;
-	let r = 0.14 + 0.045 * ( 1 - u ) + 0.2 * Math.exp( - Math.max( y, 0 ) / 0.45 );
-	r *= 1 + 0.04 * Math.sin( y * 1.7 ) * ( 1 - u );
+	let r = 0.155 + 0.045 * ( 1 - u ) + 0.19 * Math.exp( - Math.max( y, 0 ) / 0.42 );
+	r *= 1 + 0.05 * Math.sin( y * 1.7 ) * ( 1 - u ); // slight irregularity
 	r += 0.07 * smooth( 0.955, 0.99, u ) - 0.1 * smooth( 0.995, 1.02, u ); // leaf-base boot
 	return r;
 };
+// buttress roots: lumps around the flared base, fading out within the first ~0.6 m
+const palmRootLumps = ( u, a ) => {
+	const k = Math.exp( - Math.max( u * PALM_H, 0 ) / 0.3 );
+	return k * ( 0.16 * Math.max( 0, Math.sin( a * 5 + 0.7 ) ) + 0.08 * Math.sin( a * 11 + 2.1 ) );
+};
 
+// Frond parameters shared by both levels so their silhouettes agree (ported from Tidewater
+// PlantGeometry.js palmFrondParams): a 2/5 spiral, young fronds stand up, mature ones arch out and droop
+// toward the tip, the two oldest hang down along the trunk.
 function palmFronds( rand, count ) {
 	const list = [];
 	for ( let i = 0; i < count; i ++ ) {
 		const a = count > 1 ? i / ( count - 1 ) : 0.5; // 0 youngest .. 1 oldest
-		const dead = i >= count - 1 && count > 10;
-		const len = ( 3.9 + 1.4 * smooth( 0, 0.45, a ) ) * ( 0.9 + 0.2 * rand() );
+		const hanging = count > 10 && i >= count - 2;
+		const len = ( 3.8 + 1.5 * smooth( 0, 0.45, a ) ) * ( 0.88 + 0.24 * rand() );
 		list.push( {
-			a, dead, k: i,
-			azimuth: i * 2.39996 + ( rand() - 0.5 ) * 0.35,
-			elevation: dead ? - 1.25 : 1.05 - 1.45 * Math.pow( a, 0.8 ) + ( rand() - 0.5 ) * 0.25,
-			bend: dead ? 0.15 : 0.6 + 0.85 * a + rand() * 0.3,
-			twist: ( rand() - 0.5 ) * 0.3,
-			length: dead ? len * 0.85 : len,
-			attachY: 0.3 - 0.45 * a,
+			a, dead: hanging && i === count - 1, hanging, k: i,
+			azimuth: i * 2.39996 + ( rand() - 0.5 ) * 0.4,
+			elevation: hanging ? - 1.05 - ( i - ( count - 2 ) ) * 0.25 : 1.0 - 1.25 * Math.pow( a, 0.8 ) + ( rand() - 0.5 ) * 0.3,
+			// the rachis arches: most of the bend is in the outer half (the tips hang)
+			bend: hanging ? 0.35 : 0.55 + 1.15 * a + rand() * 0.4,
+			bendPow: hanging ? 1.2 : 1.9 + rand() * 0.5,
+			twist: ( rand() - 0.5 ) * 0.45,
+			roll: ( rand() - 0.5 ) * ( hanging ? 0.4 : 0.9 ),
+			length: hanging ? len * 0.9 : len,
+			attachY: 0.32 - 0.5 * a,
 			phase: rand(), cr: rand(),
 		} );
 	}
@@ -251,7 +308,8 @@ export function buildPalm( lod = 0, seed = 11 ) {
 		const dr = ( palmRadius( u + 0.01 ) - palmRadius( u - 0.01 ) ) / ( 0.02 * H );
 		for ( let i = 0; i <= radial; i ++ ) {
 			const a = i / radial * Math.PI * 2;
-			_a.set( Math.cos( a ) * r, u * H, Math.sin( a ) * r );
+			const rr = r + palmRootLumps( u, a );
+			_a.set( Math.cos( a ) * rr, u * H, Math.sin( a ) * rr );
 			_b.set( Math.cos( a ), - dr, Math.sin( a ) ).normalize();
 			// uv.y: height fraction; the shader scales it by the trunk length for the ring texture
 			b.vertex( _a, _b, i / radial * 2, u, [ u, 0, 0, 0 ], [ PART.PALMBARK, 0.55 + 0.45 * smooth( 0, 0.2, u ) * ( 1 - 0.5 * smooth( 0.9, 1, u ) ), 0.5, 0 ], [ 1, 1, 1 ] );
@@ -273,20 +331,25 @@ export function buildPalm( lod = 0, seed = 11 ) {
 		// (20 faces with smooth normals: a nut is a few pixels even under the palm)
 		blob( b, c, new THREE.Vector3( s, s * 1.12, s ), 0, { part: PART.SOLID, crown: 20, col, ao: () => 0.6 } );
 	}
-	const fronds = palmFronds( randF, 16 );
+	// 18 fronds (the mid level drops four and widens the leaflets, as Tidewater's far palm)
+	const fronds = palmFronds( randF, 18 ).filter( ( f, i ) => lod === 0 || ( i !== 1 && i !== 5 && i !== 9 && i !== 13 ) );
+	const leafScale = lod === 0 ? 1 : 1.15;
 	for ( const f of fronds ) {
 		const origin = new THREE.Vector3( Math.cos( f.azimuth ) * 0.14, H + f.attachY, Math.sin( f.azimuth ) * 0.14 );
 		const Lf = f.length;
-		// colour by age: young fronds a fresh yellow-green, old ones yellowing, the dead one brown (its own tile)
-		const col = f.dead ? [ 1, 1, 1 ] : [ 1 + 0.12 * ( 1 - f.a ) - 0.05, 1.02, 0.85 + 0.1 * f.a ].map( ( v, q ) => v * ( q === 2 ? 1 - 0.25 * smooth( 0.75, 1, f.a ) : 1 ) );
+		// colour by age (Tidewater's ramp: young fronds a lighter yellow-green, mature olive, the oldest
+		// yellowing), a value per frond; the dead one brown (its own tile)
+		const col = f.dead ? [ 1, 1, 1 ] : leafCol( 'FROND', frondCol( f.hanging ? 1 : f.a, f.cr ) );
 		frond( b, {
-			origin, azimuth: f.azimuth, elevation: f.elevation, bend: f.bend, twist: f.twist, length: Lf,
-			segs: lod === 0 ? 9 : 5, cross: lod === 0 ? 2 : 1, tile: f.dead ? 'DEADFROND' : 'FROND',
-			leafLen: ( s ) => 0.2 * Lf * ( smooth( 0.03, 0.22, s ) * ( 1 - 0.6 * smooth( 0.35, 1.0, s ) ) ),
-			leafAngle: ( s ) => 1.05 - 0.4 * s,
-			droop: ( s ) => ( f.dead ? 1.25 : 0.45 + 0.5 * f.a ) + 0.32 * s,
-			curl: f.dead ? 0.1 : 0.22, minWidth: 0.05,
-			veg: { u0: 1, flutter: f.dead ? 0.3 : 1, phase: f.phase },
+			origin, azimuth: f.azimuth, elevation: f.elevation, bend: f.bend, bendPow: f.bendPow, twist: f.twist, roll: f.roll, length: Lf,
+			segs: lod === 0 ? 8 : 3, cross: lod === 0 ? 2 : 1, tile: f.dead ? 'DEADFROND' : 'FROND',
+			// leaflets start after the bare petiole (~1/5 of the frond), longest a third of the way out
+			leafLen: ( s ) => leafScale * 0.23 * Lf * ( smooth( 0.14, 0.3, s ) * ( 1 - 0.68 * smooth( 0.35, 1.0, s ) ) ),
+			leafAngle: ( s ) => 1.1 - 0.5 * s,
+			// the two rows hang from the rachis in a V (keeled), steeper toward the tip and on old fronds
+			droop: ( s ) => ( f.hanging ? 1.3 : 0.88 + 0.35 * f.a ) + 0.45 * s,
+			curl: f.hanging ? 0.15 : 0.45, minWidth: 0.045, upBias: 0,
+			veg: { u0: 1, flutter: f.hanging ? 0.3 : 1, phase: f.phase },
 			mat: [ PART.LEAF, 0.55 + 0.45 * ( 1 - f.a ), f.cr, 1 + f.k ], col,
 		} );
 	}
@@ -350,11 +413,11 @@ function crownLobes( kind, rand ) {
 }
 
 const LEAF_STYLE = {
-	monkeypod: { tile: 'FINE', size: 1.9, clumpR: 1.0, clumpsPerR: 3.3, cardsPer: 3, col: [ 1, 1, 1 ] },
-	kukui: { tile: 'BROAD', size: 1.6, clumpR: 0.85, clumpsPerR: 3.6, cardsPer: 3, col: [ 1, 1, 1 ] },
-	ohia: { tile: 'SMALL', size: 1.25, clumpR: 0.7, clumpsPerR: 4.2, cardsPer: 3, col: [ 1, 1, 1 ] },
-	kiawe: { tile: 'FINE', size: 1.5, clumpR: 0.8, clumpsPerR: 3.2, cardsPer: 2, col: [ 1.15, 1.12, 0.85 ] },
-	ironwood: { tile: 'NEEDLE', size: 2.1, clumpR: 0.95, clumpsPerR: 2.8, cardsPer: 3, col: [ 1, 1, 1 ], upBias: 0.3 },
+	monkeypod: { tile: 'FINE', size: 1.9, clumpR: 1.0, clumpsPerR: 3.3, cardsPer: 3, bark: barkLin( 1, 0.3 ) },
+	kukui: { tile: 'BROAD', size: 1.6, clumpR: 0.85, clumpsPerR: 3.6, cardsPer: 3, bark: barkLin( 1.45, - 0.2 ) },
+	ohia: { tile: 'SMALL', size: 1.25, clumpR: 0.7, clumpsPerR: 4.2, cardsPer: 3, bark: barkLin( 0.95, 0.6 ) },
+	kiawe: { tile: 'FINE', size: 1.5, clumpR: 0.8, clumpsPerR: 3.2, cardsPer: 2, bark: barkLin( 0.8, 0.4 ) },
+	ironwood: { tile: 'NEEDLE', size: 2.1, clumpR: 0.95, clumpsPerR: 2.8, cardsPer: 3, upBias: 0.3, bark: barkLin( 0.9, 0.5 ) },
 };
 
 export function buildBroadleaf( kind, lod = 0, seed = 21 ) {
@@ -366,7 +429,7 @@ export function buildBroadleaf( kind, lod = 0, seed = 21 ) {
 	const crownC = new THREE.Vector3( ...cr.crownC ), crownR = new THREE.Vector3( ...cr.crownR );
 	const flex = ( p ) => Math.min( 1, Math.hypot( p.x, p.z ) / 5 ) * smooth( cr.fork, cr.fork + 3, p.y );
 	const barkVeg = ( p ) => [ Math.max( 0, p.y / H ), flex( p ), 0, 0 ];
-	const barkCol = kind === 'kukui' ? lin( 0xb0aca0 ) : kind === 'ohia' ? lin( 0x9a8f80 ) : kind === 'ironwood' ? lin( 0x8a7a6a ) : kind === 'kiawe' ? lin( 0x7a6e62 ) : lin( 0x9a9488 );
+	const barkCol = style.bark;
 	const radial = lod === 0 ? 9 : 5;
 	// trunk(s) with a flared foot
 	const stems = cr.stems || 1;
@@ -409,7 +472,7 @@ export function buildBroadleaf( kind, lod = 0, seed = 21 ) {
 		}, rand ) );
 	}
 	for ( const s of specs ) { s.phase = rand(); s.cr = rand(); }
-	emitCrown( b, specs, lod, ( s ) => ( { tile: style.tile, u0: 0, u1: 1, v0: 0, v1: 1, crownC, crownR, H, flex, col: style.col } ), crownC, crownR );
+	emitCrown( b, specs, lod, ( s ) => ( { tile: style.tile, u0: 0, u1: 1, v0: 0, v1: 1, crownC, crownR, H, flex, col: leafCol( style.tile, paletteCol( kind, s.cr ) ) } ), crownC, crownR );
 	return b.build();
 }
 
@@ -437,7 +500,7 @@ export function buildPine( lod = 0, seed = 41 ) {
 	const H = 30;
 	const flex = ( p ) => Math.min( 1, Math.hypot( p.x, p.z ) / 3 );
 	const veg = ( p ) => [ Math.max( 0, p.y / H ), flex( p ), 0, 0 ];
-	const barkCol = lin( 0x8a7560 );
+	const barkCol = barkLin( 1.1, 0.5 );
 	const pts = [];
 	const tr = lod === 0 ? 10 : 5;
 	for ( let k = 0; k <= tr; k ++ ) pts.push( new THREE.Vector3( 0, - 0.3 + k / tr * ( H + 0.3 ), 0 ) );
@@ -472,7 +535,7 @@ export function buildPine( lod = 0, seed = 41 ) {
 			card( b, {
 				center: c, w: br.L + 0.3, h: hgt, normal: n, spin: angleInPlane( n, dir ),
 				tile: 'PINEBR', u0: 0, u1: 1, v0: 0, v1: 1, lobeC: new THREE.Vector3( 0, br.y, 0 ), lobeR: br.L + 0.4,
-				crownC, crownR, H, flex, phase: br.ph, cr: br.cr, col: [ 1, 1, 1 ],
+				crownC, crownR, H, flex, phase: br.ph, cr: br.cr, col: leafCol( 'PINEBR', paletteCol( 'pine', br.cr ) ),
 				// a narrow column: the branch tips are out in the light, the trunk end is shaded
 				aoAt: ( p ) => Math.min( 1, 0.42 + 0.45 * Math.hypot( p.x, p.z ) / ( br.L + 0.3 ) + 0.15 * br.f ),
 			} );
@@ -499,7 +562,7 @@ export function buildTreeFern( lod = 0, seed = 51 ) {
 	const pts = [];
 	const lx = ( rand() - 0.5 ) * 0.4, lz = ( rand() - 0.5 ) * 0.4;
 	for ( let k = 0; k <= 5; k ++ ) { const f = k / 5; pts.push( new THREE.Vector3( lx * f * f, - 0.2 + f * ( TH + 0.2 ), lz * f * f ) ); }
-	tube( b, pts, ( f ) => 0.2 + 0.06 * Math.exp( - f * 6 ) + 0.03 * f, { radial: lod === 0 ? 8 : 5, part: PART.BARK, veg: ( p ) => [ Math.max( 0, p.y / 5 ), 0, 0, 0 ], ao: () => 0.55, col: lin( 0x5a4430 ), texAround: 1, texLen: 1.2, cap: true } );
+	tube( b, pts, ( f ) => 0.2 + 0.06 * Math.exp( - f * 6 ) + 0.03 * f, { radial: lod === 0 ? 8 : 5, part: PART.BARK, veg: ( p ) => [ Math.max( 0, p.y / 5 ), 0, 0, 0 ], ao: () => 0.55, col: barkLin( 0.85, 0.8 ), texAround: 1, texLen: 1.2, cap: true } );
 	const top = pts[ pts.length - 1 ];
 	const n = lod === 0 ? 13 : 8;
 	for ( let i = 0; i < n; i ++ ) {
@@ -514,7 +577,7 @@ export function buildTreeFern( lod = 0, seed = 51 ) {
 			leafLen: ( s ) => 0.36 * Lf * ( smooth( 0.02, 0.2, s ) * ( 1 - 0.75 * smooth( 0.4, 1, s ) ) ),
 			leafAngle: () => 1.35, droop: ( s ) => 0.12 + 0.25 * s, curl: 0.1, minWidth: 0.02,
 			veg: { u0: 1, flutter: 0.6, phase: rand() },
-			mat: [ PART.LEAF, 0.5 + 0.5 * ( 1 - a ), rand(), 0 ], col: dead ? [ 0.85, 0.78, 0.7 ] : [ 1, 1, 1 ],
+			mat: [ PART.LEAF, 0.5 + 0.5 * ( 1 - a ), rand(), 0 ], col: dead ? [ 0.85, 0.78, 0.7 ] : leafCol( 'FERN', paletteCol( 'fern', 0.3 + 0.7 * ( 1 - a ) * rand() ) ),
 		} );
 	}
 	return b.build();
@@ -529,7 +592,7 @@ export function buildBanana( lod = 0, seed = 61 ) {
 	for ( let si = 0; si < ( lod === 0 ? 3 : 2 ); si ++ ) {
 		const [ sx, sz, SH, nL ] = stems[ si ];
 		const pts = [ new THREE.Vector3( sx, - 0.1, sz ), new THREE.Vector3( sx, SH * 0.5, sz ), new THREE.Vector3( sx, SH, sz ) ];
-		tube( b, pts, ( f ) => ( 0.13 - 0.05 * f + 0.05 * Math.exp( - f * 8 ) ) * ( SH / 2.9 + 0.3 ), { radial: lod === 0 ? 7 : 5, part: PART.SOLID, veg: ( p ) => [ Math.max( 0, p.y / 3.5 ), 0, 0, 0 ], ao: ( f ) => 0.6 + 0.3 * f, col: lin( 0x5f7a38 ), fixedUV: WHITE, cap: true } );
+		tube( b, pts, ( f ) => ( 0.13 - 0.05 * f + 0.05 * Math.exp( - f * 8 ) ) * ( SH / 2.9 + 0.3 ), { radial: lod === 0 ? 7 : 5, part: PART.SOLID, veg: ( p ) => [ Math.max( 0, p.y / 3.5 ), 0, 0, 0 ], ao: ( f ) => 0.6 + 0.3 * f, col: linHex( 0x55672e ), fixedUV: WHITE, cap: true } );
 		const n = lod === 0 ? nL : Math.ceil( nL * 0.6 );
 		for ( let i = 0; i < n; i ++ ) {
 			const a = i / Math.max( 1, n - 1 );
@@ -544,7 +607,7 @@ export function buildBanana( lod = 0, seed = 61 ) {
 				leafLen: ( s ) => W * Math.pow( Math.max( 0, Math.sin( Math.PI * Math.min( 1, Math.max( 0, ( s - 0.12 ) / 0.88 ) ) ) ), 0.5 ),
 				leafAngle: () => 1.45, droop: ( s ) => 0.15 + 0.35 * s, curl: 0.12, minWidth: 0.02,
 				veg: { u0: 0.8, flutter: 0.8, phase: rand() },
-				mat: [ PART.LEAF, 0.6 + 0.4 * ( 1 - a ), rand(), 0 ], col: old ? [ 1.15, 0.95, 0.5 ] : [ 1, 1, 1 ],
+				mat: [ PART.LEAF, 0.6 + 0.4 * ( 1 - a ), rand(), 0 ], col: leafCol( 'BANANA', old ? mix3( paletteCol( 'banana', rand() ), linHex( 0x7c7d35 ), 0.55 ) : paletteCol( 'banana', rand() ) ),
 			} );
 		}
 	}
@@ -602,7 +665,7 @@ export function buildTi( lod = 0, seed = 71 ) {
 			const el = 0.3 + rand() * 1.1;
 			const dir = new THREE.Vector3( Math.cos( az ) * Math.cos( el ), Math.sin( el ), Math.sin( az ) * Math.cos( el ) );
 			leafStrip( b, top.clone().add( new THREE.Vector3( 0, ( rand() - 0.5 ) * 0.15, 0 ) ), dir, 0.35 + rand() * 0.25, 0.11 + rand() * 0.04, 0.5 + rand() * 0.6, 'TI',
-				[ PART.LEAF, 0.6 + 0.4 * rand(), rand(), 0 ], [ 1, 1, 1 ], [ top.y / 2.2, 1, 1, rand() ], lod === 0 ? 3 : 2 );
+				[ PART.LEAF, 0.6 + 0.4 * rand(), rand(), 0 ], leafCol( 'TI', paletteCol( 'ti', rand() ) ), [ top.y / 2.2, 1, 1, rand() ], lod === 0 ? 3 : 2 );
 		}
 	}
 	return b.build();
@@ -610,7 +673,7 @@ export function buildTi( lod = 0, seed = 71 ) {
 
 // ---- lobed shrubs: generic shrub, naupaka --------------------------------------------------------------------
 
-function buildLobed( lobes, crown, tile, lod, seed, { size, clumpR, clumpsPerR, cardsPer, flatten, stems = 3, stemCol } ) {
+function buildLobed( lobes, crown, tile, lod, seed, { size, clumpR, clumpsPerR, cardsPer, flatten, stems = 3, stemCol, pal } ) {
 	const rand = mulberry32( seed );
 	const b = new GeoBuilder();
 	const H = crown.H;
@@ -624,13 +687,13 @@ function buildLobed( lobes, crown, tile, lod, seed, { size, clumpR, clumpsPerR, 
 	const specs = [];
 	for ( const L of lobes ) specs.push( ...lobeClumps( b, L, { clumpsPerR: clumpsPerR * ( lod === 0 ? 1 : 0.45 ), clumpR: clumpR * ( lod === 0 ? 1 : 1.5 ), cardsPer: lod === 0 ? cardsPer : 2, size: size * ( lod === 0 ? 1 : 1.5 ), flatten }, rand ) );
 	specs.sort( ( a, c ) => c.center.distanceToSquared( crownC ) - a.center.distanceToSquared( crownC ) );
-	for ( const s of specs ) card( b, { ...s, tile, u0: 0, u1: 1, v0: 0, v1: 1, crownC, crownR, H, flex, phase: rand(), cr: rand(), col: [ 1, 1, 1 ] } );
+	for ( const s of specs ) { const cr = rand(); card( b, { ...s, tile, u0: 0, u1: 1, v0: 0, v1: 1, crownC, crownR, H, flex, phase: rand(), cr, col: leafCol( tile, paletteCol( pal, cr ) ) } ); }
 	return b.build();
 }
 
 export function buildShrub( lod = 0, seed = 81 ) {
 	return buildLobed( [ [ 0, 0.85, 0, 0.8 ], [ 0.75, 0.6, 0.35, 0.6 ], [ - 0.6, 0.55, 0.55, 0.6 ], [ - 0.25, 0.65, - 0.75, 0.62 ], [ 0.35, 1.25, - 0.25, 0.48 ] ],
-		{ H: 1.7, c: [ 0, 0.75, 0 ], r: [ 1.1, 0.8, 1.1 ] }, 'SHRUB', lod, seed, { size: 0.8, clumpR: 0.42, clumpsPerR: 5, cardsPer: 3, flatten: 0.8 } );
+		{ H: 1.7, c: [ 0, 0.75, 0 ], r: [ 1.1, 0.8, 1.1 ] }, 'SHRUB', lod, seed, { size: 0.8, clumpR: 0.42, clumpsPerR: 5, cardsPer: 3, flatten: 0.8, pal: 'shrub', stemCol: barkLin( 0.9 ) } );
 }
 
 export function buildNaupaka( lod = 0, seed = 91 ) {
@@ -638,7 +701,7 @@ export function buildNaupaka( lod = 0, seed = 91 ) {
 	const rand = mulberry32( seed + 5 );
 	for ( let i = 0; i < 7; i ++ ) { const a = i / 7 * 6.28 + rand() * 0.5, r = 0.5 + rand() * 0.8; L.push( [ Math.cos( a ) * r, 0.45 + rand() * 0.35, Math.sin( a ) * r, 0.55 + rand() * 0.25 ] ); }
 	L.push( [ 0, 0.85, 0, 0.7 ] );
-	return buildLobed( L, { H: 1.2, c: [ 0, 0.55, 0 ], r: [ 1.4, 0.6, 1.4 ] }, 'NAUPAKA', lod, seed, { size: 0.6, clumpR: 0.36, clumpsPerR: 6.5, cardsPer: 3, flatten: 0.6, stems: 0 } );
+	return buildLobed( L, { H: 1.2, c: [ 0, 0.55, 0 ], r: [ 1.4, 0.6, 1.4 ] }, 'NAUPAKA', lod, seed, { size: 0.6, clumpR: 0.36, clumpsPerR: 6.5, cardsPer: 3, flatten: 0.6, stems: 0, pal: 'naupaka' } );
 }
 
 // ---- grasses ----------------------------------------------------------------------------------------------------
@@ -647,6 +710,8 @@ export function buildNaupaka( lod = 0, seed = 91 ) {
 export function buildTallGrass( lod = 0, seed = 101 ) {
 	const rand = mulberry32( seed );
 	const b = new GeoBuilder();
+	// Tidewater's MEADOW green (the tint moves it towards the meadow yellow by dryness)
+	const grassCol = leafCol( 'GRASS', linHex( 0x40521a ) );
 	const n = lod === 0 ? 7 : 3;
 	for ( let k = 0; k < n; k ++ ) {
 		const a = k / n * Math.PI + rand() * 0.4;
@@ -665,7 +730,7 @@ export function buildTallGrass( lod = 0, seed = 101 ) {
 				const p = new THREE.Vector3( 0, y, 0 ).addScaledVector( n0, q * w * 0.5 * ( 0.35 + 0.65 * f ) ).add( off );
 				atlasUV( 'GRASS', q * 0.5 + 0.5, 1 - f, _uv );
 				const nrm = side.clone().multiplyScalar( 0.4 ).add( UP ).normalize();
-				ids.push( b.vertex( p, nrm, _uv[ 0 ], _uv[ 1 ], [ f, f, f, ph ], [ PART.LEAF, 0.35 + 0.65 * f, rand(), 0 ], [ 1, 1, 1 ] ) );
+				ids.push( b.vertex( p, nrm, _uv[ 0 ], _uv[ 1 ], [ f, f, f, ph ], [ PART.LEAF, 0.35 + 0.65 * f, rand(), 0 ], grassCol ) );
 			}
 		}
 		b.quad( ids[ 0 ], ids[ 1 ], ids[ 3 ], ids[ 2 ] );
@@ -700,7 +765,7 @@ export function buildFern( lod = 0, seed = 111 ) {
 			segs: lod === 0 ? 4 : 2, cross: 1, bendPow: 1.2, tile: 'FERN',
 			leafLen: ( s ) => 0.24 * Lf * ( smooth( 0.02, 0.2, s ) * ( 1 - 0.8 * smooth( 0.35, 1, s ) ) ),
 			leafAngle: () => 1.35, droop: ( s ) => 0.12 + 0.2 * s, curl: 0.08, minWidth: 0.012,
-			veg: { u0: 0.3, flutter: 0.6, phase: rand() }, mat: [ PART.LEAF, 0.55 + 0.45 * a, rand(), 0 ], col: [ 1, 1, 1 ],
+			veg: { u0: 0.3, flutter: 0.6, phase: rand() }, mat: [ PART.LEAF, 0.55 + 0.45 * a, rand(), 0 ], col: leafCol( 'FERN', paletteCol( 'fern', rand() ) ),
 		} );
 	}
 	return b.build();
@@ -762,7 +827,7 @@ export function buildGrassClump( lod = 0, seed = 121 ) {
 export function buildPineappleRow( lod = 0, seed = 131 ) {
 	const rand = mulberry32( seed );
 	const b = new GeoBuilder();
-	const leafCol = lin( 0x6f8a62 );
+	const pineCol = lin( 0x6f8a62 );
 	for ( const row of [ - 0.24, 0.24 ] ) {
 		for ( let k = 0; k < 3; k ++ ) {
 			const cx = - 1.2 + ( k + 0.5 + ( row > 0 ? 0.5 : 0 ) ) * 0.8 - ( row > 0 ? 0.4 : 0 ) + ( rand() - 0.5 ) * 0.1;
@@ -774,14 +839,14 @@ export function buildPineappleRow( lod = 0, seed = 131 ) {
 				const az = q * ( lod === 0 ? 2.39996 : Math.PI * 2 / n ) + rand() * 0.3;
 				const el = 0.35 + rand() * 0.8;
 				const dir = new THREE.Vector3( Math.cos( az ) * Math.cos( el ), Math.sin( el ), Math.sin( az ) * Math.cos( el ) );
-				leafStrip( b, base, dir, 0.45 + rand() * 0.3, lod === 0 ? 0.07 : 0.1, 0.25 + rand() * 0.4, 'PANDAN', [ PART.LEAF, 0.4 + 0.6 * rand(), rand(), 0 ], leafCol.map( v => v * ( 0.85 + rand() * 0.3 ) ), [ 0, 0.6, 0.4, rand() ], lod === 0 ? 2 : 1 );
+				leafStrip( b, base, dir, 0.45 + rand() * 0.3, lod === 0 ? 0.07 : 0.1, 0.25 + rand() * 0.4, 'PANDAN', [ PART.LEAF, 0.4 + 0.6 * rand(), rand(), 0 ], pineCol.map( v => v * ( 0.85 + rand() * 0.3 ) ), [ 0, 0.6, 0.4, rand() ], lod === 0 ? 2 : 1 );
 			}
 			if ( lod === 0 ) {
 				const fy = 0.42 + rand() * 0.08;
 				blob( b, base.clone().add( new THREE.Vector3( 0, fy, 0 ) ), new THREE.Vector3( 0.08, 0.12, 0.08 ), 0, { part: PART.SOLID, crown: 99, col: lin( 0xc08a2a ), ao: () => 0.8 } );
 				for ( let q = 0; q < 5; q ++ ) {
 					const az = q / 5 * 6.28;
-					leafStrip( b, base.clone().add( new THREE.Vector3( 0, fy + 0.1, 0 ) ), new THREE.Vector3( Math.cos( az ) * 0.4, 1, Math.sin( az ) * 0.4 ), 0.13, 0.04, 0.2, 'PANDAN', [ PART.LEAF, 0.9, 0.5, 99 ], leafCol, [ 0, 0.3, 0.2, 0 ], 1 );
+					leafStrip( b, base.clone().add( new THREE.Vector3( 0, fy + 0.1, 0 ) ), new THREE.Vector3( Math.cos( az ) * 0.4, 1, Math.sin( az ) * 0.4 ), 0.13, 0.04, 0.2, 'PANDAN', [ PART.LEAF, 0.9, 0.5, 99 ], pineCol, [ 0, 0.3, 0.2, 0 ], 1 );
 				}
 			}
 		}
@@ -831,5 +896,66 @@ export function buildRock( lod = 0, seed = 151 ) {
 		return k * ( d.y < - 0.2 ? 0.8 : 1 );
 	};
 	blob( b, new THREE.Vector3( 0, 0.5, 0 ), new THREE.Vector3( 1, 0.75, 0.9 ), lod === 0 ? 3 : 1, { part: PART.ROCK, uvScale: 2, col: [ 1, 1, 1 ], ao: ( d ) => 0.55 + 0.45 * Math.max( 0, d.y * 0.5 + 0.5 ), veg: () => [ 0, 0, 0, 0 ] }, disp );
+	return b.build();
+}
+
+// ---- beach clutter (after Tidewater's DebrisShapes / DebrisPlacement): driftwood along the wrack line,
+// fallen coconuts and dead fronds under the palms ------------------------------------------------------------
+
+// Driftwood log lying along x (2.4 m nominal): bleached, twisted and fluted (the grain spirals, the soft
+// wood worn out between the ridges), tapered, with a broken branch stub. Bark part: the bark texture's
+// grain on Tidewater's bleached silver-grey (NatureMaterial.js driftwood)
+export function buildDriftwood( lod = 0, seed = 161 ) {
+	const rand = mulberry32( seed );
+	const b = new GeoBuilder();
+	const L = 2.4, r0 = 0.13, r1 = 0.07;
+	const col = linHex( 0xb8b4aa );
+	const veg = () => [ 1, 0, 0, 0 ]; // (x 1: the trunk AO of a log out in the open)
+	const twist = 1.5 + rand();
+	const radius = ( f, a ) => {
+		const flute = Math.pow( Math.abs( Math.sin( a * 3 + f * twist * 3 ) ), 0.6 );
+		return ( r0 + ( r1 - r0 ) * f ) * ( 0.86 + 0.18 * flute ) * ( 1 - 0.25 * smooth( 0.96, 1, f ) );
+	};
+	const bend = ( rand() - 0.5 ) * 0.5;
+	const pts = bezier( new THREE.Vector3( - L / 2, r0 * 0.75, 0 ), new THREE.Vector3( 0, r0 * 0.8, bend ), new THREE.Vector3( L / 2, r1 * 0.7, bend * 0.4 ), lod === 0 ? 10 : 4 );
+	tube( b, pts, radius, { radial: lod === 0 ? 9 : 5, part: PART.BARK, veg, ao: () => 0.75, col, texAround: 0.5, texLen: 0.9, cap: true } );
+	// the broken stub of a side branch
+	const at = pts[ Math.round( pts.length * 0.35 ) ];
+	const stub = [ at.clone(), at.clone().add( new THREE.Vector3( 0.12, 0.22, 0.14 ) ), at.clone().add( new THREE.Vector3( 0.2, 0.36, 0.26 ) ) ];
+	tube( b, stub, ( f ) => 0.05 * ( 1 - 0.5 * f ), { radial: lod === 0 ? 6 : 4, part: PART.BARK, veg, ao: () => 0.8, col, texAround: 0.3, texLen: 0.6, cap: true } );
+	return b.build();
+}
+
+// Fallen coconuts: two nuts and a split husk lying on the ground (husk green -> brown -> grey,
+// Tidewater NatureMaterial.js coconut)
+export function buildFallenNuts( lod = 0, seed = 171 ) {
+	const rand = mulberry32( seed );
+	const b = new GeoBuilder();
+	const cols = [ linHex( 0x6b5a2a ), linHex( 0x5e3b1c ), linHex( 0x5d5245 ), linHex( 0x6b6c26 ) ];
+	for ( let i = 0; i < 3; i ++ ) {
+		const a = i * 2.2 + rand(), r = i ? 0.25 + rand() * 0.3 : 0;
+		const s = 0.12 + rand() * 0.03;
+		const c = new THREE.Vector3( Math.cos( a ) * r, s * 0.85, Math.sin( a ) * r );
+		// the third one is a split, paler husk (flattened)
+		const split = i === 2;
+		blob( b, c, split ? new THREE.Vector3( s * 1.1, s * 0.5, s * 0.9 ) : new THREE.Vector3( s * 1.12, s, s ), lod === 0 ? 1 : 0, { part: PART.SOLID, crown: i === 0 ? 0 : 99, col: split ? linHex( 0x84603a ) : cols[ Math.floor( rand() * cols.length ) ], ao: ( d ) => 0.55 + 0.45 * Math.max( 0, d.y * 0.5 + 0.5 ), veg: () => [ 0, 0, 0, 0 ] } );
+	}
+	return b.build();
+}
+
+// A dead frond lying on the ground (the dead frond tile, flat, the leaflets splayed)
+export function buildFallenFrond( lod = 0, seed = 181 ) {
+	const rand = mulberry32( seed );
+	const b = new GeoBuilder();
+	const Lf = 4.2;
+	frond( b, {
+		origin: new THREE.Vector3( - Lf * 0.5, 0.06, 0 ), azimuth: ( rand() - 0.5 ) * 0.2, elevation: 0.03, bend: 0.06, bendPow: 1.5, twist: ( rand() - 0.5 ) * 0.3, length: Lf,
+		segs: lod === 0 ? 6 : 3, cross: 1, tile: 'DEADFROND', roll: 0.3,
+		leafLen: ( s ) => 0.23 * Lf * ( smooth( 0.14, 0.3, s ) * ( 1 - 0.68 * smooth( 0.35, 1.0, s ) ) ),
+		leafAngle: ( s ) => 1.1 - 0.5 * s,
+		// the leaflets lie splayed on the sand (a shallow V)
+		droop: () => 0.12, curl: - 0.05, minWidth: 0.045,
+		veg: { u0: 0, flutter: 0, phase: 0 }, mat: [ PART.LEAF, 0.8, 0.5, 0 ], col: [ 1, 1, 1 ],
+	} );
 	return b.build();
 }

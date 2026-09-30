@@ -177,7 +177,7 @@ export function registerClothingModels( reg ) {
 				add( g, G.sph( 0.14, 16, 10, 0, PI * 2, 0, PI * 0.6 ).scale( 1.05, 1, 1 ), mat, [ 0, 0.02, 0 ] );
 				const shield = G.sph( 0.16, 14, 6, - PI * 0.4, PI * 0.8, PI * 0.3, PI * 0.42 ); shield.rotateY( PI / 2 );
 				add( g, shield, MAT.glass( 0xd8e8f0, 0.35 ), [ 0.01, 0.02, 0 ] );
-				add( g, G.box( 0.018, 0.012, 0.2 ), MAT.blackPlastic(), [ 0.118, 0.13, 0 ], [ 0, 0, - 0.5 ] ); // visor hinge, flush with the shell
+				add( g, G.torus( 0.12, 0.007, 4, 16, PI * 0.6 ), MAT.blackPlastic(), [ 0, 0.1, 0 ], [ PI / 2, 0, - PI * 0.3 ] ); // visor hinge band, on the shell
 				break;
 			}
 			case 'helmet_fire': {

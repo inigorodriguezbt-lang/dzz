@@ -25,6 +25,7 @@ import { ShoreWaves, SHORE_GLSL, PERLIN_GLSL } from './ocean/ShoreWaves.js';
 import { ShoreSim, SHORE_SIM_GLSL } from './ocean/ShoreSim.js';
 import { SURF_FOAM_GLSL } from './ocean/SurfFoam.js';
 import { Caustics } from './ocean/Caustics.js';
+import { Breakers } from './ocean/Breakers.js';
 
 // water quality: CDLOD grid (quads per node side), FFT resolution, fragment cascades, screen-space
 // reflections, near-field ripples, the shore simulation + surf foam, caustics. 'low' runs the same spectrum
@@ -58,6 +59,8 @@ export class Ocean {
 		writePatternLayer( renderer.gl, this.patterns, PATTERN_DETAIL, this.detail.data, this.detail.size );
 		this.tile.listeners.push( ( t ) => {
 			this.shore.setField( t.field );
+			this._stations = t.stations;
+			if ( this.breakers ) this.breakers.setStations( t.stations );
 			// the surf lace once the first tile is in (the worker is free then)
 			if ( ! this._lace ) this._lace = this.tile.lace( 512 ).then( ( l ) => { if ( l ) writePatternLayer( renderer.gl, this.patterns, PATTERN_LACE, l.data, l.size ); } );
 		} );
@@ -91,6 +94,12 @@ export class Ocean {
 		else if ( ! Q.sim && this.sim ) { this.sim.dispose(); this.sim = null; }
 		if ( Q.caustics && ! this.caustics ) this.caustics = new Caustics( this.r.gl, this.sizes );
 		else if ( ! Q.caustics && this.caustics ) { this.caustics.dispose(); this.caustics = null; }
+		// the thrown lips of the plunging breakers (with the shore simulation)
+		if ( Q.sim && ! this.breakers ) {
+			this.breakers = new Breakers( this.r.gl, 'uniform float uWaterLevel; uniform highp sampler2DArray uPatterns;' + groundGLSL( false ) + PERLIN_GLSL + SHORE_GLSL, this.U, this.sizes );
+			this.breakers.mesh.layers.set( LAYER_POST );
+			if ( this._stations ) this.breakers.setStations( this._stations );
+		} else if ( ! Q.sim && this.breakers ) { this.breakers.mesh.removeFromParent(); this.breakers.dispose(); this.breakers = null; }
 		const mat = this._material( Q );
 		if ( this.mesh ) {
 			this.mesh.geometry.dispose();
@@ -111,6 +120,7 @@ export class Ocean {
 				u.uCamWorld.value.copy( camera.matrixWorld );
 			};
 		}
+		if ( this.breakers && this.breakers.mesh.parent !== this.mesh ) this.mesh.add( this.breakers.mesh );
 		this.mat = mat;
 	}
 
@@ -278,6 +288,7 @@ export class Ocean {
 			U.uShoreSimRect.value.copy( this.sim.rect );
 		}
 		if ( this.caustics ) this.caustics.update( this.fft.deriv, G.uSunDir.value, dt );
+		if ( this.breakers ) this.breakers.update( this.fft.disp );
 		const u = this.mat.uniforms;
 		u.uOceanDisp.value = this.fft.disp;
 		u.uOceanDeriv.value = this.fft.deriv;
@@ -343,6 +354,7 @@ export class Ocean {
 		this.tile.dispose();
 		if ( this.sim ) this.sim.dispose();
 		if ( this.caustics ) this.caustics.dispose();
+		if ( this.breakers ) this.breakers.dispose();
 		this.patterns.dispose();
 		this.mesh.geometry.dispose();
 		this.mesh.material.dispose();
