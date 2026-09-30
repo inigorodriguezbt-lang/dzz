@@ -161,6 +161,7 @@ export class Roads {
 		this.saved = {}; // key -> items from the save, not yet opened this session
 		this.lootable = []; // wreck records in the loaded near cells
 		this.loading = []; // near cells being built a slice per frame
+		this.signTex = new Map(); // guide / welcome sign id -> { tex, refs }: canvases kept for a return trip
 		this._buildBatches();
 		this._interact();
 		this._tmp = { v: new THREE.Vector3(), m: new THREE.Matrix4(), q: new THREE.Quaternion(), e: new THREE.Euler(), s: new THREE.Vector3(), m2: new THREE.Matrix4(), m3: new THREE.Matrix4(), q2: new THREE.Quaternion(), n: new THREE.Vector3() };
@@ -302,7 +303,7 @@ export class Roads {
 		c.meshes.length = 0;
 		for ( const b of c.boxes ) this.game.physics.remove( b );
 		c.boxes.length = 0;
-		for ( const s of c.dyn ) { this.group.remove( s ); s.material.map?.dispose(); s.material.dispose(); }
+		for ( const s of c.dyn ) { this.group.remove( s ); const e = this.signTex.get( s.userData.sign ); if ( e ) e.refs --; s.material.dispose(); }
 		c.dyn.length = 0;
 		if ( c.inst ) this.dirty = true;
 		c.inst = null;
@@ -441,7 +442,8 @@ export class Roads {
 			// single-sided boards hang in front of their post
 			const off = dyn || dbl ? 0 : 0.045;
 			M.compose( V.set( x + Math.sin( yaw ) * off, y, z + Math.cos( yaw ) * off ), Q, S.set( w, h, 1 ) );
-			if ( dyn ) { this._dynSign( c, cell, M ); continue; }
+			// (painting a guide sign's canvas takes a few ms: a step of its own)
+			if ( dyn ) { this._dynSign( c, cell, M ); yield; continue; }
 			const [ px, py, pw, ph ] = atlasRect( cell );
 			vals[ 0 ] = ( px + 1 ) / ATLAS_SIZE; vals[ 1 ] = 1 - ( py + ph - 1 ) / ATLAS_H; vals[ 2 ] = ( px + pw - 1 ) / ATLAS_SIZE; vals[ 3 ] = 1 - ( py + 1 ) / ATLAS_H;
 			vals[ 4 ] = dbl; vals[ 5 ] = isShaped( cell ) ? 1 : 0; vals[ 6 ] = 0; vals[ 7 ] = 0;
@@ -536,11 +538,9 @@ export class Roads {
 	_dynSign( c, id, matrix ) {
 		const sg = this.net.signs[ id ];
 		if ( ! sg ) return;
-		const r = sg.road;
-		const remain = sg.side > 0 ? r.len - sg.s : sg.s;
-		const miles = remain * 8 / 1609.34; // the world is 1:8
-		const mat = makeDynSignMaterial( guideSign( sg, sg.kind === 'guide' ? miles : 0 ) );
+		const mat = makeDynSignMaterial( this._signTexture( id, sg ) );
 		const mesh = new THREE.Mesh( this.signGeo, mat );
+		mesh.userData.sign = id;
 		mesh.matrixAutoUpdate = false;
 		mesh.matrix.copy( matrix );
 		mesh.matrixWorld.copy( matrix );
@@ -550,6 +550,23 @@ export class Roads {
 		this.group.add( mesh );
 		c.dyn.push( mesh );
 	}
+
+	// the canvas of a guide / welcome sign: painted once, kept while in use and for a few dozen more
+	_signTexture( id, sg ) {
+		let e = this.signTex.get( id );
+		if ( e ) { this.signTex.delete( id ); this.signTex.set( id, e ); e.refs ++; return e.tex; }
+		const r = sg.road;
+		const remain = sg.side > 0 ? r.len - sg.s : sg.s;
+		const miles = remain * 8 / 1609.34; // the world is 1:8
+		e = { tex: guideSign( sg, sg.kind === 'guide' ? miles : 0 ), refs: 1 };
+		this.signTex.set( id, e );
+		for ( const [ k, o ] of this.signTex ) {
+			if ( this.signTex.size <= 32 ) break;
+			if ( o.refs <= 0 ) { o.tex.dispose(); this.signTex.delete( k ); }
+		}
+		return e.tex;
+	}
+
 
 	// the instanced bands per instance-set key: [ key, [ [ batch, d0, d1 ] ... ] ]
 	_groups() {
@@ -757,6 +774,8 @@ export class Roads {
 		this.game.scene.remove( this.group );
 		for ( const m of this.carMats ) m.dispose();
 		this.panelMat.dispose();
+		for ( const e of this.signTex.values() ) e.tex.dispose();
+		this.signTex.clear();
 	}
 }
 
