@@ -281,7 +281,7 @@ export class Crafting {
 		if ( ! f.lit ) {
 			if ( f.fuel > 0.01 ) return [ { t: bt, id: f.id, label: 'Light fire', sub: this.fireSource() || g.mode === 'creative' ? `${hrs( f.fuel )} of fuel` : 'Need a lighter or matches', action: () => this.lightFire( f ) } ];
 			if ( addFuel ) return [ addFuel ];
-			return [ { t: bt, id: f.id, label: 'Campfire', sub: 'Needs fuel', action: () => g.toast( 'Need sticks or firewood', 'info' ) } ];
+			return [ { t: bt, id: f.id, label: 'Add fuel', sub: 'Need sticks or firewood', action: () => g.toast( 'Need sticks or firewood', 'info' ) } ];
 		}
 		// a fire running low takes fuel first; otherwise F (held) puts it out
 		if ( addFuel && f.fuel < 1.5 ) return [ addFuel ];
