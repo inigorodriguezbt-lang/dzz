@@ -1,6 +1,7 @@
 // The running game: owns the world, the player and every gameplay system, and the frame loop.
 // Subsystems are optional at runtime (each is null-checked) so the game runs while pieces load.
 import * as THREE from 'three';
+import { G } from '../render/Materials.js';
 
 const _q = new THREE.Quaternion();
 import { Events } from '../core/Events.js';
@@ -186,7 +187,8 @@ export class Game {
 			damage: S.damageFlash,
 			lowBlood: THREE.MathUtils.clamp( ( 3800 - S.blood ) / 2200, 0, 1 ),
 			drunk: S.drunk, sick: S.sick * 0.6 + S.infection * 0.4,
-			underwater: p.underwater ? 1 : 0,
+			// from the camera (set by Ocean.update), so a flying or free camera under the surface is tinted too
+			underwater: p.underwater || G.uUnderwater.value > 0.5 ? 1 : 0,
 			exposureBias: this.exposure(),
 			time: this.world.clock,
 			flash: this.flash || 0,

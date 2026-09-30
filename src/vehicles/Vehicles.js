@@ -309,6 +309,8 @@ export class Vehicles {
 			v.settle();
 		}
 		this._addBoxes( v );
+		// a boat summoned onto the water starts awake so it rides the swell straight away
+		if ( spec.kind === 'boat' ) v.wake();
 		g.entities.add( v );
 		this.active.set( key, v );
 		this.list.push( v );
