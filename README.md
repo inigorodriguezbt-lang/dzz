@@ -27,10 +27,10 @@ More Node test suites: `node test/items.mjs`, `node test/weapons.mjs`, `node tes
 - **Climate and ground cover.** Rainfall is modelled from the trade winds (wet windward slopes, rain shadows,
   the dry summits above the inversion); lava flows are traced downhill from Kīlauea, Mauna Loa and Hualālai;
   old islands get red laterite; pineapple, sugar cane and ranch land where they grew.
-- **Towns and cities.** 55 settlements at their real locations — Honolulu from Pearl City to Kaimukī, Waikīkī's
+- **Towns and cities.** 58 settlements at their real locations — Honolulu from Pearl City to Kaimukī, Waikīkī's
   hotels, Kāneʻohe, Kailua, Hilo, Kona, Kahului, Lahaina, Līhuʻe and dozens of villages — plus Schofield
-  Barracks, Pearl Harbor, the Kāneʻohe Marine base, Pōhakuloa, the Pacific Missile Range, the airports and the
-  Mauna Kea observatories. About 4,600 buildings with interiors — houses, walk-ups, shops, gas stations, police
+  Barracks, Pearl Harbor, the Kāneʻohe Marine base, Pōhakuloa, the Pacific Missile Range, five airports with runways (Honolulu, Līhuʻe,
+  Kahului, Kona, Hilo) and the Mauna Kea observatories. About 4,500 buildings with interiors — houses, walk-ups, shops, gas stations, police
   and fire stations, hospitals, schools, hotel and office towers with stairwells and upper floors, warehouses,
   barracks, the airport terminals — with doors (locked ones can be picked, pried or kicked), furniture, and
   cupboards, fridges, lockers and safes to search.
