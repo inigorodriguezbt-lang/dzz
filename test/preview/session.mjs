@@ -29,7 +29,7 @@ for ( const s of steps ) {
 		try { const r = await page.evaluate( s.js ); if ( r !== undefined ) console.log( ( s.name || s.shot || 'step' ) + ':', JSON.stringify( r ) ); } catch ( e ) { console.log( 'eval error', e.message ); }
 	}
 	if ( s.wait ) await page.waitForTimeout( s.wait );
-	if ( s.shot ) { try { await page.screenshot( { path: `${outdir}/${s.shot}.png`, timeout: 150000 } ); console.log( 'shot', s.shot ); } catch ( e ) { console.log( 'shot failed', s.shot, e.message.split( '\n' )[ 0 ] ); } }
+	if ( s.shot ) { try { await page.screenshot( { path: `${outdir}/${s.shot}.jpg`, type: 'jpeg', quality: 85, timeout: 150000 } ); console.log( 'shot', s.shot ); } catch ( e ) { console.log( 'shot failed', s.shot, e.message.split( '\n' )[ 0 ] ); } }
 }
 console.log( logs.slice( 0, 80 ).join( '\n' ) );
 await browser.close();

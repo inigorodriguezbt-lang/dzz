@@ -612,7 +612,9 @@ const TERRAIN_ALBEDO = /* glsl */`
 		// where it is dry enough to show
 		// (dry grass covers most of it: the red soil shows on the steeper, eroded ground and in patches)
 		float redW = smoothstep( 0.42, 0.78, redV + ( macroA - 0.5 ) * 0.45 + ( dM.w - 0.5 ) * 0.15 ) * ( 1.0 - smoothstep( 0.38, 0.62, wetM ) )
-			* mix( 0.3, 1.0, smoothstep( 0.4, 0.7, macroB * 0.6 + dM.w * 0.25 + slope * 1.2 ) );
+			* mix( 0.3, 1.0, smoothstep( 0.4, 0.7, macroB * 0.6 + dM.w * 0.25 + slope * 1.2 ) )
+			// (towns are planted: whole hillsides of bare red dirt read as unfinished there)
+			* ( 1.0 - cityW * 0.8 );
 		float lateriteW = max( smoothstep( 0.62, 0.74, scar + ( macroB - 0.5 ) * 0.3 ) * smoothstep( 0.3, 0.42, slope )
 			* smoothstep( 0.52, 0.66, mcr ) * 0.85, redW ) * notRock;
 
@@ -676,7 +678,8 @@ const TERRAIN_ALBEDO = /* glsl */`
 		// straw, the wet windward side lush.
 		vec3 V = normalize( uCamPos - vWorldPos );
 		float NdV = clamp( dot( N0, V ), 0.0, 1.0 );
-		float dryShift = ( 0.42 - wetM ) * 0.5;
+		// (town lawns are watered: green even on the dry leeward side)
+		float dryShift = ( 0.42 - max( wetM, cityW * 0.62 ) ) * 0.5;
 		MeadowTone mt = terrainMeadowTone( macroA + dryShift, macroB + dryShift, slope, N0.z, dM.w * 0.65 + dN.w * 0.35, true );
 		// clumps (1-3 m) and tussocks, blade-scale grain
 		float clump = dM.w * 0.6 + dN.y * 0.4;

@@ -169,10 +169,23 @@ export class Renderer {
 					for ( int y = 0; y < ${METER_TILES}; y ++ ) for ( int x = 0; x < ${METER_TILES}; x ++ ) s += texelFetch( tTiles, ivec2( x, y ), 0 ).rg;
 					float avg = exp2( s.x / max( s.y, 1e-4 ) );
 					// the eye only partly compensates: dark scenes stay darker (dusk and night must not look
-					// like day), and at night at most one extra stop
+					// like day), and at night at most one extra stop. The floor is lower than Tidewater's 0.6: the
+					// Hawaiian noon sun stands near the zenith, so a beach meters ~0.85 and needs 0.35 to read right
 					float ratio = 0.25 / avg;
 					float partial = ratio > 1.0 ? pow( ratio, 0.8 ) : ratio;
-					float tgt = clamp( partial, 0.6, mix( 6.0, 2.0, uNight ) );
+					float tgt = clamp( partial, 0.35, mix( 6.0, 2.0, uNight ) );
+					// highlight protection: when a large part of the frame would wash out at that boost (sea and sky
+					// beyond a shaded foreground), pull back by up to 0.85 stop; a window or a lamp is too small to count
+					float nB = 0.0, lB = 0.0;
+					for ( int y = 0; y < ${METER_TILES}; y ++ ) for ( int x = 0; x < ${METER_TILES}; x ++ ) {
+						vec2 t = texelFetch( tTiles, ivec2( x, y ), 0 ).rg;
+						float l = t.x / max( t.y, 1e-4 );
+						if ( exp2( l ) * tgt > 1.0 ) { nB += 1.0; lB += l; }
+					}
+					if ( tgt > 1.0 && nB > 0.0 ) {
+						float cap = clamp( 1.1 / exp2( lB / nB ), tgt * 0.55, tgt );
+						tgt = exp2( mix( log2( tgt ), log2( cap ), smoothstep( 0.05, 0.25, nB / ${METER_TILES * METER_TILES}.0 ) ) );
+					}
 					float cur = texelFetch( tPrev, ivec2( 0 ), 0 ).r;
 					float rate = tgt > cur ? 1.6 : 1.1;
 					float k = uReset > 0.5 ? 1.0 : 1.0 - exp( - uDt * rate );
