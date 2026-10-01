@@ -5,6 +5,11 @@
 
 export const FLAG = { ROAD: 1, DIRT: 2, STREET: 4, RUNWAY: 8, BUILDING: 16, CITY: 32, FIELD: 64 };
 
+// The decoded buffer is shared memory when the page is cross-origin isolated (COOP / COEP headers, see
+// vite.config.js): the world workers and the water's worker then read this one copy instead of 46 MB each.
+export const TERRAIN_SHARED = globalThis.crossOriginIsolated === true && typeof SharedArrayBuffer === 'function';
+const bytes = ( n ) => new Uint8Array( TERRAIN_SHARED ? new SharedArrayBuffer( n ) : n );
+
 export async function loadTerrainBuffer( url, onProgress ) {
 	const res = await fetch( url );
 	if ( ! res.ok ) throw new Error( `terrain data: HTTP ${res.status}` );
@@ -18,13 +23,23 @@ export async function loadTerrainBuffer( url, onProgress ) {
 		chunks.push( value ); got += value.length;
 		if ( onProgress && total ) onProgress( got / total );
 	}
-	let buf = new Uint8Array( got );
+	const gz = got > 18 && chunks[ 0 ][ 0 ] === 0x1f && chunks[ 0 ][ 1 ] === 0x8b;
+	let buf = gz ? new Uint8Array( got ) : bytes( got );
 	let o = 0;
 	for ( const c of chunks ) { buf.set( c, o ); o += c.length; }
-	if ( buf[ 0 ] === 0x1f && buf[ 1 ] === 0x8b ) {
-		const ds = new DecompressionStream( 'gzip' );
-		const stream = new Blob( [ buf ] ).stream().pipeThrough( ds );
-		buf = new Uint8Array( await new Response( stream ).arrayBuffer() );
+	chunks.length = 0;
+	if ( gz ) {
+		// (not served with a content encoding) inflate straight into a buffer of the size in the gzip trailer
+		const out = bytes( new DataView( buf.buffer ).getUint32( got - 4, true ) );
+		const src = new ReadableStream( { start( c ) { c.enqueue( buf ); c.close(); } } );
+		const r = src.pipeThrough( new DecompressionStream( 'gzip' ) ).getReader();
+		o = 0;
+		for ( ;; ) {
+			const { done, value } = await r.read();
+			if ( done ) break;
+			out.set( value, o ); o += value.length;
+		}
+		buf = out;
 	}
 	return buf.buffer;
 }
@@ -196,21 +211,22 @@ export class HeightField {
 	}
 
 	// ---- min / max pyramid over the coarse grid (culling the quadtree, far LOD) ----------------------
+	// Level 0 is the coarse grid itself, read in place; the coarser levels keep min / max in its raw int16 units
+	// (exact: extremes of integers). A third of the coarse grid in all, instead of two float copies of it (38 MB
+	// in every thread that holds the terrain)
 
 	_buildMinMax() {
-		const levels = [];
-		let w = this.cnx, h = this.cnz;
-		let mn = new Float32Array( w * h ), mx = new Float32Array( w * h );
-		for ( let i = 0; i < w * h; i ++ ) { mn[ i ] = mx[ i ] = this.coarse[ i ] * this.iq; }
-		levels.push( { w, h, mn, mx, cell: this.CS } );
+		let w = this.cnx, h = this.cnz, mn = this.coarse, mx = this.coarse;
+		const levels = [ { w, h, mn, mx, cell: this.CS } ];
 		while ( w > 1 || h > 1 ) {
 			const nw = Math.ceil( w / 2 ), nh = Math.ceil( h / 2 );
-			const nmn = new Float32Array( nw * nh ), nmx = new Float32Array( nw * nh );
+			const nmn = new Int16Array( nw * nh ), nmx = new Int16Array( nw * nh );
 			for ( let j = 0; j < nh; j ++ ) for ( let i = 0; i < nw; i ++ ) {
-				let a = Infinity, b = - Infinity;
+				let a = 32767, b = - 32768;
 				for ( let dj = 0; dj < 2; dj ++ ) for ( let di = 0; di < 2; di ++ ) {
-					const si = Math.min( w - 1, i * 2 + di ), sj = Math.min( h - 1, j * 2 + dj );
-					a = Math.min( a, mn[ sj * w + si ] ); b = Math.max( b, mx[ sj * w + si ] );
+					const k = Math.min( h - 1, j * 2 + dj ) * w + Math.min( w - 1, i * 2 + di );
+					if ( mn[ k ] < a ) a = mn[ k ];
+					if ( mx[ k ] > b ) b = mx[ k ];
 				}
 				nmn[ j * nw + i ] = a; nmx[ j * nw + i ] = b;
 			}
@@ -230,7 +246,7 @@ export class HeightField {
 		let a = Infinity, b = - Infinity;
 		for ( let j = j0; j <= j1; j ++ ) for ( let i = i0; i <= i1; i ++ ) { a = Math.min( a, lv.mn[ j * lv.w + i ] ); b = Math.max( b, lv.mx[ j * lv.w + i ] ); }
 		if ( a === Infinity ) return [ - 1000, - 1000 ];
-		return [ a - 2, b + 2 ];
+		return [ a * this.iq - 2, b * this.iq + 2 ];
 	}
 
 	// ---- ray march against the ground (bullets, line of sight, picking) ---------------------------------

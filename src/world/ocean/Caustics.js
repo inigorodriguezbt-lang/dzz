@@ -14,6 +14,7 @@
 //        change of P.xz across one pixel (dFdx / dFdy)
 //   vec3 causticsSampleLevel( P, depth, level )  flat surface, fixed blur level
 import * as THREE from 'three';
+import { releaseArraysOnUpload } from '../../render/Materials.js';
 
 const RES = 512;
 const LAYERS = [
@@ -65,7 +66,9 @@ export class Caustics {
 		const geo = new THREE.BufferGeometry();
 		geo.setAttribute( 'position', new THREE.BufferAttribute( pos, 3 ) );
 		geo.setIndex( new THREE.BufferAttribute( idx, 1 ) );
-		return geo;
+		// (static: the CPU copies, 16 MB over the four grids, go once uploaded)
+		geo.boundingSphere = new THREE.Sphere( new THREE.Vector3( 0.5, 0.5, 0 ), 2 );
+		return releaseArraysOnUpload( geo );
 	}
 
 	_material( Ly, k ) {

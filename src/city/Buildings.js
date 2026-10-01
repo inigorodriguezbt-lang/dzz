@@ -184,7 +184,7 @@ class City {
 		c.dead = true;
 		if ( c.job ) c.job.cancelled = true;
 		map.delete( c.key );
-		if ( c.mesh ) { this.group.remove( c.mesh ); c.mesh.geometry.dispose(); }
+		if ( c.mesh ) { this.group.remove( c.mesh ); c.mesh.geometry.dispose(); this.world.csm?.lastOnly?.delete( c.mesh ); }
 		if ( c.lod === 0 && c.ready ) for ( const bi of c.ids ) { this.nearReady[ bi ] = 0; this._shellBoxes( bi, false ); this.stateTouched.add( bi ); }
 	}
 
@@ -197,6 +197,9 @@ class City {
 			m.castShadow = true; m.receiveShadow = true;
 			m.matrixAutoUpdate = false; m.updateMatrix();
 			m.name = ( c.lod ? 'bld-far-' : 'bld-near-' ) + c.key;
+			// (perf) far shells cast into the widest sun cascade only: the nearer ones lie inside the near shells'
+			// range, where the far shells are collapsed in their shader (every vertex still went through it)
+			if ( c.lod ) this.world.csm?.lastOnly?.add( m );
 			this.group.add( m );
 			c.mesh = m;
 		}

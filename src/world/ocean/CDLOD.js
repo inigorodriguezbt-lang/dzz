@@ -96,6 +96,8 @@ export class CDLOD {
 		this._cam = new THREE.Vector3();
 		this._order = [];
 		this.lodCounts = new Array( levels ).fill( 0 );
+		// ( x, z, size ) => true for a node with nothing to draw (no sea under it): skipped with its subtree
+		this.cull = null;
 	}
 
 	update( camera ) {
@@ -155,6 +157,7 @@ export class CDLOD {
 		const box = this._bounds( x, z, size );
 		if ( ! this._intersectsSphere( box, this.ranges[ lod ] ) ) return false;
 		if ( ! this._frustum.intersectsBox( box ) ) return true;
+		if ( this.cull && this.cull( x, z, size ) ) return true;
 		if ( lod === 0 || ! this._intersectsSphere( box, this.ranges[ lod - 1 ] ) ) {
 			this._add( x, z, size, lod );
 			return true;
@@ -165,7 +168,7 @@ export class CDLOD {
 			if ( ! this._select( cx, cz, h, lod - 1 ) ) {
 				// quadrant outside the finer range: draw it at this node's LOD
 				const b = this._bounds( cx, cz, h );
-				if ( this._frustum.intersectsBox( b ) ) this._add( cx, cz, h, lod );
+				if ( this._frustum.intersectsBox( b ) && ! ( this.cull && this.cull( cx, cz, h ) ) ) this._add( cx, cz, h, lod );
 			}
 		}
 		return true;

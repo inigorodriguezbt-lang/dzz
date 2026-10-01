@@ -8,6 +8,7 @@ import { Ocean } from '../world/Ocean.js';
 import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
 import { G, COMMON_GLSL, SHARED_PARS, preloadTextures, setMaxAnisotropy } from '../render/Materials.js';
 import { SunShadows } from '../render/Shadows.js';
+import { Lamps } from '../render/Lamps.js';
 import { FS_VERT } from '../render/Renderer.js';
 
 // the key light's visibility around a point (cascades, cloud and hill shadow), averaged over a small cross
@@ -46,6 +47,8 @@ export class World {
 		this.camera.position.set( 0, 50, 0 );
 		this.clock = 0;
 		this.systems = [];
+		// the small lights every system shares (render/Lamps.js)
+		this.lamps = new Lamps( this.scene );
 		// the key light's visibility at the player's hands, for the view model (its own scene: no shadow maps
 		// there): a 1x1 pass read back asynchronously, eased
 		this.handVis = 1;
@@ -139,6 +142,7 @@ export class World {
 		this.sun.color.copy( this.sky.keyColor );
 		this.sun.intensity = 1;
 		for ( const sys of this.systems ) sys.update && sys.update( dt );
+		this.lamps.update( this.camera.position );
 		const r = this.renderer;
 		this.ocean.update( dt, this.camera, r.sceneColor, r.sceneDepth, _view.set( r.width, r.height ) );
 		// cascaded shadows of the key light, fitted to this frame's camera

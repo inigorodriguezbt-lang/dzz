@@ -65,7 +65,8 @@ export class Vehicles {
 		this.spot = new THREE.SpotLight( 0xfff4e6, 0, 110, 0.72, 0.6, 1.4 );
 		this.spot.castShadow = false;
 		this.spot.visible = true;
-		game.scene.add( this.spot, this.spot.target );
+		// (a proxy for the world's shared spot light when there is one, render/Lamps.js: ahead of the flashlight)
+		if ( game.world?.lamps ) game.world.lamps.addSpot( this.spot, 2 ); else game.scene.add( this.spot, this.spot.target );
 		// the player's arms on the controls in the first-person seat
 		this.arms = new DriverArms();
 		this.armsVer = - 1;
@@ -1181,6 +1182,7 @@ export class Vehicles {
 		this.unprovide?.();
 		this.offDeath?.();
 		this._horn( null, false );
+		this.game.world?.lamps?.remove( this.spot );
 		this.game.scene.remove( this.spot, this.spot.target );
 		this.spot.dispose?.();
 		this.arms.dispose();

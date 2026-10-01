@@ -1,7 +1,7 @@
 // Worker side of the buildings module (job type "buildings", see src/workers/world.worker.js):
 //   { op: 'cell', ids, lod, ox, oz }  merged shells of the listed buildings around origin (ox, 0, oz)
 //   { op: 'storey', i, si }           the real interior of storey si of building i (building-local coords)
-import { Geo, transferOf } from './geo.js';
+import { scratchGeo, transferOf } from './geo.js';
 import { readBuilding, fitToGround } from './data.js';
 import { makePlan } from './plan.js';
 import { buildShell } from './exterior.js';
@@ -46,7 +46,7 @@ export function buildingJob( hf, world, msg ) {
 		return { result: o, transfer };
 	}
 	// shells
-	const g = new Geo( 16384 );
+	const g = scratchGeo( 'shells', 16384 );
 	for ( const i of msg.ids ) {
 		const P = planOf( hf, world, i );
 		const r = P.r;

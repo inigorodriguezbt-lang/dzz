@@ -65,10 +65,25 @@ export class SunShadows {
 		// rendered from the afterRender callback of an empty scene
 		this._host = new THREE.Scene();
 		this._todo = null;
+		// casters drawn into the last (widest) cascade only (City's far building shells: within the nearer
+		// cascades' reach the near shells stand in for them)
+		this.lastOnly = new Set();
 		this._host.onAfterRender = ( gl, s, camera ) => {
 			if ( ! this._todo ) return;
-			gl.shadowMap.needsUpdate = true;
-			gl.shadowMap.render( this._todo, this._scene, camera );
+			const last = this.lights[ this.lights.length - 1 ];
+			const near = this.lastOnly.size ? this._todo.filter( ( L ) => L !== last ) : [];
+			if ( near.length ) {
+				const prev = [];
+				for ( const o of this.lastOnly ) { prev.push( o.castShadow ); o.castShadow = false; }
+				gl.shadowMap.needsUpdate = true;
+				gl.shadowMap.render( near, this._scene, camera );
+				let i = 0;
+				for ( const o of this.lastOnly ) o.castShadow = prev[ i ++ ];
+				if ( this._todo.includes( last ) ) { gl.shadowMap.needsUpdate = true; gl.shadowMap.render( [ last ], this._scene, camera ); }
+			} else {
+				gl.shadowMap.needsUpdate = true;
+				gl.shadowMap.render( this._todo, this._scene, camera );
+			}
 			this._todo = null;
 		};
 	}

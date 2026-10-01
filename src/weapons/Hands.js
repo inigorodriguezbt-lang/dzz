@@ -107,7 +107,8 @@ export class Hands {
 		// world flashlight (a constant light count: no shader recompiles when it toggles)
 		this.spot = new THREE.SpotLight( 0xfff4e0, 0, 45, 0.42, 0.45, 2 );
 		this.spot.castShadow = false;
-		game.scene.add( this.spot, this.spot.target );
+		// (a proxy for the world's shared spot light when there is one, render/Lamps.js)
+		if ( game.world?.lamps ) game.world.lamps.addSpot( this.spot, 1 ); else game.scene.add( this.spot, this.spot.target );
 		// and a little of it on the view model
 		this.lamp = new THREE.PointLight( 0xfff0dc, 0, 1.5, 2 );
 		game.viewScene.add( this.lamp );
@@ -1507,6 +1508,7 @@ export class Hands {
 		this._disposed = true;
 		for ( const o of this._offs ) o();
 		this.vm.dispose();
+		this.game.world?.lamps?.remove( this.spot );
 		this.spot.parent?.remove( this.spot );
 		this.spot.target.parent?.remove( this.spot.target );
 		this.lamp.parent?.remove( this.lamp );

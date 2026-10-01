@@ -3,7 +3,7 @@
 // ceilings, the stairs, the storey's outside parts (porches, galleries, loggias, railings), the roof deck on
 // the top storey, and everything the runtime needs: colliders, doors, containers, loot spots, beds, taps and
 // candles. All in building-local metres (x across the front, z from the front to the back, y world height).
-import { Geo, GlassGeo, F_IN } from './geo.js';
+import { scratchGeo, GlassGeo, F_IN } from './geo.js';
 import { L, hash32, rng, winState, winHash, winKey, DECAL, decalUV, pumpsOf } from './data.js';
 import { M, slabT, extOf } from './plan.js';
 import { storeyOutside, frontSteps, stepBoxes, groundAt, bulkhead, hoseTower, terminalCanopyOf, towerCatwalkOf, penthouseOf, portalOf } from './exterior.js';
@@ -125,7 +125,7 @@ class Out {
 	constructor( P, si ) {
 		this.P = P; this.si = si; this.st = P.storeys[ si ];
 		// g: the storey and its furniture; gd: small things (drawn only up close); dec: decals
-		this.g = new Geo( 8192 ); this.gd = new Geo( 4096 ); this.dec = new Geo( 256 ); this.glass = new GlassGeo();
+		this.g = scratchGeo( 'storey', 8192 ); this.gd = scratchGeo( 'storeyFine', 4096 ); this.dec = scratchGeo( 'decals', 256 ); this.glass = new GlassGeo();
 		this.boxes = []; this.doors = []; this.containers = []; this.spots = []; this.beds = []; this.taps = []; this.lights = []; this.statics = [];
 		this.barred = new Set(); // windows boarded up from inside (data.js winKey)
 		this.R = rng( hash32( P.bid, si, 0x1a7 ) );

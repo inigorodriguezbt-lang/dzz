@@ -15,6 +15,16 @@
 export const F_IN = 64; // interior surface: dimmer sky light
 export const F_GLOW = 128; // emissive (lanterns, candles)
 
+// one builder per job kind, reused (reset) by each job in this thread: finish() copies the content out, and
+// growing a fresh builder by doubling for every job was most of the building workers' garbage (~0.4 GB while a
+// city streams in)
+const scratch = new Map();
+export function scratchGeo( key, cap ) {
+	let g = scratch.get( key );
+	if ( ! g ) scratch.set( key, g = new Geo( cap ) );
+	return g.reset();
+}
+
 export class Geo {
 	constructor( cap = 2048 ) {
 		this.cap = 0; this.icap = 0;
@@ -25,6 +35,16 @@ export class Geo {
 		this.stack = [];
 		this.tag0 = 0; this.tag1 = 255;
 		this.win = null; // { u0, bay, w, h, sill, style, seed } for facade()
+	}
+
+	// empty it for the next job, keeping the capacity
+	reset() {
+		this.n = 0; this.ni = 0;
+		this.m = [ 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0 ];
+		this.stack = [];
+		this.tag0 = 0; this.tag1 = 255;
+		this.win = null;
+		return this;
 	}
 
 	_grow( vc, ic ) {
@@ -113,7 +133,10 @@ export class Geo {
 		this.col[ p ] = c[ 0 ]; this.col[ p + 1 ] = c[ 1 ]; this.col[ p + 2 ] = c[ 2 ];
 		this.mat[ i ] = M.l | ( M.f || 0 );
 		this.tag[ i * 2 ] = this.tag0; this.tag[ i * 2 + 1 ] = this.tag1;
-		this.wn[ i * 4 + 3 ] = 0; this.wn2[ i * 4 + 3 ] = 0;
+		// (all of the window words: a reused builder holds the last job's values)
+		const w = i * 4;
+		this.wn[ w ] = this.wn[ w + 1 ] = this.wn[ w + 2 ] = this.wn[ w + 3 ] = 0;
+		this.wn2[ w ] = this.wn2[ w + 1 ] = this.wn2[ w + 2 ] = this.wn2[ w + 3 ] = 0;
 		this.lt[ i * 2 ] = 128; this.lt[ i * 2 + 1 ] = 255;
 		return i;
 	}

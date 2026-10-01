@@ -267,7 +267,8 @@ export class Renderer {
 		const ldr = this.aa === 'fxaa' ? new THREE.WebGLRenderTarget( OW, OH, { type: THREE.UnsignedByteType, depthBuffer: false } ) : null;
 		// the opaque scene with its ambient occlusion (what water refracts), then the hazed frame the view
 		// model is drawn over
-		const beauty = new THREE.WebGLRenderTarget( W, H, { type: THREE.HalfFloatType, samples, depthBuffer: true } );
+		// (with TAA only full-screen passes draw here; without it the view model is drawn over the hazed frame)
+		const beauty = new THREE.WebGLRenderTarget( W, H, { type: THREE.HalfFloatType, samples, depthBuffer: ! this.taaOn } );
 		beauty.texture.minFilter = beauty.texture.magFilter = THREE.LinearFilter;
 		beauty.texture.generateMipmaps = false;
 		// upsampling: the resolved frame at the display resolution with the scene depth scaled up under it (the

@@ -83,8 +83,10 @@ export class LocalTile {
 				this.worker = new Worker( new URL( './shore.worker.js', import.meta.url ), { type: 'module' } );
 				this.worker.onmessage = ( e ) => { const cb = this._cb.get( e.data.id ); this._cb.delete( e.data.id ); if ( cb ) cb( e.data ); };
 				this.worker.onerror = ( e ) => console.warn( 'shore worker error', e.message || e );
-				const buf = hf.buffer.slice( 0 );
-				this._call( { type: 'init', meta: { halfX: hf.halfX, halfZ: hf.halfZ }, buffer: buf }, [ buf ] );
+				// (its own copy, unless the terrain is in shared memory)
+				const copy = hf.buffer instanceof ArrayBuffer;
+				const buf = copy ? hf.buffer.slice( 0 ) : hf.buffer;
+				this._call( { type: 'init', meta: { halfX: hf.halfX, halfZ: hf.halfZ }, buffer: buf }, copy ? [ buf ] : [] );
 			} catch ( e ) { console.warn( 'shore worker unavailable', e ); this.worker = null; }
 		}
 	}

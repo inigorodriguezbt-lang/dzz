@@ -510,8 +510,8 @@ export function preloadTextures( names, onProgress ) {
 	} ) ) );
 }
 
-// a canvas texture drawn by fn( ctx, w, h )
-export function canvasTexture( w, h, fn, { srgb = true, repeat = true } = {} ) {
+// a canvas texture drawn once by fn( ctx, w, h ) (keep: it will be redrawn and uploaded again)
+export function canvasTexture( w, h, fn, { srgb = true, repeat = true, keep = false } = {} ) {
 	const c = document.createElement( 'canvas' );
 	c.width = w; c.height = h;
 	fn( c.getContext( '2d' ), w, h );
@@ -519,5 +519,24 @@ export function canvasTexture( w, h, fn, { srgb = true, repeat = true } = {} ) {
 	t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
 	if ( repeat ) t.wrapS = t.wrapT = THREE.RepeatWrapping;
 	t.anisotropy = maxAniso;
+	return keep ? t : releaseCanvasOnUpload( t );
+}
+
+// Static geometry nothing reads back (no raycasts, bounds set up front): once on the GPU, each attribute keeps a
+// one-element array of its type (three reads the type; count is kept) instead of its CPU copy
+function freeArray() { this.array = new this.array.constructor( 1 ); }
+export function releaseArraysOnUpload( geo, { index = true } = {} ) {
+	for ( const k in geo.attributes ) ( geo.attributes[ k ].data || geo.attributes[ k ] ).onUpload( freeArray );
+	if ( index && geo.index ) geo.index.onUpload( freeArray );
+	return geo;
+}
+
+// For a canvas drawn once: once the texture is on the GPU, shrink the canvas to 1 x 1, which frees its pixels in
+// the page and the copy Chrome keeps of an accelerated 2D canvas in the GPU process (the texture keeps its own)
+export function releaseCanvasOnUpload( t ) {
+	t.onUpdate = () => {
+		t.onUpdate = null;
+		t.image.width = t.image.height = 1;
+	};
 	return t;
 }

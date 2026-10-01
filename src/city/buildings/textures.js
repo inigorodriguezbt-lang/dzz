@@ -8,7 +8,7 @@
 //   sign atlas    names.js
 //   decal atlas   blood, smears, papers, dirt and glass for the interiors' outbreak dressing
 import * as THREE from 'three';
-import { tex } from '../../render/Materials.js';
+import { tex, releaseCanvasOnUpload } from '../../render/Materials.js';
 import { L, TEX_LAYERS } from './data.js';
 import { paintSignAtlas } from './names.js';
 
@@ -28,13 +28,16 @@ function rngOf( seed ) {
 }
 
 function canvas( n ) { const c = document.createElement( 'canvas' ); c.width = c.height = n; return c; }
+// the layers are painted, then read back (getImageData, or drawn into a read-back canvas): CPU canvases, as a
+// GPU-backed one costs a synchronous GPU readback each time ("GPU stall due to ReadPixels")
+const cpu2d = ( c ) => c.getContext( '2d', { willReadFrequently: true } );
 
 // ---- procedural layers (albedo canvas + optional height canvas for the normals) ---------------------------------
 
 function procedural( layer ) {
-	const c = canvas( N ), x = c.getContext( '2d' );
+	const c = canvas( N ), x = cpu2d( c );
 	let hgt = null;
-	const H = () => { hgt = canvas( N ); const h = hgt.getContext( '2d' ); h.fillStyle = '#808080'; h.fillRect( 0, 0, N, N ); return h; };
+	const H = () => { hgt = canvas( N ); const h = cpu2d( hgt ); h.fillStyle = '#808080'; h.fillRect( 0, 0, N, N ); return h; };
 	const R = rngOf( layer * 7919 );
 	const noiseFill = ( base, amp, cell = 2 ) => {
 		const img = x.createImageData( N, N ), d = img.data;
@@ -324,7 +327,7 @@ function paintArt( x, N, R ) {
 
 // normal map (tangent space, 0..255) from a height canvas, downsampled to NN
 function heightToNormal( hc, strength = 3 ) {
-	const c = canvas( NN ); const x = c.getContext( '2d' );
+	const c = canvas( NN ); const x = cpu2d( c );
 	x.drawImage( hc, 0, 0, NN, NN );
 	const src = x.getImageData( 0, 0, NN, NN ).data;
 	const out = new Uint8Array( NN * NN * 4 );
@@ -350,8 +353,8 @@ export function buildingTextures() {
 	const gains = new Float32Array( LAYERS ).fill( 1 );
 	const flat = new Uint8Array( NN * NN * 4 );
 	for ( let i = 0; i < NN * NN; i ++ ) { flat[ i * 4 ] = 128; flat[ i * 4 + 1 ] = 128; flat[ i * 4 + 2 ] = 255; flat[ i * 4 + 3 ] = 255; }
-	const c = canvas( N ), x = c.getContext( '2d', { willReadFrequently: true } );
-	const cn = canvas( NN ), xn = cn.getContext( '2d', { willReadFrequently: true } );
+	const c = canvas( N ), x = cpu2d( c );
+	const cn = canvas( NN ), xn = cpu2d( cn );
 	for ( let l = 0; l < LAYERS; l ++ ) {
 		let normal = flat;
 		const name = TEX_LAYERS[ l ];
@@ -407,7 +410,7 @@ export function buildingTextures() {
 	A.onUpdate = B.onUpdate = releaseData;
 	// the sign atlas
 	const sc = paintSignAtlas( document.createElement( 'canvas' ) );
-	const S = new THREE.CanvasTexture( sc );
+	const S = releaseCanvasOnUpload( new THREE.CanvasTexture( sc ) );
 	S.colorSpace = THREE.SRGBColorSpace; S.anisotropy = 8; S.generateMipmaps = true; S.minFilter = THREE.LinearMipmapLinearFilter;
 	_set = { albedo: A, normal: B, gains, signs: S, decals: decalAtlas() };
 	return _set;
@@ -560,7 +563,7 @@ function decalAtlas() {
 		x.globalAlpha = 1;
 		for ( let i = 0; i < 40; i ++ ) { x.fillStyle = blood( 0.7 ); x.beginPath(); x.arc( R() * S, S / 2 + ( R() - 0.5 ) * 90, 1 + R() * 3.5, 0, Math.PI * 2 ); x.fill(); }
 	} );
-	const t = new THREE.CanvasTexture( c );
+	const t = releaseCanvasOnUpload( new THREE.CanvasTexture( c ) );
 	t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
 	return t;
 }

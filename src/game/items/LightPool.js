@@ -2,7 +2,9 @@
 // each frame to the strongest nearby sources — campfires, road flares, chemlights, a lantern or torch on your belt,
 // building lamps and street lights (Buildings / Roads add their sources here too).
 // The light count never changes (unused lights sit at intensity 0) because adding or removing a light makes
-// three.js recompile every lit material in the world, and every light costs every lit pixel even when dark.
+// three.js recompile every lit material in the world, and every light costs every lit pixel even when dark. In a
+// world with shared lamps (render/Lamps.js) these lights are proxies: the lamps take the strongest of them, the
+// flashes' (FX) and the carried lights' each frame.
 // The carried spot light (`spotSource`) is only for a game without a hands module (which draws the flashlight
 // itself): its SpotLight is created the first time one is needed, so a normal game never pays for it.
 import * as THREE from 'three';
@@ -19,7 +21,10 @@ export class LightPool {
 			l.castShadow = false;
 			this.points.push( l );
 		}
-		game.scene.add( ...this.points );
+		// (proxies for the world's shared lamps when there are any, render/Lamps.js)
+		this.lamps = game.world?.lamps || null;
+		if ( this.lamps ) for ( const l of this.points ) this.lamps.addPoint( l );
+		else game.scene.add( ...this.points );
 		this.sources = new Set(); // { pos: Vector3, color, intensity, range, flicker, on, priority }
 		this.spotSource = null; // { color, intensity, range, angle }
 		this.t = 0;
@@ -38,7 +43,7 @@ export class LightPool {
 		if ( s && ! this.spot ) {
 			this.spot = new THREE.SpotLight( 0xffffff, 0, 40, 0.45, 0.55, 2 );
 			this.spot.castShadow = false;
-			g.scene.add( this.spot, this.spot.target );
+			if ( this.lamps ) this.lamps.addSpot( this.spot, 0 ); else g.scene.add( this.spot, this.spot.target );
 		}
 		if ( this.spot && s && ! g.dead ) {
 			this._fwd.set( 0, 0, - 1 ).applyQuaternion( cam.quaternion );
@@ -81,6 +86,8 @@ export class LightPool {
 	}
 
 	dispose() {
+		for ( const l of this.points ) this.lamps?.remove( l );
+		if ( this.spot ) this.lamps?.remove( this.spot );
 		this.game.scene.remove( ...this.points );
 		if ( this.spot ) { this.game.scene.remove( this.spot, this.spot.target ); this.spot.dispose(); }
 		for ( const l of this.points ) l.dispose();

@@ -51,3 +51,33 @@ export function seaMaskAt( hf, mask, x, z ) {
 	const b = at( i, j + 1 ) * ( 1 - tx ) + at( i + 1, j + 1 ) * tx;
 	return ( a * ( 1 - tz ) + b * tz ) / 255;
 }
+
+// max pyramid of the mask (level 0 is the mask itself): anySea() answers "is there sea under this square" in a
+// few lookups. The sea mesh skips quadtree nodes with none (ocean/CDLOD.js cull): the shader would discard all
+// of their fragments anyway (vSeaMask), after the whole water shading
+export function seaPyramid( hf, mask ) {
+	let w = hf.cnx, h = hf.cnz, m = mask;
+	const levels = [ { w, h, m, cell: hf.CS } ];
+	while ( w > 1 || h > 1 ) {
+		const nw = Math.ceil( w / 2 ), nh = Math.ceil( h / 2 ), n = new Uint8Array( nw * nh );
+		for ( let j = 0; j < nh; j ++ ) for ( let i = 0; i < nw; i ++ ) {
+			const i0 = i * 2, j0 = j * 2, i1 = Math.min( w - 1, i0 + 1 ), j1 = Math.min( h - 1, j0 + 1 );
+			n[ j * nw + i ] = m[ j0 * w + i0 ] | m[ j0 * w + i1 ] | m[ j1 * w + i0 ] | m[ j1 * w + i1 ];
+		}
+		w = nw; h = nh; m = n;
+		levels.push( { w, h, m, cell: levels[ levels.length - 1 ].cell * 2 } );
+	}
+	return levels;
+}
+
+// any sea cell within the square (x0, z0, size) grown by `margin` m (off the map counts as sea)
+export function anySea( pyr, hf, x0, z0, size, margin = 2 * hf.CS ) {
+	const a = x0 - margin - hf.x0, b = x0 + size + margin - hf.x0, c = z0 - margin - hf.z0, d = z0 + size + margin - hf.z0;
+	let L = 0;
+	while ( L < pyr.length - 1 && pyr[ L ].cell * 2 < size + 2 * margin ) L ++;
+	const lv = pyr[ L ];
+	const i0 = Math.floor( a / lv.cell ), i1 = Math.floor( b / lv.cell ), j0 = Math.floor( c / lv.cell ), j1 = Math.floor( d / lv.cell );
+	if ( i0 < 0 || j0 < 0 || i1 >= lv.w || j1 >= lv.h ) return true;
+	for ( let j = j0; j <= j1; j ++ ) for ( let i = i0; i <= i1; i ++ ) if ( lv.m[ j * lv.w + i ] ) return true;
+	return false;
+}

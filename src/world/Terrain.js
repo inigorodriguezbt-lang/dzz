@@ -11,7 +11,7 @@
 // per-vertex horizon AO (world worker) feeds dtAO; the heightfield hill shadow and the ground bounce
 // are baked around the camera (terrain/HillShadow.js, terrain/GroundBounce.js).
 import * as THREE from 'three';
-import { G, patchMaterial } from '../render/Materials.js';
+import { G, patchMaterial, releaseArraysOnUpload } from '../render/Materials.js';
 import { srgb, rot2, rot2js, TERRAIN_SHADING_GLSL } from './terrain/TerrainShading.js';
 import { getDetailTexture, loadDetailTexture } from './terrain/DetailTextures.js';
 import { HillShadow } from './terrain/HillShadow.js';
@@ -57,7 +57,7 @@ class Node {
 		this.mesh = null;
 		this.state = 0; // 0 none, 1 requested, 2 ready, 3 empty (deep sea / outside)
 		this.job = null;
-		this.lastUsed = 0;
+		this.lastUsed = 0; this.lastT = 0;
 		this.minY = 0; this.maxY = 0;
 	}
 }
@@ -112,9 +112,11 @@ export class Terrain {
 		TerrainMorph.K.value = K;
 		for ( const m of this.drawn ) m.visible = false;
 		this.drawn.length = 0;
+		this.now = performance.now();
 		this._select( this.root, camPos, K, frustum );
-		// evict meshes unused for a while
-		if ( this.frame % 60 === 0 ) this._evict( this.root );
+		// evict meshes unused for a while (frames, or seconds when the frame rate is low: at a few frames a second
+		// every node ever loaded stayed in memory)
+		if ( this.frame % 60 === 0 || this.now - ( this._evictT ?? 0 ) > 3000 ) { this._evictT = this.now; this._evict( this.root ); }
 		this._updateFrames( camPos );
 		if ( this.gl ) {
 			this.hillShadow.update( this.gl, camPos );
@@ -188,6 +190,8 @@ export class Terrain {
 	}
 
 	_request( n, p ) {
+		// (wanted now: a node still loading must not look idle to _evict)
+		n.lastUsed = this.frame; n.lastT = this.now;
 		if ( n.state !== 0 ) return;
 		if ( this._empty( n ) ) { n.state = 3; return; }
 		n.state = 1;
@@ -218,6 +222,9 @@ export class Terrain {
 		g.setAttribute( 'skirt', new THREE.BufferAttribute( r.skirt, 1 ) );
 		g.setAttribute( 'parentY', new THREE.BufferAttribute( r.parentY, 1 ) );
 
+		// (the node's own arrays are dead weight once on the GPU: bounds are set here and nothing reads them back;
+		// the shared index stays)
+		releaseArraysOnUpload( g );
 		g.setIndex( this.index );
 		g.boundingBox = new THREE.Box3( new THREE.Vector3( 0, r.minY, 0 ), new THREE.Vector3( n.size, r.maxY, n.size ) );
 		g.boundingSphere = g.boundingBox.getBoundingSphere( new THREE.Sphere() );
@@ -239,6 +246,7 @@ export class Terrain {
 
 	_select( n, p, K, frustum ) {
 		n.lastUsed = this.frame;
+		n.lastT = this.now;
 		if ( this._wantSplit( n, p, K ) ) {
 			if ( ! n.children ) {
 				const h = n.size / 2;
@@ -248,7 +256,7 @@ export class Terrain {
 				];
 			}
 			let all = true;
-			for ( const c of n.children ) { if ( ! this._ready( c ) ) { this._request( c, p ); all = false; } }
+			for ( const c of n.children ) { c.lastUsed = this.frame; c.lastT = this.now; if ( ! this._ready( c ) ) { this._request( c, p ); all = false; } }
 			if ( all ) {
 				for ( const c of n.children ) this._select( c, p, K, frustum );
 				return;
@@ -263,7 +271,8 @@ export class Terrain {
 
 	_evict( n ) {
 		if ( n.children ) for ( const c of n.children ) this._evict( c );
-		if ( n.level > 2 && this.frame - n.lastUsed > 240 ) {
+		const idle = this.frame - n.lastUsed;
+		if ( n.level > 2 && ( idle > 240 || ( idle > 20 && this.now - n.lastT > 10000 ) ) ) {
 			if ( n.mesh ) { this.group.remove( n.mesh ); n.mesh.geometry.dispose(); n.mesh = null; this.loadedCount --; }
 			if ( n.job ) { n.job.cancelled = true; }
 			if ( n.state !== 3 ) n.state = 0;

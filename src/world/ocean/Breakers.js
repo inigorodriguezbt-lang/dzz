@@ -12,7 +12,7 @@
 // water with premultiplied alpha. Its root lies on the crest of the water surface and fades in there.
 import * as THREE from 'three';
 import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
-import { G, COMMON_GLSL } from '../../render/Materials.js';
+import { G, COMMON_GLSL, releaseArraysOnUpload } from '../../render/Materials.js';
 import { LACE_TILE } from './SurfFoam.js';
 
 export const MAX_STATIONS = 4096;
@@ -183,6 +183,8 @@ ${ fftCode }					return d;
 		geo.setIndex( new THREE.BufferAttribute( index, 1 ) );
 		geo.boundingSphere = new THREE.Sphere( new THREE.Vector3(), 1e7 );
 		geo.setDrawRange( 0, 0 );
+		// (static: 12 MB of CPU copies once uploaded)
+		releaseArraysOnUpload( geo );
 		const mat = new THREE.ShaderMaterial( {
 			name: 'BreakerLip',
 			uniforms: Object.assign( {

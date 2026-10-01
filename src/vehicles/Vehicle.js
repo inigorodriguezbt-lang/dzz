@@ -17,6 +17,8 @@ const rnd = Math.random;
 const rr = ( a, b ) => a + ( b - a ) * rnd();
 // crashes below this closing speed (m/s) are bumps
 const CRASH_MIN = 3.5;
+// m: past this a vehicle is drawn with its far model, by the quality preset
+const FAR_LOD = { low: 25, medium: 35, high: 45, ultra: 75 };
 
 export class Vehicle extends Entity {
 	constructor( game, type, o = {} ) {
@@ -617,7 +619,10 @@ export class Vehicle extends Entity {
 	updateVisual( dt, camPos, inside = false ) {
 		const d = camPos.distanceTo( this.pos );
 		const v = this.visual;
-		let lod = d > 520 ? 'hidden' : d > 75 ? 'far' : ( this.sleeping && ! this.driver && d > 12 ) ? 'parked' : 'active';
+		// (the near models are ~50k triangles: past a few dozen metres the far one looks the same, at a fifth of
+		// the cost in the view and in every sun cascade)
+		const far = FAR_LOD[ this.game.settings?.get?.( 'quality' ) ] ?? 45;
+		let lod = d > 520 ? 'hidden' : d > far ? 'far' : ( this.sleeping && ! this.driver && d > 12 ) ? 'parked' : 'active';
 		if ( inside ) lod = 'active';
 		if ( this.kind === 'heli' && this.rotor > 0.02 && lod !== 'hidden' && d < 160 ) lod = 'active';
 		if ( this.kind === 'plane' && this.engine.running && lod !== 'hidden' && d < 160 ) lod = 'active';

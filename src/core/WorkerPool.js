@@ -15,14 +15,16 @@ export class WorkerPool {
 		}
 	}
 
-	// send the same message to every worker (init)
-	broadcast( msg, cloneBuffer ) {
+	// send the same message to every worker (init) with its own copy of `buffer`, or the buffer itself when it is
+	// shared memory
+	broadcast( msg, buffer ) {
 		return Promise.all( this.workers.map( ( w ) => new Promise( ( resolve, reject ) => {
 			const id = this.nextId ++;
 			this.pending.set( id, { resolve, reject, worker: w } );
 			const m = { ...msg, id };
-			if ( cloneBuffer ) m.buffer = cloneBuffer.slice( 0 );
-			w.postMessage( m, cloneBuffer ? [ m.buffer ] : [] );
+			const copy = buffer instanceof ArrayBuffer;
+			if ( buffer ) m.buffer = copy ? buffer.slice( 0 ) : buffer;
+			w.postMessage( m, copy ? [ m.buffer ] : [] );
 			this.idle.splice( this.idle.indexOf( w ), 1 );
 		} ) ) );
 	}

@@ -11,7 +11,7 @@
 import * as THREE from 'three';
 import { G, COMMON_GLSL } from '../render/Materials.js';
 import { LAYER_POST } from '../render/Renderer.js';
-import { buildSeaMask, seaMaskAt } from './ocean/seaMask.js';
+import { buildSeaMask, seaMaskAt, seaPyramid, anySea } from './ocean/seaMask.js';
 import { waterShadeUniforms, WATER_HELPERS_GLSL, waterShadeGLSL } from './ocean/waterShade.js';
 import { OceanFFT } from './ocean/OceanFFT.js';
 import { OceanTwin } from './ocean/OceanTwin.js';
@@ -55,6 +55,7 @@ export class Ocean {
 		this._att = [ 0, 0, 0, 0 ];
 		this._d = [ 0, 0, 0 ];
 		this.seaMask = buildSeaMask( hf );
+		this._seaPyr = seaPyramid( hf, this.seaMask );
 		this.bathy = makeBathyTexture( hf, this.seaMask );
 		this.tile = new LocalTile( hf );
 		this.shore = new ShoreWaves();
@@ -94,6 +95,8 @@ export class Ocean {
 		this.fft = new OceanFFT( this.r.gl, this.sizes, Q.fft );
 		if ( this.sea ) { this.fft.setSpectrum( this.P ); this._setFoam(); }
 		this.cdlod = new CDLOD( { gridSize: Q.grid, leafSize: 8, levels: 14, minY: - 25, maxY: 25 } );
+		// (perf) no nodes over dry land: their vertices were shaded and every fragment discarded (vSeaMask)
+		this.cdlod.cull = ( x, z, size ) => ! anySea( this._seaPyr, this.hf, x, z, size );
 		// the shore simulation (medium and up)
 		if ( Q.sim && ! this.sim ) this.sim = new ShoreSim( this.r.gl, 'uniform float uWaterLevel; uniform highp sampler2DArray uPatterns;' + groundGLSL( false ) + PERLIN_GLSL + SHORE_GLSL, this.U );
 		else if ( ! Q.sim && this.sim ) { this.sim.dispose(); this.sim = null; }
@@ -470,5 +473,7 @@ function makeBathyTexture( hf, mask ) {
 	t.magFilter = t.minFilter = THREE.LinearFilter;
 	t.generateMipmaps = false;
 	t.needsUpdate = true;
+	// (nothing reads it back: the 14 MB CPU copy goes once it is on the GPU)
+	t.onUpdate = () => { t.onUpdate = null; t.image.data = null; };
 	return t;
 }

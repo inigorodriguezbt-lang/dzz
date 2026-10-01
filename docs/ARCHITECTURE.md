@@ -87,6 +87,17 @@ evaluates JS in the page after boot (`window.__app`, `window.__app.game`).
   bounds touch, so keep casters cheap (a low LOD, no tiny props far out). Alpha-tested foliage: `material.alphaTest` +
   `side: DoubleSide` works in the shadow pass too. `patchMaterial( m, key, extra, { pcf: true } )`: the 5-tap PCF instead
   of the contact-hardening search on the near cascade (thin, many-layered surfaces such as grass blades).
+  `world.csm.lastOnly` (a Set): casters drawn into the widest cascade only (the far building shells).
+- Small lights: never add a Point/SpotLight to the world scene (every lit pixel pays for every light, lit or dark, and adding
+  one recompiles every lit material). `world.lamps.addPoint( pointLight )` / `addSpot( spotLight, priority )` take your
+  light as a proxy (not in any scene; set its position / colour / intensity / distance as usual, `remove( light )` on
+  dispose); each frame the three strongest lit points near the camera and the highest-priority lit spot get the real
+  lights (render/Lamps.js). Night sources go through `game.itemLights` (LightPool) as before.
+- Memory: static geometry nothing reads back: `releaseArraysOnUpload( geometry )` (render/Materials.js) drops the CPU
+  copies once uploaded (set bounds first); a canvas drawn once: `canvasTexture()` / `releaseCanvasOnUpload( texture )`.
+  Canvases read on the CPU (getImageData, toDataURL, drawn into a read canvas) need `getContext( '2d', { willReadFrequently:
+  true } )`: a GPU canvas makes each read a synchronous GPU readback. The terrain buffer is a SharedArrayBuffer when the
+  page is cross-origin isolated (vite.config.js headers): don't write to `hf.buffer`.
 - Web Workers: `world.pool.submit({ type, ...args }, priority)` returns a job with `.promise`. Worker handlers live in
   `src/workers/world.worker.js`; the worker has `hf` (HeightField) and `world` (meta subset: cities, roads, streets, runways, buildings).
   To add a handler, put your function in your own module file and add ONE line to the handlers map in the worker

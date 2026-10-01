@@ -544,9 +544,11 @@ export class FX {
 		this.bN = 0; // next frame starts empty; the draw uses this frame's buffers
 	}
 
-	// ---- lights: two world point lights shared by every flash and fire (constant light count: no recompiles) ----
+	// ---- lights: the two flashes / fires that matter most this frame, as point lights. In the world scene they are
+	// proxies the world's shared lamps take from (render/Lamps.js: a constant light count, no recompiles) ----
 	_initLights() {
-		this.lights = [ 0, 1 ].map( () => { const l = new THREE.PointLight( 0xffaa66, 0, 30, 2 ); l.castShadow = false; this.scene.add( l ); return l; } );
+		const lamps = this.scene === this.game?.world?.scene ? this.game.world.lamps : null;
+		this.lights = [ 0, 1 ].map( () => { const l = new THREE.PointLight( 0xffaa66, 0, 30, 2 ); l.castShadow = false; if ( lamps ) lamps.addPoint( l ); else this.scene.add( l ); return l; } );
 		this.lightReq = []; // transient: { pos, color, i, range, t, dur, flicker }
 		this._frameLights = [];
 	}
@@ -904,6 +906,7 @@ export class FX {
 	dispose() {
 		for ( const h of this.fires ) h.snd?.stop();
 		for ( const h of this.smokes ) h.snd?.stop();
+		for ( const l of this.lights ) this.game?.world?.lamps?.remove( l );
 		for ( const o of [ this.alpha.mesh, this.add.mesh, this.decals, this.beams, this.cas, ...this.lights ] ) {
 			o.parent?.remove( o );
 			o.geometry?.dispose?.();

@@ -296,10 +296,12 @@ function makeStage( r ) {
 	} ) );
 	const canvas = document.createElement( 'canvas' ); canvas.width = RT; canvas.height = RT;
 	const out = document.createElement( 'canvas' ); out.width = SIZE; out.height = SIZE;
-	const octx = out.getContext( '2d' );
+	// (CPU canvases: the pixels go in with putImageData and out with toDataURL; a GPU-backed canvas made every icon
+	// a synchronous GPU readback in the GPU process, "GPU stall due to ReadPixels")
+	const octx = out.getContext( '2d', { willReadFrequently: true } );
 	octx.imageSmoothingEnabled = true; octx.imageSmoothingQuality = 'high';
 	const webp = out.toDataURL( 'image/webp' ).startsWith( 'data:image/webp' );
-	return { renderer: r, scene, camera, hdr, ldr, quad, env, canvas, ctx: canvas.getContext( '2d' ), out, octx, webp, img: new ImageData( RT, RT ) };
+	return { renderer: r, scene, camera, hdr, ldr, quad, env, canvas, ctx: canvas.getContext( '2d', { willReadFrequently: true } ), out, octx, webp, img: new ImageData( RT, RT ) };
 }
 
 const _box = new THREE.Box3(), _v = new THREE.Vector3(), _dir = new THREE.Vector3(), _up = new THREE.Vector3( 0, 1, 0 );
