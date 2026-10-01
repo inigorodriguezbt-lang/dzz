@@ -197,6 +197,11 @@ Each module file `src/.../<Module>.js` exports `install(game)` (listed in `src/g
 - Title vistas all use hour 18.25 and hold the clock, matching the loader key art (public/ui/keyart.jpg).
 - FX that must not ghost under TAA (tracers, sparks, muzzle flashes) go on `LAYER_OVERLAY` (Renderer.js), drawn after
   the TAA resolve.
+- Anything that moves on its own in the world scene (creatures, vehicles, thrown things, door leaves) needs motion vectors
+  for the TAA, or it ghosts / turns see-through while the camera holds still: `setDynamic( object )` (render/post/Motion.js)
+  once on its root (skinned meshes use their bones; an InstancedMesh must keep each thing in the same slot). Alpha-blended
+  layer-1 effects and instance batches re-sorted every frame: `setReactive( mesh, strength )` (0 turns it off). Both hold
+  weak references; rigid meshes that didn't move are skipped, so parked or resting things cost nothing.
 - `renderScale` < 1 with TAA renders the scene at that scale and the TAA resolve upsamples to the display (the low and medium
   presets); `renderer.width/height` is the render resolution, `renderer.outWidth/outHeight` the display. Settings v3
   moves players who kept the v2 low / medium values to the new ones.

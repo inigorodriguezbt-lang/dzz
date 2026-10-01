@@ -4,8 +4,15 @@
 // pass: the current frame reconstructed at the output pixel with a Lanczos-2 kernel over the 3x3 taps, a
 // 5-tap Catmull-Rom history clamped to the neighbourhood's variance box (YCoCg), thin-feature locks and
 // the luma instability test keeping sub-pixel detail, a still-pixel keep, and the accumulation capped by
-// motion and by the history's resampling blur. Velocity is camera-only reprojection from depth (terrain,
-// water, vegetation and buildings are static; characters rely on the variance clamp). Halton (2, 3)
+// motion and by the history's resampling blur. Velocity is camera reprojection from depth (terrain, water,
+// vegetation and buildings are static), and for the things that move on their own (creatures, vehicles, things
+// in flight) the motion vectors of post/Motion.js: there the history follows the object, the clamp box is
+// tight, no lock or still-pixel keep holds it, and the next frame treats the pixel as in motion (so the
+// background revealed behind it doesn't keep it either). Motion.js's reactive mask (alpha particles, instance
+// batches re-sorted every frame) drops that share of the history. The still-pixel keep (ours) only holds a
+// history the jitter can explain: not near a moving object, not after the local luma swung, not one whose
+// colour left the neighbourhood, nor one further out in luma than the local luma moved over the jitter cycle
+// (a stale value on a steady pixel used to stay: the dotted lines the lawn kept after a teleport). Halton (2, 3)
 // jitter with 4 phases at half a pixel (0.35 of it while the camera moves).
 // WebGL conventions: uv.y up (the jitter and the sample offsets in y-up pixels), reversed-Z depth.
 import * as THREE from 'three';
@@ -28,6 +35,7 @@ const VERT = /* glsl */`
 const RESOLVE_FRAG = /* glsl */`
 	uniform sampler2D tBeauty; uniform sampler2D tDepth; uniform sampler2D tSceneDepth; uniform sampler2D tPrevDepth;
 	uniform sampler2D tHistory; uniform sampler2D tLock; uniform sampler2D tLumaHistory; uniform sampler2D tExposure;
+	uniform sampler2D tMotion; uniform float uMotionOn; uniform float uBoxDynamic; uniform float uKeepSwing; uniform float uKeepStrict;
 	uniform mat4 uInvViewProj; uniform mat4 uViewProjNoJitter; uniform mat4 uPrevViewProjNoJitter; uniform mat4 uPrevInvViewProj; uniform mat4 uView; uniform vec3 uCamPosTAA;
 	uniform vec2 uJitter; uniform vec2 uNearFar; uniform float uReset; uniform float uJitterPhases; uniform float uExposureScale;
 	uniform float uDepthThreshold, uEdgeDepthDiff, uBoxStill, uBoxMotion, uMaxAccumulation, uMotionAccumulation, uBlurComp, uLocks, uInstability, uLockThreshold, uStaticKeep;
@@ -98,6 +106,8 @@ const RESOLVE_FRAG = /* glsl */`
 		float near = uNearFar.x; float far = uNearFar.y;
 		return ( ( near + viewZ ) * far ) / ( ( far - near ) * viewZ );
 	}
+	// view distance of a standard perspective depth
+	float taauLinearDepth( float d ) { float near = uNearFar.x; float far = uNearFar.y; return near * far / max( far - d * ( far - near ), 1e-6 ); }
 	bool taauInside( vec2 uv ) { return all( greaterThanEqual( uv, vec2( 0.0 ) ) ) && all( lessThanEqual( uv, vec2( 1.0 ) ) ); }
 	// camera-only motion of a texel (uv, current - previous): the world point under it (a direction at
 	// infinity for the sky) projected with this and the last frame's unjittered cameras
@@ -133,17 +143,35 @@ const RESOLVE_FRAG = /* glsl */`
 			if ( depth < closestDepth ) { closestDepth = depth; closestPositionTexel = neighbor; }
 			farthestDepth = max( farthestDepth, depth );
 		}
-		vec2 velocity = taauVelocity( clamp( closestPositionTexel, ivec2( 0 ), ivec2( inSize ) - 1 ), inSize );
+		ivec2 cpt = clamp( closestPositionTexel, ivec2( 0 ), ivec2( inSize ) - 1 );
+		ivec2 ct = clamp( closestTap, ivec2( 0 ), ivec2( inSize ) - 1 );
+		// moving objects (Motion.js): their motion vector at the nearest depth (dilated, as FSR2), dynamic when
+		// that or the pixel itself is one; the reactive mask at the pixel
+		vec4 motionN = vec4( 0.0 ), motionC = vec4( 0.0 );
+		float nearDynamic = 0.0;
+		if ( uMotionOn > 0.5 ) {
+			motionN = texelFetch( tMotion, cpt, 0 ); motionC = texelFetch( tMotion, ct, 0 );
+			// (the 1/8 mip, bilinear: a moving object within ~8-16 input pixels; its AO halo and contact shadow
+			// move with it over static pixels)
+			nearDynamic = textureLod( tMotion, uv, 3.0 ).a;
+		}
+		bool isDynamic = motionN.a > 0.5 || motionC.a > 0.5;
+		float reactiveIn = sat( motionC.b );
+		vec2 velocity = motionN.a > 0.5 ? motionN.xy : taauVelocity( cpt, inSize );
 		vec2 historyUV = uv - velocity;
 		float hrVelocity = length( velocity * outSize ); // output pixels per frame
 		bool isEdge = farthestDepth - closestDepth > uEdgeDepthDiff;
-		bool isDisocclusion = closestDepth - taauPreviousDepth( historyUV ) > uDepthThreshold;
+		float prevDepth = taauPreviousDepth( historyUV );
+		// (a moving object's own depth changes from frame to frame: there only a jump of 10 cm + 3 % counts, what
+		// stood in front of it last frame)
+		float linNow = taauLinearDepth( closestDepth );
+		bool isDisocclusion = isDynamic ? linNow - taauLinearDepth( prevDepth ) > 0.1 + 0.03 * linNow : closestDepth - prevDepth > uDepthThreshold;
 		// the water surface keeps its history (its depth changes with the waves, not with occlusion): it is
 		// in front of the opaque depth
-		ivec2 ct = clamp( closestTap, ivec2( 0 ), ivec2( inSize ) - 1 );
 		bool isWater = texelFetch( tDepth, ct, 0 ).r > texelFetch( tSceneDepth, ct, 0 ).r + 1e-7;
 		bool isExistingSample = taauInside( historyUV );
-		float depthClip = ( isDisocclusion && ! isEdge && ! isWater ) ? 1.0 : 0.0;
+		// (a depth edge keeps its history against the jitter, but not where something moves)
+		float depthClip = ( isDisocclusion && ( isDynamic || ! isEdge ) && ! isWater ) ? 1.0 : 0.0;
 		bool isNewSample = ! isExistingSample || uReset > 0.5;
 
 		// ---- history (FSR2 ReprojectHistoryColor / ReprojectHistoryLockStatus)
@@ -151,18 +179,26 @@ const RESOLVE_FRAG = /* glsl */`
 		vec2 lockStatus = vec2( 0.0 );
 		float temporalReactive = 0.0;
 		bool inMotionLastFrame = false;
+		bool wasDynamic = false;
 		float blurPrev = 0.0;
 		if ( ! isNewSample ) {
 			vec4 hs = taauSampleHistory( historyUV );
 			vec4 ls = textureLod( tLock, historyUV, 0.0 );
 			// a NaN / Inf that got into the history (or the exposure) restarts the pixel instead of spreading
-			if ( taauBad( hs ) || taauBad( ls ) || taauBad( vec4( exposure ) ) ) { isNewSample = true; hs = vec4( 0.0 ); ls = vec4( 0.0 ); }
+			// (z: the temporal reactive factor, negative in motion, 2 lower on a moving object: a flag, so the
+			// nearest texel's, not a blend)
+			float lz = texelFetch( tLock, clamp( ivec2( historyUV * outSize ), ivec2( 0 ), ivec2( outSize ) - 1 ), 0 ).z;
+			if ( taauBad( hs ) || taauBad( ls ) || taauBad( vec4( exposure, lz, 0.0, 0.0 ) ) ) { isNewSample = true; hs = vec4( 0.0 ); ls = vec4( 0.0 ); lz = 0.0; }
 			historyColor = taauToYCoCg( min( hs.rgb * exposure, vec3( 65504.0 ) ) );
 			lockStatus = ls.xy;
-			temporalReactive = sat( abs( ls.z ) );
-			inMotionLastFrame = ls.z < 0.0;
+			wasDynamic = lz < - 1.5;
+			temporalReactive = sat( abs( lz ) - ( wasDynamic ? 2.0 : 0.0 ) );
+			inMotionLastFrame = lz < 0.0;
 			blurPrev = ls.w;
 		}
+		// a moving object left this pixel: what it uncovered has no history (where its depth gives no
+		// disocclusion either: feet on the ground, a body lying on it)
+		if ( wasDynamic && ! isDynamic ) depthClip = 1.0;
 
 		// ---- the 3x3 input taps: prepared (exposed) YCoCg colour, lock luma. A NaN / Inf tap (one bad pixel of a
 		// material) is dropped: it takes the centre's value and no weight, so it can't turn into a black block
@@ -201,11 +237,11 @@ const RESOLVE_FRAG = /* glsl */`
 			uint q1 = ( 1u << 1u ) | ( 1u << 2u ) | ( 1u << 4u ) | ( 1u << 5u );
 			uint q2 = ( 1u << 3u ) | ( 1u << 4u ) | ( 1u << 6u ) | ( 1u << 7u );
 			uint q3 = ( 1u << 4u ) | ( 1u << 5u ) | ( 1u << 7u ) | ( 1u << 8u );
-			newLock = isRidge && ( mask & q0 ) != q0 && ( mask & q1 ) != q1 && ( mask & q2 ) != q2 && ( mask & q3 ) != q3;
+			newLock = ! isDynamic && isRidge && ( mask & q0 ) != q0 && ( mask & q1 ) != q1 && ( mask & q2 ) != q2 && ( mask & q3 ) != q3;
 		}
 
 		// ---- lock status (FSR2 UpdateLockStatus); the shading change luma is the local mean lock luma
-		float thisFrameReactive = temporalReactive;
+		float thisFrameReactive = max( temporalReactive, reactiveIn );
 		float shadingLuma = lumaSum / 9.0;
 		if ( lockStatus.y == 0.0 ) lockStatus.y = shadingLuma;
 		float luminanceDiff = 1.0 - taauMinDivMax( lockStatus.y, shadingLuma );
@@ -219,7 +255,7 @@ const RESOLVE_FRAG = /* glsl */`
 		}
 		thisFrameReactive = max( thisFrameReactive, sat( ( luminanceDiff - 0.1 ) * 10.0 ) );
 		lockStatus.x *= 1.0 - thisFrameReactive;
-		lockStatus.x *= depthClip < 0.1 ? 1.0 : 0.0;
+		lockStatus.x *= depthClip < 0.1 && ! isDynamic ? 1.0 : 0.0;
 		float lockContribution = sat( sat( sat( lockStatus.x - 1.0 ) * 4.0 ) * sat( taauMinDivMax( lockStatus.y, shadingLuma ) ) ) * uLocks;
 
 		// ---- this frame at the output pixel: Lanczos-2 over the 3x3 taps, and the rectification box
@@ -284,16 +320,35 @@ const RESOLVE_FRAG = /* glsl */`
 				lumaInstability = ( dmin != abs( d0 ) ? 1.0 : 0.0 ) * boxSizeFactor;
 				lumaInstability = lumaInstability > 1.0 / 255.0 ? 1.0 : 0.0;
 			}
-			lumaInstability *= ( lumaHist.w != 0.0 ? 1.0 : 0.0 ) * uInstability;
-			// still pixels: a clamp can only be the jitter's doing unless the lighting changed
+			lumaInstability *= ( lumaHist.w != 0.0 && ! isDynamic && nearDynamic < 0.005 ? 1.0 : 0.0 ) * uInstability;
+			// still pixels: a clamp can only be the jitter's doing unless the lighting changed (or something
+			// moved through: not on or just behind a moving object, nor under the reactive mask)
 			float dAll = min( min( abs( curLuma - lumaHist.x ), abs( curLuma - lumaHist.y ) ), min( abs( curLuma - lumaHist.z ), abs( curLuma - lumaHist.w ) ) );
-			staticKeep = uStaticKeep * ( ( hrVelocity < 0.05 && lumaHist.w != 0.0 && ! isWater ) ? 1.0 : 0.0 ) * sat( 1.0 - ( dAll - 0.01 ) / 0.03 );
+			bool still = hrVelocity < 0.05 && lumaHist.w != 0.0 && ! isWater && ! isDynamic && ! inMotionLastFrame && reactiveIn < 0.01 && nearDynamic < 0.005;
+			// (ours) nor while the last frames swung: something passed over (a moving shadow, a light), and what it
+			// left in the history is not the jitter's doing
+			float swing = max( max( abs( curLuma - lumaHist.x ), abs( lumaHist.x - lumaHist.y ) ), max( abs( lumaHist.y - lumaHist.z ), abs( lumaHist.z - lumaHist.w ) ) );
+			staticKeep = uStaticKeep * ( still ? 1.0 : 0.0 ) * sat( 1.0 - ( dAll - 0.01 ) / 0.03 ) * mix( 1.0, sat( 1.0 - ( swing - 0.03 ) / 0.03 ), uKeepSwing );
+			// (ours) and the test above sees luma only: a history whose colour left the neighbourhood further than
+			// its luma did is no jitter (the lawn turning from dry to green as the ground data streams in kept the
+			// old colour along the lines where both lumas matched; a blue jacket passing over grass)
+			vec3 hOut = max( aabbMin - historyColor, 0.0 ) + max( historyColor - aabbMax, 0.0 );
+			float chromaExcess = ( length( hOut.yz ) - hOut.x ) / max( boxCenter.x, 1e-4 );
+			staticKeep *= mix( 1.0, sat( 1.0 - ( chromaExcess - 0.02 ) / 0.04 ), uKeepStrict );
+			// (ours) and it only covers what the jitter can do: a sub-pixel feature the taps catch in some phases
+			// moves the local luma by about as much as it puts the history outside the box. Beyond twice the spread
+			// of the last four local lumas the history is stale (something that was there and is gone)
+			float lumaLo = min( min( curLuma, lumaHist.x ), min( min( lumaHist.y, lumaHist.z ), lumaHist.w ) );
+			float lumaHi = max( max( curLuma, lumaHist.x ), max( max( lumaHist.y, lumaHist.z ), lumaHist.w ) );
+			float hY = max( historyColor.x, 0.0 ), cY = clamp( hY, max( aabbMin.x, 0.0 ), max( aabbMax.x, 0.0 ) );
+			float lumaExcess = abs( hY / ( 1.0 + hY ) - cY / ( 1.0 + cY ) );
+			staticKeep *= mix( 1.0, sat( 1.0 - ( lumaExcess - 2.0 * ( lumaHi - lumaLo ) - 2.0 / 255.0 ) / ( 4.0 / 255.0 ) ), uKeepStrict );
 			lumaHist = vec4( curLuma, lumaHist.xyz );
 		}
 
 		// ---- accumulation weight (FSR2 ComputeBaseAccumulationWeight)
 		float accumulation = uMaxAccumulation * ( isExistingSample ? 1.0 : 0.0 ) * ( 1.0 - thisFrameReactive ) * ( 1.0 - depthClip );
-		accumulation = min( accumulation, mix( accumulation, upsampledWeight * uMotionAccumulation, max( inMotionLastFrame ? 1.0 : 0.0, sat( hrVelocity * 10.0 ) ) ) );
+		accumulation = min( accumulation, mix( accumulation, upsampledWeight * uMotionAccumulation, max( inMotionLastFrame || isDynamic ? 1.0 : 0.0, sat( hrVelocity * 10.0 ) ) ) );
 		accumulation = min( accumulation, mix( accumulation, upsampledWeight, sat( hrVelocity / 20.0 ) ) );
 
 		// resampling blur: the blur the history has gathered caps the accumulation
@@ -311,7 +366,7 @@ const RESOLVE_FRAG = /* glsl */`
 			// rectify (FSR2 RectifyHistory): clamp to the variance box, but keep locked and oscillating
 			// pixels' history; a clamp drops the accumulated weight
 			float scaleInfluence = max( uBoxStill, min( 20.0, pow( 1.0 / abs( downscale.x * downscale.y ), 3.0 ) ) );
-			float boxScaleT = max( depthClip, sat( hrVelocity / 20.0 ) );
+			float boxScaleT = max( max( depthClip, sat( hrVelocity / 20.0 ) ), isDynamic ? uBoxDynamic : 0.0 );
 			float boxScale = mix( scaleInfluence, uBoxMotion, boxScaleT );
 			vec3 boxMin = max( aabbMin, boxCenter - boxVec * boxScale );
 			vec3 boxMax = min( aabbMax, boxCenter + boxVec * boxScale );
@@ -340,7 +395,8 @@ const RESOLVE_FRAG = /* glsl */`
 		newReactive = max( newReactive, mix( newReactive, 0.4, sat( hrVelocity ) ) );
 		newReactive = max( newReactive * newReactive, depthClip * 0.1 );
 		newReactive = isNewSample ? 1.0 : newReactive;
-		if ( sat( hrVelocity * 10.0 ) >= 1.0 ) newReactive = -max( TAAU_EPS, newReactive );
+		if ( sat( hrVelocity * 10.0 ) >= 1.0 || isDynamic ) newReactive = -max( TAAU_EPS, newReactive );
+		if ( isDynamic ) newReactive -= 2.0;
 
 		outColor = max( outColor, vec3( 0.0 ) ) / max( exposure, 1e-6 );
 		oColor = vec4( taauBad( vec4( outColor, 1.0 ) ) ? vec3( 0.0 ) : outColor, 1.0 );
@@ -374,6 +430,8 @@ export class TAA {
 			uniforms: {
 				tBeauty: { value: null }, tDepth: { value: null }, tSceneDepth: { value: null }, tPrevDepth: { value: this.prevDepth.texture },
 				tHistory: { value: null }, tLock: { value: null }, tLumaHistory: { value: null }, tExposure: { value: null },
+				// motion vectors and the reactive mask (post/Motion.js), when anything was drawn into them this frame
+				tMotion: { value: null }, uMotionOn: { value: 0 },
 				uInvViewProj: { value: new THREE.Matrix4() }, uViewProjNoJitter: { value: new THREE.Matrix4() }, uPrevViewProjNoJitter: { value: new THREE.Matrix4() },
 				uPrevInvViewProj: { value: new THREE.Matrix4() }, uView: { value: new THREE.Matrix4() }, uCamPosTAA: { value: new THREE.Vector3() },
 				uJitter: { value: new THREE.Vector2() }, uNearFar: { value: new THREE.Vector2( 0.1, 1000 ) }, uReset: { value: 1 }, uJitterPhases: { value: 4 }, uExposureScale: { value: 0.55 },
@@ -382,6 +440,13 @@ export class TAA {
 				uDepthThreshold: { value: 0.0005 }, uEdgeDepthDiff: { value: 0.001 }, uBoxStill: { value: 3 }, uBoxMotion: { value: 1 },
 				uMaxAccumulation: { value: 2 }, uMotionAccumulation: { value: 10 }, uBlurComp: { value: 0.5 }, uLocks: { value: 1 },
 				uInstability: { value: 1 }, uLockThreshold: { value: 1.05 }, uStaticKeep: { value: 1 },
+				// (ours) on moving objects the clamp box goes this far from the still box toward the moving one
+				uBoxDynamic: { value: 0.85 },
+				// (ours) 1: no still-pixel keep for the four frames after the local luma swung
+				uKeepSwing: { value: 1 },
+				// (ours) 1: no still-pixel keep for a history that left the neighbourhood in colour, or in luma further
+				// than the jitter moves the local luma
+				uKeepStrict: { value: 1 },
 			},
 		} );
 		this.copyDepthMat = new THREE.ShaderMaterial( { vertexShader: VERT, fragmentShader: COPY_DEPTH_FRAG, uniforms: { tDepth: { value: null } }, depthTest: false, depthWrite: false } );
@@ -418,6 +483,9 @@ export class TAA {
 	}
 
 	get texture() { return this.history[ this._cur ].textures[ 0 ]; }
+	// this and the last frame's unjittered view-projection (valid between begin and end)
+	get viewProj() { return this._vpNoJitter; }
+	get prevViewProj() { return this._prevVPNoJitter; }
 
 	// 0 (still) .. 1 (moving) from the camera's world matrix since the last frame, eased out
 	_cameraMotion( camera ) {
@@ -474,10 +542,13 @@ export class TAA {
 		this.quad.render( this.gl );
 	}
 
-	// the resolve: beauty (lit colour), depth (with water), scene depth (opaque), exposure (1x1 texture)
-	resolve( gl, camera, beauty, depth, sceneDepth, exposure ) {
+	// the resolve: beauty (lit colour), depth (with water), scene depth (opaque), exposure (1x1 texture), the
+	// motion vectors / reactive mask (post/Motion.js; null when nothing moving was drawn)
+	resolve( gl, camera, beauty, depth, sceneDepth, exposure, motion = null ) {
 		this.gl = gl;
 		const u = this.resolveMat.uniforms;
+		u.tMotion.value = motion;
+		u.uMotionOn.value = motion ? 1 : 0;
 		const dst = 1 - this._cur, src = this.history[ this._cur ];
 		u.tBeauty.value = beauty;
 		u.tDepth.value = depth;

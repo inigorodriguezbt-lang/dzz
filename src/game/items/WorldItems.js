@@ -22,6 +22,7 @@ import { modelInfo, instanceParts, onModelBuilder } from '../../render/ItemModel
 import { rollLoot } from './Loot.js';
 import { liquidName } from './util.js';
 import { setIconRenderer } from '../../render/Icons.js';
+import { setReactive } from '../../render/post/Motion.js';
 import { LightPool } from './LightPool.js';
 import { ItemUse } from './ItemUse.js';
 import { Crafting } from '../Crafting.js';
@@ -344,7 +345,10 @@ export class WorldItems {
 				nearest = Math.min( nearest, it._d2 );
 			}
 			const shadow = info.radius > SHADOW_MIN && nearest < SHADOW_R * SHADOW_R;
+			// (instances have no previous matrices: while one falls the TAA drops the history under the batch)
+			const falling = list.some( it => it.falling );
 			for ( const m of b.meshes ) {
+				setReactive( m, falling ? 1 : 0 );
 				m.count = list.length;
 				m.instanceMatrix.needsUpdate = true;
 				m.boundingSphere = null; // recomputed from the instances for culling

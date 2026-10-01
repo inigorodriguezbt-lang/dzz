@@ -6,6 +6,7 @@
 // Frame: the animal faces -z, +y up, origin on the ground under the middle of the body; metres.
 import * as THREE from 'three';
 import { patchMaterial } from '../render/Materials.js';
+import { setDynamic } from '../render/post/Motion.js';
 
 const TAU = Math.PI * 2;
 const V = ( x, y, z ) => new THREE.Vector3( x, y, z );
@@ -529,6 +530,7 @@ export function animalInstance( t ) {
 	mesh.frustumCulled = true;
 	mesh.boundingSphere = t.bound.clone();
 	mesh.boundingSphere.radius += 0.6;
+	setDynamic( mesh ); // (motion vectors for the TAA)
 	const bone = {};
 	for ( const b of bones ) { bone[ b.name ] = b; b.userData.rest = b.quaternion.clone(); }
 	return { mesh, bone, mat, t };

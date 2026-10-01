@@ -11,6 +11,7 @@ import { Kit } from './kit.js';
 import { riderKit } from './models/parts.js';
 import { makeBodyMaterial, makeGlassMaterial, makeRotorDiscMaterial, EMIT_CHANNELS } from './materials.js';
 import { LAYER_POST } from '../render/Renderer.js';
+import { setDynamic } from '../render/post/Motion.js';
 
 // lamp channels of the body material (kit.js MAT presets)
 export const EMIT = { head: 1, tail: 2, reverse: 3, indL: 4, indR: 5, red: 6, blue: 7, gauge: 8, nav: 9, strobe: 10 };
@@ -70,6 +71,8 @@ export class VehicleVisual {
 		this.look = look;
 		this.group = new THREE.Group();
 		this.group.name = 'vehicle-' + m.name;
+		// motion vectors for the TAA while it (or a part of it) moves; parked it stays on the static path
+		setDynamic( this.group );
 		this.mat = makeBodyMaterial( {
 			paint: look.paint ?? 0xb0b4b8, paint2: look.paint2 ?? 0xf2f2f0, metallic: look.metallic ?? 0.4,
 			dirt: look.dirt ?? 0, rust: look.rust ?? 0, fade: look.fade ?? 0, dent: look.dent ?? 0, height: m.bounds.max.y,

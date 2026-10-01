@@ -7,6 +7,7 @@ import { Entity, rayCylinder, raySphere } from '../game/Entities.js';
 import { HumanBody } from './Body.js';
 import { Mover, steer, move, stuckCheck } from './Steer.js';
 import { avatarsFor } from './Characters.js';
+import { setDynamic } from '../render/post/Motion.js';
 import { ITEMS, getItem, makeStack } from '../game/items/ItemDB.js';
 import { rollLoot } from '../game/items/Loot.js';
 // (Math.hypot boxes its arguments in V8: garbage on hot paths)
@@ -365,7 +366,7 @@ export class Bandit extends Entity {
 				const v = GunModels.buildGunView( getItem( this.weapon ), 'world' );
 				this.gun = v.obj;
 				this.gun.traverse( o => { if ( o.isMesh ) { o.castShadow = true; o.receiveShadow = true; } } );
-				this.game.scene.add( this.gun );
+				this.game.scene.add( setDynamic( this.gun ) ); // (it moves with the hand: motion vectors for the TAA)
 			} catch ( e ) { this.weapon && console.warn( 'bandit gun', e ); this.gunFailed = true; }
 		}
 		if ( ! this.gun ) return;

@@ -5,7 +5,8 @@
 //   3. composite into mainRT (beauty colour + scene depth copied), then water and transparents (layer 1)
 //      that read beautyRT and the scene depth for refraction and depth-based absorption
 //   4. sun shafts and god rays on mainRT (colour + depth) into beautyRT (post/Haze.js)
-//   4b. with antialias 'taa': the temporal resolve (post/TAA.js) back into mainRT, then the overlay layer
+//   4b. with antialias 'taa': the motion vectors / reactive mask of the moving things (post/Motion.js), the
+//      temporal resolve (post/TAA.js) back into mainRT, then the overlay layer
 //   5. first-person view model (its own scene and camera) over a cleared depth
 //   6. bloom chain (13-tap downsamples, Karis average on the first, tent upsamples) and the auto exposure
 //      metered from the 1/16 level, then the grade in scene-linear HDR (RCAS, motion blur, bloom, lens
@@ -19,6 +20,7 @@ import { G } from './Materials.js';
 import { GTAO } from './post/GTAO.js';
 import { Haze } from './post/Haze.js';
 import { TAA } from './post/TAA.js';
+import { MotionPass } from './post/Motion.js';
 import { LensFlare, FLARE_GLSL } from './post/LensFlare.js';
 import { MotionBlur, MB_GLSL } from './post/MotionBlur.js';
 
@@ -191,6 +193,8 @@ export class Renderer {
 		this.gtao = new GTAO();
 		this.haze = new Haze();
 		this.taa = new TAA();
+		this.motion = new MotionPass();
+		this.motionVectors = true; // (false: camera-only reprojection, for comparisons)
 		this.flare = new LensFlare();
 		this.mb = new MotionBlur();
 		this.shadows = null; // the cascaded sun shadows (World): the shafts' shadow
@@ -284,6 +288,7 @@ export class Renderer {
 		this.haze.setSize( W, H );
 		this.taa.setSize( W, H, OW, OH );
 		this.taa.reset();
+		this.motion.setSize( W, H );
 		this.mb.setSize( OW, OH );
 		this.mb.reset();
 		// 5 levels: 1/2 .. 1/32 of the display
@@ -380,7 +385,9 @@ export class Renderer {
 		// upsampling, the display-sized post target with the scene depth scaled up under it), where the view
 		// model is drawn over it (never into the history)
 		if ( taaOn ) {
-			this.taa.resolve( gl, cam, out.texture, T.main.depthTexture, T.scene.depthTexture, this.exposureRT[ this._exp ].texture );
+			// (with the scene pass's jittered camera, against its depth)
+			const moving = this.motionVectors && this.motion.render( gl, f.scene, cam, this.taa.viewProj, this.taa.prevViewProj, T.scene.depthTexture );
+			this.taa.resolve( gl, cam, out.texture, T.main.depthTexture, T.scene.depthTexture, this.exposureRT[ this._exp ].texture, moving ? this.motion.texture : null );
 			if ( T.post !== T.main ) {
 				gl.setRenderTarget( T.post );
 				this.composite.material.uniforms.tColor.value = this.taa.texture;

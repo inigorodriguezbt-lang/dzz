@@ -6,6 +6,7 @@ import { Geo, F_IN } from './geo.js';
 import { L, hash32 } from './data.js';
 import { M } from './plan.js';
 import { geoToBuffer } from './materials.js';
+import { setDynamic } from '../../render/post/Motion.js';
 
 const OPEN = 1.62; // hinged leaves open to ~93 degrees
 const SPEED = 3.2; // rad / s
@@ -83,6 +84,7 @@ class LeafBatch {
 		m.frustumCulled = false;
 		m.castShadow = this.layer === 0; m.receiveShadow = true;
 		m.layers.set( this.layer );
+		setDynamic( m ); // (leaves keep their slots: motion vectors for the TAA while one swings)
 		if ( this.colours ) {
 			m.instanceColor = new THREE.InstancedBufferAttribute( new Float32Array( cap * 3 ).fill( 1 ), 3 );
 			// the light baked on each side of the doorway (light.js): daylight / 2 on the leaf's -z and +z faces

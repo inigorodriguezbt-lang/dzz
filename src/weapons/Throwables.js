@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { buildThrowableView } from './GunModels.js';
 import { hitEntity } from './Ballistics.js';
+import { setDynamic } from '../render/post/Motion.js';
 
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _d = new THREE.Vector3();
 const rnd = Math.random;
@@ -22,7 +23,7 @@ export class Throwables {
 		const mesh = buildThrowableView( def, 'world' );
 		mesh.traverse( m => { if ( m.isMesh ) { m.castShadow = true; } } );
 		mesh.position.copy( o.origin );
-		this.game.scene.add( mesh );
+		this.game.scene.add( setDynamic( mesh ) ); // (motion vectors for the TAA)
 		const obj = {
 			def, kind: t.kind, mesh, pos: o.origin.clone(), vel: o.vel.clone(), spin: new THREE.Vector3( rnd() * 12 - 6, rnd() * 12 - 6, rnd() * 12 - 6 ),
 			fuse: Math.max( 0.05, ( t.fuse || 0 ) - ( o.cooked || 0 ) ), armed: t.kind !== 'molotov', rest: false, t: 0, source: o.source ?? null, done: false, bounces: 0, unlit: !! o.unlit,

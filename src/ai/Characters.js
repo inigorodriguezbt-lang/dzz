@@ -16,6 +16,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { patchMaterial } from '../render/Materials.js';
+import { setDynamic } from '../render/post/Motion.js';
 import { ClipBank, RigInfo, Rig, BONE } from './Anim.js';
 
 export const MAX_WOUNDS = 6;
@@ -600,6 +601,8 @@ export class CharacterLib {
 		// scene traversal only recomputes world matrices below nodes that changed
 		model.traverse( o => { o.updateMatrix(); o.matrixAutoUpdate = false; } );
 		root.matrixAutoUpdate = false;
+		// motion vectors for the TAA (it skins them with this and the last frame's bones)
+		setDynamic( root );
 		const rig = new Rig( this.bank, t.info, bones );
 		rig.pelvisScale = t.pelvisScale;
 		return new CharacterInstance( t, root, model, meshes, rig, u, [ mat, cardMat ].filter( Boolean ), avatar, bones );

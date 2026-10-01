@@ -18,6 +18,7 @@
 import * as THREE from 'three';
 import { G, COMMON_GLSL, patchMaterial } from './Materials.js';
 import { LAYER_OVERLAY } from './Renderer.js';
+import { setDynamic, setReactive } from './post/Motion.js';
 
 export const FX_LAYER = 1;
 const N = 4; // atlas cells per side
@@ -421,6 +422,8 @@ export class FX {
 		this.alpha = new Pool( 1600, false, atlas );
 		this.add = new Pool( 900, true, atlas );
 		this.scene.add( this.alpha.mesh, this.add.mesh );
+		// the alpha particles go through the TAA: its history fades under them in proportion to their alpha
+		setReactive( this.alpha.mesh, 0.8 );
 		this._p = {};
 		this.t = 0;
 		this._initDecals();
@@ -594,7 +597,8 @@ export class FX {
 		this.cas.count = 0;
 		this.cas.frustumCulled = false;
 		this.cas.castShadow = false;
-		this.scene.add( this.cas );
+		// (each casing keeps its slot: motion vectors for the TAA while they fly)
+		this.scene.add( setDynamic( this.cas ) );
 		this.casList = [];
 		this.casMax = MAX;
 		this.casNext = 0;
