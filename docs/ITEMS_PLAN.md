@@ -366,3 +366,49 @@ Mood items, skill reading, collectibles, toys and vices.
 All tests pass. An in-game session shows each site kind and a sample of the new items in place, and screenshots
 are judged. A combo and cooking walkthrough works in a real session. Loot is balanced (no flood of rares, every new
 item reachable). Draw-call and memory checks. Docs: the ARCHITECTURE.md item contracts and the README features list.
+
+## Shared vocabulary (phase B)
+
+Domains run two at a time, in this order: tech, kitchen, pharmacy, outdoors, arms, gear, leisure. A combo or recipe
+should refer to an id that exists already, or to one from its own domain. To refer to another domain's things, use
+**tool kinds** and **tags**, so the order doesn't matter.
+
+**Tool kinds** (`tool.kind` or `tool.provides`, and melee `tools`):
+- Existing: cut, chop, pry, dig, open_can, skin, hammer, saw, toolbox, sewing, tape, cleaning, pot, canopener,
+  lighter, matches, fishingrod.
+- New, owned by tech: screwdriver, pliers, wrench, hacksaw (cuts metal and pipes), boltcutter, solder, weld, drill,
+  glue (an adhesive used as a tool).
+- New, owned by kitchen: pan (a skillet or wok), bowl, grater, peeler.
+- New, owned by pharmacy: grind (a mortar and pestle).
+- New, owned by gear or tech: needle (tailoring; a sewing kit provides needle).
+- New, owned by arms: whetstone (sharpening; the existing stone sharpens too).
+
+**Material tags** on items:
+- cloth, leather, denim, rubber, plastic, glass
+- metal_sheet, pipe, spring, fastener (nails, screws, bolts), wire, cordage (rope, paracord, sennit)
+- electronics, battery_aa, battery_d, battery_9v, adhesive (glue, epoxy, tape)
+- fuel, oil, spirit (drinkable spirits, which work as a disinfectant), sugar, spice, herb, fruit, vegetable, meat, fish
+- seed, bait, paper, wood, bone, shell, stone
+
+**Ownership where the domain seed lists overlap:**
+- flare gun: arms
+- spear gun and Hawaiian sling: outdoors
+- handheld game, frisbee, surfboard, flask: leisure
+- firecrackers and noise makers you throw: arms
+- alarm clock: tech, unless placeables already made it
+- bug spray and snorkel gear: outdoors
+- sunscreen: pharmacy
+- cocktails, coffee and tea: kitchen
+- bolt cutters and hacksaw: tech
+- bags and containers: gear
+- dyes: gear
+- the cookbook: leisure (it grants cooking xp; the kitchen domain reads `game.skills.level( 'cooking' )`)
+
+**Where loot shows:**
+- **Building tables** feed both the loose loot spots you see on shelves, counters, tables and floors, and the
+  furniture containers. Most of them do this: house_*, fridge, grocery, convenience, pharmacy, hospital, clinic,
+  hardware, toolbox, clothing_store, sports, surf, market, pawn, gunstore, police, fire_station, military,
+  military_armory, military_locker, hangar, garage_shop, gas_station, restaurant, restaurant_kitchen, fastfood, bar,
+  office, desk, school, church, bank, post, hotel_room, warehouse, observatory and farm.
+- **The `site_<kind>` tables** feed outdoor ground loot, which is always visible.
+- **car_trunk, car_glovebox and zombie_* are menus only.** An item found only there doesn't count as visible.
