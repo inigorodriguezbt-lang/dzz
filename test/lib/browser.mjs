@@ -47,7 +47,45 @@ function withFakeLock( browser ) {
 }
 
 export async function launch( extraArgs = [] ) {
-	return withFakeLock( await launchRaw( extraArgs ) );
+	await takeBrowserLock();
+	let browser;
+	try { browser = await launchRaw( extraArgs ); } catch ( e ) { releaseBrowserLock(); throw e; }
+	const close = browser.close.bind( browser );
+	browser.close = async ( ...a ) => { try { return await close( ...a ); } finally { releaseBrowserLock(); } };
+	browser.on( 'disconnected', releaseBrowserLock );
+	return withFakeLock( browser );
+}
+
+// One test browser at a time on this machine (a game page takes 3-5 GB of a shared ~15 GB): launch() waits for a
+// lock directory held by another process's browser, and takes over a lock whose process is gone. BROWSER_LOCK=0
+// skips it.
+const LOCK = '/tmp/deadtide-browser.lock';
+let held = false;
+function alive( pid ) { try { process.kill( pid, 0 ); return true; } catch ( e ) { return e.code === 'EPERM'; } }
+async function takeBrowserLock() {
+	if ( process.env.BROWSER_LOCK === '0' || held ) return;
+	let said = 0;
+	for ( ;; ) {
+		try {
+			fs.mkdirSync( LOCK );
+			fs.writeFileSync( LOCK + '/pid', String( process.pid ) );
+			held = true;
+			for ( const sig of [ 'exit', 'SIGINT', 'SIGTERM' ] ) process.once( sig, () => { releaseBrowserLock(); if ( sig !== 'exit' ) process.exit( 130 ); } );
+			return;
+		} catch ( e ) {
+			if ( e.code !== 'EEXIST' ) throw e;
+			let pid = 0;
+			try { pid = + fs.readFileSync( LOCK + '/pid', 'utf8' ); } catch ( e2 ) { /* being written */ }
+			if ( pid && ! alive( pid ) ) { fs.rmSync( LOCK, { recursive: true, force: true } ); continue; }
+			if ( Date.now() - said > 60000 ) { console.log( `(waiting for the browser lock held by pid ${pid || '?'}: one test browser at a time)` ); said = Date.now(); }
+			await new Promise( r => setTimeout( r, 2000 ) );
+		}
+	}
+}
+function releaseBrowserLock() {
+	if ( ! held ) return;
+	held = false;
+	try { if ( + fs.readFileSync( LOCK + '/pid', 'utf8' ) === process.pid ) fs.rmSync( LOCK, { recursive: true, force: true } ); } catch ( e ) { /* already gone */ }
 }
 
 async function launchRaw( extraArgs ) {

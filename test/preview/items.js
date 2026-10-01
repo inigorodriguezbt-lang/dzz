@@ -1,5 +1,5 @@
 // Item model / icon preview (not shipped). Open /test/preview/items.html on the dev server:
-//   ?mode=grid (default) 3D models on a table in rows, ?cat=food|clothing|… filter, ?q=substring, ?cols=N
+//   ?mode=grid (default) 3D models on a table in rows, ?cat=food|clothing|… filter, ?q=substring, ?ids=a,b, ?tag=x, ?cols=N
 //   ?mode=icons          the icon sheet rendered by src/render/Icons.js
 //   ?fresh=1             re-render every icon (clears the icon store)
 //   ?fire=1[&night=1]    a lit campfire and camp stove next to the grid (use ?q=none for the fires alone)
@@ -23,7 +23,9 @@ const hud = document.getElementById( 'hud' );
 const weaponMods = import.meta.glob( '../../src/weapons/*Models.js' );
 for ( const f of Object.values( weaponMods ) ) { try { await f(); } catch ( e ) { console.warn( 'weapon models', e ); } }
 
-const defs = [ ...ITEMS.values() ].filter( d => ( ! cat || d.cat === cat ) && ( ! needle || d.id.includes( needle ) ) );
+// ?ids=a,b,c picks exact ids; ?tag=x items with that tag
+const idList = q.get( 'ids' ) ? new Set( q.get( 'ids' ).split( ',' ) ) : null, tagQ = q.get( 'tag' );
+const defs = [ ...ITEMS.values() ].filter( d => ( ! cat || d.cat === cat ) && ( ! needle || d.id.includes( needle ) ) && ( ! idList || idList.has( d.id ) ) && ( ! tagQ || d.tags?.includes( tagQ ) ) );
 G.uSkyLUT.value = new THREE.DataTexture( new Uint8Array( [ 150, 180, 210, 255 ] ), 1, 1 );
 G.uSkyLUT.value.needsUpdate = true;
 

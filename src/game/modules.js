@@ -6,6 +6,10 @@ export const MODULES = [
 	() => import( '../city/Roads.js' ),
 	() => import( '../city/Buildings.js' ),
 	() => import( './items/WorldItems.js' ),
+	// item expansion (docs/ITEMS_PLAN.md): item-on-item mixes, placed things (traps, collectors), outdoor loot sites
+	() => import( './items/Combine.js' ),
+	() => import( './items/Placeables.js' ),
+	() => import( './items/Sites.js' ),
 	() => import( '../weapons/Hands.js' ),
 	() => import( '../ai/Creatures.js' ),
 	() => import( '../vehicles/Vehicles.js' ),

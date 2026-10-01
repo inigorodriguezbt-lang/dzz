@@ -20,6 +20,7 @@ import { capacityOf, containerVolume } from '../Inventory.js';
 import { POT_COOKED } from './recipes.js';
 import { playItemSound, ensureItemSound } from './sounds.js';
 import { liquidName, worstLiquid, provides, fmtHour, cardinal } from './util.js';
+import { USE_PROVIDERS } from './hooks.js';
 
 // progress labels for medical verbs
 const GERUND = {
@@ -144,6 +145,10 @@ export class ItemUse {
 		if ( d.book?.skill && ! this.knowledge[ d.book.skill ] ) add( 'Read', () => this.read( stack ) );
 		if ( d.id === 'ukulele' ) add( 'Play', () => this.noiseMaker( 'strum', 45 ) );
 		if ( d.id === 'rubber_duck' ) add( 'Squeeze', () => this.noiseMaker( 'squeak', 18 ) );
+		// verbs the other item modules add (hooks.js)
+		for ( const fn of USE_PROVIDERS ) {
+			try { fn( stack, d, { add, first, game: g, use: this, inv } ); } catch ( e ) { console.error( 'use actions', e ); }
+		}
 		return A;
 	}
 

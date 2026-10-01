@@ -313,6 +313,23 @@ export const LOOT_TABLES = {
 	] },
 };
 
+// ---- extension (the other item modules add to these from their own files) ----------------------------------
+
+// append entries (any of the forms above) to a table
+export function extendLoot( name, entries ) {
+	const t = LOOT_TABLES[ name ];
+	if ( ! t ) { console.warn( 'extendLoot: no table', name ); return; }
+	t.items.push( ...entries );
+	compiled.clear();
+}
+
+// a new table; an existing name is kept unless replace is set
+export function defineLootTable( name, table, { replace = false } = {} ) {
+	if ( LOOT_TABLES[ name ] && ! replace ) { console.warn( 'defineLootTable: exists', name ); return; }
+	LOOT_TABLES[ name ] = { rolls: table.rolls || [ 1, 2 ], items: table.items || [], ...table };
+	compiled.clear();
+}
+
 // ---- rolling ------------------------------------------------------------------------------------------------
 
 // tables are compiled lazily into flat [ { ids, weights, total, w, q } ] and recompiled when new items register

@@ -9,7 +9,7 @@
 // ('cut' = any knife or machete, 'chop', 'hammer', 'saw', 'pot', 'toolbox', 'canopener'…).
 import { ITEMS } from './ItemDB.js';
 
-const R = ( id, name, out, inputs, o = {} ) => ( { id, name, out, in: inputs, tools: o.tools || [], time: o.time ?? 6, station: o.station, liquid: o.liquid, special: o.special, keep: o.keep, cat: o.cat || 'survival' } );
+export const R = ( id, name, out, inputs, o = {} ) => ( { id, name, out, in: inputs, tools: o.tools || [], time: o.time ?? 6, station: o.station, liquid: o.liquid, special: o.special, keep: o.keep, cat: o.cat || 'survival' } );
 
 const BASE = [
 	// ---- medical ----
@@ -47,6 +47,10 @@ const BASE = [
 	R( 'poi', 'Pound poi', [ 'poi', 1 ], [ [ 'cooked_taro', 1 ] ], { liquid: { kind: 'water', litres: 0.25 }, time: 14, cat: 'food' } ),
 ];
 
+// recipes the other item modules register from their own files: addRecipes( [ R( … ), … ] )
+const EXTRA = [];
+export function addRecipes( list ) { EXTRA.push( ...list ); }
+
 // raw foods that cook in a pot of water (their recipe above) rather than roasting on the fire
 export const POT_COOKED = { rice_bag: 'cook_rice', eggs: 'cook_egg' };
 
@@ -64,5 +68,5 @@ function cookingRecipes() {
 
 // the full list; built on demand so every def module has registered first
 export function allRecipes() {
-	return [ ...BASE, ...cookingRecipes() ];
+	return [ ...BASE, ...EXTRA, ...cookingRecipes() ];
 }

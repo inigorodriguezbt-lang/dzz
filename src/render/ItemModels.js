@@ -15,6 +15,7 @@ import { patchMaterial } from './Materials.js';
 import { registerFoodModels } from '../game/items/models/food.js';
 import { registerClothingModels } from '../game/items/models/clothing.js';
 import { registerGearModels } from '../game/items/models/gear.js';
+import { registerDomainModels } from '../game/items/models/ext/index.js';
 
 const builders = new Map();
 const cache = new Map();
@@ -150,3 +151,4 @@ export function instanceParts( def ) {
 registerFoodModels( registerModelBuilder );
 registerClothingModels( registerModelBuilder );
 registerGearModels( registerModelBuilder );
+registerDomainModels( registerModelBuilder );
