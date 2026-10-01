@@ -1,9 +1,9 @@
 // Creatures preview capture (dev only): node test/preview/creatures-shot.mjs <port> <out.png> "<js returning a promise or value>" [w] [h]
 // Loads test/preview/creatures.html, runs the expression (it sets up and renders a scene), then grabs the canvas.
 import fs from 'node:fs';
-import { chromium } from 'playwright';
+import { launch } from '../lib/browser.mjs';
 const [ port, out, expr, w = '1280', h = '720' ] = process.argv.slice( 2 );
-const browser = await chromium.launch( { args: [ '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist' ] } );
+const browser = await launch();
 const page = await browser.newPage( { viewport: { width: + w, height: + h } } );
 const logs = [];
 page.on( 'console', m => { if ( ! m.text().includes( '[vite]' ) ) logs.push( `[${m.type()}] ${m.text()}` ); } );

@@ -1,7 +1,7 @@
 // Evaluate JS in the roads preview after it is ready: node test/roads-probe.mjs "<url>" "<js expr>" [out.png]
-import { chromium } from 'playwright';
+import { launch } from './lib/browser.mjs';
 const [ url, expr, out ] = process.argv.slice( 2 );
-const browser = await chromium.launch( { args: [ '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist' ] } );
+const browser = await launch();
 const page = await browser.newPage( { viewport: { width: 1280, height: 720 } } );
 const logs = [];
 page.on( 'console', m => logs.push( `[${m.type()}] ${m.text()}` ) );

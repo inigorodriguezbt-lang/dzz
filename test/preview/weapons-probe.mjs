@@ -1,7 +1,7 @@
 // Evaluate JS in the weapons preview page: node test/preview/weapons-probe.mjs <port> "<async js expr>" [firstItem]
-import { chromium } from 'playwright';
+import { launch } from '../lib/browser.mjs';
 const [ port, expr ] = process.argv.slice( 2 );
-const browser = await chromium.launch( { args: [ '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist' ] } );
+const browser = await launch();
 const page = await browser.newPage( { viewport: { width: 960, height: 540 } } );
 const logs = [];
 page.on( 'console', m => { const t = m.text(); if ( ! t.includes( 'vite' ) ) logs.push( `[${m.type()}] ${t}` ); } );

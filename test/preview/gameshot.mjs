@@ -3,10 +3,10 @@
 // Waits for the game, then for the vegetation around the player to stream in, then renders one frame
 // and grabs the canvas (a page screenshot takes minutes under SwiftShader).
 import fs from 'node:fs';
-import { chromium } from 'playwright';
+import { launch } from '../lib/browser.mjs';
 
 const [ port, out, query, expr ] = process.argv.slice( 2 );
-const browser = await chromium.launch( { args: [ '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist' ] } );
+const browser = await launch();
 const page = await browser.newPage( { viewport: { width: 800, height: 450 } } );
 // lighter settings keep the SwiftShader renderer inside the shared memory limit
 await page.addInitScript( () => {

@@ -1,10 +1,10 @@
 // Screenshots of the hands preview: node test/preview/shoot-hands.mjs <port> <outdir> '<json array of poses>'
-import { chromium } from 'playwright';
+import { launch } from '../lib/browser.mjs';
 import fs from 'node:fs';
 const [ port, outdir, json, w = '720', h = '540' ] = process.argv.slice( 2 );
 const poses = JSON.parse( json );
 fs.mkdirSync( outdir, { recursive: true } );
-const browser = await chromium.launch( { args: [ '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist' ] } );
+const browser = await launch();
 const page = await browser.newPage( { viewport: { width: + w, height: + h } } );
 const logs = [];
 page.on( 'console', m => logs.push( `[${m.type()}] ${m.text()}` ) );
