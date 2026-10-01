@@ -23,16 +23,18 @@ const V3 = ( x = 0, y = 0, z = 0 ) => new THREE.Vector3( x, y, z );
 // lighter, 'wood' gets a grain along the gun, 'matte' only a faint mottle. Colours are a little lighter than the real
 // finishes: a black gun must still show its shapes in the view's light.
 const MAT = {
-	blk: { color: 0x47484a, metalness: 0.45, roughness: 0.5, fin: 'metal', bare: 0x8c9095 }, // parkerised steel
-	blued: { color: 0x363c44, metalness: 0.75, roughness: 0.3, fin: 'metal', bare: 0xa3a8ae },
-	alu: { color: 0x4a4e53, metalness: 0.25, roughness: 0.4, fin: 'metal', bare: 0xb9bdc2 }, // anodised aluminium
-	poly: { color: 0x3b3c3f, metalness: 0.0, roughness: 0.62, grip: 1, fin: 'poly' },
-	polyS: { color: 0x3f4043, metalness: 0.0, roughness: 0.5, fin: 'poly' },
+	// dark like the real finishes (black anodising ~sRGB 35-45): under the world's sun and sky the lighter greys
+	// these started with read as bare silver
+	blk: { color: 0x2c2d2f, metalness: 0.45, roughness: 0.52, fin: 'metal', bare: 0x8c9095 }, // parkerised steel
+	blued: { color: 0x262b31, metalness: 0.75, roughness: 0.32, fin: 'metal', bare: 0xa3a8ae },
+	alu: { color: 0x2b2e32, metalness: 0.2, roughness: 0.5, fin: 'metal', bare: 0xb9bdc2 }, // anodised aluminium
+	poly: { color: 0x252628, metalness: 0.0, roughness: 0.64, grip: 1, fin: 'poly' },
+	polyS: { color: 0x28292b, metalness: 0.0, roughness: 0.54, fin: 'poly' },
 	tan: { color: 0x9a8461, metalness: 0.0, roughness: 0.7, grip: 1, fin: 'poly' },
 	tanM: { color: 0x8c7856, metalness: 0.3, roughness: 0.55, fin: 'metal', bare: 0x9b9c9c }, // FDE cerakote metal
 	od: { color: 0x4b5137, metalness: 0.0, roughness: 0.72, grip: 1, fin: 'poly' },
 	green: { color: 0x3d4631, metalness: 0.0, roughness: 0.66, fin: 'poly' },
-	gray: { color: 0x3a3d40, metalness: 0.05, roughness: 0.66, grip: 1, fin: 'poly' },
+	gray: { color: 0x2a2c2f, metalness: 0.05, roughness: 0.66, grip: 1, fin: 'poly' },
 	wood: { color: 0x9a5c36, metalness: 0.0, roughness: 0.5, fin: 'wood' },
 	walnut: { color: 0x5a3721, metalness: 0.0, roughness: 0.42, fin: 'wood' },
 	lam: { color: 0x74361e, metalness: 0.0, roughness: 0.45, fin: 'wood' },
