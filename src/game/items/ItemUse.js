@@ -13,6 +13,11 @@
 // flares glow.
 // Using something where it lies (eating off a table, opening a can on a shelf) claims it: the loot spot counts as
 // looted and the item is saved like a drop (WorldItems.claim).
+// Mood and skills: applyFun( def, k ) applies an item's `fun` ({ boredom, stress, unhappy }) through
+// survival.mood() — eating, drinking, medicine, playing, reading call it; verbs other modules add call it too.
+// Reading (`read: { skill, xp, hours, once }`, or an old guide's `book.skill`) is a time-lapse: `hours` of game
+// time pass in a few seconds, xp comes in as you read, and stopping keeps your place (skills.pages).
+// Practice: cooking, first aid, repairs and tailoring grant xp here (game.skills).
 // Player-facing text stays short and functional: menu labels are a verb (+ object), toasts a few words.
 import * as THREE from 'three';
 import { getItem, makeStack, cloneStack, newUid, freshness, stackVolume } from './ItemDB.js';
@@ -21,6 +26,7 @@ import { POT_COOKED } from './recipes.js';
 import { playItemSound, ensureItemSound } from './sounds.js';
 import { liquidName, worstLiquid, provides, fmtHour, cardinal } from './util.js';
 import { USE_PROVIDERS } from './hooks.js';
+import { SKILLS } from '../Skills.js';
 
 // progress labels for medical verbs
 const GERUND = {
@@ -29,6 +35,17 @@ const GERUND = {
 	'Start IV': 'Running IV', 'Transfuse': 'Transfusing', 'Purify water': 'Purifying', 'Take': 'Taking',
 };
 const SKILL_NAME = { fishing: 'fishing', survival: 'survival', foraging: 'foraging', first_aid: 'first aid' };
+// a mood lift for things you play with that have no `fun` of their own
+const PLAY_FUN = { ukulele: { boredom: - 20, unhappy: - 8, stress: - 5 }, rubber_duck: { boredom: - 3, unhappy: - 1 } };
+// real seconds per game hour of reading (a 2 h book takes 24 s; game time runs fast while you read)
+const READ_RATE = 12;
+// seconds of play before a book read for fun (a novel, a comic) cheers fully again
+const REREAD = 3600;
+const MOOD_KEYS = [ 'boredom', 'stress', 'unhappy', 'panic' ];
+const NO_OPTS = {};
+const _fun = { boredom: 0, stress: 0, unhappy: 0, panic: 0 };
+const LIT = ( s, d ) => !! d?.tool?.light && !! s.data?.on;
+const NONE = [];
 
 // clothes that do not rip into rags (synthetics, armour, rubber)
 const RIP_EXCLUDE = /wetsuit|hazmat|rain_|leather|down_jacket|firefighter|ghillie|police_vest|plate|stab|rig|life_jacket|vest|helmet|hard_hat/;
@@ -39,18 +56,24 @@ export class ItemUse {
 		this.lights = lights;
 		this.lastHours = game.time.hours;
 		this.tickT = 0;
-		this.knowledge = {};
+		this._knowledge = {}; // only without game.skills (a stripped-down test game)
+		this.reading = null;
+		this.funT = {};
 		this.carried = lights ? lights.add( { pos: new THREE.Vector3(), color: 0xffaa66, intensity: 0, range: 8, on: false, priority: 4, lift: 0 } ) : null;
 		this.flares = []; // burning road flares in the world
 		this.glows = new Map(); // lit chemlights on the ground: WorldItem -> { src, sprite }
 		this.glowTex = null;
 		this.glowT = 0;
-		// what the guides taught belongs to the character: a new one after death starts without it
-		this.offDeath = game.events?.on?.( 'playerDeath', () => { this.knowledge = {}; } ) || null;
+		this.offDeath = null;
 	}
 
 	get inv() { return this.game.player.inventory; }
 	get S() { return this.game.survival; }
+	// what the guides taught: the character's (game.skills.known), so a new one after death starts without it.
+	// Fishing, gathering and fires read it as itemUse.knowledge.<key>
+	get knowledge() { return this.game.skills?.known || this._knowledge; }
+	get skills() { return this.game.skills || null; }
+	xp( skill, n ) { this.game.skills?.xp( skill, n ); }
 
 	// ============================================================================================================
 	// actions
@@ -141,10 +164,15 @@ export class ItemUse {
 		// ---- a fire nearby burns it ----
 		if ( nearFire && g.crafting?.fuelValue?.( d.id ) && d.id !== 'campfire_kit' ) add( 'Add to fire', () => g.crafting.addFuel( stack ) );
 
-		// ---- guides and odds and ends ----
-		if ( d.book?.skill && ! this.knowledge[ d.book.skill ] ) add( 'Read', () => this.read( stack ) );
-		if ( d.id === 'ukulele' ) add( 'Play', () => this.noiseMaker( 'strum', 45 ) );
-		if ( d.id === 'rubber_duck' ) add( 'Squeeze', () => this.noiseMaker( 'squeak', 18 ) );
+		// ---- books and odds and ends ----
+		const rs = this.readSpec( d );
+		if ( rs && this.canRead( d, rs ) ) {
+			// a book's default is reading it (not burning it by the fire)
+			const done = this.skills?.readProgress( d.id ) || 0;
+			( d.cat === 'book' ? first : add )( 'Read', () => this.read( stack ), [ done > 0.01 && done < 1 ? `${Math.round( done * 100 )}%` : null ] );
+		}
+		if ( d.id === 'ukulele' ) add( 'Play', () => this.play( stack, 'strum', 45, 6 ) );
+		if ( d.id === 'rubber_duck' ) add( 'Squeeze', () => { this.noiseMaker( 'squeak', 18 ); this.applyFun( d, 1, { repeat: 60, fallback: PLAY_FUN.rubber_duck } ); } );
 		// verbs the other item modules add (hooks.js)
 		for ( const fn of USE_PROVIDERS ) {
 			try { fn( stack, d, { add, first, game: g, use: this, inv } ); } catch ( e ) { console.error( 'use actions', e ); }
@@ -317,11 +345,12 @@ export class ItemUse {
 		if ( stack.data.uses <= 0 ) { this.game.toast( `${d.name} used up`, 'info' ); this.consumeOne( stack ); } else this.changed( this.where( stack ) );
 	}
 
+	// a timed action with the progress ring; returns it (Actions.current while it runs)
 	timed( label, time, sound, onDone, opts = {} ) {
 		const g = this.game;
 		if ( g.actions.busy && ! opts.force ) g.actions.cancel();
 		if ( sound ) ensureItemSound( g.audio, sound );
-		g.actions.start( {
+		return g.actions.start( {
 			label, time, sound, cancelOnMove: opts.cancelOnMove ?? true,
 			onDone: () => { try { onDone(); } catch ( e ) { console.error( e ); } this.inv.changed(); },
 			onCancel: opts.onCancel,
@@ -352,8 +381,41 @@ export class ItemUse {
 		return b ? { tool: b, time: 4, loss: 0, wear: 0.005 } : null;
 	}
 	wear( stack, amount ) { if ( stack && amount ) stack.cond = Math.max( 0.02, stack.cond - amount ); }
-	// the first aid handbook makes every treatment quicker
-	medTime( t ) { return t * ( this.knowledge.first_aid ? 0.7 : 1 ); }
+	// the first aid handbook makes every treatment quicker, and so does practice
+	medTime( t ) { return t * ( this.knowledge.first_aid ? 0.7 : 1 ) * ( 1 - ( this.skills?.level( 'first_aid' ) || 0 ) * 0.035 ); }
+
+	// ============================================================================================================
+	// mood: an item's `fun` ({ boredom, stress, unhappy }, negative = better), scaled by k (a portion, a page)
+	// ============================================================================================================
+
+	// opts.repeat: seconds before a reusable thing (a ukulele, a toy) cheers you fully again; opts.fallback: the
+	// lift for an item without its own `fun`. (Reading calls this every frame: no allocation.)
+	applyFun( def, k = 1, opts = NO_OPTS ) {
+		const fun = def?.fun || ( opts.fallback ?? null );
+		if ( ! fun || ! ( k > 0 ) ) return;
+		if ( opts.repeat ) k *= this.funDamp( def.id, opts.repeat, true );
+		for ( const key of MOOD_KEYS ) _fun[ key ] = ( fun[ key ] || 0 ) * k;
+		this.S?.mood?.( _fun );
+	}
+
+	// 0.15..1: how much a repeat cheers, by the seconds of play since the last time (stamp: this is that time)
+	funDamp( key, seconds, stamp = false ) {
+		const now = this.game.playTime ?? performance.now() / 1000, last = this.funT[ key ];
+		if ( stamp ) this.funT[ key ] = now;
+		return last == null ? 1 : Math.min( 1, Math.max( 0.15, ( now - last ) / seconds ) );
+	}
+
+	// play an instrument or a toy: noise the infected hear, then the lift
+	play( stack, sound, radius, time ) {
+		const g = this.game, d = getItem( stack.id );
+		this.noiseMaker( sound, radius );
+		const act = this.timed( `Playing ${d.name}`, time, null, () => {
+			if ( ! this.exists( stack ) ) return;
+			this.applyFun( d, 1, { repeat: 120, fallback: PLAY_FUN[ d.id ] } );
+		} );
+		// a few more strums while it lasts
+		for ( let t = 2; t < time; t += 2 ) setTimeout( () => { if ( g.actions.current === act ) playItemSound( g, sound, { vol: 0.8 } ); }, t * 1000 );
+	}
 
 	// ============================================================================================================
 	// eating and drinking
@@ -394,6 +456,7 @@ export class ItemUse {
 			if ( ! this.exists( one ) ) return;
 			const S = this.S;
 			const msg = S.eat( one );
+			this.applyFun( d, 1 / ( f.portions || 1 ) );
 			// food spilled opening the can with the wrong tool is lost from every portion
 			if ( one.data.spill ) S.hunger = Math.max( 0, S.hunger - f.kcal / 20 / f.portions * one.data.spill );
 			if ( msg ) this.game.toast( msg, 'warn' );
@@ -415,6 +478,7 @@ export class ItemUse {
 			if ( left < f.portions ) data.left = Math.min( cf.portions, Math.max( 1, Math.round( left / f.portions * cf.portions ) ) );
 			if ( data.left === cf.portions ) delete data.left;
 			this.transform( one, f.cooked, data );
+			this.xp( 'cooking', d.weight > 1 ? 7 : 5 );
 		} );
 	}
 
@@ -431,6 +495,7 @@ export class ItemUse {
 			if ( r.liquid ) C.drawLiquid( r.liquid.kind, r.liquid.litres );
 			this.consumeOne( one );
 			this.give( r.out[ 0 ], Math.max( 1, Math.round( r.out[ 1 ] * k ) ) );
+			this.xp( 'cooking', 6 );
 		} );
 	}
 
@@ -446,6 +511,7 @@ export class ItemUse {
 		this.timed( `Drinking ${d.name}`, 2.5, sound, () => {
 			if ( ! this.exists( one ) ) return;
 			this.S.drink( this.scaledDrink( k, k.portions ), 0.33, 'water' );
+			this.applyFun( d, 1 / Math.max( 1, k.portions || 1 ) );
 			this.game.audio?.play( 'drink', { vol: 0.5 } );
 			one.data.left = ( one.data.left ?? k.portions ) - 1;
 			if ( one.data.left > 0 ) { this.changed( this.where( one ) ); return; }
@@ -528,6 +594,7 @@ export class ItemUse {
 			if ( d.medical.uses ) this.useUp( tab, need );
 			else { tab.qty -= need; if ( tab.qty <= 0 ) this.discard( tab ); }
 			g.toast( 'Water purified', 'good' );
+			this.xp( 'survival', 2 );
 		} );
 	}
 
@@ -547,8 +614,12 @@ export class ItemUse {
 		const verb = m.verb || 'Use';
 		this.timed( GERUND[ verb ] || verb, this.medTime( m.use || 3 ), m.sound || 'bandage', () => {
 			if ( ! this.exists( stack ) ) return;
-			const bleeding = S.bleeding;
+			const bleeding = S.bleeding, fracture = S.fracture && ! S.splint, infected = S.infected;
 			S.medicate( d );
+			this.applyFun( d );
+			// first aid practice comes from treating (not from taking pills): more for a wound closed, a leg
+			// splinted, an infection fought
+			if ( m.bleed || m.splint || m.infection || m.heal || m.blood ) this.xp( 'first_aid', 2 + ( m.bleed && bleeding > S.bleeding ? 4 : 0 ) + ( m.splint && fracture ? 8 : 0 ) + ( m.infection && infected ? 3 : 0 ) );
 			if ( m.bleed && bleeding > 0 ) g.toast( S.bleeding > 0 ? `Still bleeding (${S.bleeding})` : 'Bleeding stopped', S.bleeding > 0 ? 'warn' : 'good' );
 			if ( m.infection && S.infected ) g.toast( 'Still infected', 'warn' );
 			if ( m.uses ) this.useUp( stack ); else this.consumeOne( stack );
@@ -873,6 +944,7 @@ export class ItemUse {
 
 	sleep( quality ) {
 		const g = this.game, S = this.S;
+		if ( ( S.panic || 0 ) > 40 ) { g.toast( 'Too tense to sleep', 'warn' ); return false; }
 		if ( g.world.isIndoors?.( g.player.pos ) && quality < 1 ) quality = Math.min( 1, quality + 0.1 );
 		const hours = Math.max( 2, Math.min( 9, Math.round( ( 100 - S.energy ) / ( 12 * quality ) ) ) );
 		g.app?.ui?.closeScreen?.();
@@ -931,14 +1003,17 @@ export class ItemUse {
 		if ( ! tool ) return;
 		if ( ! target ) { g.toast( 'Nothing to repair', 'info' ); return; }
 		const kind = getItem( tool.id ).tool.kind;
-		const gain = kind === 'tape' ? 0.2 : 0.35;
-		const cap = kind === 'tape' ? 0.85 : 1; // tape never makes it good as new
 		const dt = getItem( target.id );
+		// clothes are tailoring, everything else maintenance: practice mends more each time
+		const skill = ( dt.cat === 'clothing' || dt.cat === 'backpack' ) && kind !== 'cleaning' ? 'tailoring' : 'maintenance';
+		const gain = ( kind === 'tape' ? 0.2 : 0.35 ) * ( this.skills?.mul( skill, 0.04 ) || 1 );
+		const cap = kind === 'tape' ? 0.85 : 1; // tape never makes it good as new
 		this.timed( `Repairing ${dt.name}`, kind === 'tape' ? 5 : 9, kind === 'tape' ? 'tear' : 'zipper', () => {
 			if ( ! this.exists( tool ) || ! this.exists( target ) ) return;
 			target.cond = Math.min( cap, target.cond + gain );
 			this.changed( this.where( target ) );
 			this.useUp( tool );
+			this.xp( skill, kind === 'tape' ? 4 : 6 );
 		} );
 	}
 
@@ -957,19 +1032,116 @@ export class ItemUse {
 			if ( ! this.exists( stack ) ) return;
 			this.discard( stack );
 			this.give( 'rags', n );
+			this.xp( 'tailoring', 2 );
 		} );
 	}
 
-	// guides teach one thing each (knowledge flags other systems read); the book stays in your bag
-	read( stack ) {
-		const g = this.game, d = getItem( stack.id );
-		const skill = d.book?.skill;
-		if ( ! skill ) return;
-		if ( this.knowledge[ skill ] ) { g.toast( 'Already read', 'info' ); return; }
-		this.timed( `Reading ${d.name}`, 8, null, () => {
-			this.knowledge[ skill ] = true;
-			g.toast( `Learned: ${SKILL_NAME[ skill ] || skill}`, 'good' );
-		}, { cancelOnMove: false } );
+	// ============================================================================================================
+	// reading
+	// ============================================================================================================
+
+	// what reading a book does: { skill, xp, hours, once, learn } or null. From `read` on the def, or an old
+	// guide's book.skill (its knowledge flag other systems read, plus a level's worth of practice), or, for any other
+	// book (a comic, a phrasebook), half an hour of reading for its own sake
+	readSpec( d ) {
+		if ( ! d ) return null;
+		const learn = d.book?.skill || null;
+		const own = SKILLS.includes( learn ) ? learn : null;
+		if ( d.read ) {
+			const xp = d.read.xp || 0;
+			return { skill: d.read.skill || own, xp, hours: Math.max( 0.1, d.read.hours ?? 1 ), once: d.read.once ?? ( xp > 0 || !! learn ), learn };
+		}
+		if ( learn ) return { skill: own, xp: 75, hours: 1, once: true, learn };
+		if ( d.cat === 'book' || d.id === 'newspaper' ) return { skill: null, xp: 0, hours: d.cat === 'book' ? 0.5 : 0.25, once: false, learn: null };
+		return null;
+	}
+
+	// a book read once is done with (its place is kept if you stopped part way)
+	canRead( d, rs ) {
+		if ( ! rs.once ) return true;
+		if ( this.skills ) return this.skills.readProgress( d.id ) < 1;
+		return ! ( rs.learn && this.knowledge[ rs.learn ] );
+	}
+
+	// a light of your own at night: one you carry that's on (a lamp, a lit torch, the light on your gun, a headlamp),
+	// or a lit one close by (a lantern or candle you set down, a chemlight or a flare on the ground)
+	lightNear( r = 8 ) {
+		const g = this.game, pos = g.player.pos, r2 = r * r;
+		if ( this.inv.find( LIT ) || this._handsLight() ) return true;
+		for ( const p of g.placeables?.near?.( pos, r, 'light' ) || NONE ) if ( p.stack?.data?.on && p.stack.data.charge > 0 ) return true;
+		for ( const f of this.flares ) if ( f.pos.distanceToSquared( pos ) < r2 ) return true;
+		for ( const it of this.glows.keys() ) if ( it.pos.distanceToSquared( pos ) < r2 ) return true;
+		return false;
+	}
+
+	// light to read by: daylight, a fire, or a light of your own
+	canSee() {
+		const g = this.game;
+		if ( g.mode === 'creative' || ( g.world?.sky?.night || 0 ) < 0.55 ) return true;
+		return !! g.nearFire?.( g.player.pos ) || this.lightNear();
+	}
+
+	// the infected hunting you close by, or a fresh wound
+	danger() {
+		const g = this.game, p = g.player;
+		for ( const z of g.entities?.near?.( p.pos, 12, 'zombie', this._near || ( this._near = [] ) ) || NONE ) if ( z.alive && z.target === p ) return true;
+		return ( this.S?.damageFlash || 0 ) > 0.3;
+	}
+
+	// a time-lapse: game time runs READ_RATE real seconds per hour while you read, and the xp, the book's fun and
+	// the hours come in as the pages turn (update). Stopping keeps your place. The book stays in your bag.
+	// spec: { skill, xp, hours, once, learn } for a verb that reads something without a `read` field
+	read( stack, spec = null ) {
+		const g = this.game, p = g.player, d = getItem( stack.id ), rs = spec ? { skill: null, xp: 0, hours: 1, once: false, learn: null, ...spec } : this.readSpec( d );
+		if ( ! rs ) return;
+		if ( ! this.canRead( d, rs ) ) { g.toast( 'Already read', 'info' ); return; }
+		if ( p.swimming || p.underwater || p.vehicle?.driver ) { g.toast( 'Not now', 'warn' ); return; }
+		if ( ! this.canSee() ) { g.toast( 'Too dark to read', 'warn' ); return; }
+		if ( this.danger() ) { g.toast( 'Not now', 'warn' ); return; }
+		if ( ( this.S?.panic || 0 ) >= 50 ) { g.toast( 'Too tense to read', 'warn' ); return; }
+		const from = this.skills?.readProgress( d.id ) || 0;
+		// a book read for fun cheers less when you read it again soon (only a fresh start counts as a re-read)
+		const funK = rs.once || from > 0 ? 1 : this.funDamp( 'read:' + d.id, REREAD );
+		// reading passes the time: the book's own fun, else a little less boredom (more for a book with no lesson)
+		const hrs = Math.min( 3, rs.hours );
+		const fallback = rs.xp || rs.learn ? { boredom: - 8 * hrs } : { boredom: - 20 * hrs, unhappy: - 6 * hrs };
+		const R = { stack, d, rs, from, at: from, act: null, chk: 0.5, funK, fun: { fallback } };
+		this.reading = R;
+		R.act = this.timed( `Reading ${d.name}`, Math.max( 2, rs.hours * READ_RATE * ( 1 - from ) ), null, () => {
+			this._readTo( R, 1 );
+			this._readDone( R );
+		}, { cancelOnMove: ! p.vehicle, onCancel: () => { if ( this.reading === R ) this.reading = null; } } );
+	}
+
+	_readTo( R, p ) {
+		const dp = p - R.at;
+		if ( ! ( dp > 0 ) ) return;
+		R.at = p;
+		const g = this.game, rs = R.rs, hours = rs.hours * dp;
+		if ( ! g.timeFrozen ) { g.time.hours += hours; this.S?.passTime?.( hours ); }
+		if ( rs.skill && rs.xp ) this.xp( rs.skill, rs.xp * dp );
+		this.applyFun( R.d, dp * R.funK, R.fun );
+		this.skills?.setRead( R.d.id, p );
+	}
+
+	_readDone( R ) {
+		const g = this.game, rs = R.rs;
+		if ( this.reading === R ) this.reading = null;
+		// a book read for fun starts again from the top (and counts as read now, for the next time)
+		if ( ! rs.once ) { this.skills?.setRead( R.d.id, 0 ); this.funDamp( 'read:' + R.d.id, REREAD, true ); }
+		if ( rs.learn && ! this.knowledge[ rs.learn ] ) {
+			if ( this.skills ) this.skills.learn( rs.learn ); else this._knowledge[ rs.learn ] = true;
+			g.toast( `Learned: ${SKILL_NAME[ rs.learn ] || rs.learn}`, 'good' );
+		}
+	}
+
+	_updateReading( dt ) {
+		const g = this.game, R = this.reading;
+		if ( g.actions.current !== R.act ) { this.reading = null; return; }
+		// twice a second: the infected closing in, a wound, the dark, or the book gone (dropped, burnt) stop it
+		R.chk -= dt;
+		if ( R.chk <= 0 ) { R.chk = 0.5; if ( this.danger() || ! this.canSee() || ! this.exists( R.stack ) ) { g.actions.cancel(); return; } }
+		this._readTo( R, R.from + ( 1 - R.from ) * g.actions.progress );
 	}
 
 	// ============================================================================================================
@@ -981,6 +1153,7 @@ export class ItemUse {
 		// the flashlight key when no hands module handles it
 		if ( ! g.hands && g.inputActive && g.input.pressed?.( 'flashlight' ) ) this.toggleLight();
 		this._updateFlares( dt );
+		if ( this.reading ) this._updateReading( dt );
 		this.tickT += dt;
 		let dh = 0;
 		if ( this.tickT >= 1 ) {
@@ -1015,12 +1188,18 @@ export class ItemUse {
 		if ( g.items3d ) for ( const it of g.items3d.items ) { const d = getItem( it.stack.id ); if ( d?.food?.spoil ) it.stack.data.age = ( it.stack.data.age || 0 ) + dh; }
 	}
 
+	// the guides' flags are saved with the character now (survival.skills); without game.skills, here
 	serialize( save ) {
 		save.world = save.world || {};
-		save.world.knowledge = { ...this.knowledge };
+		if ( ! this.game.skills ) save.world.knowledge = { ...this._knowledge };
 	}
 	load( save ) {
-		this.knowledge = { ...( save.world?.knowledge || {} ) };
+		// older saves kept the flags in the world: hand them to the character once
+		const old = save.world?.knowledge;
+		if ( old ) {
+			for ( const k of Object.keys( old ) ) { if ( this.skills ) this.skills.learn( k ); else this._knowledge[ k ] = true; }
+			if ( this.skills ) delete save.world.knowledge;
+		}
 		this.lastHours = this.game.time.hours;
 	}
 

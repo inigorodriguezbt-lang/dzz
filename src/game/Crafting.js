@@ -156,6 +156,7 @@ export class Crafting {
 				this.inv.changed();
 				g.events.emit( 'item:pick', { stack: { id, qty: n, data: {}, uid: 'craft' } } );
 				g.stats.crafted = ( g.stats.crafted || 0 ) + 1;
+				g.skills?.craftXp?.( r ); // practice in whatever the recipe is (cooking, first aid, carpentry…)
 			},
 		} );
 		return true;

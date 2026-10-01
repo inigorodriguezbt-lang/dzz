@@ -50,10 +50,12 @@ export class Gathering {
 		const g = this.game, inv = g.player.inventory;
 		this.searched.set( k, g.time.hours );
 		const got = [];
+		// practice finds a little more (up to +30 % at level 10)
+		const lvl = g.skills?.level( 'foraging' ) || 0;
 		for ( const [ id, a, b, chance ] of kind.loot ) {
 			// the plant field guide: better odds and a little more of everything
 			const forager = !! g.itemUse?.knowledge?.foraging;
-			if ( ! getItem( id ) || Math.random() > Math.min( 1, chance * ( forager ? 1.3 : 1 ) ) ) continue;
+			if ( ! getItem( id ) || Math.random() > Math.min( 1, chance * ( forager ? 1.3 : 1 ) * ( 1 + lvl * 0.03 ) ) ) continue;
 			const n = a + Math.floor( Math.random() * ( b - a + 1 + ( forager ? 1 : 0 ) ) );
 			const s = makeStack( id, n );
 			if ( ! s ) continue;
@@ -62,6 +64,7 @@ export class Gathering {
 			got.push( id );
 		}
 		g.audio?.play( 'pickup', { vol: 0.4 } );
+		g.skills?.xp( 'foraging', got.length ? 2 + got.length * 2 : 1 );
 		if ( ! got.length ) g.toast( 'Nothing found', 'info' );
 		inv.changed();
 	}

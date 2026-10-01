@@ -9,7 +9,7 @@ function item( id, name, cat, o ) {
 		id, name, cat, desc: o.desc || '', weight: o.w ?? 0.2, size: o.size ?? 1, stack: o.stack ?? 1,
 		rarity: o.rarity || 'common', tags: [ ...( o.tags || [] ) ], model: o.model,
 	};
-	for ( const k of [ 'medical', 'vehicle', 'fuel', 'key', 'book', 'throwable', 'misc', 'material' ] ) if ( o[ k ] ) d[ k ] = o[ k ];
+	for ( const k of [ 'medical', 'vehicle', 'fuel', 'key', 'book', 'throwable', 'misc', 'material', 'place' ] ) if ( o[ k ] ) d[ k ] = o[ k ];
 	return d;
 }
 const mat = ( id, name, o ) => item( id, name, 'material', { ...o, tags: [ 'material', ...( o.tags || [] ) ] } );
@@ -37,7 +37,7 @@ defineItems( [
 	mat( 'rope', 'Rope', { w: 0.6, size: 2, tags: [ 'hardware', 'boat', 'farm', 'garage', 'outdoor' ], model: { type: 'rope' },
 		desc: 'Crafting.' } ),
 	mat( 'tarp', 'Tarp', { w: 0.9, size: 3, tags: [ 'hardware', 'garage', 'farm', 'construction', 'outdoor' ], model: { type: 'folded', size: [ 0.32, 0.06, 0.24 ], color: 0x2a5aa8, grommets: true },
-		desc: 'Crafting.' } ),
+		place: { kind: 'collector', shape: 'tarp', litres: 30, area: 3, verb: 'Rig' }, desc: 'Crafting. Rig it to catch rain.' } ),
 	mat( 'scrap_metal', 'Scrap metal', { w: 0.5, size: 2, stack: 6, tags: [ 'garage', 'construction', 'trash', 'street' ], model: { type: 'scrap' },
 		desc: 'Crafting.' } ),
 	mat( 'stone', 'Stones', { w: 0.6, size: 2, stack: 6, tags: [ 'wild', 'beach' ], model: { type: 'stone', r: 0.06 },

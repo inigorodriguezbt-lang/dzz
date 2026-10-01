@@ -686,7 +686,7 @@ export class Hands {
 		if ( ! gun || def?.cat !== 'firearm' || this.act || this.held !== this.shown || this.equip < 0.9 ) return false;
 		const f = def.firearm, inv = this.inv;
 		ops.sanitizeGun( gun );
-		const speed = this.creative ? 0.8 : 1;
+		const speed = ( this.creative ? 0.8 : 1 ) * this._reloadK();
 		const pistol = f.cls === 'pistol';
 		// a jam clears first
 		if ( gun.data.jam ) {
@@ -723,6 +723,7 @@ export class Hands {
 					gun.data.mag = best;
 					if ( old && inv.add( old, { autoEquip: false } ) > 0 ) { g.dropStack( old ); g.toast( 'Magazine dropped', 'warn' ); }
 					this._sfx( 'mag_in', 0.8 );
+					g.skills?.xp( 'reloading', 2 );
 					inv.changed();
 				} ],
 				...( p.charge ? [ [ p.charge, () => { this._sfx( pistol ? 'slide' : 'charge', 0.8 ); ops.chamberRound( gun ); this.vm.s.empty = false; inv.changed(); } ] ] : [] ),
@@ -757,10 +758,13 @@ export class Hands {
 		return this._loop( gun, def, 'shells', f.action === 'bolt' ? 0.5 : 0.35, 0.45 );
 	}
 
+	// reload practice (game.skills): up to a third quicker at level 10
+	_reloadK() { return 1 - ( this.game.skills?.level( 'reloading' ) || 0 ) * 0.03; }
+
 	// open -> insert one round at a time (interruptible by fire) -> close
 	_loop( gun, def, kind, openT, closeT ) {
 		const f = def.firearm, g = this.game, inv = this.inv;
-		const speed = this.creative ? 0.8 : 1;
+		const speed = ( this.creative ? 0.8 : 1 ) * this._reloadK();
 		const openSnd = kind === 'revolver' ? 'cylinder_open' : kind === 'break' ? 'break_open' : f.action === 'bolt' ? 'bolt' : null;
 		const port = f.action === 'pump' ? 'bottom' : 'top';
 		const insert = () => {
@@ -770,7 +774,7 @@ export class Hands {
 			this._startAct( kind === 'shells' ? 'shells_insert' : kind + '_insert', f.perRound * speed, p, [
 				[ 0.5, () => {
 					const a2 = this._ammoFor( gun, f );
-					if ( a2 && ops.loadInternal( gun, a2, 1 ) ) { this._spend( a2 ); this._sfx( 'shell_in', 0.7, 0.95 + rnd() * 0.1 ); if ( kind === 'revolver' ) this.vm.cylAngle = ( this.vm.cylAngle || 0 ) + PI / 3; }
+					if ( a2 && ops.loadInternal( gun, a2, 1 ) ) { this._spend( a2 ); this._sfx( 'shell_in', 0.7, 0.95 + rnd() * 0.1 ); if ( kind === 'revolver' ) this.vm.cylAngle = ( this.vm.cylAngle || 0 ) + PI / 3; g.skills?.xp( 'reloading', 0.5 ); }
 					inv.changed();
 				} ],
 			], () => { if ( p.stop || ! this.inv.findUid( gun.uid ) ) this._closeLoop( gun, def, kind ); else insert(); } );
@@ -1325,7 +1329,8 @@ export class Hands {
 		const stam = g.survival ? 1 + Math.max( 0, 1 - g.survival.stamina / 100 ) * 1.4 : 1;
 		const moving = 1 + Math.min( 1, ( p.speedNow || 0 ) / 3 ) * 1.5;
 		const cls = def?.firearm?.cls;
-		s.swayK = ( cls === 'pistol' ? 1.3 : 0.85 + Math.min( 0.6, w / 12 ) ) * stanceK * stam * moving * ( this.drawHeldT > 4 ? 1.8 : 1 );
+		// (stress and panic shake it, aiming practice steadies it: Survival.swayMul)
+		s.swayK = ( cls === 'pistol' ? 1.3 : 0.85 + Math.min( 0.6, w / 12 ) ) * stanceK * stam * moving * ( this.drawHeldT > 4 ? 1.8 : 1 ) * ( g.survival?.swayMul?.() ?? 1 );
 		const B = this.breath;
 		s.breath += ( ( B.tired > 0 ? 1.8 : B.holding ? 0.12 : 1 ) - s.breath ) * Math.min( 1, dt * 4 );
 		// the slide locks back / the bow is bare when there's nothing to fire

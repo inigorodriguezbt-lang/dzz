@@ -172,6 +172,7 @@ export class InventoryUI {
 		const near = this._groundNow();
 		// a game-mode switch (the chat's /gamemode) adds or removes the Catalog tab and the Delete rows
 		if ( this.inv.version !== this.version || near.key !== this.nearKey || this.dirty || g.mode !== this.mode ) { this.ground = near.list; this.nearKey = near.key; this.render(); }
+		this._comboProgress();
 		// vitals, conditions and the clock change without an inventory change
 		this.liveT = ( this.liveT || 0 ) + dt;
 		if ( this.liveT > 0.5 ) { this.liveT = 0; this._live(); }
@@ -736,7 +737,8 @@ export class InventoryUI {
 		const hit = document.elementFromPoint( x, y );
 		if ( ! hit || ! this.el.contains( hit ) ) return null;
 		const c = hit.closest( '.cell, .hot' );
-		if ( c?._accI?.ok ) return { el: c, acc: c._accI, item: true };
+		// a mix that can't run yet (no fire, no fuel) still targets the item, to say why; a hotbar key still binds
+		if ( c?._accI?.ok || ( c?._accI?.combo && c._hb == null ) ) return { el: c, acc: c._accI, item: true };
 		for ( let n = hit; n && n !== this.el; n = n.parentElement ) if ( n._dt ) return { el: n, acc: n._accD || NO };
 		// the scrim outside the panel and the strip drops to the ground
 		if ( ! this.panel.contains( hit ) && ! this.strip.contains( hit ) ) return { scrim: true, acc: d.loc.type === 'ground' || d.loc.type === 'catalog' ? NO : { ok: true, verb: 'Drop' } };
@@ -842,7 +844,8 @@ export class InventoryUI {
 	}
 
 	// item-on-item: ammo into a magazine or an internal-feed gun, a magazine into a gun, an attachment onto a
-	// gun, the same item onto a stack with room. Anything else is not a target (the drop falls to the section).
+	// gun, the same item onto a stack with room, then the mixes (game.combine: the verb, or why it can't run yet).
+	// Anything else is not a target (the drop falls to the section).
 	_acceptsItem( stack, from, target, tloc ) {
 		if ( target === stack || tloc.type === 'catalog' ) return NO;
 		const a = getItem( stack.id ), b = getItem( target.id );
@@ -852,6 +855,8 @@ export class InventoryUI {
 		if ( a.magazine && ( b.firearm?.mags || [] ).includes( a.id ) ) return { ok: true, verb: 'Insert' };
 		if ( a.attachment && b.firearm ) return ! ops.attachmentFits || ops.attachmentFits( b, a ).ok ? { ok: true, verb: 'Attach' } : NO;
 		if ( a.id === b.id && b.stack > 1 && tloc.items && target.qty < b.stack && ( from.type === 'catalog' || canMerge( target, stack ) ) ) return { ok: true, verb: 'Merge' };
+		// catalog cells are not real stacks: nothing to mix
+		if ( from.type !== 'catalog' ) { const c = this.game.combine?.accepts?.( stack, target ); if ( c ) return c; }
 		return NO;
 	}
 
@@ -868,8 +873,86 @@ export class InventoryUI {
 		else if ( a.id === b.id && b.stack > 1 && tloc.items ) {
 			const n = Math.min( b.stack - target.qty, d.stack.qty );
 			if ( n > 0 ) { target.qty += n; d.stack.qty -= n; if ( d.stack.qty <= 0 ) this._removeFrom( d.stack, d.loc ); if ( tloc.type === 'other' ) this._otherChanged(); this.inv.changed(); done = true; }
+		} else {
+			// a mix: one runs; several (rags onto sticks: a fire kit or a splint) ask which, at the drop
+			const c = this.game.combine?.accepts?.( d.stack, target );
+			// the chooser says what each uses up, and greys the ones that can't run yet (a torch without fuel)
+			if ( c?.ok && c.matches.length === 1 ) this._runCombo( c.matches[ 0 ] );
+			else if ( c?.ok ) this._comboChooser( [ ...c.matches, ...c.refused ].map( m => ( { ...m, ok: m.state.ok, reason: m.state.reason, cost: true } ) ), { x: this.px ?? 0, y: this.py ?? 0 } );
+			else if ( c?.reason ) this._deny( c.reason );
+			return;
 		}
 		if ( done ) { this.dirty = true; this.audio.ui(); }
+	}
+
+	// ---- mixes (game.combine) ------------------------------------------------------------------------------------------
+
+	// runs where you stand with the screen open; the cells show its progress (the HUD ring is under the screen)
+	_runCombo( m ) {
+		// a refusal toasts its reason (combine.run)
+		if ( this.game.combine.run( m.combo, m.a, m.b ) ) this.audio.ui();
+		else this.audio.ui( 'ui_error', 0.3 );
+		this.dirty = true;
+	}
+
+	// a popover of mixes at a point: a drop with a choice, or the Combine row's list. Rows that can't run yet are
+	// shown greyed with the reason.
+	_comboChooser( list, at ) {
+		const name = s => displayName( s );
+		const items = list.map( p => {
+			// on the right: why not; at a drop (the partner is known) what it uses up; in the Combine list the
+			// partner's name, unless the label already says it
+			const other = p.other;
+			const meta = p.ok === false ? p.reason : p.cost ? this.game.combine.cost( p.combo, p.a, p.b ) : other && ! p.label.includes( name( other ) ) ? name( other ) : null;
+			return { label: p.label, meta, disabled: p.ok === false, run: () => this._runCombo( p ) };
+		} );
+		if ( ! items.length ) return;
+		this.ctxClose?.();
+		this.ctxClose = popMenu( items, at, { parent: this.el, audio: this.audio, onClose: () => { this.ctxClose = null; } } );
+	}
+
+	// "Combine ›" with the number that can run now; it opens the list of partners beside the menu
+	_combineRow( stack, add ) {
+		const list = this.game.combine?.partners?.( stack ).slice( 0, 12 ) || [];
+		if ( ! list.length ) return;
+		const n = list.filter( p => p.ok ).length;
+		this._comboAt = null;
+		add( 'Combine', () => this._comboChooser( list, this._comboAt || { x: this.px ?? 0, y: this.py ?? 0 } ), '›', { meta: n ? String( n ) : null, combine: true } );
+	}
+
+	// progress of a running mix on its two cells: outlined, a bar filling along the top. Called every frame while the
+	// screen is open: nothing is allocated when no mix runs, and the cells are looked up again only after a render
+	// replaced them (a stack in a collapsed section is not searched for every frame).
+	_comboProgress() {
+		const act = this.game.actions?.current;
+		const P = this._prog;
+		if ( ! act?.combo ) {
+			if ( P ) { for ( const b of P.bars ) { b.parentElement?.classList.remove( 'sel' ); b.remove(); } this._prog = null; }
+			return;
+		}
+		let stale = ! P || P.act !== act || P.v !== this.version || P.nk !== this.nearKey;
+		if ( ! stale ) for ( let i = 0; i < P.bars.length; i ++ ) if ( ! P.bars[ i ].isConnected ) { stale = true; break; }
+		if ( stale ) {
+			if ( P ) for ( const b of P.bars ) { b.parentElement?.classList.remove( 'sel' ); b.remove(); }
+			const bars = [];
+			for ( const cell of this.el.querySelectorAll( '.cell' ) ) {
+				const uid = cell._it?.stack.uid;
+				if ( uid !== act.combo.a && uid !== act.combo.b ) continue;
+				const bar = h( 'i.combo-prog', { style: { position: 'absolute', left: 'calc(5 * var(--u))', top: 'calc(4 * var(--u))', height: 'calc(3 * var(--u))', width: '0',
+					borderRadius: 'calc(2 * var(--u))', background: 'var(--accent)', pointerEvents: 'none' } } );
+				cell.classList.add( 'sel' );
+				cell.appendChild( bar );
+				bars.push( bar );
+			}
+			this._prog = { act, v: this.version, nk: this.nearKey, bars, p: - 1 };
+		}
+		const Q = this._prog;
+		// a step of 1 %: the width string is built only when it moves
+		const p = Math.round( Math.min( 1, this.game.actions.progress || 0 ) * 100 );
+		if ( p === Q.p ) return;
+		Q.p = p;
+		const w = `calc(${p / 100} * (100% - 10 * var(--u)))`;
+		for ( const b of Q.bars ) b.style.width = w;
 	}
 
 	_bind( stack, i ) {
@@ -1107,6 +1190,11 @@ export class InventoryUI {
 		if ( ! items?.length ) return;
 		el.classList.add( 'sel' );
 		this.ctxClose = popMenu( items, { x: e.clientX, y: e.clientY }, { parent: this.el, audio: this.audio, onClose: () => { el.classList.remove( 'sel' ); this.ctxClose = null; } } );
+		// the Combine row's list opens beside the row (gone from the page by the time it runs)
+		const ci = items.filter( Boolean ).findIndex( it => it.combine );
+		const menu = this.el.lastElementChild;
+		const row = ci >= 0 && menu?.matches( '.pop.menu' ) ? menu.querySelectorAll( 'button' )[ ci ] : null;
+		if ( row ) { const r = row.getBoundingClientRect(); this._comboAt = { x: r.right + 2, y: r.top - 4 }; }
 	}
 
 	// context menu rows (6.10): verbs of 1-2 words, key caps on the right
@@ -1131,6 +1219,7 @@ export class InventoryUI {
 			add( 'Take', () => this._quickMove( stack, loc ), { key: 'Shift' }, { def: true } );
 			if ( d.cat === 'clothing' || d.cat === 'backpack' ) add( 'Wear', () => this.move( stack, loc, { type: 'equip', slot: slotOf( d ) || 'back' } ) );
 			for ( const a of uses() ) if ( ! /drop/i.test( a.label ) && ! seen.has( a.label.toLowerCase() ) ) add( a.label, a.run );
+			this._combineRow( stack, add );
 			return out;
 		}
 		if ( ! CARRIED.has( loc.type ) ) return out;
@@ -1157,6 +1246,7 @@ export class InventoryUI {
 			for ( const gun of guns.slice( 0, 4 ) ) add( `Attach to ${getItem( gun.id ).name}`, () => H?.attach?.( gun, stack ) );
 		}
 		for ( const a of uses() ) if ( ! seen.has( a.label.toLowerCase() ) && ! /^drop$/i.test( a.label ) ) add( a.label, a.run );
+		this._combineRow( stack, add );
 		sep();
 		if ( inv.hands === stack.uid ) { if ( ! seen.has( 'put away' ) ) add( 'Put away', () => H?.holster?.() ); }
 		else if ( loc.type !== 'equip' && ! seen.has( 'hold' ) ) add( 'Hold', () => H?.select?.( stack ) );

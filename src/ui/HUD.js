@@ -61,6 +61,18 @@ const VITALS = [
 const TIERS = [ 4, 15, 45 ];
 export const COND_ICON = { blood: 'blood', tired: 'energy' }; // condition id -> icon when they differ
 
+// moodle glyphs (Survival.moodles() ids), faces in the style of the 'sick' condition icon: the set gains them
+// here so the HUD chips and the Status screen both draw them with icon()
+const MOOD_GLYPHS = {
+	// grimace with a bead of sweat
+	stress: '<circle cx="11" cy="13" r="7.5"/><path d="M7.75 16.5l1.6-1.25 1.6 1.25 1.6-1.25 1.6 1.25M8.5 11h.01M13.5 11h.01M19 3c1.1 1.35 2.1 2.55 2.1 3.6a2.1 2.1 0 0 1-4.2 0c0-1.05 1-2.25 2.1-3.6Z"/>',
+	// frown
+	unhappy: '<circle cx="12" cy="12" r="8.5"/><path d="M8.75 16.5a4 4 0 0 1 6.5 0M9 10h.01M15 10h.01"/>',
+	// heavy lids, flat mouth
+	bored: '<circle cx="12" cy="12" r="8.5"/><path d="M7.75 10.25h3M13.25 10.25h3M9.5 15.5h5"/>',
+};
+for ( const [ k, v ] of Object.entries( MOOD_GLYPHS ) ) PATHS[ k ] ??= v;
+
 // canvas versions of the icon set (minimap): Path2D built from the same SVG markup
 const GLYPHS = new Map();
 function glyph( name ) {
@@ -181,7 +193,10 @@ export class HUD {
 			this.vAltRow = h( 'div.g', { hidden: true }, icon( 'altitude' ), this.vAlt = h( 'span.alt' ) ) );
 		this.br = h( 'div.br', {}, this.pickups, this.weapon, this.vehicle );
 
-		this.el.append( this.tl, this.dmg, this.cross, this.hit, this.ring, this.ringLabel, this.prompt, this.compass, this.heading, this.place, this.minimap, this.bl, this.bc, this.br );
+		// panic: a dark, slowly breathing edge (under everything else)
+		this.vig = h( 'div.panic-vig', { hidden: true } );
+
+		this.el.append( this.vig, this.tl, this.dmg, this.cross, this.hit, this.ring, this.ringLabel, this.prompt, this.compass, this.heading, this.place, this.minimap, this.bl, this.bc, this.br );
 		this.zoom = 1.1;
 		this.miniDt = 0;
 		this.hitT = 0;
@@ -359,7 +374,7 @@ export class HUD {
 
 		// vitals at 10 Hz, conditions three times a second
 		const vdt = this.due( 'vitals', 0.1 );
-		if ( vdt ) this._vitals( S, vdt, creative, always );
+		if ( vdt ) { this._vitals( S, vdt, creative, always ); this._panic( S, creative ); }
 		if ( this.due( 'conds', 0.33 ) ) this._conditions( S, inv, creative, input );
 		if ( frame % 2 === 0 ) this._stamina( S, p, creative, allow.maxSt );
 
@@ -590,18 +605,23 @@ export class HUD {
 			ids.add( c.id );
 			let o = this.condEls.get( c.id );
 			if ( ! o ) {
-				o = { lab: h( 'span' ), x: h( 'span.x', { hidden: true } ), label: null, until: 0 };
-				o.el = h( 'div.cond.plate.fade', {}, icon( COND_ICON[ c.id ] || c.id ), o.lab, o.x );
+				o = { lab: h( 'span' ), x: h( 'span.x', { hidden: true } ), label: null, until: 0, lv: null, bars: null };
+				// moodles carry a level: four pips beside the face, filled from the bottom
+				if ( c.level ) { o.bars = [ 0, 1, 2, 3 ].map( () => h( 'i' ) ); o.lv = h( 'span.lv', {}, ...o.bars ); }
+				o.el = h( 'div.cond.plate.fade', {}, icon( COND_ICON[ c.id ] || c.id ), o.lv, o.lab, o.x );
 				this.condEls.set( c.id, o );
 			}
-			// the label shows for 6 s when the condition appears or changes (Cold -> Hypothermia, Bleeding -> ×2)
-			if ( c.label !== o.label ) { o.label = c.label; o.until = this.t + 6; }
+			if ( o.bars ) for ( let i = 0; i < 4; i ++ ) flag( o.bars[ i ], 'on', i < ( c.level || 0 ) );
+			// the label shows for 6 s when the condition appears or changes (Cold -> Hypothermia, Bleeding -> ×2,
+			// a moodle's level)
+			const lk = c.label + ( c.level ? '|' + c.level : '' );
+			if ( lk !== o.label ) { o.label = lk; o.until = this.t + 6; }
 			const open = this.t < o.until;
 			const extra = c.id === 'bleed' && S.bleeding > 1 ? '×' + S.bleeding : '';
 			text( o.lab, open ? c.label : '' ); show( o.lab, open );
 			text( o.x, extra ); show( o.x, ! open && !! extra );
 			flag( o.el, 'lab', open || !! extra );
-			for ( const k of [ 'bad', 'warn', 'good' ] ) flag( o.el, 'k-' + k, c.kind === k );
+			for ( const k of [ 'bad', 'warn', 'good', 'mild' ] ) flag( o.el, 'k-' + k, c.kind === k );
 		}
 		for ( const id of [ ...this.condEls.keys() ] ) if ( ! ids.has( id ) ) this.condEls.delete( id );
 		// K Bandage while bleeding with something that stops it
@@ -614,6 +634,13 @@ export class HUD {
 			sync( this.conds, [ ...list.map( c => this.condEls.get( c.id ).el ), ...( heal ? [ this.healChip ] : [] ) ] );
 		}
 		show( this.conds, list.length > 0 || heal );
+	}
+
+	// the panic vignette: in from a third of panic, deeper as it climbs
+	_panic( S, creative ) {
+		const v = creative ? 0 : Math.max( 0, Math.min( 1, ( ( S.panic || 0 ) - 35 ) / 55 ) );
+		show( this.vig, v > 0.01 );
+		if ( v > 0.01 ) prop( this.vig, '--k', v.toFixed( 2 ) );
 	}
 
 	_stamina( S, p, creative, maxSt ) {

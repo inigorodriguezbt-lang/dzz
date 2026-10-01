@@ -5,11 +5,13 @@
 //   special: 'boil'                              boils the dirty or salty water in your containers at a fire
 //   keep: [ ids ]                                ingredients that are not used up (a pot used to cook in)
 //   cat: 'medical'|'tools'|'weapons'|'food'|'survival'   grouping for the UI
+//   skill, xp                                    the skill a finished recipe trains and how much (game.skills.craftXp
+//                                                infers both when they're left out)
 // `tools` are kinds matched by Inventory.hasTool: a tool's `tool.kind` or a melee weapon's `melee.tools`
 // ('cut' = any knife or machete, 'chop', 'hammer', 'saw', 'pot', 'toolbox', 'canopener'…).
 import { ITEMS } from './ItemDB.js';
 
-export const R = ( id, name, out, inputs, o = {} ) => ( { id, name, out, in: inputs, tools: o.tools || [], time: o.time ?? 6, station: o.station, liquid: o.liquid, special: o.special, keep: o.keep, cat: o.cat || 'survival' } );
+export const R = ( id, name, out, inputs, o = {} ) => ( { id, name, out, in: inputs, tools: o.tools || [], time: o.time ?? 6, station: o.station, liquid: o.liquid, special: o.special, keep: o.keep, cat: o.cat || 'survival', skill: o.skill, xp: o.xp } );
 
 const BASE = [
 	// ---- medical ----

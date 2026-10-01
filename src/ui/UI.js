@@ -36,6 +36,9 @@ const REMEDY = {
 	sick: [ 'Charcoal', d => d?.medical?.sick ],
 	hot: [ 'Shade' ], wet: [ 'Shelter' ], tired: [ 'Sleep' ], heavy: [ 'Drop weight' ],
 	blood: [ 'Saline', d => d?.medical?.blood ],
+	// moodles (Survival.moodles): what lifts each one, highlighted when you carry something that does
+	stress: [ 'Rest', d => d?.fun?.stress < 0 || d?.drink?.alcohol > 0 ], unhappy: [ 'Comfort', d => d?.fun?.unhappy < 0 ],
+	bored: [ 'Read', d => d?.read || d?.cat === 'book' || d?.fun?.boredom < 0 ],
 };
 
 export class UI {
@@ -264,12 +267,15 @@ export class UI {
 			if ( c.id === 'frac' ) rem = S.splint ? [ 'Rest' ] : [ 'Splint', d => d?.medical?.splint ];
 			if ( c.id === 'cold' ) rem = [ S.temp < 35.2 ? 'Fire' : 'Warm clothes' ];
 			const val = c.id === 'cold' || c.id === 'hot' ? S.temp.toFixed( 1 ) + '°' : c.id === 'wet' ? pct( S.wet * 100 ) : c.id === 'blood' ? pct( S.blood / 50 )
-				: c.id === 'tired' ? pct( S.energy ) : c.id === 'heavy' ? weight.toFixed( 1 ) + ' kg' : '';
+				: c.id === 'tired' ? pct( S.energy ) : c.id === 'heavy' ? weight.toFixed( 1 ) + ' kg'
+				: c.mood ? String( Math.round( c.id === 'stress' ? Math.max( S.stress, S.panic ) : c.id === 'bored' ? S.boredom : S.unhappy ) ) : '';
 			const has = !! rem?.[ 1 ] && !! inv.find( ( s, d ) => rem[ 1 ]( d ) );
 			return h( 'div.st-row.' + c.kind, {}, icon( COND_ICON[ c.id ] || c.id ), h( 'span.lab', { text: c.label } ),
 				val ? h( 'span.v', { text: val } ) : null, rem ? h( 'span.rem' + ( has ? '.has' : '' ), { text: rem[ 0 ] } ) : null );
 		} );
 		const temp = S.temp;
+		// the skills practised so far (game.skills), with their level
+		const skills = ( g.skills?.list?.() || [] ).filter( k => k.xp > 0 );
 		const body = h( 'div.panel-body', {},
 			rows.length ? [ sec( 'Conditions' ), h( 'div', {}, ...rows ) ] : null,
 			sec( 'Body' ),
@@ -279,6 +285,7 @@ export class UI {
 				kv( 'Body', temp.toFixed( 1 ) + '°', temp < 35.2 || temp > 38.6 ? 'alarm' : temp < 36 ? 'cold' : temp > 38 ? 'warn' : '' ), kv( 'Energy', pct( S.energy ), tone( S.energy, 25, 10 ) ),
 				kv( 'Air', Math.round( S.envTemp ) + '°' ), kv( 'Stamina', `${Math.round( Math.min( S.stamina, S.maxStamina() ) )}/${Math.round( S.maxStamina() )}` ),
 				kv( 'Wet', pct( S.wet * 100 ) ), kv( 'Weight', weight.toFixed( 1 ) + ' kg', weight > 30 ? 'warn' : '' ) ),
+			skills.length ? [ sec( 'Skills' ), h( 'div.stats', {}, ...skills.map( k => kv( k.name, k.level ) ) ) ] : null,
 			sec( 'This life' ),
 			h( 'div.stats', {},
 				kv( 'Survived', fmtDur( g.time.hours - ( st.lifeStart || 0 ) ) ), kv( 'Kills', st.lifeKills || 0 ),

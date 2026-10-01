@@ -53,7 +53,8 @@ evaluates JS in the page after boot (`window.__app`, `window.__app.game`).
 - `src/game/Player.js`: `player.pos` (feet), `eye`, `yaw`, `pitch`, `stance`, `lookDir()`, `vehicle`, `recoil` (Vector2 kick:
   x = pitch rad, y = yaw rad, added to aim and decays), `shake`, `aimFov` (FOV multiplier), `inventory`, `swimming`, `underwater`.
 - `src/game/Survival.js` (`game.survival`): `hurt(amount, kind, {dir, zone, cause})` kinds bite/scratch/bullet/melee/fall/burn/explosion/vehicle/animal,
-  `eat(stack)`, `drink(def, litres, liquid)`, `medicate(def)`, `useStamina(n)`, `stamina`, `health`, … 
+  `eat(stack)`, `drink(def, litres, liquid)`, `medicate(def)`, `useStamina(n)`, `stamina`, `health`, … and the moods
+  (`boredom`, `stress`, `unhappy`, `panic`, `mood( deltas )`: see "Mood and skills").
 - `src/game/Inventory.js`: `player.inventory` (PlayerInventory): `equip` (slot → stack), `weapons` (primary/secondary/sidearm/melee → stack),
   `pockets`, `hands` (uid of the held stack), `hotbar` (9 uids), `containers()`, `add(stack)` → leftover qty, `remove(stack)`,
   `consume(id, n)`, `count(id)`, `find(pred)`, `findUid(uid)`, `heldStack()`, `hasTool(kind)`, `changed()` (call after edits → UI refresh).
@@ -179,6 +180,238 @@ Each module file `src/.../<Module>.js` exports `install(game)` (listed in `src/g
 - Roads (`game.roads`): meshes for highways, streets, sidewalks, runways, markings; street props; wrecked cars (static, some lootable
   trunks via `rollLoot('car_trunk')` + `ui.openContainer`), colliders for props.
 - UI (`game.app.ui`): `openContainer(container)`, `openInventory()`, `toast`, `showDeath(info)`; icons come from `src/render/Icons.js`.
+
+## Combine (item-on-item mixes)
+
+Drag item A onto item B in the inventory (either way round), or pick "Combine ›" in an item's right-click menu (it
+lists every partner among what you carry, the open container and the ground the screen shows; ones that can't run
+yet are greyed with the reason). Several mixes for one pair (rags onto sticks: a fire kit or a splint) open a chooser
+at the drop that says what each uses up ("2× Rags, 2× Sticks") and greys the ones that can't run yet ("Need 0.1 L
+gasoline"). A refused mix on a cell says why in red and takes the drop; on a hotbar key the drop still binds. Ammo
+into magazines, magazines into guns, attachments and merges keep precedence over mixes.
+
+- Data, Node-safe: `src/game/items/combos.js`. Domains register from their def files:
+  `import { addCombos } from '../../combos.js'; addCombos( [ { id, verb, a, b, use, liquid, out, repair, wear, tools,
+  station, time, sound, label, check, run } ] )`. The format, matcher forms and unit rules are documented at the top
+  of the file and in docs/ITEMS_PLAN.md ("Combos"). Beyond the plan: `label` takes `{a}` / `{b}` placeholders (or a
+  function); `id`, `tag`, `cat` and `tool` matchers take arrays (any of them) and an array matcher means `any`; `out`
+  may be a bare id; `time` may be `fn( ctx )`; `use` may say its unit (`{ qty | portions | uses: n }`); `check` may
+  return `{ reason, soft: true }`; extras `skill`, `xp`, `fun`, `noise: { radius }`, `progress`. Every id a combo
+  names must exist (test/combos.mjs checks); a combo whose output is missing at runtime is skipped with a warning.
+- Units: a plain `n` is a use for items with `tool.uses` / `medical.uses` (duct tape, antiseptic, a lighter), a portion
+  for drinks with `portions > 1` (a shot of rum; the last shot leaves `drink.container`), else one of the stack (a
+  battery, a nail — also drawn from other carried stacks of the same id; the unit used takes its per-unit state, so
+  the next can of a stack is closed). `{ qty: 1 }` is one whole unit however full (a bottle of rum into a molotov).
+  `'all'` is the whole stack, `0` keeps it.
+- Liquids: `liquidIn( stack )` → `{ kind, litres, cap, fuel }` for water containers (`tool.liquid`; kind null when
+  empty) and gasoline / diesel cans (`fuel`). Kinds: water, dirty, sea, fuel, or `'any'` / a list in matchers.
+- Runtime: `game.combine` (`src/game/items/Combine.js`, no three.js): `find( a, b )` → `[ { combo, a, b, label,
+  state } ]`, `accepts( dragged, target )` (the inventory's drag verb: `{ ok, verb, matches, refused }`, `{ ok: false,
+  reason, combo: true }` or null), `partners( stack )` → `[ { combo, other, a, b, verb, label, ok, reason } ]` (one row
+  per combo and partner id: the partner that needs it most), `state( combo, a, b )` → `{ ok, reason?, soft? }`,
+  `cost( combo, a, b )` → "2× Rags, 4× Sticks" or null, `run( combo, a, b )`. Run order: checks (units, "Empty it
+  first", tools via `provides()`, `station: 'fire'` via `game.nearFire`, `check`) → a `game.actions` progress action
+  (creative shortens it; the action carries `combo: { id, a, b }` so the inventory draws progress on both cells) →
+  re-check (nothing happens if you died or respawned meanwhile) → liquid → repair (+6 % per skill level, capped at
+  `repair.max`) and wear → use (through `game.itemUse` where / discard / consumeOne / splitOne / transform, so a stack
+  is used up wherever it lives) → `out` (inventory, else `game.dropStack` with "No room, dropped"; the HUD pickup row
+  shows it when the screen is closed — no `'item:pick'`, it is not loot) → `run( ctx )` → a side that became the
+  output hands its hotbar key and the hands to it (a bat into a nailed bat) → xp, mood, noise, a toast for repairs,
+  and a `'combine'` event `{ id, a, b }`. Soft refusals (a repair at its cap, liquids that don't mix) are not offered
+  in menus and are not a drag target, so moving a bottle past other bottles still drops into the section.
+- `ctx`: `{ game, inv, combo, a, b, A, B, use (game.itemUse), survival, player, skills, used: { a, b }, made: [ new
+  stacks ], consume( stack, n ), give( id, qty, data ), replace( stack, id, data ), toast( text, kind ), sound( name ),
+  pour( from, to, litres ), draw( stack, litres ), liquid( stack ) }`. `replace` turns one unit into another item where
+  it lies (same uid, slot and condition); what a bag or pocket held stays in it as far as it fits, the rest goes into
+  your other bags (jeans cut into shorts keep what fits).
+- Battery devices may set `tool.cell` (default `'aa'`): the base `insert_batteries` combo only feeds AA devices, so a
+  domain adding D cells or 9 V adds its own combo.
+- Tests: `node test/combos.mjs` (registry ids, matchers, orientation, partners, consumption, liquids, outputs, repair
+  caps, refusals, tools and station, the timed action, death and respawn mid-action, a save → load round trip, the
+  hotbar hand-over, the chooser's cost line).
+
+## Placeables (things put down in the world)
+
+An item with `place: { kind, … }` gets a verb in its menu (`placeables/verbs.js`: Place, Set, Pitch, Lay out, Plant,
+Rig — `place.verb` overrides); any bag or box with room (`cat: 'backpack'` or `container.capacity`) gets "Stash";
+planks get "Barricade door" at a closed door. The verb starts the placer: a translucent ghost of the placed model at the
+crosshair on the ground (green, or red with the reason: Too far, In water, Needs water, Too steep, Blocked, Too close,
+Outdoors only, Needs open sky, Needs soft ground), the wheel or R turns it, the left button or F puts it down (a short
+timed action), the right button, Esc or walking off cancels. While placing, the placer reads fire / aim / interact /
+reload and the wheel first (systems update before the hands) and removes them from that frame's input. Placing works
+from the inventory, the ground or the container on screen (a shelf, a trunk: remembered when the screen closes); one
+unit of a stack is placed and the rest stays where it was.
+
+- Runtime: `game.placeables` (`src/game/items/Placeables.js`, a content module after WorldItems):
+  `beginPlace( stack, { kind, keep, item, name, spec } )` (keep: the stack is a tool that makes the thing and stays
+  yours, as a shovel digs a hole; item: the made thing's id; spec: more placement fields such as verb, gerund, time,
+  soft, outdoors, water), `add( kind, stack, pos, yaw, data, item ) -> p` (onPlace runs when data is null),
+  `remove( p, { give } )`, `refresh( p )` (rebuild the look after a state change), `near( pos, r, kind )`,
+  `byDoor( key )`, `list` (Map). Helpers for kinds: `vec( p )`, `give( stack )`, `timed( label, time, sound, onDone )`,
+  `sound( p, name, vol )`, `loop( p, name, vol, ref )` / `stopLoop`, `noise( p, radius, kind )` (a 'noise' event the
+  infected hear), `light( p, { color, intensity, range, flicker, lift } | null )` (a `game.itemLights` source),
+  `pickUpAction( p, { label, time, check, before } )`, `hold( p )` / `release()` (a trap holding the player: speed 0
+  through a wrapper on `survival.moveModifiers`).
+- Records: `{ id, kind, item, pos: { x, y, z }, yaw, stack, data, born }`, saved in `save.world.placeables`
+  (`registry.js` serializeRecord / loadRecord; fields starting with `_` are runtime only). Records of a kind nobody
+  registered are kept aside and saved again. Each is drawn as a few meshes (its kind's `model()`, else the item model
+  as the world items draw it, `fx.itemModel( def )`; placed shapes from `placedModel()` are merged per material once,
+  `placeables/merge.js`: 1–5 draw calls a thing), hidden past 70 m (180 m for tents and barrels); a tent or a barrel
+  adds a physics box. Lights go through `game.itemLights`, dimmed outdoors by day (`src.dim`).
+- Kinds: `addPlaceable( kind, def )` from `placeables/registry.js` (Node-safe). def: `update( p, dt, game, dh )` (dt real
+  seconds, dh game hours; 4 Hz within 60 m, every 2 s beyond), `frame( p, dt, game )` (every frame within 90 m),
+  `actions( p, game ) -> [ { label, run } ]`, `label( p )`, `sub( p )`, `model( p )`, `show( p )` (after each build),
+  `check( pos, game, spec, A )` (a placement reason; `A.floor` is the box under the ghost or null), `onPlace`,
+  `onRemove`, `serialize`, `load`, `outdoors`, `soft`, `water` (true: may stand in water, `'only'`: must — a fish
+  trap), `solid`, `solidBox`, `place: { time, gerund }`. F on a placed thing: a tap runs the first action, holding F
+  (0.4 s) opens the list as a popover at the crosshair (number keys pick). The prompt is rebuilt when the record
+  changes (`refresh`, an action), the inventory changes, or every quarter second. A barricaded door shows its planks'
+  prompt instead of the door's; from the far side it reads "Open · Barricaded" and stays shut.
+- Base kinds (`placeables/*.js`, numbers in `placeables/logic.js`):
+  - `light`: lanterns, chemlights, torches, candles, tiki torches; burn down in game hours; rain puts out open flames.
+  - `noise`: the alarm clock (set 20 s / 1 min / 3 min, rings 45 s, noise radius 50 every 2 s) and the radio (playing,
+    radius 32 every 4 s, drains its batteries; the emergency radio cranks).
+  - `collector`: rain barrel (120 L) and a rigged tarp (30 L, three times the catch) fill with `weather.rain` (none
+    under a roof); F fills a carried container, drinks, tips out; stale (dirty) after 72 h without rain.
+  - `trap`: wire snares catch a feral chicken, a mongoose (not on Kauaʻi) or a rat over game hours — likelier far from
+    towns, in moist ground, at dawn and dusk, with bait, never while the player is within 20 m; the catch rots after a
+    day. Spring traps snap on the first leg (zombie 45 leg damage and held 25 s, animal 70, the player 28 + a 35 %
+    broken leg and held until "Pry open" is held), loud (noise 22). Whoever sets one can step off it; it arms once
+    they are clear.
+  - `stash`: a bag or tote whose contents stay in the item; with a shovel it is buried in soft ground (a mound) and
+    dug up again. A shovel's "Dig stash" makes a bare hole (20 volume, `data.items`) that is filled in once empty.
+    Food left in a stash, hole or tent goes off in game hours (`ageStored`; a cooler bag slows it).
+  - `shelter`: a pitched tent (sleep, 40 storage) or a laid-out sleeping bag.
+  - `barricade`: planks + 2 nails + a hammer on a closed door, up to 4 (90 hp each); each live door's `bash()` is
+    wrapped so blows break planks first; planks come off with a hammer or crowbar. Windows: no API yet.
+- Items (`defs/ext/placeables.js`): alarm_clock, snare, spring_trap, rain_barrel, stash_box, candle, tiki_torch,
+  raw_small_game / cooked_small_game; `place` on lantern, chemlight(_red), torch, radio, tent, sleeping_bag, tarp.
+  /summon: alarm_clock, radio_playing, rain_barrel, tarp_catcher, spring_trap, snare, lantern_lit, tiki_torch,
+  tent_pitched, stash_box.
+- Tests: `node test/placeables.mjs`.
+
+## Sites (outdoor loot you can see)
+
+Small scenes in the open with their loot lying on the ground as real world items (`game.items3d.spawn` with a stable
+`key`, `persistent: false`). `game.sites` (`src/game/items/Sites.js`, a content module after the items module):
+
+- Kinds (`sites/kinds.js`): roadside (a burst suitcase, a tipped shopping cart), bus_stop (a rural shelter on the
+  highways), crash_car (a car in the ditch, on its roof or side), beach_camp (towels, umbrella, cooler, chair),
+  campsite (dome or ridge tent, cold fire pit, logs, a tarp), hiker (a body on a slope, trekking poles), fishing_spot
+  (rod holders, bucket, chair at the water's edge), checkpoint (police: canopy, table, cruiser, barriers, tape),
+  military_checkpoint (sandbag nest, GP tent, crates under camo netting, razor wire), heli_crash (a smoking Black Hawk,
+  rare), fema_camp (relief tents, cots, pallets, barrels, porta-potties, near towns), farm_stand (a fruit stand with a
+  roof, crates, an honesty box), picnic, body, supply_drop (an event) and stash (buried). Each has a loot table
+  `site_<kind>` (Node-safe, `sites/tables.js`, imported by `defs/index.js`) that domains extend with `extendLoot`, plus
+  `site_stash_rich` for treasure-map caches.
+- Placement (`sites/plan.js`, Node-safe, deterministic from `game.seed`): a 96 m cell grid; each cell probes a few
+  points, classes the best one (road, beach, lot, street, shore, forest, open, town: roads, `hf` flags, beaches, sea
+  distance, moisture, settlements, parking lots, buildings) and maybe places a kind that fits (footprint dry, gentle,
+  off buildings, off the road unless it belongs on it; roadside kinds face the road, beach kinds the sea). A footprint
+  stays inside its own cell and clear of the neighbouring cells' road scenes, helicopter wrecks and stashes, so no two
+  sites overlap (the coarse grids are memoised on `env.memo`, shared with the runtime). Parking lots only get small
+  finds (the street generator parks cars in their stalls); FEMA camps stand in town parks, on open ground near towns
+  and beside highways. The roads'
+  outbreak events carry loot too: roadblock → checkpoint, checkpoint → military_checkpoint, crash → crash_car,
+  jam → roadside (layouts in the event's frame, so the road module's own props stay the scene). Helicopter crashes
+  (2048 m grid, about one cell in three, away from roads and towns) and stashes (384 m grid, one in two, a quarter
+  rich) use coarse grids so they can be found kilometres away. Site keys: `site:<ci>:<cj>:<n>`, `heli:<I>:<J>`,
+  `stash:<I>:<J>`, `drop:<id>`; item keys append the slot index.
+- Layouts (`sites/layout.js`, Node-safe): props, loot slots `{ x, z, h, p, table? }` (h above the ground: a table, a
+  bench, a towel), decals, bodies, effects and interactions in the site's frame. Props are built by
+  `sites/props.js` / `sites/vehicles.js` into a `Kit` (`sites/kit.js`) and merged into one mesh per material per site
+  (matte, plastic, paint, metal, cloth, wood, print atlas, glow, decal: a handful of draw calls, castShadow within
+  110 m), with physics boxes for what you bump into or put things on. Flat cloth (towels, clothes, blankets, a
+  parachute) drapes over the terrain. Props, decals and loot stand on paved surfaces: `sites.lift( x, z )` gives a
+  sidewalk's top (20 cm, from the street network's segments, so before the roads' colliders stream in) or a road's
+  or lot's (7 cm).
+- Streaming: props within 240 m; the camps that sit on parking lots and streets (FEMA camp, police and Army
+  checkpoints) within 380 m, before the parked vehicles come (360 m), so their colliders keep cars out of them. A site
+  is built a few props a frame and merged a few parts a frame (`Kit.begin` / `step( until )` / `end`; 4 ms a frame),
+  and dropped 40 m further out with its geometry disposed. Loot and bodies come out within 120 m, one site a frame
+  (cleared past 145 m). Bodies are the creatures module's dead (`game.zombies.spawn( as, pos, { victim: true, wait:
+  true } )`, kept from its corpse cleanup while shown); without it a covered body or a body bag. A body's Search finds
+  the same things however often it is shown again (`zb.lootItems`: rolled once from the creatures' table for its
+  kind; one searched before a save is empty until the kind's respawn). A helicopter's smoke column is emitted through
+  `game.fx` out to 1.8 km (laid out already formed when it first comes into range).
+- Loot state (`sites/state.js`, saved in `save.world.sites`): taken keys with the game hour (the items3d taken
+  listener), back after the kind's `respawn` hours (72–240) rolled anew; stashes and drops never refill. Interactions
+  used, stashes dug, drops and the next drop time are saved with it.
+- Interactions (F): Light fire (campsite fire pit, becomes a `game.crafting` campfire), Salvage (helicopter: aim at
+  any of the hull, a crowbar or toolbox: scrap, wire, maybe a battery), Cut parachute (a blade: tarp and rope), Break
+  open (the farm stand's honesty box: cash), Dig (a stash, a shovel or pickaxe: the cache comes up around an open
+  tote). A layout's spot is a sphere (`r` at height `h`) or a box (`box: [ hx, hy, hz ]` in the site's frame); the
+  prompt carries the site as its owner, so the site's own colliders never hide it.
+- Supply drops: every 9–22 game hours a crate on a parachute falls 350–900 m from the player (toast, "Supply drop"
+  map marker, the transport overhead), lands with a thud the infected hear and burns a red smoke flare for 15 min;
+  it stays 72 h.
+- Stash items: `stash_note` and `treasure_map` (`stash: true`, "Read"): the first read fixes a stash 200–2600 m away
+  (treasure maps prefer rich caches) in `stack.data.site` and marks it on the map; a cairn and turned soil mark the
+  spot on the ground.
+- API: `reveal( kind, near, maxR? )` (marks the nearest site of a kind: radios, scanners, notes), `find( kind, near,
+  maxR? )` (maxR 1500 m, 6000 m for helicopters), `readStash( stack )`, `supplyDrop( pos?, { alt } )`,
+  `debugPlace( kind, pos, { yaw, seed, extra, items } )` (also
+  `/summon site_<kind>`), `near( pos, r )`, `obstacles( x0, z0, size )` (site footprints in the vegetation's obstacle
+  layout: `world/Vegetation.js` keeps trees and shrubs off them), `stats()`.
+- Preview: `test/preview/sites.html` (every kind on flat ground with a roll of its loot; `?kinds=`, `?seed=`,
+  `__focus( kind, yaw, pitch, dist )`). Tests: `node test/sites.mjs` (tables, layouts, placement on a stub and on the
+  real world with no overlaps, the state; and `game.sites` on a stub game: streaming and disposal, the stepwise build,
+  loot keys and respawn, bodies, the prompts through the real crosshair ray, salvage, the cash box, digging, a stash
+  note, a drop from the sky to expiry, a save → load round trip).
+
+## Mood and skills
+
+Project Zomboid's moodles, gentler. `game.survival` (`src/game/Survival.js`) and `game.skills` (`src/game/Skills.js`,
+made by the Survival constructor). Tests: `node test/mood.mjs`.
+
+- Moods, 0–100, saved in `save.survival`: `boredom`, `stress`, `unhappy`, and `panic` (a fast spike).
+  `survival.mood( { boredom, stress, unhappy, panic } )` adds deltas (negative = better), clamped; it does nothing in
+  creative or god mode, which keep every mood at 0.
+  - Boredom grows when idle, faster indoors (16 min standing about indoors to "Bored"). Moving about outdoors, a
+    vehicle, fishing and a fight ease it.
+  - Stress comes from the infected near you (hunting you counts most), wounds and bites, bleeding, fever, hunger,
+    thirst, pain, an unsplinted leg, and the dark outdoors at night without a light. It eases when nothing presses:
+    faster indoors, by a fire, with a drink, and with sleep.
+  - Panic rises while the infected hunting you are within 9 m and fades about 15 s after they're gone. Stress makes
+    it come faster; kills this life dull it. Stress above 90 keeps it at the edge (up to 50).
+  - Unhappiness comes from long boredom or stress, being wet and cold, pain, hunger, sickness, and rotten or raw food.
+    It lifts slowly when calm, with drink, cooked food, sleep and items' `fun`.
+- Effects, all read in one place: `swayMul()` (aim sway in weapons/Hands: stress and panic shake, the aiming level
+  steadies), stamina regen (stress), `healMul()` (natural healing) and `sleepQuality()` (unhappiness: an unhappy
+  sleep gives back less energy, "Slept badly"), `noiseMul()` (footsteps, stealth level). Panic adds a racing
+  heartbeat and the HUD's dark breathing edge.
+- `survival.moodles()` → `[ { id: 'stress'|'unhappy'|'bored', label, kind: 'mild'|'warn'|'bad', level: 1–4, mood: true } ]`
+  (levels start at 25 / 50 / 75 / 90), appended to `conditions()`: the HUD shows them as chips with four level pips,
+  the Status screen with a value and a remedy. Messages: Bored, Very bored, Stressed, Very stressed, Unhappy,
+  Depressed, Panicked.
+- Sleep: Survival notices Game.sleep's clock jump and applies `slept( hours )` (calmer, less bored, cheered). Reading's
+  time-lapse costs `passTime( hours )` (hunger, thirst, energy).
+- `game.skills`: `xp( skill, n )` → level (a level-up toasts "Fishing 3" and emits `'skill' { skill, level }`),
+  `level( skill )` 0–10, `progress( skill )`, `total( skill )`, `mul( skill, perLevel )` = 1 + level × perLevel (for
+  small bonuses), `knows( key )` / `learn( key )` (the old guides' flags; `itemUse.knowledge` reads them),
+  `readProgress( id )`, `craftSkill( recipe )`, `list()`. Skills: fishing, survival, foraging, first_aid, cooking,
+  mechanics, carpentry, tailoring, electrical, aiming, reloading, maintenance, stealth. Cumulative xp for level n:
+  round( 75 · n^1.6 ) (75, 227, 435 … 2986). Saved in `save.survival.skills`; they die with the character.
+  - XP already granted: fishing (catches, misses), cooking (roasting, the pot, fire recipes), first_aid (treatments),
+    crafting (`recipe.skill`, else inferred from what it is made of; `R( …, { skill, xp } )` sets them), repairs
+    (maintenance, or tailoring for clothes and bags), tearing rags (tailoring), purifying water (survival), firearm and
+    bow hits and kills (aiming), reloads (reloading), creeping near unaware infected (stealth), foraging.
+  - Bonuses already read: fishing (bites, landing), first_aid (treatment time), cooking (less food sickness), aiming
+    (sway), reloading (speed), stealth (footsteps), foraging (finds), maintenance and tailoring (mend per repair).
+    Combos use `skill` / `xp` themselves.
+- Items: `fun: { boredom, stress, unhappy, panic }` is applied by `game.itemUse.applyFun( def, k, { repeat, fallback } )`
+  on eating (per portion), drinking (per portion), medicine, reading (as the pages turn), the ukulele's Play and the
+  duck's Squeeze. A domain verb that cheers calls `ctx.use.applyFun( def, 1, { repeat: seconds } )` when it's done
+  (`repeat` damps a thing used again soon, down to 15 %), and grants practice with `ctx.use.xp( skill, n )`.
+- Reading: `read: { skill, xp, hours = 1, once }` (`once` defaults to true when it teaches). An old guide's
+  `book.skill` reads as `{ skill, xp: 75, hours: 1, once: true }` plus its flag; any other `cat: 'book'` item is a
+  half-hour read for fun (the newspaper a quarter hour). Reading is a time-lapse of 12 real seconds per game hour
+  (the hours pass, food spoils); xp and fun come as the pages turn; stopping keeps the place ("Read 40%"); it needs
+  light (day, a fire, a light carried or set down nearby) and is refused in water, at the wheel, in a panic and with
+  the infected hunting you close by, which also interrupt it. A book read for fun again within an hour of play cheers
+  less. A domain verb can read anything with `ctx.use.read( stack, { hours, xp, skill } )`.
+- Chat: `/skill [skill] [level]`, `/mood [boredom|stress|unhappy|panic] [0-100]` (cheats outside creative, refused in
+  hardcore).
 
 ## Rendering notes (ported from Tidewater)
 

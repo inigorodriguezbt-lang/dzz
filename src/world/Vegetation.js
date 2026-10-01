@@ -285,7 +285,11 @@ export class Vegetation {
 			for ( const k of set ) { for ( let q = 0; q < 6; q ++ ) a[ o + q ] = src[ k * 6 + q ]; o += 6; }
 			return a;
 		};
-		return { bld: pack( bs, this._obs.b ), seg: pack( ss, this._obs.s ), cty: citiesNear( this.world.meta.cities, x0, z0, size ) };
+		// the outdoor loot sites keep their ground clear too (items/Sites.js; same layout)
+		let bld = pack( bs, this._obs.b );
+		const site = this.game.sites?.obstacles?.( x0, z0, size );
+		if ( site ) { const both = new Float32Array( ( bld?.length || 0 ) + site.length ); if ( bld ) both.set( bld ); both.set( site, bld?.length || 0 ); bld = both; }
+		return { bld, seg: pack( ss, this._obs.s ), cty: citiesNear( this.world.meta.cities, x0, z0, size ) };
 	}
 
 	// ---- quality -------------------------------------------------------------------------------------------------

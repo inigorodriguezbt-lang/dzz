@@ -133,6 +133,7 @@ export class Fishing {
 		if ( this.inv.count( 'fishing_bait' ) > 0 ) t *= 0.5;
 		if ( this.inv.count( 'tackle_box' ) > 0 ) t *= 0.8;
 		if ( g.itemUse?.knowledge?.fishing ) t *= 0.8;
+		t *= 1 - ( g.skills?.level( 'fishing' ) || 0 ) * 0.03; // practice: up to 30 % sooner
 		const h = g.hour;
 		if ( ( h > 5 && h < 8.5 ) || ( h > 17 && h < 20 ) ) t *= 0.7; // the bite is on at dawn and dusk
 		t /= ( getItem( this.rod.id ).tool.quality || 1 ) ** 0.5;
@@ -169,10 +170,11 @@ export class Fishing {
 		const g = this.game, rod = this.rod;
 		const q = getItem( rod.id ).tool.quality || 1;
 		const big = BIG.has( this.catchId );
-		let chance = 0.72 * q + ( g.itemUse?.knowledge?.fishing ? 0.12 : 0 ) - ( big ? 0.18 : 0 );
+		const lvl = g.skills?.level( 'fishing' ) || 0;
+		let chance = 0.72 * q + ( g.itemUse?.knowledge?.fishing ? 0.12 : 0 ) + lvl * 0.02 - ( big ? 0.18 : 0 );
 		chance *= 0.6 + 0.4 * rod.cond;
 		rod.cond = Math.max( 0.02, rod.cond - ( big ? 0.03 : 0.01 ) );
-		if ( Math.random() > Math.min( 0.95, chance ) ) { this.stop( big ? 'Line snapped' : 'Got away', 'warn' ); return; }
+		if ( Math.random() > Math.min( 0.95, chance ) ) { g.skills?.xp( 'fishing', 1 ); this.stop( big ? 'Line snapped' : 'Got away', 'warn' ); return; }
 		let id = this.catchId;
 		if ( id === 'junk' ) id = JUNK[ Math.floor( Math.random() * JUNK.length ) ];
 		const s = makeStack( id, 1, { loot: id !== this.catchId } );
@@ -185,6 +187,9 @@ export class Fishing {
 		const name = getItem( id ).name.replace( /^Raw /, '' );
 		g.toast( `Caught: ${name}`, this.catchId === 'junk' ? 'info' : 'good' );
 		g.stats.fish = ( g.stats.fish || 0 ) + ( this.catchId === 'junk' ? 0 : 1 );
+		// practice, and a catch is a small joy
+		g.skills?.xp( 'fishing', this.catchId === 'junk' ? 1 : big ? 8 : 4 );
+		if ( this.catchId !== 'junk' ) g.survival?.mood?.( { boredom: big ? - 8 : - 4, unhappy: big ? - 4 : - 1 } );
 		this.inv.changed();
 		this.stop();
 	}

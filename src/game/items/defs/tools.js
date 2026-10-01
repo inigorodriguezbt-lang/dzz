@@ -15,6 +15,8 @@ function tool( id, name, kind, o ) {
 	return {
 		id, name, cat: 'tool', desc: o.desc || '', weight: o.w ?? 0.2, size: o.size ?? 1, stack: o.stack ?? 1,
 		rarity: o.rarity || 'common', tags: [ 'tool', ...( o.tags || [] ) ], model: o.model, tool: t,
+		// left in the world as a placeable (docs/ITEMS_PLAN.md, game/items/Placeables.js)
+		...( o.place ? { place: o.place } : {} ),
 	};
 }
 const bottle = ( o ) => ( { type: 'bottle', ...o } );
@@ -28,19 +30,20 @@ defineItems( [
 		light: { kind: 'spot', range: 30, angle: 0.62, color: 0xf6f2ff, intensity: 55 }, model: { type: 'headlamp' },
 		desc: 'Hands-free light. Uses batteries.' } ),
 	tool( 'lantern', 'LED lantern', 'lantern', { w: 0.6, size: 2, battery: 20, rechargeable: true, rarity: 'uncommon', tags: [ 'outdoor', 'hardware', 'house', 'garage' ],
-		light: { kind: 'point', range: 12, color: 0xffe2b0, intensity: 16 }, model: { type: 'lantern', color: 0x2a5a3a },
+		light: { kind: 'point', range: 12, color: 0xffe2b0, intensity: 16 }, model: { type: 'lantern', color: 0x2a5a3a }, place: { kind: 'light' },
 		desc: 'Area light. Uses batteries.' } ),
 	tool( 'phone', 'Smartphone', 'phone', { w: 0.18, size: 0.5, battery: 2, rechargeable: true, tags: [ 'house', 'office', 'civilian', 'tourist', 'car' ],
 		light: { kind: 'spot', range: 14, angle: 0.8, color: 0xf2f6ff, intensity: 14 }, model: { type: 'phone', cracked: true },
 		desc: 'Light and clock.' } ),
 	tool( 'chemlight', 'Chemlight (green)', 'chemlight', { w: 0.03, size: 0.5, stack: 4, battery: 10, rarity: 'common', tags: [ 'military', 'outdoor', 'police', 'fire', 'boat' ],
-		light: { kind: 'point', range: 6, color: 0x5aff6a, intensity: 3 }, model: { type: 'chemlight', color: 0x5aff6a },
+		light: { kind: 'point', range: 6, color: 0x5aff6a, intensity: 3 }, model: { type: 'chemlight', color: 0x5aff6a }, place: { kind: 'light' },
 		desc: 'Snap to light. Lasts 10 h.' } ),
 	tool( 'chemlight_red', 'Chemlight (red)', 'chemlight', { w: 0.03, size: 0.5, stack: 4, battery: 10, rarity: 'uncommon', tags: [ 'military', 'outdoor', 'boat' ],
-		light: { kind: 'point', range: 5, color: 0xff3a3a, intensity: 3 }, model: { type: 'chemlight', color: 0xff3a3a },
+		light: { kind: 'point', range: 5, color: 0xff3a3a, intensity: 3 }, model: { type: 'chemlight', color: 0xff3a3a }, place: { kind: 'light' },
 		desc: 'Snap to light. Lasts 10 h.' } ),
 	tool( 'torch', 'Torch', 'torch', { w: 0.5, size: 3, battery: 1.5, rarity: 'uncommon', tags: [ 'crafted' ],
 		light: { kind: 'point', range: 14, color: 0xff9a40, intensity: 14, flicker: true }, model: { type: 'stick', len: 0.55, r: 0.016, rag: 0x3a2a1a },
+		place: { kind: 'light', verb: 'Plant', upright: true, fire: true, flame: 0.07 },
 		desc: 'Light with a lighter or matches.' } ),
 
 	// ================= fire =================
@@ -124,13 +127,15 @@ defineItems( [
 
 	// ================= radios =================
 	tool( 'radio', 'Emergency radio', 'radio', { w: 0.6, size: 2, battery: 30, rechargeable: true, rarity: 'uncommon', tags: [ 'house', 'hardware', 'outdoor', 'office', 'fire' ],
-		model: { type: 'radio', style: 'portable', color: 0xc0282a }, desc: 'Weather forecast.' } ),
+		model: { type: 'radio', style: 'portable', color: 0xc0282a }, place: { kind: 'noise', radius: 32, every: 4 }, desc: 'Weather forecast.' } ),
 	tool( 'walkie_talkie', 'Walkie-talkie', 'radio', { w: 0.25, size: 1, battery: 16, rechargeable: true, rarity: 'uncommon', tags: [ 'police', 'military', 'fire', 'hotel', 'security' ],
 		model: { type: 'radio', color: 0x1a1a1a } } ),
 
 	// ================= camping =================
 	tool( 'tent', 'Tent', 'tent', { w: 2.4, size: 8, rarity: 'rare', tags: [ 'outdoor', 'sports' ],
-		model: { type: 'stuffsack', len: 0.55, r: 0.1, color: 0x2a7a4a, poles: true }, desc: 'Sleep anywhere.' } ),
+		model: { type: 'stuffsack', len: 0.55, r: 0.1, color: 0x2a7a4a, poles: true }, place: { kind: 'shelter', shape: 'tent', sleep: 1, capacity: 40, verb: 'Pitch' },
+		desc: 'Sleep anywhere.' } ),
 	tool( 'sleeping_bag', 'Sleeping bag', 'sleepingbag', { w: 1.2, size: 5, rarity: 'uncommon', tags: [ 'outdoor', 'sports', 'military', 'house' ],
-		model: { type: 'stuffsack', len: 0.4, r: 0.14, color: 0x2a4a8a, drawcord: true }, desc: 'Sleep outdoors.' } ),
+		model: { type: 'stuffsack', len: 0.4, r: 0.14, color: 0x2a4a8a, drawcord: true }, place: { kind: 'shelter', shape: 'bedroll', sleep: 0.85, verb: 'Lay out' },
+		desc: 'Sleep outdoors.' } ),
 ] );
