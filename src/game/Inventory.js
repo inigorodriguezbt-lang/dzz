@@ -17,7 +17,9 @@ export function itemsOf( stack ) {
 }
 export function capacityOf( stack ) {
 	const def = getItem( stack.id );
-	return def?.clothing?.capacity || def?.backpack?.capacity || def?.container?.capacity || 0;
+	const base = def?.clothing?.capacity || def?.backpack?.capacity || def?.container?.capacity || 0;
+	// pouches sewn on (stack.data.mods.cap, the gear domain)
+	return base + ( stack.data?.mods?.cap || 0 );
 }
 
 export function containerVolume( items ) {

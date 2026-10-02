@@ -13,6 +13,7 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import '../game/items/defs/firearms.js';
 import { getItem, makeStack, displayName } from '../game/items/ItemDB.js';
+import { lookOf } from '../game/items/ext/gear/logic.js';
 import * as ops from './ops.js';
 import { ViewModel } from './ViewModel.js';
 import { weaponMaterials, gunData, meleeData } from './GunModels.js';
@@ -1286,8 +1287,8 @@ export class Hands {
 	// sleeves and gloves from what's worn: long sleeves for jackets, hoodies and warm shirts, the top's own print
 	_dressArms() {
 		const eq = this.inv.equip;
-		const top = eq.torso ? getItem( eq.torso.id ) : null;
-		const gl = eq.hands ? getItem( eq.hands.id ) : null;
+		const top = eq.torso ? lookOf( eq.torso ) : null; // as it looks: a dyed top's colour
+		const gl = eq.hands ? lookOf( eq.hands ) : null;
 		const c = top?.clothing, m = top?.model;
 		const style = m?.style;
 		const long = !! c && style !== 'tank' && style !== 'tee' && style !== 'polo' && ( [ 'hoodie', 'jacket', 'coat', 'suit', 'wetsuit' ].includes( style ) || ( c.insulation ?? 0 ) >= 0.15 || ( c.waterproof ?? 0 ) >= 0.3 );

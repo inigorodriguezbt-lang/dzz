@@ -12,6 +12,7 @@ import * as THREE from 'three';
 import { loadArmRig } from '../weapons/ArmRig.js';
 import { wristMatrix, curlFor, THUMB_POSE, setHandMetrics } from '../weapons/Arms.js';
 import { getItem } from '../game/items/ItemDB.js';
+import { lookOf } from '../game/items/ext/gear/logic.js';
 import { riderPose } from './visual.js';
 import { joint } from './models/parts.js';
 
@@ -42,8 +43,8 @@ function sleevePrint( m ) {
 // sleeves and gloves from what's worn (the same rules as the first-person weapon arms in Hands.js)
 export function armStyle( inv ) {
 	const eq = inv?.equip || {};
-	const top = eq.torso ? getItem( eq.torso.id ) : null;
-	const gl = eq.hands ? getItem( eq.hands.id ) : null;
+	const top = eq.torso ? lookOf( eq.torso ) : null; // as it looks: a dyed top's colour
+	const gl = eq.hands ? lookOf( eq.hands ) : null;
 	const c = top?.clothing, m = top?.model;
 	const style = m?.style;
 	const long = !! c && style !== 'tank' && style !== 'tee' && style !== 'polo' && ( [ 'hoodie', 'jacket', 'coat', 'suit', 'wetsuit' ].includes( style ) || ( c.insulation ?? 0 ) >= 0.15 || ( c.waterproof ?? 0 ) >= 0.3 );

@@ -25,7 +25,7 @@ import { capacityOf, containerVolume } from '../Inventory.js';
 import { POT_COOKED } from './recipes.js';
 import { playItemSound, ensureItemSound } from './sounds.js';
 import { liquidName, worstLiquid, provides, fmtHour, cardinal } from './util.js';
-import { USE_PROVIDERS } from './hooks.js';
+import { USE_PROVIDERS, EAT_HOOKS, MED_HOOKS, spoilRate } from './hooks.js';
 import { SKILLS } from '../Skills.js';
 
 // progress labels for medical verbs
@@ -457,6 +457,8 @@ export class ItemUse {
 			const S = this.S;
 			const msg = S.eat( one );
 			this.applyFun( d, 1 / ( f.portions || 1 ) );
+			// what the stack itself carries (an evolved dish: hooks.js)
+			for ( const fn of EAT_HOOKS ) fn( one, d, 1 / ( f.portions || 1 ), this );
 			// food spilled opening the can with the wrong tool is lost from every portion
 			if ( one.data.spill ) S.hunger = Math.max( 0, S.hunger - f.kcal / 20 / f.portions * one.data.spill );
 			if ( msg ) this.game.toast( msg, 'warn' );
@@ -604,18 +606,28 @@ export class ItemUse {
 
 	medicate( stack ) {
 		const g = this.game, S = this.S, d = getItem( stack.id ), m = d.medical;
+		// the item modules' rules first (hooks.js): a reason refuses, true allows what the rules below would refuse
+		let allow = false;
+		for ( const h of MED_HOOKS ) {
+			const r = h.check?.( stack, d, this );
+			if ( typeof r === 'string' ) { g.toast( r, 'info' ); return; }
+			if ( r === true ) allow = true;
+		}
 		// refuse what would only be wasted
-		if ( m.splint && ! S.fracture ) { g.toast( 'Nothing broken', 'info' ); return; }
-		if ( m.splint && S.splint ) { g.toast( 'Already splinted', 'info' ); return; }
-		if ( m.bleed && S.bleeding <= 0 ) { g.toast( 'Not bleeding', 'info' ); return; }
-		if ( m.infection && ! S.infected && ! m.heal && ! m.pain && ! ( m.sick && S.sick > 0.1 ) ) { g.toast( 'No infection', 'info' ); return; }
-		if ( m.blood && S.blood > 4900 ) { g.toast( 'No blood loss', 'info' ); return; }
-		if ( m.sick && ! m.infection && ! m.heal && S.sick <= 0.05 ) { g.toast( 'Not sick', 'info' ); return; }
+		if ( ! allow ) {
+			if ( m.splint && ! S.fracture ) { g.toast( 'Nothing broken', 'info' ); return; }
+			if ( m.splint && S.splint ) { g.toast( 'Already splinted', 'info' ); return; }
+			if ( m.bleed && S.bleeding <= 0 ) { g.toast( 'Not bleeding', 'info' ); return; }
+			if ( m.infection && ! S.infected && ! m.heal && ! m.pain && ! ( m.sick && S.sick > 0.1 ) ) { g.toast( 'No infection', 'info' ); return; }
+			if ( m.blood && S.blood > 4900 ) { g.toast( 'No blood loss', 'info' ); return; }
+			if ( m.sick && ! m.infection && ! m.heal && S.sick <= 0.05 ) { g.toast( 'Not sick', 'info' ); return; }
+		}
 		const verb = m.verb || 'Use';
-		this.timed( GERUND[ verb ] || verb, this.medTime( m.use || 3 ), m.sound || 'bandage', () => {
+		this.timed( m.gerund || GERUND[ verb ] || verb, this.medTime( m.use || 3 ), m.sound || 'bandage', () => {
 			if ( ! this.exists( stack ) ) return;
 			const bleeding = S.bleeding, fracture = S.fracture && ! S.splint, infected = S.infected;
-			S.medicate( d );
+			const res = S.medicate( d );
+			for ( const h of MED_HOOKS ) { try { h.done?.( stack, d, this, res ); } catch ( e ) { console.error( 'med hook', e ); } }
 			this.applyFun( d );
 			// first aid practice comes from treating (not from taking pills): more for a wound closed, a leg
 			// splinted, an infection fought
@@ -1172,6 +1184,8 @@ export class ItemUse {
 	_spoil( dh ) {
 		const g = this.game;
 		const age = ( items, k ) => {
+			// ice beside the food slows it (hooks.js)
+			k = spoilRate( items, k, dh, g );
 			for ( const s of items ) {
 				const d = getItem( s.id );
 				if ( d?.food?.spoil ) s.data.age = ( s.data.age || 0 ) + dh * k;

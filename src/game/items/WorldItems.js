@@ -17,6 +17,7 @@
 import * as THREE from 'three';
 import './defs/index.js';
 import { getItem, displayName, condLabel, ammoOf, stackWeight } from './ItemDB.js';
+import { lookKey, lookDef } from './ext/gear/logic.js';
 import { Entity, raySphere } from '../Entities.js';
 import { modelInfo, instanceParts, onModelBuilder } from '../../render/ItemModels.js';
 import { rollLoot } from './Loot.js';
@@ -62,7 +63,7 @@ export class WorldItem extends Entity {
 	get def() { return getItem( this.stack.id ); }
 	// the model's bounding sphere centre in the world
 	centre( out ) {
-		const info = this.mgr.info( this.stack.id );
+		const info = this.mgr.info( lookKey( this.stack ) );
 		return out.copy( info.centre ).applyQuaternion( this.quat ).add( this.pos );
 	}
 	update( dt ) {
@@ -232,7 +233,7 @@ export class WorldItems {
 	}
 
 	// the stack changed identity in place (a coconut cracked open): redraw it
-	refresh( item ) { this.infos.delete( item.stack.id ); this.dirty = true; }
+	refresh( item ) { this.infos.delete( lookKey( item.stack ) ); this.dirty = true; }
 
 	// F: take it
 	take( item ) {
@@ -262,7 +263,7 @@ export class WorldItems {
 
 	info( id ) {
 		let i = this.infos.get( id );
-		if ( ! i ) { i = modelInfo( getItem( id ) ); this.infos.set( id, i ); }
+		if ( ! i ) { i = modelInfo( lookDef( id ) ); this.infos.set( id, i ); }
 		return i;
 	}
 
@@ -275,7 +276,7 @@ export class WorldItems {
 		const c = this._c;
 		for ( const it of this.near( ray.origin, maxDist + 1 ) ) {
 			if ( it.falling ) continue;
-			const info = this.info( it.stack.id );
+			const info = this.info( lookKey( it.stack ) );
 			it.centre( c );
 			// generous spheres for tiny things (a ring, a battery) so they are not pixel hunts
 			const r = Math.max( 0.13, Math.min( info.radius * 0.85, 0.9 ) );
@@ -292,7 +293,7 @@ export class WorldItems {
 		if ( d.fuel ) sub.push( `${( s.data.amount || 0 ).toFixed( 1 )} L` );
 		if ( [ 'firearm', 'melee', 'clothing', 'backpack', 'tool' ].includes( d.cat ) && s.cond < 0.85 ) sub.push( condLabel( s.cond ) );
 		sub.push( stackWeight( s ).toFixed( stackWeight( s ) < 1 ? 2 : 1 ) + ' kg' );
-		return [ { t: bt, id: 'item:' + best.id, label: `Take ${displayName( s )}${qty}`, sub: sub.join( ' · ' ), icon: s.id, action: () => this.take( best ), owner: best } ];
+		return [ { t: bt, id: 'item:' + best.id, label: `Take ${displayName( s )}${qty}`, sub: sub.join( ' · ' ), icon: lookKey( s ), action: () => this.take( best ), owner: best } ];
 	}
 
 	// ---- per frame -----------------------------------------------------------------------------------------
@@ -315,8 +316,9 @@ export class WorldItems {
 		const near = this.near( cam, DRAW_R );
 		const groups = new Map();
 		for ( const it of near ) {
-			let a = groups.get( it.stack.id );
-			if ( ! a ) { a = []; groups.set( it.stack.id, a ); }
+			const key = lookKey( it.stack );
+			let a = groups.get( key );
+			if ( ! a ) { a = []; groups.set( key, a ); }
 			a.push( it );
 		}
 		for ( const b of this.batches.values() ) b.used = false;
@@ -365,7 +367,7 @@ export class WorldItems {
 	}
 
 	_makeBatch( id ) {
-		const def = getItem( id );
+		const def = lookDef( id );
 		if ( ! def ) return null;
 		let parts;
 		try { parts = instanceParts( def ); } catch ( e ) { console.error( 'item model', id, e ); return null; }
@@ -445,17 +447,18 @@ export class WorldItems {
 	_highlight( dt ) {
 		const H = this.hl, it = this.game.interact.target?.owner instanceof WorldItem ? this.game.interact.target.owner : null;
 		if ( ! it || ! this.items.has( it ) ) { H.grp.visible = false; return; }
-		if ( H.id !== it.stack.id ) {
+		const key = lookKey( it.stack );
+		if ( H.id !== key ) {
 			H.grp.clear();
-			for ( const p of instanceParts( getItem( it.stack.id ) ) ) {
+			for ( const p of instanceParts( lookDef( key ) ) ) {
 				const m = new THREE.Mesh( p.geometry, H.mat );
 				m.layers.set( 1 );
 				m.frustumCulled = false;
 				H.grp.add( m );
 			}
-			H.id = it.stack.id;
+			H.id = key;
 		}
-		const info = this.info( it.stack.id );
+		const info = this.info( key );
 		// scale about the model centre by about a centimetre, whatever the size
 		const k = 1 + 0.012 / Math.max( 0.05, info.radius );
 		for ( const m of H.grp.children ) m.position.copy( info.centre ).multiplyScalar( - 1 );

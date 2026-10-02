@@ -91,7 +91,8 @@ export const LOOT_TABLES = {
 
 	// ================= shops =================
 	grocery: { rolls: [ 2, 6 ], items: [
-		T( 'canned', 10, { cat: 'food' } ), T( 'grocery', 8, { cat: 'food' } ), T( 'drink', 5, { cat: 'drink', not: [ 'alcohol' ] } ), T( 'alcohol', 1.2, { cat: 'drink' } ),
+		// (not what is only ever made, a mug of coffee or a cocktail, nor a week-old bag of ice: a tag entry matches every drink)
+		T( 'canned', 10, { cat: 'food' } ), T( 'grocery', 8, { cat: 'food' } ), T( 'drink', 5, { cat: 'drink', not: [ 'alcohol', 'crafted', 'cold' ] } ), T( 'alcohol', 1.2, { cat: 'drink' } ),
 		[ 'rice_bag', 2 ], [ 'spam', 3 ], [ 'water_bottle', 2 ], [ 'water_jug', 1.2 ], [ 'charcoal', 0.8 ], [ 'matches', 0.6 ], [ 'lighter', 0.5 ], [ 'batteries', 0.8 ],
 		[ 'cooking_oil', 0.8 ], [ 'tote_bag', 0.3 ], [ 'vitamins', 0.3 ],
 	] },

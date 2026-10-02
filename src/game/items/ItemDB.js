@@ -142,7 +142,8 @@ export function freshness( s ) {
 export function displayName( s ) {
 	const def = ITEMS.get( s.id );
 	if ( ! def ) return s.id;
-	let n = def.name;
+	// a stack may carry its own name (an evolved dish: "Stew (taro, Spam, onion)")
+	let n = typeof s.data?.name === 'string' && s.data.name ? s.data.name : def.name;
 	if ( def.cat === 'food' && def.food.spoil && freshness( s ) <= 0 ) n = 'Rotten ' + n;
 	return n;
 }

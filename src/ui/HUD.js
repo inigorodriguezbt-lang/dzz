@@ -7,6 +7,7 @@ import { h, kc, fmtDist } from './dom.js';
 import { icon, PATHS } from './icons.js';
 import { getItem, displayName, ammoOf } from '../game/items/ItemDB.js';
 import { setIcon } from './itemIcons.js';
+import { lookKey } from '../game/items/ext/gear/logic.js';
 
 const LINGER = 3; // s an element stays after whatever woke it stops (5.2)
 const NS = 'http://www.w3.org/2000/svg';
@@ -675,7 +676,9 @@ export class HUD {
 			show( o.el, i < top );
 			if ( i >= top ) continue;
 			flag( o.el, 'unb', ! s );
-			if ( ( s?.uid || null ) !== o.uid ) { o.uid = s?.uid || null; if ( s ) setIcon( o.img, s.id ); else o.img.removeAttribute( 'src' ); }
+			// keyed by what it looks like too: a stack changed in place (dyed, cut into shorts) keeps its uid
+			const k = s ? s.uid + '|' + lookKey( s ) : null;
+			if ( k !== o.uid ) { o.uid = k; if ( s ) setIcon( o.img, lookKey( s ) ); else o.img.removeAttribute( 'src' ); }
 			show( o.img, !! s );
 			const a = s ? ammoOf( s ) : null;
 			text( o.q, s ? ( a !== null ? a : s.qty > 1 ? s.qty : '' ) : '' );

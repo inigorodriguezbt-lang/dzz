@@ -143,7 +143,8 @@ export class Creatures {
 		const moving = p.sprinting ? 1.3 : sp > 1 ? 1 : 0.7;
 		// a torch in the dark is seen from far off (about 50 m standing still, 75 m walking)
 		const light = this.night > 0.3 && g.hands?.spot?.intensity > 0 ? 1 + this.night * 3.2 : 1;
-		pi.visibility = pi.vehicle ? 1.5 : stance * moving * light;
+		// player.camo: what you wear (a ghillie hood, camo dye, hi-vis; set by the gear domain's system, 0.65..1.3)
+		pi.visibility = pi.vehicle ? 1.5 : stance * moving * light * ( p.camo ?? 1 );
 		if ( p.swimming ) pi.visibility *= 0.8;
 	}
 

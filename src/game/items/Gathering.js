@@ -23,12 +23,15 @@ export class Gathering {
 		const g = this.game, hf = g.hf;
 		if ( y < g.physics.waterLevel( x, z ) + 0.05 ) return null;
 		if ( hf.flagsNear( x, z ) & ( 1 | 4 | 8 | 16 | 32 ) ) return null; // roads, streets, runways, buildings, towns
-		if ( y < 3 && g.world.isBeach?.( x, z ) ) return { label: 'Search beach', loot: [ [ 'stick', 1, 3, 0.8 ], [ 'stone', 1, 2, 0.6 ], [ 'firewood', 1, 1, 0.15 ], [ 'rope', 1, 1, 0.04 ], [ 'empty_bottle', 1, 1, 0.08 ] ] };
+		if ( y < 3 && g.world.isBeach?.( x, z ) ) return { label: 'Search beach', loot: [ [ 'stick', 1, 3, 0.8 ], [ 'stone', 1, 2, 0.6 ], [ 'firewood', 1, 1, 0.15 ], [ 'rope', 1, 1, 0.04 ], [ 'empty_bottle', 1, 1, 0.08 ], [ 'noni_fruit', 1, 1, 0.05 ] ] };
 		const s = hf.surfaceAt( x, z, this._s4 );
 		if ( s[ 1 ] > 0.45 ) return { label: 'Search rocks', loot: [ [ 'stone', 1, 3, 0.9 ] ] };
 		if ( hf.normalAt( x, z, this._n, 1 ).y < 0.75 ) return null;
 		const lush = s[ 0 ] > 0.35;
-		return { label: 'Gather sticks', loot: [ [ 'stick', 1, lush ? 4 : 2, 0.9 ], [ 'long_stick', 1, 1, lush ? 0.3 : 0.12 ], [ 'stone', 1, 1, 0.25 ], [ 'guava', 1, 2, lush ? 0.12 : 0 ], [ 'lilikoi', 1, 2, lush ? 0.08 : 0 ] ] };
+		return { label: 'Gather sticks', loot: [ [ 'stick', 1, lush ? 4 : 2, 0.9 ], [ 'long_stick', 1, 1, lush ? 0.3 : 0.12 ], [ 'stone', 1, 1, 0.25 ], [ 'guava', 1, 2, lush ? 0.12 : 0 ], [ 'lilikoi', 1, 2, lush ? 0.08 : 0 ],
+			// the pharmacy's wild herbs (skipped when they aren't defined)
+			[ 'uhaloa_root', 1, 1, 0.05 ], [ 'popolo_berries', 1, 3, lush ? 0.06 : 0 ], [ 'mamaki_leaves', 1, 3, lush ? 0.05 : 0 ], [ 'olena_root', 1, 2, lush ? 0.04 : 0 ],
+			[ 'kukui_nuts', 2, 4, lush ? 0.05 : 0 ], [ 'awa_root', 1, 1, lush ? 0.02 : 0 ], [ 'noni_fruit', 1, 1, lush ? 0 : 0.03 ] ] };
 	}
 
 	provide( ray, maxDist ) {

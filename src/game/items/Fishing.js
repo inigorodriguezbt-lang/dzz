@@ -24,6 +24,11 @@ const BOB_PX = 7; // the bobber never gets smaller than this on screen (a real o
 const LINE_PX = 1.6; // on-screen line width (px)
 const LINE_N = 16; // line segments
 
+// Other item modules tune the bite and the catch (lures, squid jigs: defs/ext/outdoors.js). fn( fishing ) returns null
+// or { bite: wait multiplier, weights: { id: k }, extra: [ [ id, w ] ], land: + landing chance, caught( fishing, id ) }
+export const FISHING_MODS = [];
+export function addFishingMod( fn ) { FISHING_MODS.push( fn ); }
+
 export class Fishing {
 	constructor( game ) {
 		this.game = game;
@@ -137,13 +142,23 @@ export class Fishing {
 		const h = g.hour;
 		if ( ( h > 5 && h < 8.5 ) || ( h > 17 && h < 20 ) ) t *= 0.7; // the bite is on at dawn and dusk
 		t /= ( getItem( this.rod.id ).tool.quality || 1 ) ** 0.5;
+		for ( const m of this._mods() ) if ( m.bite > 0 ) t *= m.bite;
 		return t;
 	}
 
 	_band() { return this.depth < 2.5 ? 'shallow' : this.depth < 12 ? 'reef' : 'deep'; }
 
+	_mods() {
+		const out = [];
+		for ( const fn of FISHING_MODS ) { try { const m = fn( this ); if ( m ) out.push( m ); } catch ( e ) { console.error( 'fishing mod', e ); } }
+		return out;
+	}
+
 	_pick() {
-		const g = this.game, table = CATCH[ this._band() ].map( ( [ id, w ] ) => [ id, w * ( id === 'raw_shark' && g.world.sky.night > 0.5 ? 2.2 : 1 ) ] ).filter( ( [ id ] ) => id === 'junk' || getItem( id ) );
+		const g = this.game, mods = this._mods();
+		const k = ( id ) => mods.reduce( ( a, m ) => a * ( m.weights?.[ id ] ?? 1 ), 1 );
+		const base = CATCH[ this._band() ].concat( ...mods.map( m => m.extra || [] ) );
+		const table = base.map( ( [ id, w ] ) => [ id, w * k( id ) * ( id === 'raw_shark' && g.world.sky.night > 0.5 ? 2.2 : 1 ) ] ).filter( ( [ id ] ) => id === 'junk' || getItem( id ) );
 		let x = Math.random() * table.reduce( ( a, e ) => a + e[ 1 ], 0 );
 		for ( const [ id, w ] of table ) { x -= w; if ( x <= 0 ) return id; }
 		return table[ 0 ][ 0 ];
@@ -171,7 +186,8 @@ export class Fishing {
 		const q = getItem( rod.id ).tool.quality || 1;
 		const big = BIG.has( this.catchId );
 		const lvl = g.skills?.level( 'fishing' ) || 0;
-		let chance = 0.72 * q + ( g.itemUse?.knowledge?.fishing ? 0.12 : 0 ) + lvl * 0.02 - ( big ? 0.18 : 0 );
+		const mods = this._mods();
+		let chance = 0.72 * q + ( g.itemUse?.knowledge?.fishing ? 0.12 : 0 ) + lvl * 0.02 - ( big ? 0.18 : 0 ) + mods.reduce( ( a, m ) => a + ( m.land || 0 ), 0 );
 		chance *= 0.6 + 0.4 * rod.cond;
 		rod.cond = Math.max( 0.02, rod.cond - ( big ? 0.03 : 0.01 ) );
 		if ( Math.random() > Math.min( 0.95, chance ) ) { g.skills?.xp( 'fishing', 1 ); this.stop( big ? 'Line snapped' : 'Got away', 'warn' ); return; }
@@ -190,6 +206,7 @@ export class Fishing {
 		// practice, and a catch is a small joy
 		g.skills?.xp( 'fishing', this.catchId === 'junk' ? 1 : big ? 8 : 4 );
 		if ( this.catchId !== 'junk' ) g.survival?.mood?.( { boredom: big ? - 8 : - 4, unhappy: big ? - 4 : - 1 } );
+		for ( const m of mods ) m.caught?.( this, id );
 		this.inv.changed();
 		this.stop();
 	}

@@ -9,6 +9,7 @@ import { capacityOf, itemsOf } from '../../Inventory.js';
 import { placedModel } from '../models/ext/placeables.js';
 import { itemModel } from './fx.js';
 import { provides } from '../util.js';
+import { spoilRate } from '../hooks.js';
 
 const HARD = 1 | 4 | 8 | 16;
 export const HOLE_CAP = 20;
@@ -20,6 +21,7 @@ const shovel = ( g ) => g.player.inventory.find( ( s ) => provides( s, 'dig' ) )
 // ItemUse already. k: what the container lets through (a cooler bag 0.5)
 export function ageStored( g, items, dh, k = 1 ) {
 	if ( ! ( dh > 0 ) || ! items?.length || g.app?.ui?.inventory?.other?.items === items ) return;
+	k = spoilRate( items, k, dh, g ); // ice beside the food (hooks.js)
 	for ( const s of items ) {
 		const d = getItem( s.id );
 		if ( d?.food?.spoil ) s.data.age = ( s.data.age || 0 ) + dh * k;

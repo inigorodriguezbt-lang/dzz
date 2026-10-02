@@ -10,6 +10,7 @@ import { ITEMS, getItem, displayName, condLabel, freshness, ammoOf, stackWeight,
 import { addToItems, containerVolume, containerWeight, itemsOf, capacityOf } from '../game/Inventory.js';
 import { fmtHour, liquidName } from '../game/items/util.js';
 import * as ops from '../weapons/ops.js';
+import { lookKey } from '../game/items/ext/gear/logic.js';
 
 const GROUND_R = 2.6;
 const WEIGHT_MAX = 45, WEIGHT_TIRED = 18, WEIGHT_OVER = 30; // kg: the meter's scale, where stamina starts to drop, overloaded
@@ -41,6 +42,14 @@ const slotOf = d => d.clothing?.slot || d.backpack?.slot || ( d.cat === 'backpac
 const tipStack = id => ( { uid: 'tip:' + id, id, qty: 1, cond: 1, data: {} } );
 
 // the one bar a cell shows: condition, freshness, fill or charge (0..1), or null for none
+// a garment's stats plus what was sewn or strapped on it (stack.data.mods, the gear domain)
+function withMods( c, s ) {
+	const m = s?.data?.mods;
+	if ( ! c || ! m ) return c;
+	return { ...c, capacity: ( c.capacity || 0 ) + ( m.cap || 0 ), insulation: ( c.insulation || 0 ) + ( m.ins || 0 ), waterproof: Math.min( 1, ( c.waterproof || 0 ) + ( m.wp || 0 ) ),
+		armor: { bite: ( c.armor?.bite || 0 ) + ( m.bite || 0 ), bullet: ( c.armor?.bullet || 0 ) + ( m.bullet || 0 ) } };
+}
+
 function barOf( s, d ) {
 	if ( ! d ) return null;
 	if ( d.tool?.liquid ) return ( s.data.amount || 0 ) / d.tool.liquid;
@@ -300,7 +309,7 @@ export class InventoryUI {
 			h( 'button.btn.icon.sm', { type: 'button', title: 'Sort', onclick: () => this._sort() }, icon( 'sort' ) ) ) );
 		for ( const c of cs ) {
 			let lead;
-			if ( c.owner ) { lead = h( 'img', { alt: '', draggable: false } ); setIcon( lead, c.owner.id ); } else lead = icon( 'torso' );
+			if ( c.owner ) { lead = h( 'img', { alt: '', draggable: false } ); setIcon( lead, lookKey( c.owner ) ); } else lead = icon( 'torso' );
 			col.appendChild( this._section( { key: c.owner?.uid || 'pockets', name: c.label, lead, items: c.items, capacity: c.capacity, loc: { type: 'container', container: c, items: c.items } } ) );
 		}
 	}
@@ -373,7 +382,7 @@ export class InventoryUI {
 	_stats() {
 		const S = this.game.survival, inv = this.inv;
 		let insul = 0, bite = 0;
-		for ( const s of Object.values( inv.equip ) ) { const c = s && getItem( s.id )?.clothing; if ( c ) { insul += c.insulation || 0; bite = Math.max( bite, c.armor?.bite || 0 ); } }
+		for ( const s of Object.values( inv.equip ) ) { const c = s && withMods( getItem( s.id )?.clothing, s ); if ( c ) { insul += c.insulation || 0; bite = Math.max( bite, c.armor?.bite || 0 ); } }
 		const lvl = ( v, low, crit ) => v < crit ? 'alarm' : v < low ? 'warn' : '';
 		const hp = Math.round( S.health ), bl = Math.round( S.blood / 50 ), fo = Math.round( Math.min( 100, S.hunger ) ), wa = Math.round( Math.min( 100, S.thirst ) ), en = Math.round( S.energy ), t = S.temp;
 		const tc = t < 35.2 || t > 38.6 ? 'alarm' : t < 36 ? 'cold' : t > 38 ? 'warn' : '';
@@ -414,7 +423,7 @@ export class InventoryUI {
 			const el = h( 'div.hot' + ( at && inv.hands === at.stack.uid ? '.on' : '' ) );
 			if ( at ) {
 				const img = h( 'img', { alt: '', draggable: false } );
-				setIcon( img, at.stack.id );
+				setIcon( img, lookKey( at.stack ) );
 				el.appendChild( img );
 				el._it = at;
 			}
@@ -431,7 +440,7 @@ export class InventoryUI {
 	_cell( stack, loc, cls = '', { dot = true } = {} ) {
 		const d = getItem( stack.id );
 		const img = h( 'img', { alt: '', draggable: false } );
-		setIcon( img, stack.id );
+		setIcon( img, lookKey( stack ) );
 		const el = h( 'div.cell' + cls, {}, img );
 		// a level rifle fills a wide slot; the category glyph (shown until the render lands) stays upright
 		if ( ( cls.includes( '.w3' ) || cls.includes( '.w2' ) ) && DIAG_CLS.has( d?.firearm?.cls ) ) {
@@ -595,7 +604,8 @@ export class InventoryUI {
 			num( 'Speed', m.speed, ov( o, x => x.speed ), v => v.toFixed( 1 ) + '/s', 1 );
 			num( 'Reach', m.reach, ov( o, x => x.reach ), v => v.toFixed( 1 ) + ' m', 1 );
 		} else if ( d.clothing || d.backpack ) {
-			const c = d.clothing || d.backpack, o = cd ? cd.clothing || cd.backpack : null;
+			const c = withMods( d.clothing || d.backpack, inst ? stack : null ), o = cd ? withMods( cd.clothing || cd.backpack, cmp ) : null;
+			if ( inst && stack.data?.wet > 0.3 ) flags.push( 'Wet' );
 			const s = slotOf( d );
 			if ( SLOT_NAME[ s ] ) meta += ' · ' + SLOT_NAME[ s ];
 			cond();

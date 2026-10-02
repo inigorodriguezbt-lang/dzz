@@ -14,6 +14,7 @@ import * as THREE from 'three';
 import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { getItem } from '../game/items/ItemDB.js';
+import { lookDef } from '../game/items/ext/gear/logic.js';
 import { buildItemModel, hasModelBuilder, builderSignature } from './ItemModels.js';
 import { G as UNI } from './Materials.js';
 
@@ -43,7 +44,8 @@ let db = null;
 const LS_KEY = 'deadtide.icons.v' + ICON_VERSION;
 
 function sigFor( id ) {
-	const def = getItem( id );
+	// an id, or a look key ('tshirt~black': a dyed stack, the gear domain's lookKey)
+	const def = getItem( id ) || lookDef( id );
 	if ( ! def ) return null;
 	const type = def.model?.type || 'box';
 	const builder = hasModelBuilder( type ) ? builderSignature( type ) : 'fallback';
@@ -142,7 +144,7 @@ function schedule() {
 			const job = queue.shift();
 			const cached = iconSync( job.id );
 			if ( cached ) { job.resolve( cached ); continue; }
-			const def = getItem( job.id );
+			const def = getItem( job.id ) || lookDef( job.id );
 			if ( ! def ) { job.resolve( null ); continue; }
 			if ( WEAPON_TYPES.has( def.model?.type ) && ! hasModelBuilder( def.model.type ) && Object.keys( weaponModelModules ).length ) {
 				await loadWeaponModels();
