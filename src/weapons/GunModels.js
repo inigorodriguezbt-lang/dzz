@@ -2368,9 +2368,9 @@ function labelMaterial( cal ) {
 		const g = c.getContext( '2d' );
 		g.fillStyle = '#d9cfb8'; g.fillRect( 0, 0, 256, 128 );
 		g.fillStyle = color; g.fillRect( 0, 0, 256, 44 ); g.fillRect( 0, 110, 256, 18 );
-		g.fillStyle = '#f4efe2'; g.font = 'bold 34px Inter, Arial, sans-serif'; g.textAlign = 'center'; g.fillText( cal.toUpperCase(), 128, 34 );
-		g.fillStyle = '#2a2622'; g.font = 'bold 20px Inter, Arial, sans-serif'; g.fillText( cal === '12ga' ? 'SHOTSHELLS' : cal === 'flare' ? 'SIGNAL FLARES' : 'CENTERFIRE', 128, 76 );
-		g.font = '15px Inter, Arial, sans-serif'; g.fillText( 'HANDLE WITH CARE', 128, 100 );
+		g.fillStyle = '#f4efe2'; g.font = 'bold 34px 'Roboto Condensed', 'Arial Narrow', Arial, sans-serif'; g.textAlign = 'center'; g.fillText( cal.toUpperCase(), 128, 34 );
+		g.fillStyle = '#2a2622'; g.font = 'bold 20px 'Roboto Condensed', 'Arial Narrow', Arial, sans-serif'; g.fillText( cal === '12ga' ? 'SHOTSHELLS' : cal === 'flare' ? 'SIGNAL FLARES' : 'CENTERFIRE', 128, 76 );
+		g.font = '15px 'Roboto Condensed', 'Arial Narrow', Arial, sans-serif'; g.fillText( 'HANDLE WITH CARE', 128, 100 );
 		const t = new THREE.CanvasTexture( c ); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
 		m.map = t;
 	}
