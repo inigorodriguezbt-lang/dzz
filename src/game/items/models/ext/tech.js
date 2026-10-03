@@ -86,17 +86,20 @@ function wrapTex( key, spec ) {
 	return canvasTex( 'tech:wrap:' + key, 256, 128, ( ctx, W, H ) => {
 		ctx.fillStyle = css( spec.bg ); ctx.fillRect( 0, 0, W, H );
 		if ( spec.band ) { ctx.fillStyle = css( spec.band ); ctx.fillRect( 0, H * 0.68, W, H * 0.32 ); }
-		ctx.fillStyle = css( spec.fg ); ctx.font = `900 ${Math.round( H * 0.34 )}px Arial`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+		// the label is printed twice round the cylinder: each copy fits its half ("MAPP GAS" overran into the other)
+		const fit = ( text, px, weight ) => { ctx.font = `${weight} ${px}px Arial`; const k = Math.min( 1, W * 0.44 / Math.max( 1, ctx.measureText( text ).width ) ); if ( k < 1 ) ctx.font = `${weight} ${Math.floor( px * k )}px Arial`; };
+		ctx.fillStyle = css( spec.fg ); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+		fit( spec.text, Math.round( H * 0.34 ), 900 );
 		for ( const x of [ W * 0.25, W * 0.75 ] ) { ctx.fillText( spec.text, x, H * 0.36 ); }
-		if ( spec.sub ) { ctx.fillStyle = css( spec.subColor ?? spec.bg ); ctx.font = `bold ${Math.round( H * 0.17 )}px Arial`; for ( const x of [ W * 0.25, W * 0.75 ] ) ctx.fillText( spec.sub, x, H * 0.84 ); }
+		if ( spec.sub ) { ctx.fillStyle = css( spec.subColor ?? spec.bg ); fit( spec.sub, Math.round( H * 0.17 ), 'bold' ); for ( const x of [ W * 0.25, W * 0.75 ] ) ctx.fillText( spec.sub, x, H * 0.84 ); }
 	} );
 }
 
 // a helix along +x: a spring, a coiled cord
-function helix( r, len, turns, tube, seg = 0 ) {
+function helix( r, len, turns, tube, seg = 0, rs = 5 ) {
 	const pts = [], n = seg || Math.max( 24, Math.round( turns * 12 ) );
 	for ( let i = 0; i <= n; i ++ ) { const t = i / n, a = t * turns * PI * 2; pts.push( new THREE.Vector3( ( t - 0.5 ) * len, Math.cos( a ) * r, Math.sin( a ) * r ) ); }
-	return new THREE.TubeGeometry( new THREE.CatmullRomCurve3( pts ), n * 2, tube, 5, false );
+	return new THREE.TubeGeometry( new THREE.CatmullRomCurve3( pts ), n * 2, tube, rs, false );
 }
 const tube = ( pts, r, seg = 24, rs = 6 ) => new THREE.TubeGeometry( new THREE.CatmullRomCurve3( pts.map( p => new THREE.Vector3( ...p ) ) ), seg, r, rs, false );
 
@@ -279,14 +282,16 @@ export function register( reg ) {
 
 	reg( 'tech_springs', () => {
 		const g = group(), m = M( 0xc0c4ca, { rough: 0.25, metal: 0.95 } );
-		add( g, helix( 0.011, 0.09, 10, 0.0019 ), m, [ 0, 0.013, - 0.03 ] );
-		add( g, helix( 0.016, 0.065, 6, 0.0024 ), m, [ 0.012, 0.018, 0.015 ], [ 0, 0.5, 0 ] );
-		add( g, helix( 0.008, 0.06, 11, 0.0014 ), M( 0x8a7a5a, { rough: 0.35, metal: 0.9 } ), [ - 0.03, 0.009, 0.05 ], [ 0, - 0.4, 0 ] );
+		// coarse coils: a handful of 10 cm springs at 12 segments a turn drew 6500 triangles
+		add( g, helix( 0.011, 0.09, 10, 0.0019, 80, 4 ), m, [ 0, 0.013, - 0.03 ] );
+		add( g, helix( 0.016, 0.065, 6, 0.0024, 48, 4 ), m, [ 0.012, 0.018, 0.015 ], [ 0, 0.5, 0 ] );
+		add( g, helix( 0.008, 0.06, 11, 0.0014, 88, 4 ), M( 0x8a7a5a, { rough: 0.35, metal: 0.9 } ), [ - 0.03, 0.009, 0.05 ], [ 0, - 0.4, 0 ] );
 		return ground( g );
 	} );
 
 	reg( 'tech_sheet', () => {
-		const g = group(), m = M( 0xffffff, { map: spangleTex(), rough: 0.35, metal: 0.85 } );
+		// galvanised: duller than chrome, so a sheet lying flat doesn't mirror the sky blue
+		const g = group(), m = M( 0xffffff, { map: spangleTex(), rough: 0.55, metal: 0.55 } );
 		add( g, B( 0.45, 0.003, 0.32 ), m, [ 0, 0.0015, 0 ] );
 		add( g, B( 0.45, 0.003, 0.32 ), m, [ 0.02, 0.0045, 0.012 ], [ 0, 0.05, 0 ] );
 		// a bent corner
@@ -514,7 +519,7 @@ export function register( reg ) {
 				add( k, RB( 0.075, 0.012, 0.016, 0.005 ), m, [ - 0.01, 0.006 + ( s > 0 ? 0.013 : 0 ), 0 ], [ 0, 0, s * 0.12 ] );
 				add( k, B( 0.03, 0.006, 0.014 ), cu, [ 0.04, 0.007 + ( s > 0 ? 0.008 : 0 ), 0 ], [ 0, 0, - s * 0.08 ] );
 			}
-			add( k, helix( 0.006, 0.014, 3, 0.0012 ).rotateY( PI / 2 ), steel(), [ 0.015, 0.012, 0 ] );
+			add( k, helix( 0.006, 0.014, 3, 0.0012, 18, 4 ).rotateY( PI / 2 ), steel(), [ 0.015, 0.012, 0 ] );
 			k.position.set( x, 0.05, z ); k.rotation.y = yaw;
 			g.add( k );
 		};

@@ -26,6 +26,9 @@ export function cellOf( d ) {
 // loose cells come back out of a device only when they are plain cells: a rechargeable one is filled for free by a
 // crank, the sun or a generator, so taking its cells out would turn chargers into an endless supply of fresh AAs
 export const cellsOut = ( d ) => !! CELL_ITEM[ cellOf( d ) ] && ! d?.tool?.rechargeable;
+// a loose cell is always fresh, so one comes back out only while the device is nearly full (at half, taking it out
+// and putting it back would refill the device for free, again and again)
+export const CELL_BACK = 0.9;
 
 export const capOf = ( d ) => d?.tool?.battery || 0;
 export const chargeOf = ( s, d = getItem( s?.id ) ) => Math.max( 0, s?.data?.charge ?? capOf( d ) );
@@ -119,7 +122,7 @@ export function dismantleYield( d, s, { level = 0, quality = 1, rnd = Math.rando
 		if ( n ) out.set( id, ( out.get( id ) || 0 ) + n );
 	}
 	const cell = CELL_ITEM[ cellOf( d ) ];
-	if ( cellsOut( d ) && s && fracOf( s, d ) >= 0.5 && getItem( cell ) ) out.set( cell, ( out.get( cell ) || 0 ) + 1 );
+	if ( cellsOut( d ) && s && fracOf( s, d ) >= CELL_BACK && getItem( cell ) ) out.set( cell, ( out.get( cell ) || 0 ) + 1 );
 	return [ ...out ];
 }
 

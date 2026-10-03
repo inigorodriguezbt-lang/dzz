@@ -8,6 +8,7 @@ import { M, MAT, G, PI, add, group, ground, labelTex, canvasTex, css, facet, gra
 import { IMU } from '../../ext/kitchen/imu.js';
 import { placedModel } from './placeables.js';
 import { compact } from '../../placeables/merge.js';
+import { flame, glowSprite } from '../../placeables/fx.js';
 
 // ---- small helpers ------------------------------------------------------------------------------------------------
 
@@ -203,9 +204,10 @@ export function register( reg ) {
 		const g = group(), k = s.kind;
 		switch ( k ) {
 			case 'luau': {
-				// a bundle of three taro leaves, broad and arrow-shaped, laid on each other, their cut stalks tied
-				const L = 0.3, W = 0.27;
-				const mat = M( 0xffffff, { map: leafTex( 'heart', 0x2f6a2a, 0x3f7a34, 0x8ab86a ), rough: 0.7, side: THREE.DoubleSide } );
+				// a bundle of three taro leaves, broad and arrow-shaped, laid on each other, their cut stalks tied (full
+				// size and a fresh mid-green: smaller and darker, they vanished on asphalt)
+				const L = 0.4, W = 0.34;
+				const mat = M( 0xffffff, { map: leafTex( 'heart', 0x4a9a3a, 0x62ae4c, 0xb8e08e ), rough: 0.65, side: THREE.DoubleSide } );
 				for ( let i = 0; i < 3; i ++ ) {
 					const geo = flatShape( leafShape( 'heart', L, W ), ( x, z ) => 0.004 + i * 0.007 + Math.abs( z ) * 0.18 + Math.sin( x / L * PI ) * 0.012, 16 );
 					add( g, geo, mat, [ - L / 2 + i * 0.015, 0, ( i - 1 ) * 0.02 ], [ 0, ( i - 1 ) * 0.22, 0 ] );
@@ -217,8 +219,8 @@ export function register( reg ) {
 			}
 			case 'ti': {
 				// a bundle of long glossy ti leaves lying side by side (not fanned out), the stems bound with raffia
-				const L = 0.46, W = 0.095, n = 6;
-				const mat = M( 0xffffff, { map: leafTex( 'lance', 0x2a7a32, 0x4a9a3a, 0x9ad07a ), rough: 0.35, side: THREE.DoubleSide } );
+				const L = 0.5, W = 0.115, n = 6;
+				const mat = M( 0xffffff, { map: leafTex( 'lance', 0x3a9a3a, 0x5ab84a, 0xb8e890 ), rough: 0.35, side: THREE.DoubleSide } );
 				for ( let i = 0; i < n; i ++ ) {
 					const k = i - ( n - 1 ) / 2;
 					const geo = flatShape( leafShape( 'lance', L - Math.abs( k ) * 0.02, W ), ( x, z ) => 0.004 + i * 0.004 + Math.abs( z ) * 0.22 + Math.sin( x / L * PI ) * 0.01, 14 );
@@ -875,11 +877,19 @@ function buildImu( stage, o ) {
 		add( extra, lump( 0.07, 0.06, i + 11 ), stone, [ Math.cos( a ) * d, 0.0, Math.sin( a ) * d ] );
 	}
 	if ( stage === 'fire' ) {
-		// a log fire burning on the stones
+		// a log fire burning on the stones: the placed lights' licking flames (animated, additive), a tall one in the
+		// middle and a ring round it, and a glow, so it reads as a big fire at noon too (three small cones did not)
 		const wood = M( 0x3a2414, { rough: 0.9 } ), ember = M( 0x2a1a10, { emissive: 0xff6a20, emissiveIntensity: 1.6, rough: 1 } );
 		for ( let i = 0; i < 5; i ++ ) add( extra, G.cylX( 0.04, 0.55, 8 ), wood, [ 0, 0.06 + ( i % 2 ) * 0.05, 0 ], [ 0, i * PI / 5, 0.12 ] );
 		add( extra, disc( 0.26 ), ember, [ 0, 0.03, 0 ] );
-		for ( let i = 0; i < 3; i ++ ) add( extra, G.cone( 0.08 - i * 0.015, 0.25 + i * 0.05, 8 ), M( 0xff8a2a, { emissive: 0xff7a1a, emissiveIntensity: 2.2, transparent: true, opacity: 0.55 } ), [ ( i - 1 ) * 0.07, 0.08, ( i % 2 ) * 0.05 ] );
+		const core = flame( 0.95 ); core.position.set( 0, 0.06, 0 ); root.add( core );
+		for ( let i = 0; i < 5; i ++ ) {
+			const a = i / 5 * PI * 2 + 0.5, f = flame( 0.5 + ( i % 3 ) * 0.1 );
+			f.position.set( Math.cos( a ) * 0.17, 0.05, Math.sin( a ) * 0.17 );
+			f.rotation.y = a;
+			root.add( f );
+		}
+		const gl = glowSprite( 0xff7a2a, 1.4 ); gl.position.set( 0, 0.45, 0 ); root.add( gl );
 	}
 	if ( stage === 'hot' ) add( extra, disc( 0.3 ), M( 0x1a1008, { emissive: 0xff3a0a, emissiveIntensity: 0.9, rough: 1 } ), [ 0, 0.02, 0 ] );
 	if ( stage === 'hot' || stage === 'pit' ) {

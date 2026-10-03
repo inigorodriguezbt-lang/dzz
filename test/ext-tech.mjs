@@ -10,7 +10,7 @@ installFakeDom();
 const THREE = await import( 'three' );
 await import( '../src/game/items/defs/index.js' );
 const { ITEMS, getItem, makeStack } = await import( '../src/game/items/ItemDB.js' );
-const { LOOT_TABLES, compileTable } = await import( '../src/game/items/Loot.js' );
+const { LOOT_TABLES, compileTable, rollLoot } = await import( '../src/game/items/Loot.js' );
 const { allRecipes } = await import( '../src/game/items/recipes.js' );
 const C = await import( '../src/game/items/combos.js' );
 const R = await import( '../src/game/items/placeables/registry.js' );
@@ -729,6 +729,37 @@ console.log( 'added in review' );
 	game.crafting.craft( r ); finish();
 	ok( has( 'motion_light' ) && ! has( 'solar_light' ), 'built' );
 	clearInv();
+}
+
+console.log( 'second review' );
+{
+	// a loose cell is always fresh: one comes back out only from a nearly full device (at half, out and back in again
+	// refilled it for free)
+	const rem = put( 'tv_remote' ); rem.data.charge = 3.1;
+	ok( ! verb( rem, 'Remove batteries' ), 'no cells out of a half-used remote' );
+	rem.data.charge = 6 * L.CELL_BACK;
+	ok( run( rem, 'Remove batteries' ) && has( 'batteries' ) === 1 && rem.data.charge === 0, 'a nearly full one gives its AA back' );
+	clearInv();
+	const sc = getItem( 'police_scanner' ), ss = makeStack( 'police_scanner', 1 );
+	ss.data.charge = 6;
+	ok( ! L.dismantleYield( sc, ss, { rnd: () => 0.5 } ).some( ( [ id ] ) => id === 'batteries' ), 'nor out of a part-used device taken apart' );
+	// glue holds hard things together: not a map, a hammock, an engine or electronics (solder and oil fix those)
+	const glue = C.getCombo( 'tech_glue_fix' ), worn = ( id ) => { const s = makeStack( id, 1 ); s.cond = 0.5; return s; };
+	const glues = ( id ) => !! getItem( id ) && C.matches( glue.b, worn( id ), getItem( id ) );
+	ok( glues( 'hammer' ) && glues( 'compass' ) && glues( 'pliers' ) && glues( 'fishing_rod' ), 'glue fixes tools and weapons' );
+	for ( const id of [ 'map_hawaii', 'generator', 'phone', 'police_scanner', 'solar_panel', 'tent', 'hammock', 'emergency_blanket', 'mosquito_net' ] ) if ( getItem( id ) ) ok( ! glues( id ), `glue doesn't fix ${id}` );
+	// oil keeps metal from rusting: not stone, bamboo or wood
+	const oil = C.getCombo( 'tech_oil_tool' ), oils = ( id ) => !! getItem( id ) && C.matches( oil.b, worn( id ), getItem( id ) );
+	ok( oils( 'machete' ) && oils( 'hacksaw' ) && oils( 'screwdriver' ), 'oil for metal tools' );
+	for ( const id of [ 'baseball_bat', 'stone_adze', 'bamboo_spear', 'basalt_flake' ] ) if ( getItem( id ) ) ok( ! oils( id ), `no oil for ${id}` );
+	// the alarm clock (another def file) has its parts list as soon as the catalogue is imported, not a tick later
+	ok( getItem( 'alarm_clock' ).dismantle?.some( ( [ id ] ) => id === 'springs' ), 'the alarm clock comes apart for a spring' );
+	// a police scanner marks the map: a find, not a given, even at a police station
+	let n = 0, all = 0, s0 = 3;
+	const rnd = () => ( s0 = ( s0 * 16807 ) % 2147483647 ) / 2147483647;
+	for ( let i = 0; i < 6000; i ++ ) for ( const st of rollLoot( 'police', rnd, 1 ) ) { all ++; if ( st.id === 'police_scanner' ) n ++; }
+	ok( n / all < 0.025 && n > 0, `scanners are ${( n / all * 100 ).toFixed( 1 )}% of a police station's finds` );
+	ok( /lockbox/i.test( getItem( 'bolt_cutters' ).desc ), 'bolt cutters say what they open: ' + getItem( 'bolt_cutters' ).desc );
 }
 
 console.log( `\n${passes} passed, ${fails} failed` );

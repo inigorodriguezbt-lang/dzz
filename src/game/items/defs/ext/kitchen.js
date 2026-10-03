@@ -245,7 +245,7 @@ defineItems( [
 	// ================= spirits, mixers, cocktails, beer =================
 	drink( 'coconut_rum', 'Coconut rum', { w: 1.1, size: 2, water: 10, kcal: 380, alcohol: 0.26, container: 'empty_bottle', portions: 4, rarity: 'uncommon', tags: [ 'alcohol', 'spirit', 'local' ],
 		model: bottle( { style: 'liquor', h: 0.28, r: 0.041, clear: true, glass: 0xf4f2ee, opacity: 0.55, liquid: 0xf6f4ec, fill: 0.82, cap: 0x1a1a1a,
-			label: L( 'KOHALA', 'Coconut rum', 0xf6f4ec, 0x1a1a1a, 0x2a8a5a, 'palm', 'plain', { glyphColor: 0x2a8a5a } ), labelY: 0.2, labelH: 0.3 } ),
+			label: L( 'KOHALA', 'Coconut rum', 0x1a7a6a, 0xf6f4ec, 0xf2c21a, 'palm', 'band', { glyphColor: 0xf2c21a } ), labelY: 0.2, labelH: 0.34 } ),
 		desc: 'Lava flow. Molotov ingredient.' } ),
 	drink( 'blue_curacao', 'Blue curaçao', { w: 1, size: 2, water: 8, kcal: 420, alcohol: 0.2, container: 'empty_bottle', portions: 4, rarity: 'rare', tags: [ 'alcohol' ],
 		model: bottle( { style: 'liquor', h: 0.27, r: 0.038, glass: 0x1a64c8, cap: 0xc8ccd0, capMetal: true,
@@ -317,7 +317,7 @@ add( 'house_kitchen', [
 add( 'fridge', [
 	[ 'portuguese_sausage', 0.6 ], [ 'mayo', 0.4 ], [ 'shoyu', 0.3 ], [ 'beer_pale', 0.6, [ 1, 3 ] ], [ 'beer_stout', 0.25 ], [ 'pineapple_juice', 0.35 ],
 	[ 'chocolate_haupia_pie', 0.2 ], [ 'haupia', 0.3 ], [ 'salted_salmon', 0.25 ], [ 'green_onion', 0.3 ], [ 'tomato', 0.4, [ 1, 3 ] ], [ 'cabbage', 0.25 ],
-	[ 'chili_pepper_water', 0.3 ], [ 'kalua_pig', 0.1 ], [ 'freezer_pack', 0.45, [ 1, 2 ] ], [ 'coconut_milk', 0.15 ],
+	[ 'chili_pepper_water', 0.3 ], [ 'kalua_pig', 0.03 ], [ 'freezer_pack', 0.45, [ 1, 2 ] ], [ 'coconut_milk', 0.15 ],
 ] );
 add( 'grocery', [
 	[ 'shoyu', 1.4 ], [ 'sugar', 0.9 ], [ 'flour', 0.7 ], [ 'mochiko', 0.4 ], [ 'coconut_milk', 0.7 ], [ 'mayo', 0.5 ], [ 'guava_jam', 0.4 ], [ 'rice_vinegar', 0.35 ],
@@ -332,11 +332,12 @@ add( 'restaurant_kitchen', [
 	[ 'grater', 0.3 ], [ 'alaea_salt', 0.35 ], [ 'furikake', 0.3 ], [ 'nori', 0.4 ], [ 'portuguese_sausage', 0.35 ], [ 'salted_salmon', 0.25 ], [ 'cabbage', 0.3 ],
 	[ 'luau_leaves', 0.25 ], [ 'ti_leaves', 0.3, [ 2, 6 ] ], [ 'chili_pepper_water', 0.25 ], [ 'canning_jar', 0.2 ],
 ] );
-add( 'restaurant', [ [ 'bowl', 0.4 ], [ 'shoyu', 0.4 ], [ 'chili_pepper_water', 0.3 ], [ 'haupia', 0.25 ], [ 'kalua_pig', 0.1 ] ] );
+// kalua pig keeps three days, so a week into the outage it is found spoiled (bait at best): a rare find; the imu makes it
+add( 'restaurant', [ [ 'bowl', 0.4 ], [ 'shoyu', 0.4 ], [ 'chili_pepper_water', 0.3 ], [ 'haupia', 0.25 ], [ 'kalua_pig', 0.03 ] ] );
 add( 'fastfood', [ [ 'shave_ice_syrup', 0.4 ], [ 'li_hing_gummies', 0.3 ] ] );
 add( 'bar', [ [ 'cocktail_shaker', 0.9 ], [ 'pineapple_juice', 0.6 ], [ 'pog_juice', 0.4 ], [ 'li_hing_powder', 0.2 ], [ 'beer_pale', 0.8, [ 1, 3 ] ], [ 'beer_stout', 0.4 ] ] );
 add( 'hotel_room', [ [ 'coconut_rum', 0.2 ], [ 'coffee_grounds', 0.3 ], [ 'camp_mug', 0.3 ] ] );
-add( 'market', [ [ 'alaea_salt', 0.4 ], [ 'kava_powder', 0.25 ], [ 'kona_coffee_beans', 0.3 ], [ 'raw_crab', 0.15 ], [ 'guava_jam', 0.3 ], [ 'chili_pepper_water', 0.3 ] ] );
+add( 'market', [ [ 'alaea_salt', 0.4 ], [ 'kava_powder', 0.25 ], [ 'kona_coffee_beans', 0.3 ], [ 'raw_crab', 0.04 ], [ 'guava_jam', 0.3 ], [ 'chili_pepper_water', 0.3 ] ] );
 add( 'farm', [ [ 'kona_coffee_beans', 0.4 ], [ 'coffee_grinder', 0.15 ], [ 'canning_jar', 0.3 ], [ 'grill_grate', 0.2 ] ] );
 add( 'office', [ [ 'coffee_grounds', 0.6 ], [ 'camp_mug', 0.8 ], [ 'cocoa_mix', 0.25 ], [ 'energy_shot', 0.4 ], [ 'mamaki_tea', 0.2 ] ] );
 add( 'desk', [ [ 'camp_mug', 0.4 ], [ 'energy_shot', 0.2 ] ] );
@@ -367,7 +368,7 @@ add( 'site_picnic', [ [ 'shoyu', 0.3 ], [ 'bowl', 0.3 ], [ 'grill_grate', 0.45 ]
 add( 'site_farm_stand', [ [ 'tomato', 0.9, [ 2, 4 ] ], [ 'cabbage', 0.7 ], [ 'green_onion', 0.7, [ 1, 3 ] ], [ 'ginger', 0.5, [ 1, 3 ] ], [ 'garlic', 0.4, [ 1, 3 ] ],
 	[ 'chili_peppers', 0.5, [ 2, 6 ] ], [ 'luau_leaves', 0.6, [ 1, 3 ] ], [ 'ti_leaves', 0.7, [ 3, 8 ] ], [ 'kona_coffee_beans', 0.45 ], [ 'guava_jam', 0.35 ],
 	[ 'chili_pepper_water', 0.35 ], [ 'alaea_salt', 0.2 ], [ 'kava_powder', 0.12 ] ] );
-add( 'site_fishing_spot', [ [ 'limu', 0.7, [ 1, 3 ] ], [ 'shoyu', 0.35 ], [ 'raw_crab', 0.12 ], [ 'alaea_salt', 0.3 ], [ 'chili_pepper_water', 0.25 ], [ 'beer_pale', 0.4 ],
+add( 'site_fishing_spot', [ [ 'limu', 0.7, [ 1, 3 ] ], [ 'shoyu', 0.35 ], [ 'raw_crab', 0.04 ], [ 'alaea_salt', 0.3 ], [ 'chili_pepper_water', 0.25 ], [ 'beer_pale', 0.4 ],
 	[ 'freezer_pack', 0.25 ], [ 'salt_fish', 0.15 ] ] );
 add( 'site_military_checkpoint', [ [ 'coffee_grounds', 0.3 ], [ 'camp_mug', 0.4 ], [ 'energy_shot', 0.3 ] ] );
 add( 'site_checkpoint', [ [ 'coffee_grounds', 0.3 ], [ 'camp_mug', 0.3 ] ] );

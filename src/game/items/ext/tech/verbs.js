@@ -474,9 +474,9 @@ addUseActions( ( stack, def, ctx ) => {
 		const fresh = inv.find( ( s ) => s.id === L.CELL_ITEM[ cell ] );
 		if ( fresh ) add( `Insert ${L.CELL_NAME[ cell ]} battery`, () => insertCell( g, fresh, stack ) );
 	}
-	if ( L.cellsOut( def ) && L.fracOf( stack, def ) >= 0.5 && ! stack.data.on && getItem( L.CELL_ITEM[ cell ] ) ) {
+	if ( L.cellsOut( def ) && L.fracOf( stack, def ) >= L.CELL_BACK && ! stack.data.on && getItem( L.CELL_ITEM[ cell ] ) ) {
 		add( 'Remove batteries', () => timed( U, 'Removing batteries', 2, 'click', () => {
-			if ( ! U.exists( stack ) || L.fracOf( stack ) < 0.5 ) return;
+			if ( ! U.exists( stack ) || L.fracOf( stack ) < L.CELL_BACK ) return;
 			stack.data.charge = 0;
 			U.changed( U.where( stack ) );
 			giveItem( g, L.CELL_ITEM[ cell ], 1 );

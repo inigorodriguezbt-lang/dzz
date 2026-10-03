@@ -79,7 +79,7 @@ addPlaceable( 'imu', {
 
 	show( p, g ) {
 		const M = g.placeables;
-		if ( p.data.stage === 'fire' ) M.light( p, { color: 0xff8a3a, intensity: 12, range: 10, flicker: true, lift: 0.3 } );
+		if ( p.data.stage === 'fire' ) M.light( p, { color: 0xff8a3a, intensity: 30, range: 14, flicker: true, lift: 0.4 } );
 		else if ( p.data.stage === 'hot' ) M.light( p, { color: 0xff5a1a, intensity: 3, range: 4, flicker: true, lift: 0.15 } );
 		else M.light( p, null );
 		if ( p.data.stage === 'fire' ) M.loop?.( p, 'fire_loop', 0.5, 5 ); else M.stopLoop?.( p, 'fire_loop' );

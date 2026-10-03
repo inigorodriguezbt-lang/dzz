@@ -638,5 +638,22 @@ console.log( 'review' );
 	}
 }
 
+console.log( 'second review' );
+{
+	// what keeps three days or less is found spoiled a week into the outage: kalua pig and crab are rare finds (the imu
+	// and the crab traps make them fresh), so the world isn't strewn with rotten pork
+	let s0 = 11;
+	const R = () => ( s0 = ( s0 * 16807 ) % 2147483647 ) / 2147483647;
+	for ( const [ table, id ] of [ [ 'fridge', 'kalua_pig' ], [ 'restaurant', 'kalua_pig' ], [ 'market', 'raw_crab' ], [ 'site_fishing_spot', 'raw_crab' ] ] ) {
+		let n = 0, all = 0;
+		for ( let i = 0; i < 6000; i ++ ) for ( const st of rollLoot( table, R, 1 ) ) { all ++; if ( st.id === id ) n ++; }
+		ok( n / all < 0.003, `${id} is ${( n / all * 100 ).toFixed( 2 )}% of ${table} finds` );
+	}
+	ok( getItem( 'raw_crab' ).food.spoil <= 72 && getItem( 'kalua_pig' ).food.spoil <= 72, 'both keep three days or less' );
+	// the coconut rum's label stands out from its white bottle
+	const lab = getItem( 'coconut_rum' ).model.label;
+	ok( lab.bg !== 0xf6f4ec && lab.fg === 0xf6f4ec, 'coconut rum: a coloured label with pale print' );
+}
+
 console.log( `\n${passes} passed, ${fails} failed` );
 process.exit( fails ? 1 : 0 );

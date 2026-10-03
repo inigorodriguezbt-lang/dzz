@@ -16,6 +16,9 @@ import { provides } from '../../util.js';
 import * as L from '../../ext/tech/logic.js';
 import { feed, fuelIn, takeFuel, genFuel } from '../../ext/tech/power.js';
 import { openLockbox } from '../../ext/tech/verbs.js';
+// the placeables' items (the alarm clock gets a parts list below): imported first so they exist when this file runs,
+// however defs/index.js orders its imports
+import './placeables.js';
 
 // ---- def helpers --------------------------------------------------------------------------------------------------------
 
@@ -44,7 +47,7 @@ defineItems( [
 	tool( 'hacksaw', 'Hacksaw', 'hacksaw', { w: 0.55, size: 3, rarity: 'uncommon', tags: [ 'hardware', 'garage' ], model: { type: 'tech_hacksaw' },
 		desc: 'Cuts metal and pipe.' } ),
 	tool( 'bolt_cutters', 'Bolt cutters', 'boltcutter', { w: 2.4, size: 5, rarity: 'uncommon', tags: [ 'hardware', 'garage', 'fire' ], model: { type: 'tech_boltcutter' },
-		desc: 'Cuts padlocks and chain.' } ),
+		desc: 'Cuts open lockboxes. Quiet.' } ),
 	tool( 'socket_set', 'Socket set', 'wrench', { w: 1.8, size: 3, rarity: 'uncommon', tags: [ 'hardware', 'garage' ], model: { type: 'tech_socketset' },
 		desc: 'Wrench for nuts and bolts.' } ),
 	// no gas counter: recipes and combos only wear a tool, so a butane or propane gauge would never move
@@ -258,9 +261,11 @@ patch( 'belt', { dismantle: [ [ 'leather', 1 ] ], dismantleTools: [ 'cut' ] } );
 patch( 'tent', { dismantle: [ [ 'fabric', 3 ], [ 'rope', 1 ], [ 'scrap_metal', 1, 0.5 ] ], dismantleTools: [ 'cut' ] } );
 patch( 'sleeping_bag', { dismantle: [ [ 'fabric', 2 ] ], dismantleTools: [ 'cut' ] } );
 
-// things another def module registers after this one (defs/index.js order): patched once the catalogue is loaded
+// another def module's things: patched now (its file is imported above), and again once the whole catalogue is loaded
+// in case one is missing yet (patch() only fills fields that are empty, so twice is harmless)
 export const LATE = { alarm_clock: { dismantle: [ [ 'springs', 1 ], [ 'scrap_metal', 1, 0.5 ] ], dismantleTools: SD } };
 export function patchLate() { for ( const [ id, o ] of Object.entries( LATE ) ) patch( id, o ); }
+patchLate();
 Promise.resolve().then( patchLate );
 
 // ---- what the verbs roll ------------------------------------------------------------------------------------------------
@@ -319,9 +324,9 @@ put( 'office', [ [ 'desk_fan', 0.6 ], [ 'power_bank', 0.4 ], [ 'precision_screwd
 put( 'desk', [ [ 'power_bank', 0.3 ], [ 'superglue', 0.3 ], [ 'battery_9v', 0.2 ], [ 'precision_screwdrivers', 0.08 ], [ 'zip_ties', 0.2 ], [ 'lockbox', 0.06 ] ] );
 put( 'school', [ [ 'smoke_detector', 0.3 ], [ 'desk_fan', 0.3 ], [ 'digital_camera', 0.1 ], [ 'superglue', 0.3 ], [ 'wood_glue', 0.3 ], [ 'cassette_player', 0.1 ], [ 'power_bank', 0.15 ] ] );
 put( 'hotel_room', [ [ 'tv_remote', 1 ], [ 'smoke_detector', 0.3 ], [ 'digital_camera', 0.3 ], [ 'power_bank', 0.4 ], [ 'lockbox', 0.12 ], [ 'cassette_player', 0.1 ] ] );
-put( 'police', [ [ 'police_scanner', 1 ], [ 'bolt_cutters', 0.5 ], [ 'digital_camera', 0.3 ], [ 'power_bank', 0.3 ], [ 'battery_9v', 0.3 ], [ 'battery_d', 0.4, [ 1, 4 ] ], [ 'zip_ties', 0.6, [ 4, 12 ] ] ] );
-put( 'police_locker', [ [ 'police_scanner', 0.3 ], [ 'battery_d', 0.4, [ 1, 2 ] ], [ 'zip_ties', 0.4, [ 2, 8 ] ] ] );
-put( 'fire_station', [ [ 'bolt_cutters', 0.8 ], [ 'police_scanner', 0.6 ], [ 'work_light', 0.6 ], [ 'generator', 0.3 ], [ 'battery_d', 0.6, [ 1, 4 ] ], [ 'jumper_cables', 0.3 ],
+put( 'police', [ [ 'police_scanner', 0.45 ], [ 'bolt_cutters', 0.5 ], [ 'digital_camera', 0.3 ], [ 'power_bank', 0.3 ], [ 'battery_9v', 0.3 ], [ 'battery_d', 0.4, [ 1, 4 ] ], [ 'zip_ties', 0.6, [ 4, 12 ] ] ] );
+put( 'police_locker', [ [ 'police_scanner', 0.2 ], [ 'battery_d', 0.4, [ 1, 2 ] ], [ 'zip_ties', 0.4, [ 2, 8 ] ] ] );
+put( 'fire_station', [ [ 'bolt_cutters', 0.8 ], [ 'police_scanner', 0.35 ], [ 'work_light', 0.6 ], [ 'generator', 0.3 ], [ 'battery_d', 0.6, [ 1, 4 ] ], [ 'jumper_cables', 0.3 ],
 	[ 'siphon_hose', 0.2 ], [ 'smoke_detector', 0.8 ], [ 'socket_set', 0.2 ] ] );
 put( 'military', [ [ 'battery_d', 0.6, [ 1, 4 ] ], [ 'battery_9v', 0.4 ], [ 'power_bank', 0.4 ], [ 'crank_charger', 0.3 ], [ 'sat_phone', 0.04 ], [ 'drone', 0.06 ], [ 'generator', 0.15 ],
 	[ 'work_light', 0.3 ], [ 'zip_ties', 0.5, [ 4, 12 ] ] ] );
@@ -356,7 +361,7 @@ put( 'site_campsite', [ [ 'crank_charger', 0.3 ], [ 'solar_panel', 0.06 ], [ 'ba
 	[ 'cassette_player', 0.2 ], [ 'empty_can', 0.6, [ 1, 3 ] ] ] );
 put( 'site_hiker', [ [ 'power_bank', 0.5 ], [ 'crank_charger', 0.25 ], [ 'digital_camera', 0.3 ], [ 'sat_phone', 0.02 ] ] );
 put( 'site_fishing_spot', [ [ 'fishing_magnet', 0.25 ], [ 'magnet', 0.2 ], [ 'boombox', 0.15 ], [ 'cassette_player', 0.2 ], [ 'empty_can', 0.6 ] ] );
-put( 'site_checkpoint', [ [ 'police_scanner', 0.6 ], [ 'bolt_cutters', 0.3 ], [ 'work_light', 0.4 ], [ 'generator', 0.12 ], [ 'battery_d', 0.6, [ 1, 4 ] ], [ 'zip_ties', 0.6, [ 2, 8 ] ] ] );
+put( 'site_checkpoint', [ [ 'police_scanner', 0.35 ], [ 'bolt_cutters', 0.3 ], [ 'work_light', 0.4 ], [ 'generator', 0.12 ], [ 'battery_d', 0.6, [ 1, 4 ] ], [ 'zip_ties', 0.6, [ 2, 8 ] ] ] );
 put( 'site_military_checkpoint', [ [ 'generator', 0.25 ], [ 'work_light', 0.4 ], [ 'battery_d', 0.5, [ 1, 4 ] ], [ 'battery_9v', 0.4 ], [ 'sat_phone', 0.04 ], [ 'drone', 0.06 ], [ 'crank_charger', 0.2 ],
 	[ 'zip_ties', 0.5, [ 2, 8 ] ] ] );
 put( 'site_heli_crash', [ [ 'drone', 0.15 ], [ 'sat_phone', 0.1 ], [ 'power_bank', 0.4 ], [ 'battery_9v', 0.4 ], [ 'circuit_board', 0.6 ], [ 'electronic_scrap', 0.8, [ 1, 3 ] ], [ 'antenna', 0.5 ],
@@ -422,12 +427,17 @@ const usesMax = ( d ) => d?.tool?.uses ?? d?.medical?.uses ?? 1;
 // already full: not offered (a soft refusal, as a repair at its cap)
 const full = ( s ) => ( s.data?.uses ?? usesMax( getItem( s.id ) ) ) >= usesMax( getItem( s.id ) ) ? { reason: 'Full', soft: true } : null;
 const WOODEN = new Set( [ 'baseball_bat', 'nailed_bat', 'canoe_paddle', 'fishing_spear', 'fishing_rod_improvised', 'torch' ] );
-const metalTool = ( s, d ) => ( d.cat === 'melee' && ! WOODEN.has( d.id ) ) || [ 'screwdriver', 'pliers', 'hacksaw', 'boltcutter', 'drill', 'canopener', 'cut', 'toolbox' ].includes( d.tool?.kind );
+// stone, bamboo and wood (another domain's koʻi or spear): wood glue and grip wraps, not oil
+const natural = ( d ) => WOODEN.has( d.id ) || d.tags?.includes( 'wood' ) || d.tags?.includes( 'stone' ) || /stone|bamboo|basalt|wooden/.test( d.id );
+const metalTool = ( s, d ) => ! natural( d ) && ( d.cat === 'melee' || [ 'screwdriver', 'pliers', 'hacksaw', 'boltcutter', 'drill', 'canopener', 'cut', 'toolbox' ].includes( d.tool?.kind ) );
 // powered things a soldering iron and some scrap put right
 const electronic = ( s, d ) => ( !! d.tool?.battery && ! [ 'chemlight', 'torch' ].includes( d.tool.kind ) ) || ( !! d.tags?.includes( 'device' ) && d.cat !== 'material' );
-// a solid tool worth gluing: not a consumable (tape, glue, matches, cells), not a container
-const SOFT_KINDS = new Set( [ 'battery', 'cell', 'chemlight', 'torch', 'candle', 'tiki', 'trap', 'tent', 'sleepingbag', 'collector', 'stash' ] );
-const gluable = ( s, d ) => d.cat === 'melee' || ( d.cat === 'tool' && d.stack === 1 && ! d.tool.liquid && ! d.tool.uses && ! SOFT_KINDS.has( d.tool.kind ) );
+// a solid tool worth gluing: not a consumable (tape, glue, matches, cells), not a container, not cloth, paper or a net
+// (nothing glue holds), not electronics or an engine (solder and oil fix those)
+const SOFT_KINDS = new Set( [ 'battery', 'cell', 'chemlight', 'torch', 'candle', 'tiki', 'trap', 'tent', 'sleepingbag', 'collector', 'stash',
+	'map', 'blanket', 'hammock', 'pad', 'net', 'castnet', 'shelter', 'bed', 'campfire', 'ice', 'generator', 'solar_panel' ] );
+const gluable = ( s, d ) => d.cat === 'melee' || ( d.cat === 'tool' && d.stack === 1 && ! d.tool.liquid && ! d.tool.uses && ! d.tool.battery
+	&& ! SOFT_KINDS.has( d.tool.kind ) && ! d.tags?.some( ( t ) => t === 'device' || t === 'cloth' || t === 'paper' ) );
 const ON_LOCK = ( m ) => ( c ) => { openLockbox( c.game, c.b, m, c.a ); };
 
 // The shared tool kinds in plain words. Combine's and Crafting's own "Need …" lists don't know them yet, so a combo
