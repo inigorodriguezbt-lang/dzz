@@ -59,7 +59,7 @@ About 900 items, each a 3D model you can see lying in the world: on shelves, cou
   campsites, dead hikers and survivors, fishing spots, police and military checkpoints, FEMA camps, farm stands,
   picnics, smoking helicopter wrecks, supply drops under a parachute, and buried stashes you find with a note, a
   treasure map or a metal detector and dig up with a shovel.
-- **Mixes.** Drag one item onto another, or pick Combine, for hundreds of mixes: batteries into devices, duct tape
+- **Mixes.** Drag one item onto another, or pick Combine, for over 160 mixes (plus 120 recipes): batteries into devices, duct tape
   and sewing kits on worn gear, spirits on rags for sterile bandages, a taped flashlight or a bayonet on a rifle,
   cocktails (rum and POG make a Mai Tai), shoyu on raw ahi for poke, herbs ground into poultices, dyes and patches on
   clothes.
