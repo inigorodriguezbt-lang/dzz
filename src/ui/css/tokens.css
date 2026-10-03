@@ -28,7 +28,7 @@
 	--warn: #D8B23A; --alarm: #C33A32; --cold: #86B6DC; --good: #6AA84F;
 	--tint-warn: rgba(216, 178, 58, 0.2); --tint-alarm: rgba(195, 58, 50, 0.3); --tint-cold: rgba(134, 182, 220, 0.18);
 	/* item condition: the tint of a cell's background (pristine has none) and the word's colour in the tooltip */
-	--c-worn: rgba(150, 150, 150, 0.22); --c-damaged: rgba(216, 178, 58, 0.22); --c-badly: rgba(214, 112, 40, 0.28); --c-ruined: rgba(195, 58, 50, 0.34);
+	--c-worn: rgba(150, 150, 150, 0.2); --c-damaged: rgba(196, 162, 56, 0.2); --c-badly: rgba(204, 108, 40, 0.26); --c-ruined: rgba(195, 58, 50, 0.32);
 	--c-worn-ink: #B4B4B4; --c-damaged-ink: #D8B23A; --c-badly-ink: #DB7A36; --c-ruined-ink: #D6463D;
 	--wet: #5B9BD5; --hot: #D6463D;
 	--halo: 0 0 2px rgba(0, 0, 0, 0.9), 0 1px 3px rgba(0, 0, 0, 0.6);

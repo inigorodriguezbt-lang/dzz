@@ -249,7 +249,9 @@ export class InventoryUI {
 		this.leftHead = h( 'div.inv-head.tabs' );
 		this.left = h( 'div.inv-scroll' );
 		this.right = h( 'div.inv-scroll' );
-		this.charEl = h( 'div.inv-char', { title: '' }, h( 'div.sil' ) );
+		this.charEl = h( 'div.inv-char', {}, h( 'div.sil' ) );
+		// dropping gear on the character wears or equips it
+		this.charEl._dt = { type: 'body' };
 		this.slotsL = h( 'div.slots.l' );
 		this.slotsR = h( 'div.slots.r' );
 		this.slotsW = h( 'div.slots.w' );
@@ -701,6 +703,7 @@ export class InventoryUI {
 	}
 
 	_over( e ) {
+		this.px = e.clientX; this.py = e.clientY;
 		if ( this.drag?.active ) return;
 		const el = this._hoverAt( e.target );
 		if ( el === this.hoverEl ) return;
@@ -965,7 +968,7 @@ export class InventoryUI {
 		this.el.classList.add( 'dragging' );
 		// outline every place that would take it: item-on-item first (load, insert, attach, merge, mix), then the
 		// slot, section or quickbar square itself
-		for ( const t of this.el.querySelectorAll( '.cell, .hot, .sect' ) ) {
+		for ( const t of this.el.querySelectorAll( '.cell, .hot, .sect, .inv-char' ) ) {
 			t._accI = t._it && t._it.stack !== d.stack ? this._acceptsItem( d.stack, d.loc, t._it.stack, t._it.loc ) : null;
 			t._accD = t._dt ? this._accepts( d.stack, d.loc, t._dt ) : null;
 			if ( t._accI?.ok || t._accD?.ok ) t.classList.add( 'can' );
@@ -1060,9 +1063,21 @@ export class InventoryUI {
 			if ( to.type === 'hands' ) { this.game.hands?.select?.( d.stack ); this.audio.ui(); }
 			else if ( to.type === 'hotbar' ) this._bind( d.stack, to.i );
 			else if ( to.type === 'att' ) this._fit( d, to );
+			else if ( to.type === 'body' ) { const to2 = this._bodySlot( d.stack, getItem( d.stack.id ) ); if ( to2 ) this.move( d.stack, d.loc, to2 ); }
 			else this.move( d.stack, d.loc, to );
 		}
 		this.dirty = true;
+	}
+
+	// where a stack dropped on the character goes: { type, slot } or null
+	_bodySlot( stack, d ) {
+		if ( ! d ) return null;
+		if ( d.cat === 'clothing' || d.cat === 'backpack' ) { const s = slotOf( d ); return s ? { type: 'equip', slot: s } : null; }
+		const W = this.inv.weapons;
+		if ( d.cat === 'melee' ) return { type: 'weapon', slot: 'melee' };
+		if ( d.cat !== 'firearm' ) return null;
+		if ( d.firearm.slot === 'sidearm' ) return { type: 'weapon', slot: 'sidearm' };
+		return { type: 'weapon', slot: ! W.primary || W.primary === stack ? 'primary' : ! W.secondary || W.secondary === stack ? 'secondary' : 'primary' };
 	}
 
 	// onto one of the held gun's fittings: a magazine into the well, an attachment onto its rail
@@ -1120,6 +1135,13 @@ export class InventoryUI {
 				const f = ops.attachmentFits ? ops.attachmentFits( gd, d ) : { ok: true, slot: d.attachment.slot };
 				if ( f.slot !== to.slot ) return { ok: false, reason: 'Wrong slot' };
 				return f.ok ? { ok: true, verb: 'Attach' } : { ok: false, reason: f.reason || 'Does not fit' };
+			}
+			case 'body': {
+				// the slot it would go to: clothing to its own, a gun to the free shoulder, a sidearm, a melee weapon
+				const to2 = this._bodySlot( stack, d );
+				if ( ! to2 ) return { ok: false, reason: "Can't wear" };
+				if ( from.type === to2.type && from.slot === to2.slot ) return NO;
+				return { ok: true, verb: to2.type === 'equip' ? 'Wear' : 'Equip' };
 			}
 			case 'catalog':
 				return NO;
