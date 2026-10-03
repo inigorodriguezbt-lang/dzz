@@ -51,7 +51,7 @@
 .seg.fill { display: flex; } .seg.fill > button { flex: 1; }
 
 /* ---- toggle (button role=switch): a square switch --------------------------------------------------------- */
-.toggle { position: relative; width: calc(36 * var(--u)); height: calc(18 * var(--u)); border-radius: var(--r-sm); background: var(--fill-3); box-shadow: inset 0 0 0 1px var(--line-2); transition: background var(--d-2) var(--ease-out); flex: none; }
+.toggle { position: relative; width: calc(36 * var(--u)); height: calc(18 * var(--u)); border-radius: var(--r-sm); background: rgba(0, 0, 0, 0.45); box-shadow: inset 0 0 0 1px var(--line-3); transition: background var(--d-2) var(--ease-out); flex: none; }
 .toggle::after { content: ''; position: absolute; left: calc(3 * var(--u)); top: calc(3 * var(--u)); width: calc(12 * var(--u)); height: calc(12 * var(--u)); background: var(--ink-3); transition: transform var(--d-2) var(--ease-out), background var(--d-2); }
 .toggle.on { background: var(--accent); box-shadow: none; }
 .toggle.on::after { transform: translateX(calc(18 * var(--u))); background: var(--on-accent); }

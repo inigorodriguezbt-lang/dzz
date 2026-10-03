@@ -1,7 +1,8 @@
-// Chat and command line (docs/UI_SPEC.md 9). T opens it, / opens it with a slash. Suggestions sit above the
-// input with the best match ghosted after the caret: Tab takes the selected one, ↑/↓ walk the list (or the
-// history when there is nothing to complete), Page Up/Down scroll the log, Enter runs, Esc closes. Closed,
-// the last six lines show on plates and fade after 8 s; open, the whole log scrolls on a panel.
+// Chat and command line (docs/UI_SPEC.md 9), top left like DayZ's. T opens it, / opens it with a slash.
+// Suggestions sit under the input with the best match ghosted after the caret: Tab takes the selected one, ↑/↓
+// walk the list (or the history when there is nothing to complete), Page Up/Down scroll the log, Enter runs, Esc
+// closes. Closed, the last six lines show on a faint wash and fade after 8 s; open, the whole log scrolls on a
+// panel.
 import { h } from './dom.js';
 
 const FADE = 8000; // ms a line stays on screen while the chat is closed
@@ -46,7 +47,8 @@ export class Chat {
 		this.log.appendChild( el );
 		while ( this.log.children.length > KEEP ) this.log.firstChild.remove();
 		if ( atEnd || ! this.open ) this.log.scrollTop = this.log.scrollHeight;
-		setTimeout( () => el.classList.add( 'faded' ), FADE );
+		// faded, then out of the closed log's flow, so the next line starts at the top rather than under blank ones
+		setTimeout( () => { el.classList.add( 'faded' ); setTimeout( () => el.classList.add( 'gone' ), 450 ); }, FADE );
 	}
 
 	show( prefix = '' ) {

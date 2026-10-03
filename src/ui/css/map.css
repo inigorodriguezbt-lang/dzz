@@ -1,30 +1,34 @@
-/* ---- map (docs/UI_SPEC.md 8.1, 22) --------------------------------------------------------------------------- */
-/* state classes carry a map- prefix: a bare .hot is the hotbar cell */
-.map-screen { position: absolute; inset: 0; z-index: 10; background: #152E4D; pointer-events: auto; }
+/* ---- map, a paper map like DayZ's (docs/UI_DAYZ.md; behaviour in docs/UI_SPEC.md 8.1) ------------------------
+   The canvas is the paper (maptile.js, MapView.js); the controls sit on the usual dark strips over it. A faint
+   brown edge on the window reads as the edge of a sheet. State classes carry a map- prefix: a bare .hot is the
+   hotbar cell. */
+.map-screen { position: absolute; inset: 0; z-index: 10; background: #89AABD; pointer-events: auto; }
 .map-screen canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: grab; touch-action: none; }
 .map-screen.map-hot canvas { cursor: pointer; }
 .map-screen.map-drag canvas { cursor: grabbing; }
 .map-screen.map-tele canvas { cursor: crosshair; }
+.map-paper { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse 120% 110% at 50% 50%, rgba(80, 56, 30, 0) 62%, rgba(80, 56, 30, 0.22) 100%); box-shadow: inset 0 0 0 1px rgba(60, 40, 20, 0.25); }
 
-.map-title { position: absolute; left: var(--edge); top: var(--edge); max-width: calc(360 * var(--u)); padding: var(--s-2) var(--s-3); }
-.map-title .t-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.map-title .t-label { margin-top: 2px; color: var(--hud-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.map-title { position: absolute; left: var(--edge); top: var(--edge); max-width: calc(360 * var(--u)); padding: var(--s-2) var(--s-3); background: var(--m-panel); box-shadow: none; }
+.map-title .t-title { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.map-title .t-label { margin-top: 2px; color: var(--ink-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .map-title .t-label:empty { display: none; }
 
-/* close: the Map key cap and the close button share one plate, so the cap reads over bright land too */
-.map-close { position: absolute; right: var(--edge); top: var(--edge); display: flex; align-items: center; gap: calc(2 * var(--u)); padding: 0 0 0 var(--s-2); }
-.map-close .btn.icon, .map-tools .btn.icon { color: var(--hud-1); }
+/* close: the Map key cap and the close button share one strip */
+.map-close { position: absolute; right: var(--edge); top: var(--edge); display: flex; align-items: center; gap: calc(2 * var(--u)); padding: 0 0 0 var(--s-2); background: var(--m-panel); box-shadow: none; }
+.map-close .btn.icon, .map-tools .btn.icon { color: var(--ink-1); }
 
-.map-tools { position: absolute; right: var(--edge); top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; padding: 2px; }
+.map-tools { position: absolute; right: var(--edge); top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; padding: 2px; background: var(--m-panel); box-shadow: none; }
 .map-tools .btn.icon { position: relative; }
 .map-tools .btn.icon.on { background: var(--fill-3); }
-.map-tools hr { width: 100%; margin: 2px 0; border: 0; border-top: 1px solid var(--line-1); }
-.map-tools .badge { position: absolute; right: 2px; top: 2px; color: var(--hud-2); font: 600 calc(10 * var(--u)) / 1 var(--mono); }
+.map-tools hr { width: 100%; margin: 2px 0; border: 0; border-top: 1px solid var(--line-2); }
+.map-tools .badge { position: absolute; right: 2px; top: 2px; color: var(--ink-2); font: 700 max(9px, calc(10 * var(--u))) / 1 var(--font-cond); font-variant-numeric: tabular-nums; }
 
-.map-scale { position: absolute; left: var(--edge); bottom: var(--edge); color: #fff; text-align: center; text-shadow: var(--halo); font-variant-numeric: tabular-nums; pointer-events: none; }
-.map-scale .bar { height: calc(5 * var(--u)); margin-top: var(--s-1); border: 1px solid #fff; border-top: 0; filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.9)); }
-.map-readout { position: absolute; right: var(--edge); bottom: var(--edge); display: flex; align-items: center; height: calc(28 * var(--u)); padding: 0 calc(10 * var(--u)); color: var(--hud-1); white-space: pre; pointer-events: none; }
-.teleport-chip { position: fixed; z-index: 40; display: inline-flex; align-items: center; height: calc(20 * var(--u)); padding: 0 var(--s-2); border-radius: var(--r-sm); background: var(--accent); color: var(--on-accent); pointer-events: none; }
+/* the scale bar in dark ink on the paper */
+.map-scale { position: absolute; left: var(--edge); bottom: var(--edge); color: #1A1612; font: 700 max(10px, calc(12 * var(--u))) / 1 var(--font-cond); letter-spacing: 0.04em; text-align: center; text-shadow: 0 0 2px rgba(244, 238, 220, 0.95), 0 0 4px rgba(244, 238, 220, 0.8); font-variant-numeric: tabular-nums; pointer-events: none; }
+.map-scale .bar { height: calc(5 * var(--u)); margin-top: var(--s-1); border: max(1px, calc(1.5 * var(--u))) solid #1A1612; border-top: 0; filter: drop-shadow(0 0 1px rgba(244, 238, 220, 0.9)); }
+.map-readout { position: absolute; right: var(--edge); bottom: var(--edge); display: flex; align-items: center; height: calc(26 * var(--u)); padding: 0 calc(10 * var(--u)); background: var(--m-panel); box-shadow: none; color: var(--ink-1); font: 500 calc(13 * var(--u)) / 1 var(--font-cond); letter-spacing: 0.02em; font-variant-numeric: tabular-nums; white-space: pre; pointer-events: none; }
+.teleport-chip { position: fixed; z-index: 40; display: inline-flex; align-items: center; height: calc(20 * var(--u)); padding: 0 var(--s-2); background: var(--accent); color: var(--on-accent); pointer-events: none; }
 
 /* layers and marker popovers, left of the tool stack */
 .map-pop { padding: var(--s-1); }
@@ -37,9 +41,10 @@
 .map-pop .prow .rm { visibility: hidden; }
 .map-pop .prow:hover .rm, .map-pop .prow:focus-within .rm { visibility: visible; }
 .map-pop .foot { display: flex; justify-content: flex-end; margin-top: var(--s-1); padding-top: var(--s-1); border-top: 1px solid var(--line-1); }
-.mk-user { color: var(--accent); fill: var(--accent); }
-.mk-loc { color: var(--accent); }
+/* the list's marker glyphs: the map's squares in white (the popover is dark), the death skull red */
+.mk-sq { flex: none; width: calc(10 * var(--u)); height: calc(10 * var(--u)); margin: 0 calc(3 * var(--u)); background: var(--ink-1); }
+.mk-sq.loc { background: transparent; box-shadow: inset 0 0 0 max(1.5px, calc(2 * var(--u))) var(--ink-1); }
 .mk-death { color: var(--alarm); }
-.map-pop .input, .map-rename .input { height: calc(24 * var(--u)); padding: 0 var(--s-2); border-radius: var(--r-sm); }
+.map-pop .input, .map-rename .input { height: calc(24 * var(--u)); padding: 0 var(--s-2); }
 .map-rename { padding: var(--s-1); }
 .map-rename .input { width: calc(160 * var(--u)); }

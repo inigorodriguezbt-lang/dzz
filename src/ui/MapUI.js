@@ -1,6 +1,8 @@
-// Full-screen map (docs/UI_SPEC.md 8.1). Drag or W A S D / arrows pan, the wheel zooms at the cursor, + and −
-// zoom, C centres; double-click drops a numbered marker; right-click opens a menu for the marker or the spot
-// under the cursor. Tools on the right: zoom, centre, all islands, a layers popover and a marker list.
+// Full-screen map (docs/UI_SPEC.md 8.1), a paper map like DayZ's. Drag or W A S D / arrows pan, the wheel zooms at
+// the cursor, + and − zoom, C centres; double-click drops a numbered marker; right-click opens a menu for the
+// marker or the spot under the cursor. Tools on the right: zoom, centre, all islands, a layers popover and a
+// marker list. With "Map and compass: Need item" (realisticMap) the map shows where you are only while you carry a
+// GPS with charge left, as DayZ does: no arrow, no place name, no centring on yourself.
 import { h, fmtDist, kc } from './dom.js';
 import { icon } from './icons.js';
 import { toggle, popMenu, placePop } from './widgets.js';
@@ -8,7 +10,9 @@ import { drawGlyph } from './canvasIcons.js';
 
 const MAX_PPM = 2; // px per metre: past this the 4 m relief tiles only get blurrier (8 px per texel)
 const PAN = 600; // keyboard pan, px/s
-const ACCENT = '#FF7A2E', ALARM = '#FF5C5C';
+// inks on the paper (MapView INK): markers are small dark squares, the death marker red
+const INK = '#1A1612', PAPER = 'rgba(244,238,220,0.95)', ALARM = '#C33A32';
+const LABEL_FONT = "700 13px 'Roboto Condensed', Roboto, system-ui, sans-serif"; // 13u; px scaled by u where used
 const LAYERS = [ [ 'roads', 'Roads' ], [ 'buildings', 'Buildings' ], [ 'grid', 'Grid' ], [ 'markers', 'Markers' ], [ 'vehicles', 'Vehicles' ] ];
 const PAN_KEYS = { ArrowUp: [ 0, - 1 ], ArrowDown: [ 0, 1 ], ArrowLeft: [ - 1, 0 ], ArrowRight: [ 1, 0 ] };
 const MINUS = '−';
@@ -32,12 +36,15 @@ export class MapUI {
 
 	open() {
 		const g = this.ui.game, me = this._me(), input = this.app.input;
-		if ( ! this.view ) this.view = { cx: me.x, cz: me.z, ppm: 0.06 };
-		else { this.view.cx = me.x; this.view.cz = me.z; }
+		this.known = this._knows();
+		// it opens on you when it can show you; otherwise where it was last left (all the islands the first time)
+		if ( ! this.view ) this.view = this.known ? { cx: me.x, cz: me.z, ppm: 0.06 } : { cx: 0, cz: 0, ppm: 0 };
+		else if ( this.known ) { this.view.cx = me.x; this.view.cz = me.z; }
 		this.goal = null;
 		this.keys.clear();
 		this.ptr = null;
 		this._sig = '';
+		this._scaleLen = this._count = null; // new elements: the scale bar and the marker count are set afresh
 		const canvas = this.canvas = h( 'canvas' );
 		this.titleName = h( 'div.t-title' );
 		this.titleSub = h( 'div.t-label' );
@@ -49,16 +56,17 @@ export class MapUI {
 		this.btnLayers = tool( 'layers', 'Layers', () => this._layersPop() );
 		this.btnMarkers = tool( 'pin', 'Markers', () => this._markersPop() );
 		this.btnMarkers.append( this.markCount = h( 'span.badge' ) );
+		this.btnCentre = tool( 'locate', 'Centre (C)', () => this._centre() );
 		this.tools = h( 'div.map-tools.plate', {},
 			tool( 'plus', 'Zoom in (+)', () => this._zoomBy( 1.5 ) ), tool( 'minus', `Zoom out (${MINUS})`, () => this._zoomBy( 1 / 1.5 ) ), h( 'hr' ),
-			tool( 'locate', 'Centre (C)', () => this._centre() ), tool( 'fit', 'All islands', () => this._fit() ), h( 'hr' ),
+			this.btnCentre, tool( 'fit', 'All islands', () => this._fit() ), h( 'hr' ),
 			this.btnLayers, this.btnMarkers );
 		this.scaleLab = h( 'div.lab' );
 		this.scaleBar = h( 'div.bar' );
 		const scale = this.scaleEl = h( 'div.map-scale', {}, this.scaleLab, this.scaleBar );
-		this.readout = h( 'div.map-readout.plate.t-mono', { hidden: true } );
+		this.readout = h( 'div.map-readout.plate', { hidden: true } );
 		this.chip = h( 'div.teleport-chip.t-label', { hidden: true, text: 'Teleport' } );
-		const el = this.el = h( 'div.map-screen', {}, canvas, title, close, this.tools, scale, this.readout, this.chip );
+		const el = this.el = h( 'div.map-screen', {}, canvas, h( 'div.map-paper' ), title, close, this.tools, scale, this.readout, this.chip );
 
 		let drag = null;
 		canvas.addEventListener( 'pointerdown', e => {
@@ -108,8 +116,17 @@ export class MapUI {
 		addEventListener( 'blur', this.onBlur );
 		this.ui.show( el, { map: true, onClose: () => this._closed() } );
 		this._resize();
+		if ( ! this.view.ppm ) { this.view.ppm = this._fitPpm(); }
 		this._title( true );
 		this.update( 0 );
+	}
+
+	// whether the map may show where you are (and so centre on you): always, unless the realistic rule is on and
+	// you carry no GPS with charge left
+	_knows() {
+		const g = this.ui.game;
+		if ( ! this.app.settings.get( 'realisticMap' ) || g.mode === 'creative' ) return true;
+		return !! g.player.inventory.find( s => s.id === 'gps' && s.data?.charge > 0 );
 	}
 
 	_closed() {
@@ -160,7 +177,7 @@ export class MapUI {
 
 	_goTo( cx, cz, ppm = this.view.ppm ) { this.goal = { cx, cz, ppm: this._clamp( ppm ) }; }
 	_zoomBy( f ) { const b = this.goal || this.view; this._goTo( b.cx, b.cz, b.ppm * f ); }
-	_centre() { const me = this._me(); this._goTo( me.x, me.z, Math.max( this.view.ppm, 0.06 ) ); }
+	_centre() { if ( ! this.known ) return; const me = this._me(); this._goTo( me.x, me.z, Math.max( this.view.ppm, 0.06 ) ); }
 	_fit() { this._goTo( 0, 0, this._fitPpm() ); }
 
 	// ---- input --------------------------------------------------------------------------------------------
@@ -188,8 +205,9 @@ export class MapUI {
 		this.el.classList.toggle( 'map-hot', ! tele && !! this._markerAt( p.x, p.y ) );
 		const [ x, z ] = this._toWorld( p.x, p.y ), me = this._me();
 		const hgt = this.app.world.hf.baseHeight( x, z );
-		// elevation in real metres (the terrain is baked at 1/6 height); distance in game metres like the scale bar
-		const text = `${signed( x )}, ${signed( z )} · ${signed( hgt * 6 )} m · ${fmtDist( Math.hypot( x - me.x, z - me.z ) )}`;
+		// elevation in real metres (the terrain is baked at 1/6 height); distance in game metres like the scale bar,
+		// only when the map knows where you are
+		const text = `${signed( x )}, ${signed( z )} · ${signed( hgt * 6 )} m` + ( this.known ? ` · ${fmtDist( Math.hypot( x - me.x, z - me.z ) )}` : '' );
 		if ( this.readout.textContent !== text ) this.readout.textContent = text;
 		if ( this.readout.hidden ) { this.readout.hidden = false; this._sig = ''; } // labels now keep clear of it
 	}
@@ -239,15 +257,16 @@ export class MapUI {
 		return null;
 	}
 
-	// screen rect of the player disc
+	// screen rect of the player disc (nothing to keep clear of when the player isn't shown)
 	_meRect() {
+		if ( ! this.known ) return [ - 1e4, - 1e4, - 1e4, - 1e4 ];
 		const u = this.ui.u || 1, me = this._me(), [ px, py ] = this._toScreen( me.x, me.z );
 		return [ px - 14 * u, py - 14 * u, px + 14 * u, py + 14 * u ];
 	}
 
 	_labelWidth( text ) {
 		const ctx = this.canvas.getContext( '2d' );
-		ctx.font = `600 ${13 * this.ui.u}px Inter, system-ui, sans-serif`;
+		ctx.font = LABEL_FONT.replace( '13px', 13 * this.ui.u + 'px' );
 		return ctx.measureText( text ).width;
 	}
 
@@ -341,21 +360,22 @@ export class MapUI {
 		this._pop( this.btnMarkers, 'marks', () => this._fillMarkers() );
 	}
 
-	// marker list: the death marker first, then by distance; click centres, double-click renames
+	// marker list: the death marker first, then by distance (in placing order when the map can't show you); click
+	// centres, double-click renames
 	_fillMarkers() {
-		const g = this.ui.game, me = this._me(), el = this.popEl;
-		const list = g.markers.list().map( m => ( { m, d: Math.hypot( m.x - me.x, m.z - me.z ) } ) )
+		const g = this.ui.game, me = this._me(), el = this.popEl, known = this.known;
+		const list = g.markers.list().map( m => ( { m, d: known ? Math.hypot( m.x - me.x, m.z - me.z ) : 0 } ) )
 			.sort( ( a, b ) => ( b.m.kind === 'death' ) - ( a.m.kind === 'death' ) || a.d - b.d );
 		if ( ! list.length ) { this._closePop(); return; }
 		const rows = list.map( ( { m, d } ) => {
-			const glyph = icon( m.kind === 'death' ? 'skull' : 'marker', 16, m.kind === 'death' ? 'mk-death' : m.kind === 'locate' ? 'mk-loc' : 'mk-user' );
+			const glyph = m.kind === 'death' ? icon( 'skull', 16, 'mk-death' ) : h( 'span.mk-sq' + ( m.kind === 'locate' ? '.loc' : '' ) );
 			const lab = h( 'span.lab', { text: m.label } );
 			const rm = h( 'button.btn.icon.sm.rm', { type: 'button', title: 'Remove', 'aria-label': 'Remove', onclick: e => { e.stopPropagation(); g.markers.remove( m.id ); this.app.audio.ui(); this._fillMarkers(); } }, icon( 'close' ) );
 			const row = h( 'div.prow', { tabIndex: 0,
 				onclick: e => { if ( e.target.tagName !== 'INPUT' ) this._goTo( m.x, m.z, Math.max( this.view.ppm, 0.2 ) ); },
 				ondblclick: e => { if ( e.target.tagName !== 'INPUT' ) this._renameRow( m, lab ); },
 				onkeydown: e => { if ( e.target !== row ) return; if ( e.code === 'Enter' ) row.click(); else if ( e.code === 'F2' ) this._renameRow( m, lab ); else if ( e.code === 'Delete' ) rm.click(); else return; e.preventDefault(); } },
-			glyph, lab, h( 'span.v', { text: fmtDist( d ) } ), rm );
+			glyph, lab, known ? h( 'span.v', { text: fmtDist( d ) } ) : null, rm );
 			return row;
 		} );
 		const clearable = list.some( o => o.m.kind !== 'death' );
@@ -425,7 +445,11 @@ export class MapUI {
 		if ( ! force && now - ( this._titleT || 0 ) < 500 ) return;
 		this._titleT = now;
 		const g = this.ui.game, me = this._me(), set = this.app.settings;
-		const long = this.ui.locationName( me, true ), i = long.indexOf( ',' );
+		// a GPS picked up, dropped or run flat while the map is open
+		const known = this._knows();
+		if ( known !== this.known ) { this.known = known; this._sig = ''; if ( this.popEl?.classList.contains( 'marks' ) ) this._fillMarkers(); }
+		this.btnCentre.disabled = ! known;
+		const long = known ? this.ui.locationName( me, true ) : 'Hawaiian Islands', i = long.indexOf( ',' );
 		const name = i < 0 ? long : long.slice( 0, i ), island = i < 0 ? '' : long.slice( i + 1 ).trim();
 		// the time follows the watch rule of the minimap
 		const clock = ! set.get( 'realisticMap' ) || g.mode === 'creative' || g.player.inventory.count( 'watch' ) > 0;
@@ -447,7 +471,7 @@ export class MapUI {
 		const me = this._me(), yaw = g.vehicles?.hud?.()?.heading ?? g.player.yaw;
 		const markers = g.markers.list(), known = this.layers.vehicles ? g.vehicles?.known?.() || [] : [];
 		// redraw only when something visible changed: the view, the player, markers, layers, a new tile
-		const sig = [ v.cx.toFixed( 2 ), v.cz.toFixed( 2 ), v.ppm.toFixed( 5 ), W, H, this.dpr, u, me.x.toFixed( 1 ), me.z.toFixed( 1 ), yaw.toFixed( 3 ), mv.version,
+		const sig = [ v.cx.toFixed( 2 ), v.cz.toFixed( 2 ), v.ppm.toFixed( 5 ), W, H, this.dpr, u, this.known ? me.x.toFixed( 1 ) + me.z.toFixed( 1 ) + yaw.toFixed( 3 ) : '', mv.version,
 			Object.values( this.layers ).join( '' ), markers.map( m => m.id + m.label + m.x ).join( '|' ), known.length ].join( ',' );
 		if ( sig === this._sig && ! this._fading ) return;
 		this._sig = sig;
@@ -465,12 +489,12 @@ export class MapUI {
 			const p = k.pos || k;
 			if ( p === g.vehicles?.driving?.pos ) continue; // the one we sit in is the player arrow
 			const [ sx, sy ] = res.toScreen( p.x, p.z );
-			if ( sx > - 20 && sy > - 20 && sx < W + 20 && sy < H + 20 ) drawGlyph( ctx, 'car', sx, sy, 18 * u, { color: '#fff', lw: 1.5 * u, halo: 1.25 * u } );
+			if ( sx > - 20 && sy > - 20 && sx < W + 20 && sy < H + 20 ) drawGlyph( ctx, 'car', sx, sy, 18 * u, { color: INK, lw: 1.75 * u } );
 		}
 		// death last, so it is never under a user marker
 		shown.sort( ( a, b ) => ( a.m.kind === 'death' ) - ( b.m.kind === 'death' ) );
 		for ( const o of shown ) this._drawMarker( ctx, o.m, res.toScreen, u, o.label );
-		this._drawPlayer( ctx, px, py, yaw, u );
+		if ( this.known ) this._drawPlayer( ctx, px, py, yaw, u );
 		// scale bar: a round distance close to 120u
 		const d = nice( 120 * u / v.ppm ), len = Math.round( d * v.ppm );
 		if ( this._scaleLen !== len ) { this._scaleLen = len; this.scaleBar.style.width = len + 'px'; }
@@ -491,14 +515,14 @@ export class MapUI {
 		return out;
 	}
 
-	// 1 km lines (250 m close up), faded in as they get far enough apart to read as a grid
+	// 1 km lines (250 m close up) in faint ink, faded in as they get far enough apart to read as a grid
 	_grid( ctx, toScreen ) {
 		const v = this.view;
 		if ( ! this.layers.grid || v.ppm < 0.06 ) return;
 		const step = v.ppm > 0.6 ? 250 : 1000, W = this.W, H = this.H;
 		const a = Math.min( 1, ( v.ppm - 0.06 ) / 0.04 );
 		ctx.save();
-		ctx.strokeStyle = `rgba(255,255,255,${( 0.06 * a ).toFixed( 3 )})`;
+		ctx.strokeStyle = `rgba(60,44,28,${( 0.16 * a ).toFixed( 3 )})`;
 		ctx.lineWidth = 1;
 		const [ x0w, z0w ] = this._toWorld( 0, 0 ), [ x1w, z1w ] = this._toWorld( W, H );
 		ctx.beginPath();
@@ -525,31 +549,40 @@ export class MapUI {
 		} );
 	}
 
+	// a user marker is a small dark square edged in paper; a /locate one an open square; death a red skull
 	_drawMarker( ctx, m, toScreen, u, label = true ) {
 		const [ sx, sy ] = toScreen( m.x, m.z );
 		if ( sx < - 200 || sy < - 30 || sx > this.W + 30 || sy > this.H + 30 ) return;
-		// glyph boxes are 24-grid icons: the diamond fills 12 x 17 of its 24, the skull 16 x 17
-		if ( m.kind === 'death' ) { drawGlyph( ctx, 'skull', sx, sy, 20 * u, { color: ALARM, lw: 1.5 * u, halo: 1.5 * u } ); return; }
-		if ( m.kind === 'locate' ) drawGlyph( ctx, 'marker', sx, sy, 20 * u, { color: ACCENT, lw: 2 * u, halo: 1.5 * u } );
-		else drawGlyph( ctx, 'marker', sx, sy, 20 * u, { color: '#000', fill: ACCENT, lw: 1.5 * u } );
-		if ( ! label ) return;
+		// the skull is a 24-grid icon: it fills 16 x 17 of its 24
+		if ( m.kind === 'death' ) { drawGlyph( ctx, 'skull', sx, sy, 20 * u, { color: ALARM, lw: 1.5 * u, halo: 1.25 * u } ); return; }
 		ctx.save();
-		ctx.font = `600 ${13 * u}px Inter, system-ui, sans-serif`;
-		ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
-		ctx.lineWidth = 3 * u; ctx.strokeStyle = 'rgba(0,0,0,0.6)';
-		ctx.strokeText( m.label, sx + 10 * u, sy - 4 * u );
-		ctx.fillStyle = '#fff';
-		ctx.fillText( m.label, sx + 10 * u, sy - 4 * u );
+		const s = Math.round( 10 * u ), x0 = Math.round( sx - s / 2 ), y0 = Math.round( sy - s / 2 );
+		ctx.lineJoin = 'miter';
+		if ( m.kind === 'locate' ) {
+			ctx.strokeStyle = PAPER; ctx.lineWidth = 5 * u; ctx.strokeRect( x0, y0, s, s );
+			ctx.strokeStyle = INK; ctx.lineWidth = 2 * u; ctx.strokeRect( x0, y0, s, s );
+		} else {
+			ctx.fillStyle = PAPER; ctx.fillRect( x0 - 2 * u, y0 - 2 * u, s + 4 * u, s + 4 * u );
+			ctx.fillStyle = INK; ctx.fillRect( x0, y0, s, s );
+		}
+		if ( label ) {
+			ctx.font = LABEL_FONT.replace( '13px', 13 * u + 'px' );
+			ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
+			ctx.lineWidth = 3 * u; ctx.strokeStyle = PAPER;
+			ctx.strokeText( m.label, sx + 10 * u, sy - 4 * u );
+			ctx.fillStyle = INK;
+			ctx.fillText( m.label, sx + 10 * u, sy - 4 * u );
+		}
 		ctx.restore();
 	}
 
-	// a 60° view cone, brightest at the player so it also reads over sand, then the white arrow on a dark
-	// HUD-plate disc (a bare tilted arrow reads as the mouse pointer)
+	// a 60° view cone in faint ink, darkest at the player, then the white arrow on a dark disc (a bare tilted arrow
+	// reads as the mouse pointer)
 	_drawPlayer( ctx, x, y, yaw, u ) {
 		const a = - yaw - Math.PI / 2; // screen angle of the facing direction (north is up)
 		const r = 44 * u, grad = ctx.createRadialGradient( x, y, 0, x, y, r );
-		grad.addColorStop( 0, 'rgba(255,255,255,0.36)' );
-		grad.addColorStop( 1, 'rgba(255,255,255,0.03)' );
+		grad.addColorStop( 0, 'rgba(26,22,18,0.34)' );
+		grad.addColorStop( 1, 'rgba(26,22,18,0.03)' );
 		ctx.save();
 		ctx.beginPath();
 		ctx.moveTo( x, y );
@@ -559,10 +592,10 @@ export class MapUI {
 		ctx.fill();
 		ctx.beginPath();
 		ctx.arc( x, y, 12 * u, 0, Math.PI * 2 );
-		ctx.fillStyle = 'rgba(12,13,15,0.78)';
+		ctx.fillStyle = 'rgba(16,14,12,0.88)';
 		ctx.fill();
-		ctx.lineWidth = 1;
-		ctx.strokeStyle = 'rgba(255,255,255,0.22)';
+		ctx.lineWidth = 1.5 * u;
+		ctx.strokeStyle = PAPER;
 		ctx.stroke();
 		ctx.restore();
 		drawGlyph( ctx, 'player', x, y, 16 * u, { color: '#fff', lw: 0, rot: - yaw } );

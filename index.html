@@ -7,8 +7,8 @@
 	<link rel="preconnect" href="https://fonts.googleapis.com" />
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 	<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Condensed:wght@400;500;700&display=swap" rel="stylesheet" />
-	<!-- Inter (the map's canvas labels) and JetBrains Mono (chat commands, seeds, key binds) until nothing uses them -->
-	<link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,500..600&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet" />
+	<!-- JetBrains Mono: chat commands and world seeds only -->
+	<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet" />
 	<link rel="stylesheet" href="/src/ui/ui.css" />
 </head>
 <body>
@@ -18,9 +18,9 @@
 		<div class="loader-art-fallback"></div>
 		<img class="loader-art" src="ui/keyart.jpg" alt="" decoding="async" fetchpriority="high" onload="this.classList.add('is-in')" onerror="this.remove()" />
 		<div class="loader-scrim"></div>
+		<h1 class="loader-title">DEADTIDE</h1>
 		<div class="loader-inner">
-			<h1 class="loader-title">DEADTIDE</h1>
-			<div class="loader-row"><span class="loader-status">Starting…</span><span class="loader-meta"><span class="loader-pct">0%</span><span class="loader-time">0:00</span></span></div>
+			<div class="loader-row"><span class="loader-status">Starting</span><span class="loader-meta"><span class="loader-pct">0%</span><span class="loader-time">0:00</span></span></div>
 			<div class="loader-bar"><div class="loader-fill"></div></div>
 		</div>
 	</div>

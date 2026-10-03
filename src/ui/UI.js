@@ -359,6 +359,9 @@ export class UI {
 		if ( c._under !== !! this.screen ) { c._under = !! this.screen; c.classList.toggle( 'under', c._under ); }
 		const off = !! this.hud.hidden || !! g.dead;
 		if ( c._off !== off ) { c._off = off; c.classList.toggle( 'off', off ); }
+		// the debug block fills the top-left corner the chat shares
+		const low = !! this.hud.debugOn;
+		if ( c._low !== low ) { c._low = low; c.classList.toggle( 'low', low ); }
 		this._hints( dt );
 		this.hud.update( dt );
 		if ( this.screenOpts.map ) this.map.update( dt );

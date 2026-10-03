@@ -1,8 +1,9 @@
-// Full-screen menus (docs/UI_SPEC.md 10-14): title, about, worlds, new world, world details, options with
-// key rebinding, pause and death. Styles in css/menus.css; shared controls from widgets.js.
+// Full-screen menus, DayZ style (docs/UI_DAYZ.md "Menus"; behaviour in docs/UI_SPEC.md 10-14): title, credits,
+// worlds, new world, world details, options with key rebinding, pause and death. Styles in css/menus.css; shared
+// controls from widgets.js.
 import { h, clear, fmtTime, fmtDate, fmtDist, fmtDur, kc } from './dom.js';
 import { icon } from './icons.js';
-import { seg, toggle, slider, select, rail } from './widgets.js';
+import { seg, toggle, slider, select } from './widgets.js';
 import { SaveSystem } from '../core/SaveSystem.js';
 import { BINDING_LABELS, DEFAULT_BINDINGS, DEFAULTS, QUALITY_PRESETS } from '../core/Settings.js';
 import { prettyCode } from '../core/Input.js';
@@ -165,8 +166,9 @@ export class Menus {
 	// label + control row (new world, world details)
 	_row( label, ...ctl ) { return h( 'div.row', {}, h( 'div.lab', { text: label } ), h( 'div.ctl', {}, ...ctl ) ); }
 
-	// Title and pause menu: one highlighted row (.on) shared by the pointer and the keyboard. ↑/↓ wrap, Enter runs.
-	_menu( items ) {
+	// Title, pause and death: one highlighted item (.on) shared by the pointer and the keyboard. ↑/↓ (←/→ for a
+	// row) wrap, Enter runs the highlighted one; with nothing highlighted the screen's own Enter rule applies.
+	_menu( items, { row = false } = {} ) {
 		const audio = this.app.audio;
 		let on = - 1, busy = false;
 		const set = ( i, sound ) => {
@@ -185,15 +187,16 @@ export class Menus {
 		const els = items.map( ( it, i ) => h( 'button.menu-item', { type: 'button', 'data-id': it.id, onmouseenter: () => set( i, true ), onfocus: () => set( i, false ), onclick: () => run( i ) },
 			h( 'span', { text: it.label } ), it.meta ? h( 'span.meta', { text: it.meta } ) : null, it.key ? kc( it.key ) : null ) );
 		const focus = ( id ) => { const i = Math.max( 0, items.findIndex( it => it.id === id ) ); els[ i ].focus( { preventScroll: true } ); set( i, false ); };
+		const [ next, prev ] = row ? [ 'ArrowRight', 'ArrowLeft' ] : [ 'ArrowDown', 'ArrowUp' ];
 		const keys = e => {
-			if ( e.code === 'ArrowDown' || e.code === 'ArrowUp' ) {
-				const d = e.code === 'ArrowDown' ? 1 : - 1;
+			if ( e.code === next || e.code === prev ) {
+				const d = e.code === next ? 1 : - 1;
 				const i = on < 0 ? ( d > 0 ? 0 : els.length - 1 ) : ( on + d + els.length ) % els.length;
 				els[ i ].focus( { preventScroll: true } );
 				set( i, true );
 				return true;
 			}
-			if ( e.code === 'Enter' || e.code === 'NumpadEnter' || e.code === 'Space' ) { if ( on >= 0 && ! e.repeat ) run( on ); return true; }
+			if ( e.code === 'Enter' || e.code === 'NumpadEnter' || e.code === 'Space' ) { if ( on >= 0 && ! e.repeat ) run( on ); return on >= 0; }
 			return false;
 		};
 		return { els, keys, focus };
@@ -206,14 +209,17 @@ export class Menus {
 		let live = null;
 		try { live = ( await this.app.saves.list() ).find( w => ! w.dead ) || null; } catch ( e ) { console.warn( e ); }
 		if ( tok !== this._token || this.ui.game ) return;
+		const back = id => () => { this._titleFocus = id; this.title(); };
+		// the first entry plays: the last living world, or a new one when there is none
 		const m = this._menu( [
-			live && { id: 'continue', label: 'Continue', meta: `${live.name} · Day ${live.days}`, run: () => this._play( live.id ) },
+			live ? { id: 'continue', label: 'Continue', meta: `${live.name} · Day ${live.days}`, run: () => this._play( live.id ) }
+				: { id: 'new', label: 'New world', run: () => this.createWorld( back( 'new' ) ) },
 			{ id: 'worlds', label: 'Worlds', run: () => this.worlds() },
-			{ id: 'options', label: 'Options', run: () => this.options( () => { this._titleFocus = 'options'; this.title(); } ) },
-			{ id: 'about', label: 'About', run: () => this.about() },
-		].filter( Boolean ) );
+			{ id: 'options', label: 'Options', run: () => this.options( back( 'options' ) ) },
+			{ id: 'about', label: 'Credits', run: () => this.about() },
+		] );
 		const el = h( 'div.screen.title-screen', {},
-			h( 'div.menu-col', {}, h( 'h1.wordmark', { text: 'DEADTIDE' } ), ...m.els ),
+			h( 'div.menu-col', {}, h( 'h1.wordmark', { text: 'DEADTIDE' } ), h( 'div.menu-list', {}, ...m.els ) ),
 			h( 'div.version', { text: 'v' + VERSION } ) );
 		this._show( el, m.keys );
 		m.focus( this._titleFocus );
@@ -239,6 +245,7 @@ export class Menus {
 		await nextFrame( () => {} );
 	}
 
+	// credits (the title's Credits entry; the method keeps its old name)
 	about() {
 		const back = () => { this._titleFocus = 'about'; this.title(); };
 		const kv = ( k, ...v ) => h( 'div', {}, h( 'span', { text: k } ), h( 'span', {}, ...v ) );
@@ -251,8 +258,8 @@ export class Menus {
 			kv( 'Characters', 'Microsoft Rocketbox (MIT)' ),
 			kv( 'Interface basis', h( 'a', { href: 'https://github.com/dgreenheck/tidewater', target: '_blank', rel: 'noopener', text: 'Tidewater' } ), ' (MIT)' ),
 			kv( 'Engine', 'three.js' ),
-			kv( 'Fonts', 'Inter, JetBrains Mono (OFL)' ) ) );
-		const el = this._screen( this._panel( 'About', body, null, { cls: '.about-panel', onClose: back } ), back );
+			kv( 'Fonts', 'Roboto, Roboto Condensed, JetBrains Mono (Google Fonts)' ) ) );
+		const el = this._screen( this._panel( 'Credits', body, null, { cls: '.about-panel', onClose: back } ), back );
 		this._show( el, e => { if ( e.code === 'Escape' ) { back(); return true; } return false; } );
 	}
 
@@ -363,13 +370,13 @@ export class Menus {
 		pick( sel, true );
 	}
 
-	async createWorld() {
+	// back: where Cancel and Esc go (the world list, or the title when it was opened from there)
+	async createWorld( back = () => this.worlds() ) {
 		const audio = this.app.audio;
 		const taken = new Set( ( await this.app.saves.list() ).map( w => w.name ) );
 		let base = 'New World', nm = base;
 		for ( let i = 2; taken.has( nm ); i ++ ) nm = `${base} ${i}`;
 		const opt = { name: nm, seed: '', mode: 'survival', difficulty: 'normal', hardcore: false, dayMinutes: 48, startHour: 7.5, spawn: 'random' };
-		const back = () => this.worlds();
 		const name = h( 'input.input', { value: opt.name, maxLength: 40, spellcheck: false, oninput: e => { opt.name = e.target.value; } } );
 		const seed = h( 'input.input.t-mono', { placeholder: 'Random', maxLength: 40, spellcheck: false, oninput: e => { opt.seed = e.target.value.trim(); } } );
 		const hard = toggle( false, v => { opt.hardcore = v; }, { audio } );
@@ -541,10 +548,13 @@ export class Menus {
 				];
 			},
 			interface: () => [
+				sec( 'Display' ),
 				// rescaling the whole UI while dragging would move the slider under the pointer
 				sl( 'GUI scale', 'guiScale', 0.7, 1.6, 0.05, pct, { commit: true } ),
 				sg( 'HUD', 'hudMode', [ [ 'auto', 'Auto' ], [ 'always', 'Always' ] ], { get: () => S.get( 'hudMode' ) ?? 'auto' } ),
 				sg( 'Crosshair', 'crosshair', [ [ 'dot', 'Dot' ], [ 'lines', 'Dynamic' ], [ 'none', 'None' ] ] ),
+				// DayZ shows none of these; each can come back
+				sec( 'HUD' ),
 				tg( 'Compass bar', 'compass' ),
 				tg( 'Minimap', 'minimap' ),
 				tg( 'Ammo counter', 'ammoCounter' ),
@@ -601,7 +611,7 @@ export class Menus {
 			refresh();
 		};
 		const close = () => { stopListen(); back(); };
-		const tabs = rail( TABS, tab, v => { tab = v; this._optTab = v; build(); }, { audio } );
+		const tabs = this._tabs( TABS, tab, v => { tab = v; this._optTab = v; build(); } );
 		build();
 		const panel = this._panel( 'Options', h( 'div.opt-body', {}, tabs, content ), foot, { cls: '.opt-panel', onClose: close } );
 		const el = this._screen( panel, close );
@@ -611,6 +621,33 @@ export class Menus {
 			return false;
 		}, { onClose: () => stopListen() } );
 		tabs.querySelector( '.on' )?.focus( { preventScroll: true } );
+	}
+
+	// Options tabs: a flat row of caps (DayZ), the open one underlined. ←/→ move between tabs while one has focus.
+	_tabs( list, value, onChange ) {
+		const el = h( 'div.opt-tabs', { role: 'tablist' } );
+		const btns = list.map( ( [ v, label ] ) => {
+			const b = h( 'button', { type: 'button', role: 'tab', text: label, onclick: () => pick( v ) } );
+			b._v = v;
+			return b;
+		} );
+		el.append( ...btns );
+		const paint = () => { for ( const b of btns ) { const on = b._v === value; b.classList.toggle( 'on', on ); b.setAttribute( 'aria-selected', on ); b.tabIndex = on ? 0 : - 1; } };
+		const pick = ( v, focus = false ) => {
+			if ( focus ) btns.find( b => b._v === v )?.focus();
+			if ( v === value ) return;
+			value = v; paint();
+			this.app.audio.ui();
+			onChange( v );
+		};
+		el.addEventListener( 'keydown', e => {
+			if ( e.code !== 'ArrowLeft' && e.code !== 'ArrowRight' ) return;
+			e.preventDefault();
+			const i = btns.findIndex( b => b._v === value );
+			pick( btns[ ( i + ( e.code === 'ArrowRight' ? 1 : - 1 ) + btns.length ) % btns.length ]._v, true );
+		} );
+		paint();
+		return el;
 	}
 
 	// A compact key reference: [ key caps ] verb pairs in two columns, from the current bindings (Controls tab)
@@ -784,13 +821,12 @@ export class Menus {
 				g.commands?.run( `/gamemode ${g.mode === 'creative' ? 'survival' : 'creative'}` );
 				this.pause( 'mode' );
 			} },
-			{ id: 'quit', label: 'Quit to title', run: async () => { await this._saveInFrame( () => this.app.quit( true ) ); this.ui.exitGame(); } },
+			{ id: 'quit', label: 'Main menu', run: async () => { await this._saveInFrame( () => this.app.quit( true ) ); this.ui.exitGame(); } },
 		].filter( Boolean ) );
 		const el = h( 'div.screen.title-screen.pause', {},
 			h( 'div.menu-col', {},
-				h( 'div.kick.t-label', { text: 'Paused' } ),
-				h( 'div.where', { text: `${g.save.name} · Day ${g.day}` } ),
-				...m.els ) );
+				h( 'div.menu-head', {}, h( 'h1.pause-title', { text: 'Paused' } ), h( 'div.where', { text: `${g.save.name} · Day ${g.day}` } ) ),
+				h( 'div.menu-list', {}, ...m.els ) ) );
 		this._show( el, e => {
 			if ( e.code === 'Escape' ) { if ( ! e.repeat ) this.ui.closeScreen(); return true; }
 			return m.keys( e );
@@ -823,7 +859,6 @@ export class Menus {
 		const quit = async () => {
 			if ( busy ) return;
 			busy = true;
-			this.app.audio.ui();
 			await ended;
 			await this.app.quit( ! hard );
 			this.ui.exitGame();
@@ -832,22 +867,26 @@ export class Menus {
 		const respawn = () => {
 			if ( busy ) return;
 			busy = true;
-			this.app.audio.ui();
 			g.respawn();
 			this.ui.hideAll();
 			g.paused = false;
 			this.app.input.lock();
 		};
-		const stat = ( v, l ) => h( 'div', {}, h( 'div.t-num', { text: String( v ) } ), h( 'div.t-label', { text: l } ) );
-		const first = hard ? h( 'button.btn.lg', { type: 'button', text: 'Quit', onclick: quit } ) : h( 'button.btn.lg.primary', { type: 'button', text: 'Respawn', onclick: respawn } );
-		const el = h( 'div.screen.death', { role: 'alertdialog', 'aria-label': causeTitle( info.cause ) },
-			h( 'h1.cause.t-display', { text: causeTitle( info.cause ) } ),
-			h( 'div.stats-row', {}, stat( fmtDur( Math.max( 0, info.days || 0 ) * 24 ), 'Survived' ), stat( kills, 'Kills' ) ),
+		// DayZ: black, then YOU ARE DEAD, then how long, how many and what killed you, then the buttons
+		const stat = ( v, l, n = false ) => h( 'div', {}, h( 'div.v' + ( n ? '.n' : '' ), { text: String( v ) } ), h( 'div.t-label', { text: l } ) );
+		const m = this._menu( [
+			hard ? null : { id: 'respawn', label: 'Respawn', run: respawn },
+			{ id: 'quit', label: 'Main menu', run: quit },
+		].filter( Boolean ), { row: true } );
+		const el = h( 'div.screen.death', { role: 'alertdialog', 'aria-label': 'You are dead' },
+			h( 'h1.dead-title', { text: 'You are dead' } ),
+			h( 'div.stats-row', {}, stat( fmtDur( Math.max( 0, info.days || 0 ) * 24 ), 'Survived', true ), stat( kills, 'Kills', true ), stat( causeTitle( info.cause ), 'Cause' ) ),
 			hard ? h( 'div.over.t-label', { text: 'World over' } ) : null,
-			h( 'div.btns', {}, first, hard ? null : h( 'button.btn.lg', { type: 'button', text: 'Quit', onclick: quit } ) ) );
-		// Enter is the first button; it isn't focused, so no focus ring greets the death screen
+			h( 'div.btns', {}, ...m.els ) );
+		// Enter is the first button; nothing is highlighted, so no focus ring greets the death screen
 		this._show( el, e => {
-			if ( ( e.code === 'Enter' || e.code === 'NumpadEnter' ) && ! onButton() ) { if ( ! e.repeat ) first.click(); return true; }
+			if ( m.keys( e ) ) return true;
+			if ( ( e.code === 'Enter' || e.code === 'NumpadEnter' ) && ! onButton() ) { if ( ! e.repeat ) m.els[ 0 ].click(); return true; }
 			return false;
 		}, { sticky: true } );
 	}

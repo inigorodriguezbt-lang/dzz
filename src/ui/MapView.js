@@ -1,6 +1,7 @@
 // Map rendering shared by the full map (MapUI) and the minimap (HUD): relief tiles rendered by the world workers
 // at three detail levels, then runways, building footprints, streets and roads as vectors, then place labels
-// placed by priority so they never overlap. Palette and sizes: docs/UI_SPEC.md 8.2.
+// placed by priority so they never overlap. A paper map (docs/UI_DAYZ.md): dark inks on the cream tiles of
+// maptile.js, names in condensed caps with a paper-coloured halo. Palette and sizes: docs/UI_SPEC.md 8.2.
 const LEVELS = [ 64, 16, 4 ]; // metres per tile pixel
 const TPX = 256;
 const CELL = 2048; // vectors are bucketed in cells this many metres wide; only the cells on screen are drawn
@@ -8,25 +9,28 @@ const MARGIN = 300; // m a bucketed shape may reach outside its cell (long stree
 const FADE = 200; // ms for a finer tile to fade in over the coarser one under it
 
 const INK = {
-	void: '#152E4D', // off the world: the deepest sea stop, so the edge of the data never shows
-	freewayCase: 'rgba(0,0,0,0.35)', freeway: '#FFFFFF',
-	highwayCase: 'rgba(0,0,0,0.3)', highway: 'rgba(255,255,255,0.85)',
-	street: 'rgba(255,255,255,0.6)', dirt: 'rgba(255,255,255,0.45)',
-	building: 'rgba(30,32,36,0.55)', runway: 'rgba(40,42,46,0.8)',
-	halo: 'rgba(0,0,0,0.55)',
+	void: '#89AABD', // off the world: the deepest sea stop of maptile.js, so the edge of the data never shows
+	// main roads: a muted red line cased in dark ink; highways pale with the same casing; streets pale lines on the
+	// darker built-up ground; dirt tracks dashed dark brown, as on a printed topographic map
+	freewayCase: 'rgba(52,40,30,0.85)', freeway: '#B9604A',
+	highwayCase: 'rgba(52,40,30,0.75)', highway: '#F4E8C6',
+	street: 'rgba(251,247,236,0.95)', dirt: 'rgba(92,70,48,0.72)',
+	building: 'rgba(84,76,68,0.72)', runway: 'rgba(120,112,100,0.8)',
+	halo: 'rgba(240,234,214,0.85)', // around names: the paper colour
 };
-const FONT = 'Inter, system-ui, sans-serif';
+const FONT = "'Roboto Condensed', Roboto, system-ui, sans-serif";
 const ALL = { roads: true, buildings: true };
 
-// label classes: priority (lower wins a collision), zoom range it shows in (u per m), font weight/size (u), colour
+// label classes: priority (lower wins a collision), zoom range it shows in (u per m), font weight/size (u), colour,
+// caps: tracking in em for names set in capitals
 const LABEL = {
-	metro: { pri: 0, min: 0.016, font: '600 14', color: '#FFFFFF' },
-	island: { pri: 1, min: 0, max: 0.12, font: '600 12', color: 'rgba(255,255,255,0.9)', caps: true },
-	town: { pri: 2, min: 0.05, font: '600 12', color: '#FFFFFF' },
-	water: { pri: 3, min: 0.016, font: 'italic 500 11', color: 'rgba(200,225,255,0.8)' },
-	peak: { pri: 4, min: 0.03, font: '500 11', color: '#B6BAC1' },
-	other: { pri: 5, min: 0.09, font: '500 11', color: '#FFFFFF' },
-	area: { pri: 6, min: 0.05, font: 'italic 500 11', color: '#B6BAC1' },
+	metro: { pri: 0, min: 0.016, font: '700 15', color: '#1C1814', caps: 0.06 },
+	island: { pri: 1, min: 0, max: 0.12, font: '700 13', color: '#3A332B', caps: 0.24 },
+	town: { pri: 2, min: 0.05, font: '700 12', color: '#1C1814', caps: 0.06 },
+	water: { pri: 3, min: 0.016, font: 'italic 500 12', color: '#3C6378' },
+	peak: { pri: 4, min: 0.03, font: '500 12', color: '#5A4430' },
+	other: { pri: 5, min: 0.09, font: '500 12', color: '#2A241E' },
+	area: { pri: 6, min: 0.05, font: 'italic 500 12', color: '#5C5448' },
 };
 
 const smooth = t => { t = t < 0 ? 0 : t > 1 ? 1 : t; return t * t * ( 3 - 2 * t ); };
@@ -123,7 +127,7 @@ export class MapView {
 		for ( const c of m.cities ) {
 			// resorts like Waikīkī read as towns; bigger places win ties
 			const cls = c.kind === 'metro' ? LABEL.metro : c.kind === 'town' || c.kind === 'resort' ? LABEL.town : LABEL.other;
-			out.push( { cls, text: c.name, x: c.x, z: c.z, tie: - ( c.radius || 0 ) / 1e4 } );
+			out.push( { cls, text: cls.caps ? c.name.toUpperCase() : c.name, x: c.x, z: c.z, tie: - ( c.radius || 0 ) / 1e4 } );
 		}
 		for ( const l of m.labels ) {
 			const cls = l.kind === 'water' ? LABEL.water : l.kind === 'peak' ? LABEL.peak : LABEL.area;
@@ -304,7 +308,7 @@ export class MapView {
 			if ( sx < - 200 || sy < - 40 || sx > w + 200 || sy > h + 40 ) continue;
 			const [ weight, size ] = c.font.split( / (?=\d+$)/ );
 			const font = `${weight} ${Math.round( + size * u * 10 ) / 10}px ${FONT}`;
-			const spacing = c.caps ? Math.round( + size * u * 0.2 * 10 ) / 10 : 0;
+			const spacing = c.caps ? Math.round( + size * u * c.caps * 10 ) / 10 : 0;
 			const tw = this._width( font, l.text, spacing ) - spacing; // the trailing letter gap isn't ink
 			const th = + size * u;
 			const tri = l.peak ? 7 * u : 0; // summit mark to the left of the name
