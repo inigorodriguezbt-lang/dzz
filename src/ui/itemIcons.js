@@ -27,28 +27,33 @@ export function glyphFor( id ) {
 	return 'data:image/svg+xml;utf8,' + encodeURIComponent( `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-4.5 -4.5 33 33" fill="none" stroke="#B6BAC1" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round">${g}</svg>` );
 }
 
-function pending( id ) {
-	let p = waiting.get( id );
+function pending( id, v = null ) {
+	const key = v ? `${id}@${v.w}x${v.h}` : id;
+	let p = waiting.get( key );
 	if ( ! p ) {
 		// a failed or blank render resolves to null: forget it so the next request tries again
-		p = Icons.iconFor( id ).catch( () => null ).then( r => { if ( ! r ) waiting.delete( id ); return r; } );
-		waiting.set( id, p );
+		p = Icons.iconFor( id, v ).catch( () => null ).then( r => { if ( ! r ) waiting.delete( key ); return r; } );
+		waiting.set( key, p );
 	}
 	return p;
 }
 
 // Sets img.src to the rendered icon. While it is still rendering the img stays empty (css hides an img without
 // a src) rather than showing a line glyph in another style; the category glyph only stands in when the render
-// fails or takes longer than GLYPH_AFTER.
+// fails or takes longer than GLYPH_AFTER. v = { w, h }: the icon for an inventory footprint of w x h cells (drawn
+// at that aspect, long things level); the square icon stands in while it renders.
 const GLYPH_AFTER = 2500; // ms
-export function setIcon( img, id ) {
-	const s = Icons?.iconSync?.( id );
+export function setIcon( img, id, v = null ) {
+	if ( v && v.w <= 1 && v.h <= 1 ) v = null;
+	const want = v ? `${id}@${v.w}x${v.h}` : id;
+	const s = Icons?.iconSync?.( id, v );
 	if ( s ) { img.src = s; delete img.dataset.want; return; }
-	img.dataset.want = id;
+	img.dataset.want = want;
 	if ( ! Icons?.iconFor ) { img.src = glyphFor( id ); return; }
-	img.removeAttribute( 'src' );
-	const late = setTimeout( () => { if ( img.dataset.want === id && ! img.getAttribute( 'src' ) ) img.src = glyphFor( id ); }, GLYPH_AFTER );
-	pending( id ).then( url => { clearTimeout( late ); if ( img.dataset.want === id ) img.src = url || glyphFor( id ); } );
+	const sq = v ? Icons.iconSync?.( id ) : null;
+	if ( sq ) img.src = sq; else img.removeAttribute( 'src' );
+	const late = setTimeout( () => { if ( img.dataset.want === want && ! img.getAttribute( 'src' ) ) img.src = glyphFor( id ); }, GLYPH_AFTER );
+	pending( id, v ).then( url => { clearTimeout( late ); if ( img.dataset.want === want ) img.src = url || sq || glyphFor( id ); } );
 }
 
 // queue renders ahead of time (the carried items when a world starts)

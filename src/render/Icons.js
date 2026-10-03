@@ -2,9 +2,11 @@
 // transparent background, auto-framed — then cached in memory and persisted in IndexedDB (localStorage when
 // IndexedDB is unavailable), keyed by a version, the item's model spec and the builder's source hash so an icon
 // re-renders whenever the model that draws it changes.
-//   iconFor( id ) -> Promise<dataURL|null>   queued, rendered a few per frame
-//   iconSync( id ) -> dataURL|null           only what is already cached
-//   setIconRenderer( webglRenderer )         the game's renderer (no second WebGL context); a private one otherwise
+//   iconFor( id, v? ) -> Promise<dataURL|null>   queued, rendered a few per frame
+//   iconSync( id, v? ) -> dataURL|null           only what is already cached
+//   setIconRenderer( webglRenderer )             the game's renderer (no second WebGL context); a private one otherwise
+// v = { w, h }: a variant for an inventory footprint of w x h cells (docs/UI_DAYZ.md grids): drawn at that aspect and
+// VARIANT_CELL px per cell, long things level instead of on the diagonal. It is cached and stored under 'id@wxh'.
 // Rendering goes into a half-float target (linear HDR), then a small pass applies ACES + sRGB and un-premultiplies
 // alpha into an 8-bit target that is read back; 2× supersampling gives clean edges after the canvas downscale.
 // No stalls on the game's context: a model's shaders are compiled for the stage first (in parallel where the
@@ -19,9 +21,25 @@ import { buildItemModel, hasModelBuilder, builderSignature } from './ItemModels.
 import { G as UNI } from './Materials.js';
 
 export const ICON_VERSION = 6; // bump to invalidate every stored icon (lighting / framing changes; 6: blank icons were kept)
-const SIZE = 128, SS = 2, RT = SIZE * SS;
-const MIN_COVER = RT * RT * 0.004; // fewer drawn pixels than this: the draw failed, do not keep it
+const SIZE = 128, SS = 2;
+const COVER = 0.004; // fewer drawn pixels than this share of the target: the draw failed, do not keep it
+const VARIANT_CELL = 72, VARIANT_MAX = 432; // px per cell of a footprint variant, and its longest side
 const WEAPON_TYPES = new Set( [ 'gun', 'mag', 'ammo_box', 'attachment', 'melee', 'throwable' ] );
+
+// 'id' or 'id@3x2' (a footprint variant)
+function keyOf( id, v ) { return v && ( v.w > 1 || v.h > 1 ) ? `${id}@${v.w | 0}x${v.h | 0}` : id; }
+function parseKey( key ) {
+	const at = key.indexOf( '@' );
+	if ( at < 0 ) return { id: key, v: null };
+	const m = /^(\d+)x(\d+)$/.exec( key.slice( at + 1 ) );
+	return { id: key.slice( 0, at ), v: m ? { w: + m[ 1 ], h: + m[ 2 ] } : null };
+}
+// output size of a key's icon
+function outSize( v ) {
+	if ( ! v ) return { W: SIZE, H: SIZE };
+	const k = Math.min( 1, VARIANT_MAX / ( Math.max( v.w, v.h ) * VARIANT_CELL ) );
+	return { W: Math.round( v.w * VARIANT_CELL * k ), H: Math.round( v.h * VARIANT_CELL * k ) };
+}
 
 // the weapons module registers its builders when it loads; make sure they exist before drawing a weapon icon
 let weaponModelModules = {};
@@ -43,20 +61,21 @@ const sigs = new Map(); // id -> signature (computed once per session, per build
 let db = null;
 const LS_KEY = 'deadtide.icons.v' + ICON_VERSION;
 
-function sigFor( id ) {
-	// an id, or a look key ('tshirt~black': a dyed stack, the gear domain's lookKey)
+function sigFor( ikey ) {
+	// an id, or a look key ('tshirt~black': a dyed stack, the gear domain's lookKey), maybe with a variant ('@3x2')
+	const { id, v } = parseKey( ikey );
 	const def = getItem( id ) || lookDef( id );
 	if ( ! def ) return null;
 	const type = def.model?.type || 'box';
 	const builder = hasModelBuilder( type ) ? builderSignature( type ) : 'fallback';
 	const key = type + ':' + builder;
-	let s = sigs.get( id );
+	let s = sigs.get( ikey );
 	if ( s && s.key === key ) return s.sig;
 	let h = 2166136261;
-	const src = ICON_VERSION + JSON.stringify( def.model || {} ) + key;
+	const src = ICON_VERSION + JSON.stringify( def.model || {} ) + key + ( v ? `@${v.w}x${v.h}:${VARIANT_CELL}` : '' );
 	for ( let i = 0; i < src.length; i ++ ) { h ^= src.charCodeAt( i ); h = Math.imul( h, 16777619 ); }
 	s = { key, sig: ( h >>> 0 ).toString( 36 ) };
-	sigs.set( id, s );
+	sigs.set( ikey, s );
 	return s.sig;
 }
 
@@ -101,22 +120,24 @@ function persist( id, entry ) {
 
 // ---- public -------------------------------------------------------------------------------------------------
 
-export function iconSync( id ) {
-	const e = mem.get( id );
+export function iconSync( id, v = null ) {
+	const key = keyOf( id, v );
+	const e = mem.get( key );
 	if ( ! e ) return null;
-	return e.sig === sigFor( id ) ? e.url : null;
+	return e.sig === sigFor( key ) ? e.url : null;
 }
 
 const queue = [];
 const pending = new Map();
-export function iconFor( id ) {
-	const now = iconSync( id );
+export function iconFor( id, v = null ) {
+	const key = keyOf( id, v );
+	const now = iconSync( key );
 	if ( now ) return Promise.resolve( now );
-	let p = pending.get( id );
+	let p = pending.get( key );
 	if ( p ) return p;
-	p = new Promise( ( resolve ) => queue.push( { id, resolve } ) );
-	pending.set( id, p );
-	p.then( () => pending.delete( id ) );
+	p = new Promise( ( resolve ) => queue.push( { key, ...parseKey( key ), resolve } ) );
+	pending.set( key, p );
+	p.then( () => pending.delete( key ) );
 	schedule();
 	return p;
 }
@@ -142,13 +163,13 @@ function schedule() {
 		const later = [];
 		while ( queue.length && inFlight < MAX_IN_FLIGHT && ( performance.now() - t0 < 6 ) ) {
 			const job = queue.shift();
-			const cached = iconSync( job.id );
+			const cached = iconSync( job.key );
 			if ( cached ) { job.resolve( cached ); continue; }
 			const def = getItem( job.id ) || lookDef( job.id );
 			if ( ! def ) { job.resolve( null ); continue; }
 			if ( WEAPON_TYPES.has( def.model?.type ) && ! hasModelBuilder( def.model.type ) && Object.keys( weaponModelModules ).length ) {
 				await loadWeaponModels();
-				sigs.delete( job.id );
+				sigs.delete( job.key );
 			}
 			// a model textured with a world image that is still downloading would bake a black icon into the
 			// store: wait for it (a few seconds at most, then draw it anyway but do not keep it)
@@ -162,7 +183,7 @@ function schedule() {
 					if ( p ) { p.then( () => { queue.unshift( job ); schedule(); }, () => { queue.unshift( job ); schedule(); } ); continue; }
 				}
 				inFlight ++;
-				render( def, ! ready ).then( ( url ) => job.resolve( url ), ( e ) => { console.warn( 'icon', job.id, e ); job.resolve( null ); } ).finally( () => { inFlight --; if ( queue.length ) schedule(); } );
+				render( def, ! ready, job.key, job.v ).then( ( url ) => job.resolve( url ), ( e ) => { console.warn( 'icon', job.key, e ); job.resolve( null ); } ).finally( () => { inFlight --; if ( queue.length ) schedule(); } );
 			} catch ( e ) { console.warn( 'icon', job.id, e ); job.resolve( null ); }
 		}
 		scheduled = false;
@@ -208,8 +229,37 @@ function getRenderer() {
 
 function disposeStage() {
 	if ( ! stage ) return;
-	stage.hdr.dispose(); stage.ldr.dispose(); stage.quad.dispose(); stage.env?.dispose();
+	for ( const b of stage.bufs.values() ) { b.hdr.dispose(); b.ldr.dispose(); }
+	stage.bufs.clear();
+	stage.quad.dispose(); stage.env?.dispose();
 	stage = null;
+}
+
+// the targets and canvases for one output size (W x H px): the square icon's, and a few footprint variants' (least
+// recently used ones are freed)
+const MAX_BUFS = 4;
+function bufsFor( S, W, H ) {
+	const k = W + 'x' + H;
+	let b = S.bufs.get( k );
+	if ( b ) { S.bufs.delete( k ); S.bufs.set( k, b ); return b; }
+	const RW = W * SS, RH = H * SS;
+	const hdr = new THREE.WebGLRenderTarget( RW, RH, { type: THREE.HalfFloatType, depthBuffer: true } );
+	const ldr = new THREE.WebGLRenderTarget( RW, RH, { type: THREE.UnsignedByteType, depthBuffer: false } );
+	const canvas = document.createElement( 'canvas' ); canvas.width = RW; canvas.height = RH;
+	const out = document.createElement( 'canvas' ); out.width = W; out.height = H;
+	// (CPU canvases: the pixels go in with putImageData and out with toDataURL; a GPU-backed canvas made every icon
+	// a synchronous GPU readback in the GPU process, "GPU stall due to ReadPixels")
+	const octx = out.getContext( '2d', { willReadFrequently: true } );
+	octx.imageSmoothingEnabled = true; octx.imageSmoothingQuality = 'high';
+	b = { W, H, RW, RH, hdr, ldr, canvas, ctx: canvas.getContext( '2d', { willReadFrequently: true } ), out, octx, img: new ImageData( RW, RH ), pool: [] };
+	S.bufs.set( k, b );
+	for ( const [ kk, bb ] of S.bufs ) {
+		if ( S.bufs.size <= MAX_BUFS ) break;
+		if ( kk === SIZE + 'x' + SIZE || bb === b ) continue;
+		bb.hdr.dispose(); bb.ldr.dispose();
+		S.bufs.delete( kk );
+	}
+	return b;
 }
 
 function getStage() {
@@ -221,11 +271,11 @@ function getStage() {
 const contextLost = ( r ) => !! r.getContext?.()?.isContextLost?.();
 
 // the renderer state an icon draws with (the program cache keys on some of it: the target, shadows)
-function enter( r, S ) {
+function enter( r, B ) {
 	const prev = { target: r.getRenderTarget(), clear: r.getClearColor( new THREE.Color() ), alpha: r.getClearAlpha(), auto: r.autoClear, xr: r.xr.enabled, shadow: r.shadowMap.enabled };
 	r.xr.enabled = false;
 	r.shadowMap.enabled = false;
-	r.setRenderTarget( S.hdr );
+	r.setRenderTarget( B.hdr );
 	return prev;
 }
 function leave( r, prev ) {
@@ -244,7 +294,7 @@ function prepare( def ) {
 	const model = buildItemModel( def );
 	const prevParent = model.parent;
 	S.scene.add( model );
-	const prev = enter( r, S );
+	const prev = enter( r, bufsFor( S, SIZE, SIZE ) );
 	let mats = null;
 	try { mats = r.compile( S.scene, S.camera ); } finally {
 		leave( r, prev );
@@ -274,10 +324,8 @@ function makeStage( r ) {
 	} catch ( e ) { /* no environment: metals just look darker */ }
 	const camera = new THREE.OrthographicCamera( - 1, 1, 1, - 1, 0.01, 100 );
 	camera.layers.enableAll();
-	const hdr = new THREE.WebGLRenderTarget( RT, RT, { type: THREE.HalfFloatType, depthBuffer: true } );
-	const ldr = new THREE.WebGLRenderTarget( RT, RT, { type: THREE.UnsignedByteType, depthBuffer: false } );
 	const quad = new FullScreenQuad( new THREE.ShaderMaterial( {
-		uniforms: { tSrc: { value: hdr.texture }, exposure: { value: 1.05 } },
+		uniforms: { tSrc: { value: null }, exposure: { value: 1.05 } },
 		vertexShader: /* glsl */`varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4( position.xy, 0.0, 1.0 ); }`,
 		fragmentShader: /* glsl */`
 			uniform sampler2D tSrc; uniform float exposure; varying vec2 vUv;
@@ -296,25 +344,21 @@ function makeStage( r ) {
 			}`,
 		depthTest: false, depthWrite: false, blending: THREE.NoBlending,
 	} ) );
-	const canvas = document.createElement( 'canvas' ); canvas.width = RT; canvas.height = RT;
-	const out = document.createElement( 'canvas' ); out.width = SIZE; out.height = SIZE;
-	// (CPU canvases: the pixels go in with putImageData and out with toDataURL; a GPU-backed canvas made every icon
-	// a synchronous GPU readback in the GPU process, "GPU stall due to ReadPixels")
-	const octx = out.getContext( '2d', { willReadFrequently: true } );
-	octx.imageSmoothingEnabled = true; octx.imageSmoothingQuality = 'high';
-	const webp = out.toDataURL( 'image/webp' ).startsWith( 'data:image/webp' );
-	return { renderer: r, scene, camera, hdr, ldr, quad, env, canvas, ctx: canvas.getContext( '2d', { willReadFrequently: true } ), out, octx, webp, img: new ImageData( RT, RT ) };
+	const probe = document.createElement( 'canvas' ); probe.width = probe.height = 2;
+	const webp = probe.toDataURL( 'image/webp' ).startsWith( 'data:image/webp' );
+	return { renderer: r, scene, camera, quad, env, webp, bufs: new Map() };
 }
 
 const _box = new THREE.Box3(), _v = new THREE.Vector3(), _dir = new THREE.Vector3(), _up = new THREE.Vector3( 0, 1, 0 );
 const _right = new THREE.Vector3(), _camUp = new THREE.Vector3();
 
-const pixelPool = [];
-
-async function render( def, noKeep = false ) {
+async function render( def, noKeep = false, key = def.id, v = null ) {
 	const r = getRenderer();
 	if ( contextLost( r ) ) return null;
 	const S = getStage();
+	const { W, H } = outSize( v );
+	const B = bufsFor( S, W, H );
+	const aspect = W / H;
 	const model = buildItemModel( def );
 	const fallback = !! model.userData.fallback;
 	const prevParent = model.parent;
@@ -339,7 +383,9 @@ async function render( def, noKeep = false ) {
 	// a pole) also get a fatter cross-section so the handle, reel or guard still reads
 	const ratio = size.x / thick;
 	// long guns all tilt the same way whatever their magazine or stock does to the proportions
-	const diagonal = def.firearm ? [ 'rifle', 'sniper', 'shotgun', 'lmg', 'launcher' ].includes( def.firearm.cls ) : ratio > 3.2;
+	// (a footprint variant draws them along its long side instead: level, or upright in a tall one)
+	const diagonal = ! v && ( def.firearm ? [ 'rifle', 'sniper', 'shotgun', 'lmg', 'launcher' ].includes( def.firearm.cls ) : ratio > 3.2 );
+	const upright = !! v && long && aspect < 0.8;
 	const fatten = ratio > 14 ? Math.min( 2.6, ratio / 14 ) : 1;
 	const prevScale = model.scale.clone();
 	if ( fatten > 1 ) { model.scale.set( prevScale.x, prevScale.y * fatten, prevScale.z * fatten ); model.updateMatrixWorld( true ); _box.setFromObject( model, true ); _box.getCenter( centre ); _box.getSize( size ); }
@@ -349,6 +395,7 @@ async function render( def, noKeep = false ) {
 	cam.up.copy( _up );
 	cam.lookAt( centre );
 	if ( diagonal ) cam.rotateZ( - Math.PI / 4 ); // the far (+x) end towards the top right
+	else if ( upright ) cam.rotateZ( - Math.PI / 2 );
 	cam.updateMatrixWorld( true );
 	// fit what is actually drawn: every vertex projected on the view plane (the bounding box corners of a
 	// diagonal rod would leave half the icon empty)
@@ -365,28 +412,30 @@ async function render( def, noKeep = false ) {
 		}
 	} );
 	if ( ! Number.isFinite( minX ) ) { minX = minY = - 0.1; maxX = maxY = 0.1; }
-	// square frame with a margin, centred on the projected bounds
-	const half = Math.max( maxX - minX, maxY - minY ) * 0.5 * 1.1;
+	// a frame of the icon's aspect with a margin, centred on the projected bounds
+	let hh = Math.max( ( maxX - minX ) / aspect, maxY - minY ) * 0.5 * ( v ? 1.06 : 1.1 );
+	const hw = hh * aspect;
 	const cx = ( minX + maxX ) / 2, cy = ( minY + maxY ) / 2;
-	cam.left = cx - half; cam.right = cx + half; cam.top = cy + half; cam.bottom = cy - half;
+	cam.left = cx - hw; cam.right = cx + hw; cam.top = cy + hh; cam.bottom = cy - hh;
 	cam.near = 0.01; cam.far = dist * 2 + size.length() * 2;
 	cam.updateProjectionMatrix();
 
 	// the world's atmosphere patch would fog the model (it sits far from the game camera): neutralise it
 	const saved = { fog: UNI.uFogDensity.value, wet: UNI.uWet.value, cs: UNI.uCloudShadowK.value, cam: UNI.uCamPos.value.clone() };
 	UNI.uFogDensity.value = 0; UNI.uWet.value = 0; UNI.uCloudShadowK.value = 0; UNI.uCamPos.value.copy( cam.position );
-	const px = pixelPool.pop() || new Uint8Array( RT * RT * 4 );
+	const px = B.pool.pop() || new Uint8Array( B.RW * B.RH * 4 );
 	let read = null;
-	const prev = enter( r, S );
+	const prev = enter( r, B );
 	try {
 		r.setClearColor( 0x000000, 0 );
 		r.clear( true, true, false );
 		r.render( S.scene, cam );
-		r.setRenderTarget( S.ldr );
+		r.setRenderTarget( B.ldr );
 		r.clear( true, false, false );
+		S.quad.material.uniforms.tSrc.value = B.hdr.texture;
 		S.quad.render( r );
 		// the copy is queued now (the targets are free for the next icon); the pixels arrive a frame or so later
-		read = r.readRenderTargetPixelsAsync ? r.readRenderTargetPixelsAsync( S.ldr, 0, 0, RT, RT, px ) : ( r.readRenderTargetPixels( S.ldr, 0, 0, RT, RT, px ), null );
+		read = r.readRenderTargetPixelsAsync ? r.readRenderTargetPixelsAsync( B.ldr, 0, 0, B.RW, B.RH, px ) : ( r.readRenderTargetPixels( B.ldr, 0, 0, B.RW, B.RH, px ), null );
 	} finally {
 		leave( r, prev );
 		UNI.uFogDensity.value = saved.fog; UNI.uWet.value = saved.wet; UNI.uCloudShadowK.value = saved.cs; UNI.uCamPos.value.copy( saved.cam );
@@ -397,8 +446,8 @@ async function render( def, noKeep = false ) {
 	}
 	try {
 		if ( read ) await read;
-		return finish( S, def, px, fallback, noKeep );
-	} finally { pixelPool.push( px ); }
+		return finish( S, B, key, px, fallback, noKeep );
+	} finally { B.pool.push( px ); }
 }
 
 // how many pixels the model covers (alpha above ~3%)
@@ -408,20 +457,20 @@ export function coverage( px ) {
 	return n;
 }
 
-function finish( S, def, px, fallback, noKeep ) {
+function finish( S, B, key, px, fallback, noKeep ) {
 	// a lost context reads back zeros and a failed draw leaves the target empty: show nothing, keep nothing
-	if ( contextLost( S.renderer ) || coverage( px ) < MIN_COVER ) return null;
+	if ( contextLost( S.renderer ) || coverage( px ) < B.RW * B.RH * COVER ) return null;
 	// GL rows are bottom-up
-	const dst = S.img.data, row = RT * 4;
-	for ( let y = 0; y < RT; y ++ ) dst.set( px.subarray( ( RT - 1 - y ) * row, ( RT - y ) * row ), y * row );
-	S.ctx.putImageData( S.img, 0, 0 );
-	S.octx.clearRect( 0, 0, SIZE, SIZE );
-	S.octx.drawImage( S.canvas, 0, 0, SIZE, SIZE );
-	const url = S.webp ? S.out.toDataURL( 'image/webp', 0.92 ) : S.out.toDataURL( 'image/png' );
-	const entry = { sig: sigFor( def.id ), url, fallback: fallback || noKeep };
+	const dst = B.img.data, row = B.RW * 4, RH = B.RH;
+	for ( let y = 0; y < RH; y ++ ) dst.set( px.subarray( ( RH - 1 - y ) * row, ( RH - y ) * row ), y * row );
+	B.ctx.putImageData( B.img, 0, 0 );
+	B.octx.clearRect( 0, 0, B.W, B.H );
+	B.octx.drawImage( B.canvas, 0, 0, B.W, B.H );
+	const url = S.webp ? B.out.toDataURL( 'image/webp', 0.92 ) : B.out.toDataURL( 'image/png' );
+	const entry = { sig: sigFor( key ), url, fallback: fallback || noKeep };
 	if ( noKeep ) return url; // textures never arrived: show it this once, try again next time
-	mem.set( def.id, entry );
-	if ( ! fallback ) persist( def.id, entry );
+	mem.set( key, entry );
+	if ( ! fallback ) persist( key, entry );
 	return url;
 }
 

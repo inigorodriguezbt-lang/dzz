@@ -1,5 +1,7 @@
-/* ---- tokens (docs/UI_SPEC.md 2.1-2.8) ----------------------------------------------------------------
-   Graphite neutrals, one accent (rescue orange) for what you act on, one alarm (red) for danger.
+/* ---- tokens (docs/UI_DAYZ.md "Colour", "Type", "Shape"; units from docs/UI_SPEC.md 2.1) -------------------------
+   Near-black see-through panels, white and grey ink, colour only for condition and danger. Square corners, 1px
+   lines, no drop shadows but a soft one under floating tooltips and menus. The old names stay (other screens use
+   them); --accent is now the white selection, not an orange.
    Every length is N * var(--u); 1u = 1px at 1920x1080 and GUI 100%. --gui is set on <html> by main.js. */
 :root {
 	--gui: 1;
@@ -8,34 +10,45 @@
 	   inventory (1104u wide, 700u tall with its hotbar strip) would no longer fit the window. */
 	--u: calc(var(--gui) * clamp(min(0.85px, 100vh / 700, (100vw - 32px) / 1104), min(100vh / 1080, 100vw / 1600), 1.5px));
 
-	--bg-0: #0B0C0E; --bg-1: #121316; --bg-2: #1A1C20; --bg-3: #23262B;
-	--m-hud: rgba(12, 13, 15, 0.78);
-	--m-panel: rgba(16, 17, 20, 0.94);
-	--m-pop: rgba(28, 30, 34, 0.98);
-	--scrim: rgba(6, 7, 8, 0.6);
+	/* neutrals: pure greys, no blue tint */
+	--bg-0: #080808; --bg-1: #101010; --bg-2: #171717; --bg-3: #222222;
+	--m-hud: rgba(0, 0, 0, 0.5);
+	--m-panel: rgba(0, 0, 0, 0.62);
+	--m-slot: rgba(0, 0, 0, 0.45);
+	--m-pop: rgba(12, 12, 12, 0.97);
+	--m-bar: rgba(255, 255, 255, 0.07); /* header bars (VICINITY, HANDS, HIKING BACKPACK) */
+	--scrim: rgba(0, 0, 0, 0.6);
 	--fill-1: rgba(255, 255, 255, 0.04); --fill-2: rgba(255, 255, 255, 0.07); --fill-3: rgba(255, 255, 255, 0.11); --fill-4: rgba(255, 255, 255, 0.16);
-	--line-1: rgba(255, 255, 255, 0.07); --line-2: rgba(255, 255, 255, 0.12); --line-3: rgba(255, 255, 255, 0.22);
-	--ink-1: #F2F3F5; --ink-2: #B6BAC1; --ink-3: #80858D; --ink-4: #4B4F56;
+	--line-1: rgba(255, 255, 255, 0.07); --line-2: rgba(255, 255, 255, 0.12); --line-3: rgba(255, 255, 255, 0.24);
+	--ink-1: #FFFFFF; --ink-2: #C8C8C8; --ink-3: #8A8A8A; --ink-4: #555555;
 	--hud-1: rgba(255, 255, 255, 0.96); --hud-2: rgba(255, 255, 255, 0.70);
-	--accent: #FF7A2E; --accent-hover: #FF8C47; --accent-press: #E8661A;
-	--accent-soft: rgba(255, 122, 46, 0.16); --accent-line: rgba(255, 122, 46, 0.56); --on-accent: #140A04;
-	--warn: #FFC53D; --alarm: #FF5C5C; --cold: #8CCBFF; --good: #6FD08C;
-	--tint-warn: rgba(255, 197, 61, 0.16); --tint-alarm: rgba(255, 92, 92, 0.24); --tint-cold: rgba(140, 203, 255, 0.16);
+	/* selection and focus: white outlines and a lighter fill */
+	--accent: #EDEDED; --accent-hover: #FFFFFF; --accent-press: #C8C8C8;
+	--accent-soft: rgba(255, 255, 255, 0.14); --accent-line: rgba(255, 255, 255, 0.5); --on-accent: #0A0A0A;
+	--warn: #D8B23A; --alarm: #C33A32; --cold: #86B6DC; --good: #6AA84F;
+	--tint-warn: rgba(216, 178, 58, 0.2); --tint-alarm: rgba(195, 58, 50, 0.3); --tint-cold: rgba(134, 182, 220, 0.18);
+	/* item condition: the tint of a cell's background (pristine has none) and the word's colour in the tooltip */
+	--c-worn: rgba(150, 150, 150, 0.22); --c-damaged: rgba(216, 178, 58, 0.22); --c-badly: rgba(214, 112, 40, 0.28); --c-ruined: rgba(195, 58, 50, 0.34);
+	--c-worn-ink: #B4B4B4; --c-damaged-ink: #D8B23A; --c-badly-ink: #DB7A36; --c-ruined-ink: #D6463D;
+	--wet: #5B9BD5; --hot: #D6463D;
 	--halo: 0 0 2px rgba(0, 0, 0, 0.9), 0 1px 3px rgba(0, 0, 0, 0.6);
 
-	--font: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+	/* a condensed sans for headers, labels and buttons (uppercase, tracked); a plain sans for the rest */
+	--font: 'Roboto', system-ui, -apple-system, 'Segoe UI', sans-serif;
+	--font-cond: 'Roboto Condensed', 'Roboto', system-ui, sans-serif;
 	--mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+	--caps: 0.06em; /* tracking on uppercase */
 
 	--s-1: calc(4 * var(--u)); --s-2: calc(8 * var(--u)); --s-3: calc(12 * var(--u)); --s-4: calc(16 * var(--u));
 	--s-5: calc(24 * var(--u)); --s-6: calc(32 * var(--u)); --s-7: calc(48 * var(--u));
 	--edge: calc(24 * var(--u));
-	--r-xs: calc(3 * var(--u)); --r-sm: calc(4 * var(--u)); --r-md: calc(8 * var(--u)); --r-lg: calc(12 * var(--u));
+	--r-xs: 2px; --r-sm: 0px; --r-md: 0px; --r-lg: 0px;
 	--cell: calc(56 * var(--u)); --gap: calc(4 * var(--u)); --hot: calc(48 * var(--u));
 
 	--d-1: 80ms; --d-2: 160ms; --d-3: 240ms; --d-4: 400ms;
 	--ease-out: cubic-bezier(0.2, 0, 0, 1); --ease-in: cubic-bezier(0.4, 0, 1, 1);
 
-	--sh-plate: 0 1px 2px rgba(0, 0, 0, 0.35);
-	--sh-panel: 0 24px 64px -16px rgba(0, 0, 0, 0.7);
-	--sh-pop: 0 12px 32px -8px rgba(0, 0, 0, 0.6);
+	--sh-plate: none;
+	--sh-panel: none;
+	--sh-pop: 0 8px 24px -6px rgba(0, 0, 0, 0.7);
 }

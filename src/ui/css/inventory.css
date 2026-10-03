@@ -1,111 +1,169 @@
-/* ---- inventory (docs/UI_SPEC.md 6, 22) ------------------------------------------------------------------------
-   A centred column: the panel (top bar, then Nearby | equipment | Carried on the 56u cell grid) and the hotbar
-   strip under it. Tooltips, menus, the split popover and drag chips are children of the .screen (not the
-   panel, whose entry animation transforms it and would move fixed children); the drag ghost sits on #ui at 60. */
+/* ---- inventory, DayZ style (docs/UI_DAYZ.md; behaviour in docs/UI_SPEC.md 6) ------------------------------------
+   The whole screen darkens; three columns sit over it: VICINITY | the character with its gear slots | INVENTORY,
+   the quickbar under them. Every container is a grid of square cells (--gc, --gg) with the stacks as rectangles
+   over it. Tooltips, menus, the split popover and drag chips are children of the .screen; the drag ghost sits on
+   #ui at 60. */
 
-.inv-wrap { display: flex; flex-direction: column; align-items: center; gap: var(--s-4); }
-.inv-panel { width: min(calc(1104 * var(--u)), calc(100vw - 32px)); height: min(calc(800 * var(--u)), calc(100vh - 112 * var(--u))); }
+/* cells shrink when a large GUI scale leaves too little width for two 6-cell grids and a 300u centre */
+.tw-root { --gg: calc(2 * var(--u)); --gc: min(calc(58 * var(--u)), calc(((100vw - 32px - 388 * var(--u) - 12px) / 2 - 10 * var(--u)) / 6)); --gp: calc(var(--gc) + var(--gg)); --sl: calc(60 * var(--u)); }
 
-/* top bar: Day 3 · 14:20 · search · weight meter · 11.2 kg · close */
-.inv-top { display: flex; align-items: center; gap: var(--s-3); height: calc(48 * var(--u)); padding: 0 var(--s-2) 0 var(--s-4); border-bottom: 1px solid var(--line-1); flex: none; }
-.inv-top .when { flex: 1; min-width: 0; color: var(--ink-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.inv-top .search { width: calc(200 * var(--u)); }
-.wmeter { position: relative; flex: none; width: calc(120 * var(--u)); height: calc(4 * var(--u)); border-radius: calc(2 * var(--u)); background: var(--fill-3); }
-.wmeter > i { position: absolute; left: 0; top: 0; bottom: 0; max-width: 100%; border-radius: calc(2 * var(--u)); background: var(--ink-1); }
+.screen.inv { align-items: stretch; background: rgba(0, 0, 0, 0.62); }
+.inv-wrap { display: flex; flex-direction: column; align-items: center; gap: calc(10 * var(--u)); width: 100%; height: 100%; padding: calc(34 * var(--u)) 16px calc(14 * var(--u)); }
+.inv-panel { flex: 1; min-height: 0; width: 100%; display: grid; grid-template-columns: minmax(0, calc(6 * var(--gp) + 22 * var(--u))) minmax(calc(300 * var(--u)), calc(560 * var(--u))) minmax(0, calc(6 * var(--gp) + 22 * var(--u))); justify-content: center; gap: calc(14 * var(--u)); }
+/* the newest toast, in the band over the columns */
+.feed.at-inv { top: calc(5 * var(--u)); }
+
+/* ---- columns: a header bar, then the body (the outer two scroll on their own) ---------------------------------- */
+.inv-col { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.inv-col.left, .inv-col.right { background: rgba(0, 0, 0, 0.58); box-shadow: inset 0 0 0 1px var(--line-1); }
+.inv-head { flex: none; display: flex; align-items: center; gap: var(--s-2); height: calc(28 * var(--u)); padding: 0 calc(4 * var(--u)) 0 calc(10 * var(--u)); background: var(--m-bar); box-shadow: inset 0 -1px 0 var(--line-1); color: var(--ink-1); font: 500 calc(13 * var(--u)) / 1 var(--font-cond); letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap; }
+.inv-head .ttl { flex: 1; min-width: 0; }
+.inv-head .when { flex: 1; min-width: 0; color: var(--ink-2); font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; }
+.inv-head .btn.icon.sm { width: calc(24 * var(--u)); height: calc(24 * var(--u)); }
+.inv-head .search { width: calc(180 * var(--u)); }
+.inv-head .search > .input { height: calc(22 * var(--u)); font: 400 calc(12 * var(--u)) / 1 var(--font); letter-spacing: 0; text-transform: none; }
+.inv-head .search > .i { left: var(--s-2); width: calc(13 * var(--u)); height: calc(13 * var(--u)); }
+.inv-head .search > .input { padding-left: calc(26 * var(--u)); }
+/* VICINITY | CRAFT | CATALOG: flat caps tabs, the open one lit with a white underline */
+.inv-head.tabs { padding: 0; }
+.inv-head.tabs .seg { flex: 1; height: 100%; background: none; box-shadow: none; gap: 0; }
+.inv-head.tabs .seg > button { height: 100%; background: none; font-size: calc(13 * var(--u)); letter-spacing: 0.08em; }
+.inv-head.tabs .seg > button:hover { background: var(--fill-1); }
+.inv-head.tabs .seg > button.on { background: var(--fill-2); box-shadow: inset 0 -2px 0 var(--accent); }
+/* weight: a thin bar with ticks at 18 kg (stamina starts to drop) and 30 kg (overloaded) of 45 kg */
+.wmeter { position: relative; flex: none; width: calc(84 * var(--u)); height: calc(3 * var(--u)); background: var(--fill-3); }
+.wmeter > i { position: absolute; left: 0; top: 0; bottom: 0; max-width: 100%; background: var(--ink-1); }
 .wmeter.warn > i { background: var(--warn); } .wmeter.alarm > i { background: var(--alarm); }
-/* ticks at 18 kg (stamina starts to drop) and 30 kg (overloaded) of the 45 kg scale */
 .wmeter > b { position: absolute; top: calc(-2 * var(--u)); bottom: calc(-2 * var(--u)); width: 1px; margin-left: -0.5px; background: var(--ink-3); }
-.wval { flex: none; min-width: calc(52 * var(--u)); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.wval { flex: none; min-width: calc(50 * var(--u)); text-align: right; color: var(--ink-2); font-variant-numeric: tabular-nums; text-transform: none; letter-spacing: 0.02em; }
 .wval.warn { color: var(--warn); } .wval.alarm { color: var(--alarm); }
 
-/* three columns; the outer two scroll on their own. The scrollbar lives in the right padding
-   (gutter always reserved) so a column that starts scrolling never loses a column of cells. */
-.inv-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, calc(388 * var(--u))) calc(328 * var(--u)) minmax(0, calc(388 * var(--u))); }
-.inv-col { min-height: 0; padding: var(--s-4) max(0px, calc(16 * var(--u) - var(--sbw, 6px))) var(--s-4) var(--s-4); overflow-x: hidden; overflow-y: auto; scrollbar-gutter: stable; }
-/* Chrome ignores the 6px ::-webkit-scrollbar look once scrollbar-width is set (components.css sets thin);
-   InventoryUI measures the real gutter into --sbw either way */
-@supports selector(::-webkit-scrollbar) { .inv-col { scrollbar-width: auto; scrollbar-color: auto; } }
-.inv-col + .inv-col { box-shadow: inset 1px 0 0 var(--line-1); }
-/* the middle column fits the smallest window at GUI 100%; larger GUI scales may scroll it */
-.inv-col.mid { overscroll-behavior: contain; }
-.inv-col > .seg { margin-bottom: var(--s-3); }
+/* the scrolling body: its scrollbar lives in a reserved gutter so a column that starts scrolling keeps its grid */
+.inv-scroll { flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; padding: calc(8 * var(--u)) calc(6 * var(--u)) calc(12 * var(--u)) calc(10 * var(--u)); scrollbar-gutter: stable; overscroll-behavior: contain; }
+/* Chrome ignores the ::-webkit-scrollbar look once scrollbar-width is set (components.css sets thin) */
+@supports selector(::-webkit-scrollbar) { .inv-scroll, .inv-mid { scrollbar-width: auto; scrollbar-color: auto; } }
 
-/* section = one container: header, fill meter, cells (or a well when empty) */
-.sect { margin-bottom: var(--s-4); border-radius: var(--r-sm); transition: opacity var(--d-2) var(--ease-in); }
+/* ---- a container: a header bar (chevron, icon, NAME, used/cap) over its grid ----------------------------------- */
+.sect { position: relative; margin-bottom: calc(10 * var(--u)); transition: opacity var(--d-2) var(--ease-in); }
 .sect.gone { opacity: 0; pointer-events: none; }
-.sect-h { display: flex; align-items: center; gap: var(--s-2); height: calc(32 * var(--u)); cursor: pointer; border-radius: var(--r-sm); }
-.sect-h:focus-visible { outline-offset: 0; }
-.sect-h > img { width: calc(20 * var(--u)); height: calc(20 * var(--u)); flex: none; object-fit: contain; }
-.sect-h > .i { color: var(--ink-3); }
+.sect-h { display: flex; align-items: center; gap: calc(6 * var(--u)); height: calc(24 * var(--u)); padding: 0 calc(4 * var(--u)) 0 calc(4 * var(--u)); background: rgba(255, 255, 255, 0.06); color: var(--ink-1); font: 500 calc(12 * var(--u)) / 1 var(--font-cond); letter-spacing: 0.07em; text-transform: uppercase; cursor: pointer; white-space: nowrap; }
+.sect-h:hover { background: rgba(255, 255, 255, 0.09); }
+.sect-h.static { cursor: default; padding-left: calc(8 * var(--u)); }
+.sect-h.static:hover { background: rgba(255, 255, 255, 0.06); }
+.sect-h:focus-visible { outline-offset: -1px; }
+.sect-h > img { width: calc(18 * var(--u)); height: calc(18 * var(--u)); flex: none; object-fit: contain; }
+.sect-h > .i { color: var(--ink-3); width: calc(14 * var(--u)); height: calc(14 * var(--u)); }
 .sect-h .chev { display: flex; flex: none; color: var(--ink-3); transition: transform var(--d-2) var(--ease-out); }
 .sect.open .sect-h .chev { transform: rotate(90deg); }
-.sect-h .nm { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sect-h .cap { flex: none; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.sect-h .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.sect-h .cap { flex: none; max-width: 60%; color: var(--ink-2); font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
+.sect-h .cap.ellip { overflow: hidden; text-overflow: ellipsis; text-transform: none; font-family: var(--font); font-size: calc(12 * var(--u)); }
 .sect-h .cap.full { color: var(--ink-1); } .sect-h .cap.over { color: var(--alarm); }
-.sect > .meter.full > i { background: var(--ink-1); }
-.sect-h .btn { flex: none; }
-.sect > .meter { margin-bottom: var(--s-2); }
-.sect.can { outline: 1px solid var(--accent-line); outline-offset: calc(4 * var(--u)); }
-.sect.over { outline: 1.5px solid var(--accent); outline-offset: calc(4 * var(--u)); background: var(--accent-soft); }
-.sect.deny { outline: 1.5px solid var(--alarm); outline-offset: calc(4 * var(--u)); }
-.inv-col .sec-head { flex: none; }
+.sect-h .btn { flex: none; height: calc(20 * var(--u)); font-size: calc(11 * var(--u)); }
+/* drop targets while dragging: a faint outline where it could go; the hovered one green when it fits, red when not */
+.sect.can { outline: 1px solid rgba(255, 255, 255, 0.22); outline-offset: calc(2 * var(--u)); }
+.sect.over { outline: 1.5px solid var(--good); outline-offset: calc(2 * var(--u)); }
+.sect.deny { outline: 1.5px solid var(--alarm); outline-offset: calc(2 * var(--u)); }
 
-/* equipment: 5 x 56u columns */
-.slots { display: grid; grid-template-columns: repeat(5, var(--cell)); gap: var(--gap); }
-.slots .w3 { grid-column: span 3; } .slots .w2 { grid-column: span 2; }
-.slots + .slots { margin-top: var(--s-3); }
-.inv-conds { display: flex; flex-wrap: wrap; gap: var(--s-1); margin-top: var(--s-4); }
-.inv-conds + .stats { margin-top: var(--s-3); }
-.slots + .stats { margin-top: var(--s-4); }
-.inv-col .stats > div > .cold:last-child { color: var(--cold); }
+/* the grid: faint empty squares (cut short at the capacity), stacks as rectangles over them */
+.cgrid { position: relative; display: grid; grid-template-columns: repeat(var(--cols), var(--gc)); grid-auto-rows: var(--gc); gap: var(--gg); width: calc(var(--cols) * var(--gp) - var(--gg)); min-height: calc(var(--rows-drop, var(--rows)) * var(--gp) - var(--gg)); margin-top: var(--gg); }
+.cgrid > .gc { display: block; background: rgba(255, 255, 255, 0.03); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.055); }
+.cgrid > .gc.x { visibility: hidden; }
+/* rows the volume rules let in beyond the cells */
+.cgrid > .gc.more { background: rgba(255, 255, 255, 0.015); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04); }
+.cgrid > .cell.it, .cgrid > .land { position: absolute; left: calc(var(--x) * var(--gp)); top: calc(var(--y) * var(--gp)); width: calc(var(--w) * var(--gp) - var(--gg)); height: calc(var(--h) * var(--gp) - var(--gg)); }
+.cgrid > .cell.it { background-color: rgba(255, 255, 255, 0.085); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1); }
+.cgrid > .cell.it:hover { background-color: rgba(255, 255, 255, 0.16); box-shadow: inset 0 0 0 1px var(--line-3); }
+.cgrid > .cell.it.c-worn { background-color: var(--c-worn); } .cgrid > .cell.it.c-damaged { background-color: var(--c-damaged); }
+.cgrid > .cell.it.c-badly { background-color: var(--c-badly); } .cgrid > .cell.it.c-ruined { background-color: var(--c-ruined); }
+.cgrid > .cell.it > img { width: calc(100% - 6 * var(--u)); height: calc(100% - 6 * var(--u)); }
+/* where the dragged stack would land */
+.cgrid > .land { z-index: 1; background: rgba(106, 168, 79, 0.16); box-shadow: inset 0 0 0 1.5px var(--good); pointer-events: none; }
+.cgrid.solo { margin-top: 0; }
 
-/* cells: while dragging the whole screen shows the drag cursor, refused targets the not-allowed one */
+/* ---- HANDS: the held stack, its fittings in a row under it --------------------------------------------------- */
+.hands-sect { margin-bottom: calc(12 * var(--u)); }
+.hands-body { padding-top: var(--gg); }
+.hands-empty { display: flex; align-items: center; justify-content: center; width: calc(6 * var(--gp) - var(--gg)); height: var(--gc); background: rgba(255, 255, 255, 0.03); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.055); color: rgba(255, 255, 255, 0.2); }
+.att-row { display: flex; flex-wrap: wrap; gap: var(--gg); margin-top: calc(4 * var(--u)); }
+.att-row .cell { width: calc(44 * var(--u)); height: calc(44 * var(--u)); }
+.att-row .cell > img { width: calc(100% - 6 * var(--u)); height: calc(100% - 6 * var(--u)); }
+.att-row .cell.empty .i { width: 60%; height: 60%; }
+
+/* ---- the centre: header, the character between its slot columns, the weapons, conditions and the body table ---- */
+.inv-mid { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; gap: calc(8 * var(--u)); padding-top: calc(8 * var(--u)); overflow-y: auto; overflow-x: hidden; }
+.inv-col.mid > .inv-head { box-shadow: inset 0 0 0 1px var(--line-1); }
+.inv-figure { flex: 1 1 0; display: grid; grid-template-columns: var(--sl) minmax(0, 1fr) var(--sl); gap: calc(8 * var(--u)); width: 100%; min-height: calc(5 * var(--sl) + 24 * var(--u)); max-height: calc(600 * var(--u)); }
+.slots { display: flex; gap: calc(6 * var(--u)); }
+.slots.l, .slots.r { flex-direction: column; justify-content: center; }
+.slots.w { flex: none; justify-content: center; }
+.slots .cell { width: var(--sl); height: var(--sl); flex: none; }
+.slots .cell.w2 { width: calc(2 * var(--sl) + 6 * var(--u)); }
+.slots .cell:not(.empty) > img { width: calc(100% - 8 * var(--u)); height: calc(100% - 8 * var(--u)); }
+/* the 3D figure: drawn into its canvas while the screen is open; a neutral silhouette until then */
+.inv-char { position: relative; min-width: 0; overflow: hidden; background: radial-gradient(ellipse 60% 55% at 50% 44%, #26272a 0%, #0c0c0d 100%); box-shadow: inset 0 0 0 1px var(--line-1); cursor: grab; touch-action: none; }
+.inv-char.turning { cursor: grabbing; }
+.inv-char > canvas.view { position: absolute; inset: 0; width: 100%; height: 100%; display: block; opacity: 0; transition: opacity var(--d-3) var(--ease-out); }
+.inv-char.live > canvas.view { opacity: 1; }
+.inv-char > .sil { position: absolute; inset: 6% 0 4%; background: no-repeat center / contain url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 60 160'%3E%3Cg fill='%23ffffff' fill-opacity='0.1'%3E%3Ccircle cx='30' cy='13' r='10'/%3E%3Cpath d='M17 28h26c4 0 7 3 7.5 7l3.5 40c.3 3-4 4-5 1l-5-34v40l3 72c0 4-7 4-8 0l-5-58h-4l-5 58c-1 4-8 4-8 0l3-72V42l-5 34c-1 3-5.3 2-5-1l3.5-40c.5-4 3.5-7 7.5-7Z'/%3E%3C/g%3E%3C/svg%3E"); transition: opacity var(--d-3); pointer-events: none; }
+.inv-char.live > .sil { opacity: 0; }
+.inv-conds { flex: none; display: flex; flex-wrap: wrap; justify-content: center; gap: var(--s-1); max-width: 100%; }
+.inv-conds .chip { height: calc(22 * var(--u)); background: rgba(0, 0, 0, 0.5); box-shadow: inset 0 0 0 1px var(--line-1); }
+.inv-mid > .stats { flex: none; width: min(100%, calc(440 * var(--u))); }
+.inv-mid > .stats > div { height: calc(22 * var(--u)); }
+.inv-mid > .stats > div > .cold:last-child { color: var(--cold); }
+
+/* ---- cells in the inventory: while dragging the whole screen shows the drag cursor, refused targets not-allowed --- */
 .inv.dragging, .inv.dragging * { cursor: grabbing; }
 .inv.dragging .deny, .inv.dragging .deny * { cursor: not-allowed; }
-.inv .cell.empty:hover { background: var(--fill-1); box-shadow: inset 0 0 0 1px var(--line-3); }
 .inv .cell.empty.can { box-shadow: inset 0 0 0 1px var(--accent-line); }
-.inv .cell.empty.over { background: var(--accent-soft); box-shadow: inset 0 0 0 1.5px var(--accent); }
+.inv .cell.empty.over { background: rgba(106, 168, 79, 0.18); box-shadow: inset 0 0 0 1.5px var(--good); color: rgba(255, 255, 255, 0.5); }
 .inv .cell.empty.deny { box-shadow: inset 0 0 0 1.5px var(--alarm); }
-.inv .cell.empty.dim { opacity: 0.25; }
-.inv .well.can { box-shadow: inset 0 0 0 1px var(--accent-line); }
+.inv .cell.empty.dim { opacity: 0.2; }
+/* a mix running on two cells: a thin bar fills along their top */
+.cell > .combo-prog { position: absolute; left: 2px; top: 2px; width: 0; height: calc(3 * var(--u)); background: var(--accent); pointer-events: none; }
 
-/* hotbar strip under the panel: nine drop targets */
-.inv-hotbar { display: flex; gap: var(--gap); flex: none; }
-.inv-hotbar .hot { position: relative; flex: none; display: block; width: var(--hot); height: var(--hot); border: 0; border-radius: var(--r-md); background: var(--m-panel); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink-1); transition: background var(--d-1); }
-.inv-hotbar .hot:hover { background: linear-gradient(var(--fill-2), var(--fill-2)), var(--m-panel); }
-.inv-hotbar .hot > img { position: absolute; left: 50%; top: 50%; width: calc(36 * var(--u)); height: calc(36 * var(--u)); transform: translate(-50%, -50%); object-fit: contain; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5)); pointer-events: none; }
-.inv-hotbar .hot > .n { position: absolute; left: calc(4 * var(--u)); top: calc(3 * var(--u)); font: 600 calc(10 * var(--u)) / 1 var(--mono); color: var(--ink-3); }
-.inv-hotbar .hot > .q { position: absolute; right: calc(4 * var(--u)); bottom: calc(3 * var(--u)); font: 600 calc(11 * var(--u)) / 1 var(--font); font-variant-numeric: tabular-nums; color: var(--ink-1); text-shadow: 0 1px 1px rgba(0, 0, 0, 0.9); }
-.inv-hotbar .hot.on { box-shadow: inset 0 0 0 1.5px var(--accent); } .inv-hotbar .hot.on > .n { color: var(--accent); }
-.inv-hotbar .hot.sel { box-shadow: inset 0 0 0 1.5px var(--accent); }
+/* ---- the quickbar under the columns: small numbered squares ------------------------------------------------------ */
+.inv-hotbar { display: flex; gap: calc(3 * var(--u)); flex: none; }
+.inv-hotbar .hot { position: relative; flex: none; display: block; width: calc(46 * var(--u)); height: calc(46 * var(--u)); border: 0; border-radius: 0; background: var(--m-slot); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink-1); transition: background var(--d-1); }
+.inv-hotbar .hot:hover { background: rgba(255, 255, 255, 0.1); }
+.inv-hotbar .hot > img { position: absolute; left: 50%; top: 50%; width: calc(38 * var(--u)); height: calc(38 * var(--u)); transform: translate(-50%, -50%); object-fit: contain; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5)); pointer-events: none; }
+.inv-hotbar .hot > .n { position: absolute; left: calc(3 * var(--u)); top: calc(2 * var(--u)); font: 500 max(9px, calc(11 * var(--u))) / 1 var(--font-cond); color: var(--ink-2); text-shadow: 0 0 2px #000; }
+.inv-hotbar .hot > .q { position: absolute; right: calc(3 * var(--u)); bottom: calc(2 * var(--u)); font: 500 max(10px, calc(12 * var(--u))) / 1 var(--font-cond); font-variant-numeric: tabular-nums; color: var(--ink-1); text-shadow: 0 0 2px #000, 0 1px 1px #000; }
+.inv-hotbar .hot.on { box-shadow: inset 0 0 0 1px var(--accent); background: rgba(255, 255, 255, 0.1); } .inv-hotbar .hot.on > .n { color: var(--ink-1); }
+.inv-hotbar .hot.sel { box-shadow: inset 0 0 0 1px var(--accent); }
 .inv-hotbar .hot.can { box-shadow: inset 0 0 0 1px var(--accent-line); }
-.inv-hotbar .hot.over { background: linear-gradient(var(--accent-soft), var(--accent-soft)), var(--m-panel); box-shadow: inset 0 0 0 1.5px var(--accent); }
+.inv-hotbar .hot.over { background: rgba(106, 168, 79, 0.18); box-shadow: inset 0 0 0 1.5px var(--good); }
 .inv-hotbar .hot.deny { box-shadow: inset 0 0 0 1.5px var(--alarm); }
-.inv-hotbar .hot.src { opacity: 0.32; }
+.inv-hotbar .hot.src { opacity: 0.3; }
 
-/* drag: the ghost follows the pointer; the chip says what a drop would do, 4u above the target */
-.drag-ghost { position: fixed; z-index: 60; width: var(--cell); height: var(--cell); margin: calc(-28 * var(--u)) 0 0 calc(-28 * var(--u)); border-radius: var(--r-sm); background: var(--m-pop); box-shadow: 0 12px 24px -6px rgba(0, 0, 0, 0.7), inset 0 0 0 1px var(--line-2); transform: rotate(-3deg); pointer-events: none; }
-.drag-ghost > img { position: absolute; left: calc(6 * var(--u)); top: calc(6 * var(--u)); width: calc(44 * var(--u)); height: calc(44 * var(--u)); object-fit: contain; }
-.drag-ghost > .q { position: absolute; right: calc(4 * var(--u)); bottom: calc(6 * var(--u)); font: 600 calc(11 * var(--u)) / 1 var(--font); font-variant-numeric: tabular-nums; color: var(--ink-1); text-shadow: 0 1px 1px rgba(0, 0, 0, 0.9); }
+/* ---- drag: the stack's own rectangle follows the pointer, green over a place that takes it, red over one that won't */
+.drag-ghost { position: fixed; z-index: 60; left: 0; top: 0; width: calc(var(--w, 1) * var(--gp) - var(--gg)); height: calc(var(--h, 1) * var(--gp) - var(--gg)); background: rgba(40, 40, 40, 0.72); box-shadow: inset 0 0 0 1px var(--line-3), var(--sh-pop); pointer-events: none; }
+.drag-ghost.ok { background: rgba(60, 84, 50, 0.7); box-shadow: inset 0 0 0 1.5px var(--good), var(--sh-pop); }
+.drag-ghost.no { background: rgba(84, 36, 32, 0.72); box-shadow: inset 0 0 0 1.5px var(--alarm), var(--sh-pop); }
+.drag-ghost > img { position: absolute; left: calc(3 * var(--u)); top: calc(3 * var(--u)); width: calc(100% - 6 * var(--u)); height: calc(100% - 6 * var(--u)); object-fit: contain; }
+.drag-ghost > .q { position: absolute; right: calc(3 * var(--u)); bottom: calc(3 * var(--u)); font: 500 max(10px, calc(12 * var(--u))) / 1 var(--font-cond); font-variant-numeric: tabular-nums; color: var(--ink-1); text-shadow: 0 0 2px #000; }
 .inv .chip-drag { z-index: 45; white-space: nowrap; }
 
-/* split popover: slider + number, then ½ and Split */
-.split-pop { width: calc(240 * var(--u)); padding: var(--s-3); }
+/* ---- split popover: a title, slider + number, then ½ and Split ---------------------------------------------------- */
+.split-pop { width: calc(240 * var(--u)); padding: calc(10 * var(--u)) var(--s-3) var(--s-3); }
+.split-pop .ttl { margin-bottom: var(--s-2); font: 500 calc(13 * var(--u)) / 1 var(--font-cond); letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-2); }
 .split-pop .r1 { display: flex; align-items: center; gap: var(--s-3); }
 .split-pop .r1 .slider { flex: 1; width: auto; min-width: 0; }
-.split-pop .r1 .input { width: calc(56 * var(--u)); padding: 0 var(--s-2); text-align: right; font-variant-numeric: tabular-nums; -moz-appearance: textfield; }
+.split-pop .r1 .input { width: calc(56 * var(--u)); height: calc(26 * var(--u)); padding: 0 var(--s-2); text-align: right; font-variant-numeric: tabular-nums; -moz-appearance: textfield; }
 .split-pop .r1 .input::-webkit-outer-spin-button, .split-pop .r1 .input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .split-pop .r2 { display: flex; justify-content: space-between; margin-top: var(--s-3); }
 
-/* craft tab */
-.craft > .seg { margin-bottom: var(--s-1); }
-.recipe { display: grid; grid-template-columns: calc(40 * var(--u)) 1fr auto; align-items: center; gap: var(--s-3); min-height: calc(64 * var(--u)); padding: var(--s-2) 0; border-bottom: 1px solid var(--line-1); }
-.recipe > img { width: calc(40 * var(--u)); height: calc(40 * var(--u)); object-fit: contain; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5)); }
+/* ---- craft tab ------------------------------------------------------------------------------------------------- */
+.craft > .seg { margin-bottom: var(--s-2); }
+.craft > .sect-h { margin-top: var(--s-2); }
+.recipe { display: grid; grid-template-columns: calc(44 * var(--u)) 1fr auto; align-items: center; gap: var(--s-3); min-height: calc(60 * var(--u)); padding: calc(6 * var(--u)) calc(4 * var(--u)); border-bottom: 1px solid var(--line-1); }
+.recipe > img { width: calc(44 * var(--u)); height: calc(44 * var(--u)); object-fit: contain; background: rgba(255, 255, 255, 0.04); box-shadow: inset 0 0 0 1px var(--line-1); filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5)); }
 .recipe > div { min-width: 0; }
-.recipe .nm { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.recipe .nm .x { color: var(--ink-3); font-weight: 500; margin-left: var(--s-1); font-variant-numeric: tabular-nums; }
+.recipe .nm { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recipe .nm .x { color: var(--ink-3); font-weight: 400; margin-left: var(--s-1); font-variant-numeric: tabular-nums; }
 .recipe .reqs { display: flex; flex-wrap: wrap; gap: var(--s-1); margin-top: var(--s-1); }
-.recipe .chip.req { font-variant-numeric: tabular-nums; }
+.recipe .chip.req { height: calc(22 * var(--u)); background: rgba(0, 0, 0, 0.45); box-shadow: inset 0 0 0 1px var(--line-1); font-variant-numeric: tabular-nums; }
 .recipe .chip.req.txt { padding-left: var(--s-2); }
 .recipe .chip.req > .i { margin-left: calc(4 * var(--u)); }
 /* ingredient: render, name (ellipsis), have/need; short -> the count turns red */
@@ -114,17 +172,15 @@
 .recipe .chip.ing.short .n { color: var(--alarm); }
 .recipe.no { opacity: 0.55; }
 
-/* catalog tab (creative): search with the count inside, one scrolling row of categories, the cell grid */
+/* ---- catalog tab (creative): search with the count inside, one scrolling row of categories, the cell grid ---------- */
 .catalog .search { margin-bottom: var(--s-2); }
+.catalog .search > .input { height: calc(28 * var(--u)); padding-right: calc(48 * var(--u)); }
 .cat-seg { display: flex; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
 .cat-seg::-webkit-scrollbar { display: none; }
 .cat-seg > button { flex: none; }
-.catalog > .grid { margin-top: var(--s-3); }
+.catalog > .grid { margin-top: var(--s-2); grid-template-columns: repeat(auto-fill, var(--gc)); gap: var(--gg); }
+.catalog > .grid > .cell { width: var(--gc); height: var(--gc); background-color: rgba(255, 255, 255, 0.06); }
 
-/* tooltips: a slot name is one line (no fixed width); moving between cells skips the entry animation */
-.inv .tip.one { width: auto; max-width: calc(240 * var(--u)); white-space: nowrap; }
+/* ---- tooltips: a slot name is one line (no fixed width); moving between cells skips the entry animation ------------- */
+.inv .tip.one { width: auto; max-width: calc(260 * var(--u)); white-space: nowrap; }
 .inv .tip.warm { animation: none; }
-.catalog .search > .input { padding-right: calc(48 * var(--u)); }
-/* long guns lie level in the wide weapon slots (their renders are drawn on the diagonal) */
-.cell.w3.level > img { width: calc(92 * var(--u)); height: calc(92 * var(--u)); transform: translate(-50%, -50%) rotate(45deg); }
-.cell.w2.level > img { width: calc(72 * var(--u)); height: calc(72 * var(--u)); transform: translate(-50%, -50%) rotate(45deg); }

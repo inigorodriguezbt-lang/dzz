@@ -1,75 +1,78 @@
-/* ---- shared components (docs/UI_SPEC.md 2.8, 4) ---------------------------------------------------------
+/* ---- shared components (docs/UI_DAYZ.md; structure from docs/UI_SPEC.md 2.8, 4) --------------------------------
+   Flat, square, near-black and see-through; labels and buttons in condensed caps. Selection is a white outline and
+   a lighter fill, colour is kept for condition and danger.
    Stacking inside .tw-root: .hud 1, .chat 2, .lock 3, .screen 10, .feed 20, .menu-toasts 30, .pop 40,
-   .confirm-wrap 50; .drag-ghost (on body) 60. No backdrop-filter anywhere (it re-samples the WebGL canvas). */
+   .confirm-wrap 50; .drag-ghost 60. No backdrop-filter anywhere (it re-samples the WebGL canvas). */
 
-/* ---- HUD plate: every HUD string sits on one (5.9:1 or better on sky, sand, foliage and night) ---------- */
-.plate { background: var(--m-hud); border-radius: var(--r-md); box-shadow: inset 0 0 0 1px var(--line-2), var(--sh-plate); color: var(--hud-1); }
+/* ---- HUD plate: every HUD string sits on one ------------------------------------------------------------ */
+.plate { background: var(--m-hud); border-radius: var(--r-md); box-shadow: inset 0 0 0 1px var(--line-1); color: var(--hud-1); }
 .plate.warn { background: linear-gradient(var(--tint-warn), var(--tint-warn)), var(--m-hud); }
 .plate.alarm { background: linear-gradient(var(--tint-alarm), var(--tint-alarm)), var(--m-hud); }
 
 /* ---- key cap ------------------------------------------------------------------------------------------ */
-.kc { display: inline-flex; align-items: center; justify-content: center; gap: 2px; flex: none; min-width: calc(20 * var(--u)); height: calc(20 * var(--u)); padding: 0 calc(5 * var(--u)); border-radius: var(--r-xs); background: var(--ink-1); color: var(--bg-1); font: 600 max(10px, calc(11 * var(--u))) / 1 var(--mono); white-space: nowrap; }
+.kc { display: inline-flex; align-items: center; justify-content: center; gap: 2px; flex: none; min-width: calc(20 * var(--u)); height: calc(20 * var(--u)); padding: 0 calc(5 * var(--u)); border-radius: var(--r-xs); background: var(--ink-1); color: var(--on-accent); font: 700 max(10px, calc(12 * var(--u))) / 1 var(--font-cond); letter-spacing: 0.02em; text-transform: uppercase; white-space: nowrap; }
 .kc .i { width: calc(12 * var(--u)); height: calc(12 * var(--u)); }
 .kc.out { background: transparent; color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--line-3); }
 /* hold ring around the cap; --p = hold progress 0..1 */
-.kc-hold { --p: 0; display: inline-flex; padding: calc(2 * var(--u)); border-radius: calc(5 * var(--u)); background: conic-gradient(var(--accent) calc(var(--p) * 1turn), var(--line-3) 0); }
+.kc-hold { --p: 0; display: inline-flex; padding: calc(2 * var(--u)); border-radius: var(--r-xs); background: conic-gradient(var(--accent) calc(var(--p) * 1turn), var(--line-3) 0); }
 .hint { display: inline-flex; align-items: center; gap: calc(6 * var(--u)); white-space: nowrap; }
 
-/* ---- buttons ------------------------------------------------------------------------------------------ */
-.btn { display: inline-flex; align-items: center; justify-content: center; gap: var(--s-2); height: calc(32 * var(--u)); padding: 0 var(--s-4); border-radius: var(--r-md); background: var(--fill-2); color: var(--ink-1); font-weight: 500; white-space: nowrap; transition: background var(--d-1) var(--ease-out), color var(--d-1) var(--ease-out); }
-.btn:hover { background: var(--fill-3); }
+/* ---- buttons: condensed caps on a flat fill ------------------------------------------------------------- */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: var(--s-2); height: calc(32 * var(--u)); padding: 0 var(--s-4); border-radius: var(--r-md); background: var(--fill-2); box-shadow: inset 0 0 0 1px var(--line-1); color: var(--ink-1); font: 500 calc(13 * var(--u)) / 1 var(--font-cond); letter-spacing: var(--caps); text-transform: uppercase; white-space: nowrap; transition: background var(--d-1) var(--ease-out), color var(--d-1) var(--ease-out); }
+.btn:hover { background: var(--fill-3); box-shadow: inset 0 0 0 1px var(--line-3); }
 .btn:active { background: var(--fill-4); }
-.btn.primary { background: var(--accent); color: var(--on-accent); font-weight: 600; }
+.btn.primary { background: var(--accent); box-shadow: none; color: var(--on-accent); font-weight: 700; }
 .btn.primary:hover { background: var(--accent-hover); }
 .btn.primary:active { background: var(--accent-press); }
-.btn.danger { background: transparent; color: var(--alarm); }
+.btn.danger { background: transparent; box-shadow: none; color: var(--alarm); }
 .btn.danger:hover { background: var(--tint-alarm); }
-.btn.ghost { background: transparent; color: var(--ink-2); }
+.btn.ghost { background: transparent; box-shadow: none; color: var(--ink-2); }
 .btn.ghost:hover { color: var(--ink-1); background: var(--fill-2); }
 .btn.ghost:active { background: var(--fill-3); }
-.btn.sm { height: calc(24 * var(--u)); padding: 0 var(--s-2); border-radius: var(--r-sm); }
-.btn.lg { height: calc(40 * var(--u)); padding: 0 var(--s-5); }
-.btn.icon { width: calc(32 * var(--u)); padding: 0; background: transparent; color: var(--ink-2); }
+.btn.sm { height: calc(24 * var(--u)); padding: 0 var(--s-2); font-size: calc(12 * var(--u)); }
+.btn.lg { height: calc(40 * var(--u)); padding: 0 var(--s-5); font-size: calc(15 * var(--u)); }
+.btn.icon { width: calc(32 * var(--u)); padding: 0; background: transparent; box-shadow: none; color: var(--ink-2); }
 .btn.icon:hover { background: var(--fill-2); color: var(--ink-1); }
 .btn.icon:active { background: var(--fill-3); }
 .btn.icon.sm { width: calc(24 * var(--u)); height: calc(24 * var(--u)); }
 .btn:disabled { opacity: 0.4; pointer-events: none; }
 /* select (4.7): a button showing the current option, chevron at the right; the list is a .pop.menu */
-.btn.select { width: calc(280 * var(--u)); justify-content: space-between; padding: 0 var(--s-3); }
+.btn.select { width: calc(280 * var(--u)); justify-content: space-between; padding: 0 var(--s-3); font: 400 calc(13 * var(--u)) / 1 var(--font); letter-spacing: 0; text-transform: none; }
 .btn.select > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .btn.select > .i { width: calc(12 * var(--u)); height: calc(12 * var(--u)); color: var(--ink-3); transform: rotate(90deg); }
 
-/* ---- segmented ----------------------------------------------------------------------------------------- */
-.seg { display: inline-flex; gap: 2px; padding: 2px; height: calc(28 * var(--u)); border-radius: calc(7 * var(--u)); background: var(--fill-2); }
-.seg > button { height: 100%; padding: 0 var(--s-3); border-radius: calc(5 * var(--u)); color: var(--ink-2); font-weight: 500; white-space: nowrap; transition: background var(--d-2) var(--ease-out), color var(--d-2) var(--ease-out); }
-.seg > button:hover { color: var(--ink-1); }
-.seg > button.on { background: var(--bg-3); color: var(--ink-1); box-shadow: inset 0 0 0 1px var(--line-2), 0 1px 2px rgba(0, 0, 0, 0.4); }
+/* ---- segmented: flat tabs, the chosen one lit ------------------------------------------------------------ */
+.seg { display: inline-flex; gap: 1px; padding: 0; height: calc(28 * var(--u)); border-radius: var(--r-sm); background: var(--line-1); box-shadow: inset 0 0 0 1px var(--line-1); }
+.seg > button { height: 100%; padding: 0 var(--s-3); background: rgba(0, 0, 0, 0.35); color: var(--ink-3); font: 500 calc(12 * var(--u)) / 1 var(--font-cond); letter-spacing: var(--caps); text-transform: uppercase; white-space: nowrap; transition: background var(--d-2) var(--ease-out), color var(--d-2) var(--ease-out); }
+.seg > button:hover { color: var(--ink-1); background: var(--fill-2); }
+.seg > button.on { background: var(--fill-4); color: var(--ink-1); box-shadow: inset 0 -2px 0 var(--accent); }
 .seg > button:disabled { color: var(--ink-4); pointer-events: none; }
+.seg > button:focus-visible { outline-offset: -2px; }
 .seg.fill { display: flex; } .seg.fill > button { flex: 1; }
 
-/* ---- toggle (button role=switch) ------------------------------------------------------------------------ */
-.toggle { position: relative; width: calc(36 * var(--u)); height: calc(20 * var(--u)); border-radius: 999px; background: var(--fill-4); transition: background var(--d-2) var(--ease-out); flex: none; }
-.toggle::after { content: ''; position: absolute; left: calc(2 * var(--u)); top: calc(2 * var(--u)); width: calc(16 * var(--u)); height: calc(16 * var(--u)); border-radius: 50%; background: var(--ink-2); transition: transform var(--d-2) var(--ease-out), background var(--d-2); }
-.toggle.on { background: var(--accent); }
-.toggle.on::after { transform: translateX(calc(16 * var(--u))); background: #fff; }
+/* ---- toggle (button role=switch): a square switch --------------------------------------------------------- */
+.toggle { position: relative; width: calc(36 * var(--u)); height: calc(18 * var(--u)); border-radius: var(--r-sm); background: var(--fill-3); box-shadow: inset 0 0 0 1px var(--line-2); transition: background var(--d-2) var(--ease-out); flex: none; }
+.toggle::after { content: ''; position: absolute; left: calc(3 * var(--u)); top: calc(3 * var(--u)); width: calc(12 * var(--u)); height: calc(12 * var(--u)); background: var(--ink-3); transition: transform var(--d-2) var(--ease-out), background var(--d-2); }
+.toggle.on { background: var(--accent); box-shadow: none; }
+.toggle.on::after { transform: translateX(calc(18 * var(--u))); background: var(--on-accent); }
 .toggle:disabled { opacity: 0.4; pointer-events: none; }
 
 /* ---- slider: input[type=range].slider, --p = fill percent (bare range inputs get the same look) ----------- */
 .slider, :where(.tw-root) input[type=range] { -webkit-appearance: none; appearance: none; width: calc(200 * var(--u)); height: calc(20 * var(--u)); margin: 0; background: transparent; cursor: pointer; --p: 50%; }
-.slider::-webkit-slider-runnable-track, :where(.tw-root) input[type=range]::-webkit-slider-runnable-track { height: 2px; border-radius: 1px; background: linear-gradient(90deg, var(--accent) var(--p), var(--fill-3) var(--p)); }
-.slider::-webkit-slider-thumb, :where(.tw-root) input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: calc(14 * var(--u)); height: calc(14 * var(--u)); margin-top: calc(1px - 7 * var(--u)); border-radius: 50%; background: var(--ink-1); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5); }
-.slider::-moz-range-track, :where(.tw-root) input[type=range]::-moz-range-track { height: 2px; background: var(--fill-3); }
+.slider::-webkit-slider-runnable-track, :where(.tw-root) input[type=range]::-webkit-slider-runnable-track { height: 2px; background: linear-gradient(90deg, var(--accent) var(--p), var(--fill-4) var(--p)); }
+.slider::-webkit-slider-thumb, :where(.tw-root) input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: calc(8 * var(--u)); height: calc(16 * var(--u)); margin-top: calc(1px - 8 * var(--u)); border-radius: 0; background: var(--ink-1); }
+.slider::-moz-range-track, :where(.tw-root) input[type=range]::-moz-range-track { height: 2px; background: var(--fill-4); }
 .slider::-moz-range-progress, :where(.tw-root) input[type=range]::-moz-range-progress { height: 2px; background: var(--accent); }
-.slider::-moz-range-thumb, :where(.tw-root) input[type=range]::-moz-range-thumb { width: calc(14 * var(--u)); height: calc(14 * var(--u)); border: 0; border-radius: 50%; background: var(--ink-1); }
+.slider::-moz-range-thumb, :where(.tw-root) input[type=range]::-moz-range-thumb { width: calc(8 * var(--u)); height: calc(16 * var(--u)); border: 0; border-radius: 0; background: var(--ink-1); }
 /* keyboard focus rings the thumb, not the whole hit box */
 .slider:focus-visible, :where(.tw-root) input[type=range]:focus-visible { outline: none; }
-.slider:focus-visible::-webkit-slider-thumb, :where(.tw-root) input[type=range]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 2px var(--bg-1), 0 0 0 4px var(--accent); }
-.slider:focus-visible::-moz-range-thumb, :where(.tw-root) input[type=range]:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 2px var(--bg-1), 0 0 0 4px var(--accent); }
+.slider:focus-visible::-webkit-slider-thumb, :where(.tw-root) input[type=range]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 2px var(--bg-1), 0 0 0 3px var(--accent); }
+.slider:focus-visible::-moz-range-thumb, :where(.tw-root) input[type=range]:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 2px var(--bg-1), 0 0 0 3px var(--accent); }
 .val { width: calc(56 * var(--u)); flex: none; text-align: right; color: var(--ink-2); font-variant-numeric: tabular-nums; }
 
 /* ---- input, search --------------------------------------------------------------------------------------- */
-.input { height: calc(32 * var(--u)); padding: 0 var(--s-3); border: 0; border-radius: var(--r-md); background: var(--bg-2); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink-1); font: inherit; outline: none; }
-.input:focus { box-shadow: inset 0 0 0 1px var(--accent); }
+.input { height: calc(32 * var(--u)); padding: 0 var(--s-3); border: 0; border-radius: var(--r-md); background: rgba(0, 0, 0, 0.5); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink-1); font: inherit; outline: none; }
+.input:focus { box-shadow: inset 0 0 0 1px var(--accent-line); }
 .input::placeholder { color: var(--ink-3); }
 .input.t-mono { font: 500 calc(12 * var(--u)) / calc(16 * var(--u)) var(--mono); }
 .search { position: relative; display: flex; align-items: center; }
@@ -83,11 +86,12 @@
 .chip.req img { width: calc(20 * var(--u)); height: calc(20 * var(--u)); object-fit: contain; }
 .chip.miss { color: var(--alarm); }
 .chip.bad .i { color: var(--alarm); } .chip.warn .i { color: var(--warn); }
-.chip-drag { position: absolute; display: inline-flex; align-items: center; height: calc(20 * var(--u)); padding: 0 var(--s-2); border-radius: var(--r-sm); background: var(--accent); color: var(--on-accent); transform: translate(-50%, -100%); pointer-events: none; }
-.chip-drag.bad { background: var(--alarm); } .chip-drag.part { background: var(--warn); }
+/* what a drop would do, above the target: white for a verb, yellow for part of a stack, red for no */
+.chip-drag { position: absolute; display: inline-flex; align-items: center; height: calc(20 * var(--u)); padding: 0 var(--s-2); border-radius: var(--r-sm); background: var(--accent); color: var(--on-accent); font: 700 max(10px, calc(12 * var(--u))) / 1 var(--font-cond); letter-spacing: var(--caps); text-transform: uppercase; transform: translate(-50%, -100%); pointer-events: none; box-shadow: var(--sh-pop); }
+.chip-drag.bad { background: var(--alarm); color: #fff; } .chip-drag.part { background: var(--warn); }
 
 /* ---- meter ------------------------------------------------------------------------------------------------- */
-.meter { position: relative; height: 2px; border-radius: 1px; background: var(--fill-3); overflow: hidden; }
+.meter { position: relative; height: 2px; background: var(--fill-3); overflow: hidden; }
 .meter > i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--ink-2); }
 .meter.warn > i { background: var(--warn); } .meter.alarm > i { background: var(--alarm); }
 
@@ -95,9 +99,9 @@
 .screen { position: absolute; inset: 0; z-index: 10; display: flex; align-items: center; justify-content: center; pointer-events: auto; background: var(--scrim); animation: fade-in var(--d-3) var(--ease-out); }
 /* on the title the live camera and its gradient stay behind the panel */
 .screen.bare { background: transparent; }
-.panel { display: flex; flex-direction: column; max-width: calc(100vw - 32px); max-height: calc(100vh - 32px); border-radius: var(--r-lg); background: var(--m-panel); box-shadow: inset 0 0 0 1px var(--line-2), var(--sh-panel); overflow: hidden; animation: panel-in var(--d-3) var(--ease-out); }
-@keyframes panel-in { from { opacity: 0; transform: translateY(calc(8 * var(--u))); } }
-.panel-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s-3); height: calc(56 * var(--u)); padding: 0 var(--s-3) 0 var(--s-5); border-bottom: 1px solid var(--line-1); flex: none; }
+.panel { display: flex; flex-direction: column; max-width: calc(100vw - 32px); max-height: calc(100vh - 32px); border-radius: var(--r-lg); background: var(--m-panel); box-shadow: inset 0 0 0 1px var(--line-2); overflow: hidden; animation: panel-in var(--d-3) var(--ease-out); }
+@keyframes panel-in { from { opacity: 0; transform: translateY(calc(6 * var(--u))); } }
+.panel-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s-3); height: calc(48 * var(--u)); padding: 0 var(--s-2) 0 var(--s-5); background: var(--m-bar); border-bottom: 1px solid var(--line-1); flex: none; }
 .panel-head .t-title { flex: 1; min-width: 0; }
 .panel-head .meta { color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .panel-body { flex: 1; min-height: 0; overflow: auto; padding: var(--s-4) var(--s-5); }
@@ -111,24 +115,24 @@
 
 .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--line-1); border-radius: var(--r-sm); overflow: hidden; }
 .stats.one { grid-template-columns: 1fr; }
-.stats > div { display: flex; align-items: center; justify-content: space-between; gap: var(--s-3); height: calc(28 * var(--u)); padding: 0 var(--s-2); background: var(--bg-1); }
+.stats > div { display: flex; align-items: center; justify-content: space-between; gap: var(--s-3); height: calc(28 * var(--u)); padding: 0 var(--s-2); background: rgba(0, 0, 0, 0.55); }
 .stats > div > span:first-child { color: var(--ink-3); }
 .stats > div > span:last-child { font-variant-numeric: tabular-nums; }
 .stats > div > .warn:last-child { color: var(--warn); } .stats > div > .alarm:last-child { color: var(--alarm); }
 
 .row { display: flex; align-items: center; justify-content: space-between; gap: var(--s-3); min-height: calc(40 * var(--u)); border-bottom: 1px solid var(--line-1); }
 .row > .lab { flex: 1; min-width: 0; display: flex; align-items: center; gap: calc(6 * var(--u)); color: var(--ink-2); }
-/* changed-setting dot: always reserved so the label never shifts */
-.row > .lab::before { content: ''; width: calc(6 * var(--u)); height: calc(6 * var(--u)); border-radius: 50%; background: transparent; flex: none; margin-left: calc(-12 * var(--u)); }
+/* changed-setting mark: always reserved so the label never shifts */
+.row > .lab::before { content: ''; width: calc(6 * var(--u)); height: calc(6 * var(--u)); background: transparent; flex: none; margin-left: calc(-12 * var(--u)); }
 .row.changed > .lab::before { background: var(--accent); }
 .row > .ctl { display: flex; align-items: center; justify-content: flex-end; gap: var(--s-3); min-width: calc(320 * var(--u)); }
 .row > .ctl > .input { width: calc(280 * var(--u)); }
 .row > .rst { width: calc(24 * var(--u)); flex: none; display: flex; justify-content: center; }
 
 /* ---- tabs: vertical rail (Options); segmented tabs use .seg.fill ---------------------------------------------- */
-.rail { display: flex; flex-direction: column; gap: 2px; padding: var(--s-3) var(--s-2); box-shadow: inset -1px 0 0 var(--line-1); }
-.rail > button { height: calc(32 * var(--u)); padding: 0 var(--s-3); border-radius: var(--r-sm); text-align: left; color: var(--ink-2); flex: none; }
-.rail > button:hover { color: var(--ink-1); } .rail > button.on { background: var(--fill-3); color: var(--ink-1); }
+.rail { display: flex; flex-direction: column; gap: 1px; padding: var(--s-3) var(--s-2); box-shadow: inset -1px 0 0 var(--line-1); }
+.rail > button { height: calc(32 * var(--u)); padding: 0 var(--s-3); border-radius: var(--r-sm); text-align: left; color: var(--ink-3); font: 500 calc(13 * var(--u)) / 1 var(--font-cond); letter-spacing: var(--caps); text-transform: uppercase; flex: none; }
+.rail > button:hover { color: var(--ink-1); background: var(--fill-1); } .rail > button.on { background: var(--fill-3); color: var(--ink-1); box-shadow: inset 2px 0 0 var(--accent); }
 
 /* ---- list rows ------------------------------------------------------------------------------------------------ */
 /* selectable list row (4.9, worlds): [thumb 96u] [.nm over .meta] [.acts shown on hover or selection] */
@@ -137,7 +141,7 @@
 .lrow.sel { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent-line); }
 .lrow > div { min-width: 0; }
 .lrow .thumb { display: block; width: calc(96 * var(--u)); height: calc(54 * var(--u)); border-radius: var(--r-sm); object-fit: cover; background: var(--bg-2); }
-.lrow .nm { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lrow .nm { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lrow .meta { display: flex; align-items: baseline; gap: var(--s-3); margin-top: 2px; overflow: hidden; white-space: nowrap; color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .lrow .acts { display: flex; gap: 2px; visibility: hidden; }
 .lrow:hover .acts, .lrow.sel .acts, .lrow:focus-within .acts { visibility: visible; }
@@ -147,73 +151,94 @@
 .prow > .lab { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .prow > .v { color: var(--ink-2); font-variant-numeric: tabular-nums; }
 
-/* ---- item cell and slot (56u grid, 60u pitch) ------------------------------------------------------------------ */
-.cell { --glow: radial-gradient(closest-side, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0)); position: relative; width: var(--cell); height: var(--cell); border-radius: var(--r-sm); background: var(--glow), var(--fill-1); box-shadow: inset 0 0 0 1px var(--line-1); transition: background var(--d-1); }
-.cell:hover { background: var(--glow), var(--fill-3); box-shadow: inset 0 0 0 1px var(--line-3); }
-.cell:active { background: var(--glow), var(--fill-4); }
+/* ---- item cell and slot: a dark see-through square, condition as the tint of its background ---------------------- */
+.cell { position: relative; width: var(--cell); height: var(--cell); border-radius: var(--r-sm); background: var(--m-slot); box-shadow: inset 0 0 0 1px var(--line-1); transition: background var(--d-1); }
+.cell:hover { background-color: rgba(255, 255, 255, 0.1); box-shadow: inset 0 0 0 1px var(--line-3); }
+.cell:active { background-color: var(--fill-4); }
+.cell.c-worn { background-color: var(--c-worn); } .cell.c-damaged { background-color: var(--c-damaged); }
+.cell.c-badly { background-color: var(--c-badly); } .cell.c-ruined { background-color: var(--c-ruined); }
 /* the faint light rim keeps dark metal (rifles, magazines) readable on the dark cell */
-.cell > img { position: absolute; left: 50%; top: 50%; width: calc(44 * var(--u)); height: calc(44 * var(--u)); transform: translate(-50%, -50%); object-fit: contain; filter: drop-shadow(0 0 0.5px rgba(255, 255, 255, 0.35)) drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5)); pointer-events: none; }
+.cell > img { position: absolute; left: 50%; top: 50%; width: calc(100% - 8 * var(--u)); height: calc(100% - 8 * var(--u)); transform: translate(-50%, -50%); object-fit: contain; filter: drop-shadow(0 0 0.5px rgba(255, 255, 255, 0.3)) drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5)); pointer-events: none; }
 /* a render still on its way: nothing rather than a placeholder glyph in another style */
 .tw-root img:not([src]) { visibility: hidden; }
-.cell > .q { position: absolute; right: calc(4 * var(--u)); bottom: calc(6 * var(--u)); font: 600 max(10px, calc(11 * var(--u))) / 1 var(--font); font-variant-numeric: tabular-nums; color: var(--ink-1); text-shadow: 0 1px 1px rgba(0, 0, 0, 0.9); }
-.cell > .n { position: absolute; right: calc(4 * var(--u)); top: calc(3 * var(--u)); font: 600 max(9px, calc(10 * var(--u))) / 1 var(--mono); color: var(--ink-3); }
-.cell > .dot { position: absolute; left: calc(5 * var(--u)); top: calc(5 * var(--u)); width: calc(6 * var(--u)); height: calc(6 * var(--u)); border-radius: 50%; background: var(--accent); }
+/* quantity, rounds: small white digits in the bottom-right corner */
+.cell > .q { position: absolute; right: calc(3 * var(--u)); bottom: calc(3 * var(--u)); font: 500 max(10px, calc(12 * var(--u))) / 1 var(--font-cond); font-variant-numeric: tabular-nums; color: var(--ink-1); text-shadow: 0 0 2px #000, 0 1px 1px #000; pointer-events: none; }
+/* hotbar number: top-right */
+.cell > .n { position: absolute; right: calc(3 * var(--u)); top: calc(2 * var(--u)); font: 500 max(9px, calc(11 * var(--u))) / 1 var(--font-cond); color: var(--ink-2); text-shadow: 0 0 2px #000; pointer-events: none; }
+/* held: a white corner mark; spoiled: a red one */
+.cell > .dot { position: absolute; left: 0; top: 0; width: calc(6 * var(--u)); height: calc(6 * var(--u)); background: var(--accent); pointer-events: none; }
 .cell > .dot.spoiled { background: var(--alarm); }
-.cell > .dot + .dot.spoiled { left: calc(13 * var(--u)); }
-.cell > .meter { position: absolute; left: calc(6 * var(--u)); right: calc(6 * var(--u)); bottom: calc(4 * var(--u)); }
-/* empty slot: transparent, the 24u slot glyph centred */
-.cell.empty { padding: 0; background: transparent; box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink-3); display: flex; align-items: center; justify-content: center; }
-.cell.empty .i { width: calc(24 * var(--u)); height: calc(24 * var(--u)); }
+.cell > .dot + .dot.spoiled { left: calc(8 * var(--u)); }
+/* wet: a small blue drop; hot: a small red dot (top-left, after the held mark) */
+.cell > .wet, .cell > .hot { position: absolute; top: calc(3 * var(--u)); left: calc(3 * var(--u)); width: calc(7 * var(--u)); height: calc(9 * var(--u)); background: var(--wet); clip-path: path('M3.5 0C5.5 3 7 5 7 6.5A3.5 3.5 0 0 1 0 6.5C0 5 1.5 3 3.5 0Z'); pointer-events: none; }
+.cell > .hot { width: calc(7 * var(--u)); height: calc(7 * var(--u)); background: var(--hot); clip-path: circle(50%); }
+.cell > .dot ~ .wet, .cell > .dot ~ .hot { left: calc(10 * var(--u)); }
+.cell > .wet + .hot { left: calc(13 * var(--u)); }
+/* one bar along the bottom edge: fill (liquid, fuel, charge) or condition / freshness */
+.cell > .meter { position: absolute; left: 1px; right: 1px; bottom: 1px; height: calc(3 * var(--u)); background: rgba(0, 0, 0, 0.55); }
+.cell > .meter > i { background: var(--ink-2); }
+.cell > .meter.fill > i { background: var(--wet); }
+.cell > .meter.fill.fuel > i { background: var(--warn); }
+.cell > .meter.warn > i { background: var(--warn); } .cell > .meter.alarm > i { background: var(--alarm); }
+/* empty slot: a dark square with a faint grey silhouette of what goes there */
+.cell.empty { padding: 0; background: var(--m-slot); box-shadow: inset 0 0 0 1px var(--line-1); color: rgba(255, 255, 255, 0.22); display: flex; align-items: center; justify-content: center; }
+.cell.empty .i { width: 52%; height: 52%; max-width: calc(32 * var(--u)); max-height: calc(32 * var(--u)); stroke-width: 1.25; }
+.cell.empty:hover { background: rgba(0, 0, 0, 0.35); color: rgba(255, 255, 255, 0.4); }
 .cell.w2 { width: calc(116 * var(--u)); } .cell.w3 { width: calc(176 * var(--u)); }
-.cell.w2 > img, .cell.w3 > img { width: calc(100% - 16 * var(--u)); height: calc(44 * var(--u)); }
-.cell.sel { box-shadow: inset 0 0 0 1.5px var(--accent); }
+.cell.sel { box-shadow: inset 0 0 0 1px var(--accent); background-color: var(--accent-soft); }
 .cell.can { box-shadow: inset 0 0 0 1px var(--accent-line); }
-.cell.over { background: var(--accent-soft); box-shadow: inset 0 0 0 1.5px var(--accent); }
+.cell.over { background-color: rgba(106, 168, 79, 0.22); box-shadow: inset 0 0 0 1.5px var(--good); }
 .cell.deny { box-shadow: inset 0 0 0 1.5px var(--alarm); cursor: not-allowed; }
-.cell.src { opacity: 0.32; }
-.cell.dim { opacity: 0.25; }
+.cell.src { opacity: 0.3; }
+.cell.dim { opacity: 0.2; }
 .cell.spoiled > img { opacity: 0.5; }
 .well { height: var(--cell); border-radius: var(--r-sm); box-shadow: inset 0 0 0 1px var(--line-2); }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, var(--cell)); gap: var(--gap); }
 
-/* ---- tooltip, popover, context menu ------------------------------------------------------------------------------- */
+/* ---- tooltip, popover, context menu: dark, square, a soft shadow ------------------------------------------------- */
 .pop { position: fixed; z-index: 40; border-radius: var(--r-md); background: var(--m-pop); box-shadow: inset 0 0 0 1px var(--line-2), var(--sh-pop); pointer-events: auto; animation: pop-in var(--d-2) var(--ease-out); }
-@keyframes pop-in { from { opacity: 0; transform: translateY(calc(-4 * var(--u))); } }
-.tip { width: calc(240 * var(--u)); padding: var(--s-3); pointer-events: none; }
-.tip .ttl { font-weight: 600; }
+@keyframes pop-in { from { opacity: 0; } }
+.tip { width: calc(260 * var(--u)); padding: calc(10 * var(--u)) var(--s-3); pointer-events: none; }
+.tip .ttl { font: 500 calc(15 * var(--u)) / calc(18 * var(--u)) var(--font-cond); letter-spacing: var(--caps); text-transform: uppercase; color: var(--ink-1); }
 .tip .meta { color: var(--ink-3); margin-top: 2px; }
+.tip .desc { margin-top: var(--s-1); color: var(--ink-2); font-size: calc(12 * var(--u)); line-height: calc(16 * var(--u)); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .tip hr { border: 0; border-top: 1px solid var(--line-1); margin: var(--s-2) calc(-1 * var(--s-3)); }
 .tip .kv { display: flex; justify-content: space-between; gap: var(--s-2); height: calc(20 * var(--u)); align-items: center; }
 .tip .kv > span:first-child { color: var(--ink-3); }
-.tip .kv > span:last-child { font-variant-numeric: tabular-nums; }
+.tip .kv > span:last-child { font-variant-numeric: tabular-nums; color: var(--ink-1); }
+.tip .kv .c-worn { color: var(--c-worn-ink); } .tip .kv .c-damaged { color: var(--c-damaged-ink); }
+.tip .kv .c-badly { color: var(--c-badly-ink); } .tip .kv .c-ruined { color: var(--c-ruined-ink); }
+.tip .kv .wet { color: var(--wet); } .tip .kv .hot { color: var(--hot); }
 .tip .d { margin-left: calc(6 * var(--u)); } .tip .d.up { color: var(--good); } .tip .d.down { color: var(--alarm); }
 .tip .line { color: var(--ink-2); }
 .tip .flags { color: var(--warn); } .tip .flags .bad { color: var(--alarm); }
 .tip .foot { display: flex; justify-content: space-between; color: var(--ink-2); font-variant-numeric: tabular-nums; }
-.menu { min-width: calc(200 * var(--u)); max-width: calc(280 * var(--u)); padding: var(--s-1); }
-.menu > button { display: flex; align-items: center; gap: var(--s-3); width: 100%; height: calc(28 * var(--u)); padding: 0 var(--s-2); border-radius: var(--r-sm); text-align: left; }
+.menu { min-width: calc(190 * var(--u)); max-width: calc(280 * var(--u)); padding: 2px 0; }
+.menu > button { display: flex; align-items: center; gap: var(--s-3); width: 100%; height: calc(26 * var(--u)); padding: 0 var(--s-3); border-radius: 0; text-align: left; color: var(--ink-2); }
 .menu > button > span:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.menu > button:hover, .menu > button.on { background: var(--fill-3); }
-.menu > button:focus-visible { outline: none; background: var(--fill-3); }
-.menu > button.def > span:first-child { font-weight: 600; }
+.menu > button:hover, .menu > button.on { background: var(--fill-3); color: var(--ink-1); }
+.menu > button:focus-visible { outline: none; background: var(--fill-3); color: var(--ink-1); }
+.menu > button.def > span:first-child { font-weight: 500; color: var(--ink-1); }
 .menu > button.danger { color: var(--alarm); }
 .menu > button:disabled { opacity: 0.4; pointer-events: none; }
 .menu > button .h { color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .menu > button > .i:first-child { color: var(--ink-2); }
-.menu > .sep { height: 1px; margin: var(--s-1) 0; background: var(--line-1); }
+/* key hints in menus: faint condensed text, not boxed */
+.menu > button .kc.out { min-width: 0; height: auto; padding: 0; box-shadow: none; color: var(--ink-3); font-weight: 500; }
+.menu > .sep { height: 1px; margin: 2px 0; background: var(--line-1); }
 
 /* ---- toast, prompt --------------------------------------------------------------------------------------------------- */
 .toast { display: flex; align-items: center; gap: var(--s-2); width: fit-content; height: calc(28 * var(--u)); max-width: calc(360 * var(--u)); padding: 0 var(--s-3) 0 calc(10 * var(--u)); white-space: nowrap; animation: toast-in var(--d-2) var(--ease-out); }
 .toast > span { overflow: hidden; text-overflow: ellipsis; }
-.toast > .x { color: var(--hud-2); font-weight: 600; font-variant-numeric: tabular-nums; flex: none; }
-.toast > .sd { width: calc(6 * var(--u)); height: calc(6 * var(--u)); border-radius: 50%; flex: none; }
+.toast > .x { color: var(--hud-2); font-weight: 500; font-variant-numeric: tabular-nums; flex: none; }
+.toast > .sd { width: calc(6 * var(--u)); height: calc(6 * var(--u)); flex: none; }
 .toast > .sd.warn { background: var(--warn); } .toast > .sd.bad { background: var(--alarm); }
 .toast > img { width: calc(20 * var(--u)); height: calc(20 * var(--u)); object-fit: contain; margin-left: calc(-4 * var(--u)); flex: none; }
 .toast.out { opacity: 0; transition: opacity var(--d-3) var(--ease-in); }
 @keyframes toast-in { from { opacity: 0; transform: translateX(calc(-8 * var(--u))); } }
 /* interaction prompt: to the right of the crosshair so it never covers the target */
 .prompt { position: absolute; left: calc(50% + 28 * var(--u)); top: 50%; transform: translateY(-50%); display: grid; grid-template-columns: auto auto; column-gap: var(--s-2); align-items: center; max-width: calc(360 * var(--u)); padding: calc(6 * var(--u)) var(--s-3) calc(6 * var(--u)) calc(6 * var(--u)); }
-.prompt > .lbl { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prompt > .lbl { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .prompt > .sub { grid-column: 2; color: var(--hud-2); font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---- shared screen parts: menu toasts, confirm, scrollbars ------------------------------------------------------------ */
@@ -222,5 +247,5 @@
 .confirm { position: relative; width: calc(400 * var(--u)); max-width: calc(100vw - 32px); padding: var(--s-5); }
 .confirm .body { margin-top: var(--s-2); color: var(--ink-2); }
 .confirm .btns { display: flex; justify-content: flex-end; gap: var(--s-2); margin-top: var(--s-5); }
-.tw-root ::-webkit-scrollbar { width: 6px; height: 6px; } .tw-root ::-webkit-scrollbar-thumb { background: var(--fill-4); border-radius: 3px; } .tw-root ::-webkit-scrollbar-track { background: transparent; }
+.tw-root ::-webkit-scrollbar { width: 4px; height: 4px; } .tw-root ::-webkit-scrollbar-thumb { background: var(--fill-4); border-radius: 0; } .tw-root ::-webkit-scrollbar-track { background: transparent; }
 .tw-root * { scrollbar-width: thin; scrollbar-color: var(--fill-4) transparent; }
