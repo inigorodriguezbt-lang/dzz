@@ -7,7 +7,7 @@
 /* cells shrink when a large GUI scale leaves too little width for two 6-cell grids and a 300u centre */
 .tw-root { --gg: calc(2 * var(--u)); --gc: min(calc(58 * var(--u)), calc(((100vw - 32px - 388 * var(--u) - 12px) / 2 - 10 * var(--u)) / 6)); --gp: calc(var(--gc) + var(--gg)); --sl: calc(60 * var(--u)); }
 
-.screen.inv { align-items: stretch; background: rgba(0, 0, 0, 0.62); }
+.screen.inv { align-items: stretch; background: rgba(0, 0, 0, 0.72); }
 .inv-wrap { display: flex; flex-direction: column; align-items: center; gap: calc(10 * var(--u)); width: 100%; height: 100%; padding: calc(34 * var(--u)) 16px calc(14 * var(--u)); }
 .inv-panel { flex: 1; min-height: 0; width: 100%; display: grid; grid-template-columns: minmax(0, calc(6 * var(--gp) + 22 * var(--u))) minmax(calc(300 * var(--u)), calc(560 * var(--u))) minmax(0, calc(6 * var(--gp) + 22 * var(--u))); justify-content: center; gap: calc(14 * var(--u)); }
 /* the newest toast, in the band over the columns */
@@ -15,7 +15,7 @@
 
 /* ---- columns: a header bar, then the body (the outer two scroll on their own) ---------------------------------- */
 .inv-col { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-.inv-col.left, .inv-col.right { background: rgba(0, 0, 0, 0.58); box-shadow: inset 0 0 0 1px var(--line-1); }
+.inv-col.left, .inv-col.right { background: rgba(0, 0, 0, 0.62); box-shadow: inset 0 0 0 1px var(--line-1); }
 .inv-head { flex: none; display: flex; align-items: center; gap: var(--s-2); height: calc(28 * var(--u)); padding: 0 calc(4 * var(--u)) 0 calc(10 * var(--u)); background: var(--m-bar); box-shadow: inset 0 -1px 0 var(--line-1); color: var(--ink-1); font: 500 calc(13 * var(--u)) / 1 var(--font-cond); letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap; }
 .inv-head .ttl { flex: 1; min-width: 0; }
 .inv-head .when { flex: 1; min-width: 0; color: var(--ink-2); font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; }

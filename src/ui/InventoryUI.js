@@ -285,6 +285,9 @@ export class InventoryUI {
 		this.render();
 		this.preview.attach( this.charEl, this.game );
 		this.preview.sync( this.inv );
+		// like DayZ: the first-person arms and gun go away while you look through your gear (the preview shows them)
+		const vs = this.game?.viewScene;
+		if ( vs ) { this.vmWas = vs.visible; vs.visible = false; }
 	}
 
 	_onClose() {
@@ -295,6 +298,8 @@ export class InventoryUI {
 		this._closeSplit();
 		this._hideTip();
 		this.preview.detach();
+		const vs = this.game?.viewScene;
+		if ( vs && this.vmWas !== undefined ) { vs.visible = this.vmWas; this.vmWas = undefined; }
 		if ( this.other ) this.game?.events.emit( 'container:close', { container: this.other } );
 		this.other = null;
 		this.leaving = null;
