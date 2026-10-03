@@ -262,24 +262,30 @@ export function register( reg ) {
 	reg( 'pharm_crutch', ( s ) => {
 		const g = group();
 		if ( s.improvised ) {
-			const wood = M( 0x7a5a36, { rough: 0.85 } ), rag = M( 0xd8cfc0, { rough: 0.95 } );
-			add( g, G.tube( [ [ - 0.62, 0.016, 0 ], [ - 0.2, 0.016, 0.004 ], [ 0.2, 0.016, - 0.003 ], [ 0.46, 0.016, 0 ] ], 0.016, 16, 8 ), wood );
-			add( g, G.tube( [ [ 0.42, 0.014, 0 ], [ 0.52, 0.014, 0.05 ], [ 0.56, 0.014, 0.07 ] ], 0.011, 8, 6 ), wood );
-			add( g, G.cylZ( 0.016, 0.26, 8 ), wood, [ 0.57, 0.028, 0 ] );
-			add( g, G.cylZ( 0.028, 0.2, 12 ), rag, [ 0.57, 0.028, 0 ] );
-			for ( const z of [ - 0.07, - 0.02, 0.03, 0.08 ] ) add( g, G.torus( 0.029, 0.004, 4, 12 ), M( 0xb8ae9a, { rough: 0.95 } ), [ 0.57, 0.028, z ] );
-			add( g, G.cylX( 0.018, 0.08, 10 ), rag, [ 0.12, 0.018, 0 ] );
+			const wood = M( 0x7a5a36, { rough: 0.85 } ), rag = M( 0xd8cfc0, { rough: 0.95 } ), f = group();
+			add( f, G.tube( [ [ - 0.62, 0.016, 0 ], [ - 0.2, 0.016, 0.004 ], [ 0.2, 0.016, - 0.003 ], [ 0.46, 0.016, 0 ] ], 0.016, 16, 8 ), wood );
+			add( f, G.tube( [ [ 0.42, 0.014, 0 ], [ 0.52, 0.014, 0.05 ], [ 0.56, 0.014, 0.07 ] ], 0.011, 8, 6 ), wood );
+			add( f, G.cylZ( 0.016, 0.3, 8 ), wood, [ 0.57, 0.028, 0 ] );
+			add( f, G.cylZ( 0.032, 0.22, 12 ), rag, [ 0.57, 0.028, 0 ] );
+			for ( const z of [ - 0.08, - 0.025, 0.03, 0.085 ] ) add( f, G.torus( 0.033, 0.004, 4, 12 ), M( 0xb8ae9a, { rough: 0.95 } ), [ 0.57, 0.028, z ] );
+			add( f, G.cylX( 0.021, 0.1, 10 ), rag, [ 0.12, 0.021, 0 ] );
+			// propped on its padded crosspiece, so the T shows from the side too
+			f.rotation.x = 0.5;
+			g.add( f );
 			return ground( g );
 		}
 		const alu = M( 0xb8bec6, { rough: 0.3, metal: 0.85 } ), foam = M( 0x4a4e54, { rough: 0.9 } ), rub = MAT.rubber();
-		const y = 0.026;
-		for ( const sgn of [ 1, - 1 ] ) add( g, G.tube( [ [ 0.56, y, sgn * 0.045 ], [ 0.3, y, sgn * 0.042 ], [ 0.02, y, sgn * 0.03 ], [ - 0.14, y, sgn * 0.008 ] ], 0.0095, 16, 8 ), alu );
-		add( g, G.cylX( 0.012, 0.48, 12 ), alu, [ - 0.38, y, 0 ] );
-		for ( let i = 0; i < 6; i ++ ) add( g, G.cyl( 0.003, 0.003, 0.001, 8 ), MAT.darkMetal(), [ - 0.22 - i * 0.035, y + 0.0115, 0 ] );
-		add( g, G.cylX( 0.016, 0.05, 12 ), rub, [ - 0.63, y, 0 ] );
-		add( g, G.rbox( 0.05, 0.05, 0.13, 0.018, 3 ), foam, [ 0.585, 0.001, 0 ] );
-		add( g, G.cylZ( 0.013, 0.08, 12 ), foam, [ 0.14, y, 0 ] );
-		add( g, G.cylZ( 0.004, 0.1, 6 ), alu, [ 0.14, y, 0 ] );
+		const y = 0.026, f = group();
+		for ( const sgn of [ 1, - 1 ] ) add( f, G.tube( [ [ 0.56, y, sgn * 0.045 ], [ 0.3, y, sgn * 0.042 ], [ 0.02, y, sgn * 0.03 ], [ - 0.14, y, sgn * 0.008 ] ], 0.0095, 16, 8 ), alu );
+		add( f, G.cylX( 0.012, 0.48, 12 ), alu, [ - 0.38, y, 0 ] );
+		for ( let i = 0; i < 6; i ++ ) add( f, G.cyl( 0.003, 0.003, 0.001, 8 ), MAT.darkMetal(), [ - 0.22 - i * 0.035, y + 0.0115, 0 ] );
+		add( f, G.cylX( 0.016, 0.05, 12 ), rub, [ - 0.63, y, 0 ] );
+		add( f, G.rbox( 0.05, 0.05, 0.13, 0.018, 3 ), foam, [ 0.585, 0.001, 0 ] );
+		add( f, G.cylZ( 0.013, 0.08, 12 ), foam, [ 0.14, y, 0 ] );
+		add( f, G.cylZ( 0.004, 0.1, 6 ), alu, [ 0.14, y, 0 ] );
+		// it rests tipped on the edge of its pad and grip, the frame at an angle (flat, the side-on icon was one line)
+		f.rotation.x = 0.6;
+		g.add( f );
 		return ground( g );
 	} );
 
@@ -458,24 +464,31 @@ export function register( reg ) {
 	reg( 'pharm_leaves', ( s ) => {
 		const g = group();
 		if ( s.kind === 'aloe' ) {
-			const len = 0.24;
-			const geo = new THREE.CylinderGeometry( 0.003, 0.03, len, 12, 6 ).rotateZ( - PI / 2 );
-			geo.scale( 1, 0.5, 1 );
-			const p = geo.attributes.position;
-			for ( let i = 0; i < p.count; i ++ ) { const x = p.getX( i ); p.setY( i, p.getY( i ) + Math.pow( ( x + len / 2 ) / len, 2 ) * 0.02 ); }
-			geo.computeVertexNormals();
+			// two thick leaves cut from the plant, fanned from their cut bases (one alone is a sliver seen side on)
 			const skin = M( 0xffffff, { map: canvasTex( 'pharm:aloe', 128, 64, ( ctx, W, H ) => {
 				ctx.fillStyle = '#3e5e30'; ctx.fillRect( 0, 0, W, H );
 				const rr = rng( 51 );
 				for ( let i = 0; i < 45; i ++ ) { ctx.fillStyle = 'rgba(200,220,170,0.4)'; ctx.beginPath(); ctx.ellipse( rr() * W, rr() * H, 2.5, 1.2, 0, 0, PI * 2 ); ctx.fill(); }
 			} ), rough: 0.45 } );
-			add( g, geo, skin, [ 0, 0.013, 0 ] );
-			const tooth = M( 0xc8b07a, { rough: 0.6 } );
-			for ( let i = 0; i < 9; i ++ ) {
-				const x = - len / 2 + 0.02 + i * 0.022, w = 0.03 * ( 1 - ( x + len / 2 ) / len ) + 0.003;
-				for ( const sgn of [ 1, - 1 ] ) add( g, G.cone( 0.0026, 0.008, 5 ), tooth, [ x, 0.013, sgn * w ], [ sgn * PI / 2, 0, 0 ] );
-			}
-			add( g, G.cyl( 0.029, 0.029, 0.002, 12 ), M( 0xc8dcaa, { rough: 0.3 } ), [ - len / 2, 0.013, 0 ], [ 0, 0, PI / 2 ], [ 0.5, 1, 1 ] );
+			const tooth = M( 0xc8b07a, { rough: 0.6 } ), cutM = M( 0xc8dcaa, { rough: 0.3 } );
+			const leaf = ( len, w, yaw, z0 ) => {
+				const lg = group();
+				const geo = new THREE.CylinderGeometry( 0.003, w, len, 12, 6 ).rotateZ( - PI / 2 );
+				geo.scale( 1, 0.5, 1 );
+				const p = geo.attributes.position;
+				for ( let i = 0; i < p.count; i ++ ) { const x = p.getX( i ); p.setY( i, p.getY( i ) + Math.pow( ( x + len / 2 ) / len, 2 ) * 0.02 ); }
+				geo.computeVertexNormals();
+				add( lg, geo, skin, [ len / 2, 0.013, 0 ] );
+				for ( let i = 0; i < 9; i ++ ) {
+					const x = 0.02 + i * ( len - 0.04 ) / 9, ww = w * ( 1 - x / len ) + 0.003;
+					for ( const sgn of [ 1, - 1 ] ) add( lg, G.cone( 0.0026, 0.008, 5 ), tooth, [ x, 0.013, sgn * ww ], [ sgn * PI / 2, 0, 0 ] );
+				}
+				add( lg, G.cyl( w - 0.001, w - 0.001, 0.002, 12 ), cutM, [ 0, 0.013, 0 ], [ 0, 0, PI / 2 ], [ 0.5, 1, 1 ] );
+				lg.position.set( - 0.11, 0, z0 ); lg.rotation.y = yaw;
+				g.add( lg );
+			};
+			leaf( 0.24, 0.03, 0.22, - 0.016 );
+			leaf( 0.19, 0.025, - 0.36, 0.016 );
 			return ground( g );
 		}
 		const leaf = leafMat( 0x3e6a32, 0xa8b880, 'mk' );
@@ -492,7 +505,8 @@ export function register( reg ) {
 	// a poultice: a paste mound in an opened ti leaf, a strip folded over and tied
 	reg( 'pharm_poultice', ( s ) => {
 		const g = group(), leaf = leafMat( 0x3a7a2a, 0x6aa04a, 'ti' );
-		add( g, leafGeo( 0.16, 0.07, ( x, z ) => 0.002 + Math.abs( z ) * 0.25 ), leaf, [ - 0.08, 0, 0 ] );
+		// (broad enough that the icon looks down on the paste rather than along the leaf)
+		add( g, leafGeo( 0.16, 0.09, ( x, z ) => 0.002 + Math.abs( z ) * 0.25 ), leaf, [ - 0.08, 0, 0 ] );
 		const mound = G.sph( 0.026, 14, 8, 0, PI * 2, 0, PI / 2 ); mound.scale( 1.4, 0.55, 1 );
 		add( g, mound, M( s.paste ?? 0xe0901a, { rough: 0.85 } ), [ 0, 0.006, 0 ] );
 		add( g, leafGeo( 0.11, 0.05, ( x, z ) => 0.012 + Math.sin( ( x + 0.02 ) * 18 ) * 0.008 + Math.abs( z ) * 0.12 ), leaf, [ - 0.015, 0.004, - 0.004 ], [ 0, 0.25, 0 ] );
@@ -501,13 +515,14 @@ export function register( reg ) {
 	} );
 
 	// a ti-leaf wrap: leaves rolled into a bandage, a loose end, a fibre tie
+	// (a fat roll and a short loose end at an angle: it reads as a rolled bandage, not a flat leaf, from any side)
 	reg( 'pharm_wrap', () => {
 		const g = group(), leaf = leafMat( 0x3a7a2a, 0x6aa04a, 'ti' );
 		const roll = M( 0xffffff, { map: leafTex( 0x3a7a2a, 0x6aa04a, 'ti' ), rough: 0.55 } );
-		add( g, G.cylZ( 0.022, 0.07, 16 ), roll, [ - 0.02, 0.022, 0 ] );
-		add( g, G.cylZ( 0.009, 0.072, 10 ), M( 0x2a5a1a, { rough: 0.6 } ), [ - 0.02, 0.022, 0 ] );
-		add( g, leafGeo( 0.14, 0.06, ( x ) => 0.002 + x * 0.02 ), leaf, [ 0, 0, 0 ] );
-		add( g, G.torus( 0.0225, 0.0018, 4, 16 ), M( 0xb8a070, { rough: 0.9 } ), [ - 0.02, 0.022, 0.02 ] );
+		add( g, G.cylZ( 0.027, 0.075, 16 ), roll, [ - 0.03, 0.027, 0 ] );
+		add( g, G.cylZ( 0.011, 0.077, 10 ), M( 0x2a5a1a, { rough: 0.6 } ), [ - 0.03, 0.027, 0 ] );
+		add( g, leafGeo( 0.1, 0.06, ( x ) => 0.002 + x * 0.02 ), leaf, [ - 0.012, 0, 0.01 ], [ 0, - 0.45, 0 ] );
+		for ( const z of [ - 0.022, 0.022 ] ) add( g, G.torus( 0.0275, 0.0022, 4, 16 ), M( 0xb8a070, { rough: 0.9 } ), [ - 0.03, 0.027, z ] );
 		return g;
 	} );
 }

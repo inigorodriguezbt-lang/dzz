@@ -144,7 +144,7 @@ defineItems( [
 			label: L( 'LĀ SHIELD', 'Sunscreen · SPF 50 · Reef safe', 0xf28a1a, 0xffffff, 0xf2c21a, 'sun', 'band', { glyphColor: 0xf2e21a, size: 0.26 } ), labelY: 0.18, labelH: 0.44 } ),
 		desc: 'Blocks sunburn for 3 hours.' } ),
 	med( 'vinegar_spray', 'Vinegar spray', { w: 0.45, size: 1, uses: 6, use: 2, pain: 0.3, cure: { sting: 1 }, need: [ 'sting' ], needMsg: 'No sting', verb: 'Douse sting', gerund: 'Dousing sting',
-		sound: 'pharm_spritz', rarity: 'uncommon', tags: [ 'beach', 'surf', 'vinegar', 'plastic' ],
+		sound: 'pharm_spritz', rarity: 'uncommon', tags: [ 'beach', 'surf', 'plastic' ],
 		model: P( 'trigger', { body: 0xf2f2ee, liquid: 0xf0e4b8, head: 0xc0282a, label: L( 'VINEGAR', 'Jellyfish stings · Lifeguard', 0xf2c21a, 0xc0282a, 0xc0282a, 'wave', 'band', { glyphColor: 0xc0282a, size: 0.26 } ) } ),
 		desc: 'Stops a jellyfish sting.' } ),
 
@@ -305,8 +305,9 @@ add( 'site_campsite', [ [ 'heat_pack', 0.2 ], [ 'kukui_nuts', 0.3, [ 2, 5 ] ], [
 	[ 'fire_tinder', 0.4, [ 1, 3 ] ], [ 'cotton_balls', 0.2 ], [ 'olena_root', 0.2 ], [ 'ti_leaf_wrap', 0.2 ], [ 'stone_mortar', 0.12 ] ] );
 add( 'site_hiker', [ [ 'sunscreen', 0.6 ], [ 'elastic_bandage', 0.4 ], [ 'glucose_gel', 0.5 ], [ 'ors_packet', 0.4 ], [ 'inhaler', 0.08 ], [ 'olena_root', 0.25 ], [ 'uhaloa_root', 0.25 ],
 	[ 'popolo_berries', 0.3 ], [ 'mamaki_leaves', 0.3 ], [ 'awa_root', 0.12 ], [ 'fire_tinder', 0.3 ], [ 'cold_pack', 0.2 ], [ 'butterfly_strips', 0.3 ], [ 'crutch_improvised', 0.08 ] ] );
-add( 'site_farm_stand', [ [ 'noni_fruit', 0.9, [ 1, 3 ] ], [ 'olena_root', 0.6, [ 1, 3 ] ], [ 'awa_root', 0.3 ], [ 'kukui_nuts', 0.5, [ 3, 6 ] ], [ 'aloe_leaf', 0.5 ],
-	[ 'mamaki_leaves', 0.4, [ 2, 4 ] ], [ 'popolo_berries', 0.3 ], [ 'uhaloa_root', 0.2 ] ] );
+// (a roadside stand sells the remedy herbs beside the fruit: about one stand in five shows one)
+add( 'site_farm_stand', [ [ 'noni_fruit', 1.3, [ 1, 3 ] ], [ 'olena_root', 0.9, [ 1, 3 ] ], [ 'awa_root', 0.4 ], [ 'kukui_nuts', 0.7, [ 3, 6 ] ], [ 'aloe_leaf', 0.75 ],
+	[ 'mamaki_leaves', 0.6, [ 2, 4 ] ], [ 'popolo_berries', 0.4 ], [ 'uhaloa_root', 0.3 ] ] );
 add( 'site_fishing_spot', [ [ 'vinegar_spray', 0.4 ], [ 'sunscreen', 0.5 ] ] );
 add( 'site_fema_camp', [ [ 'ors_packet', 1, [ 1, 3 ] ], [ 'hand_sanitizer', 0.8 ], [ 'thermometer', 0.4 ], [ 'cold_pack', 0.3 ], [ 'doxycycline', 0.15 ], [ 'crutch', 0.2 ],
 	[ 'cotton_balls', 0.3 ], [ 'rubbing_alcohol', 0.4 ], [ 'sunscreen', 0.4 ], [ 'bandage_dirty', 0.4 ], [ 'arm_sling', 0.25 ] ] );

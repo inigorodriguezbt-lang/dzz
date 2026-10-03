@@ -591,12 +591,15 @@ export function register( reg ) {
 		return ground( g );
 	} );
 
+	// the cord in a loose coil (laid out straight, its icon was a hairline), the steel needle and the ring
 	reg( 'out_stringer', () => {
-		const g = group();
-		add( g, tube( [ [ - 0.25, 0, 0 ], [ - 0.1, 0, 0.04 ], [ 0.05, 0, - 0.02 ], [ 0.2, 0, 0.02 ] ], 0.004, 24, 5 ), fabric( 0xf2c21a, 'weave', 0xc89a1a, { rep: 20, rough: 0.9 } ) );
-		add( g, CX( 0.003, 0.09, 8, 0.0015 ), steel(), [ 0.25, 0, 0.02 ], [ 0, 0.2, 0 ] );
-		add( g, new THREE.ConeGeometry( 0.003, 0.02, 6 ).rotateZ( - PI / 2 ), steel(), [ 0.302, 0, 0.009 ], [ 0, 0.2, 0 ] );
-		add( g, TORUS( 0.02, 0.003, 6, 20 ).rotateX( PI / 2 ), steel(), [ - 0.27, 0, 0 ] );
+		const g = group(), pts = [];
+		for ( let i = 0; i <= 40; i ++ ) { const a = i / 40 * PI * 2.6, r = 0.07 - i * 0.0006; pts.push( [ Math.cos( a ) * r - 0.02, 0.004 + i * 0.0002, Math.sin( a ) * r ] ); }
+		pts.push( [ 0.08, 0.006, 0.03 ] );
+		add( g, tube( pts, 0.004, 80, 5 ), fabric( 0xf2c21a, 'weave', 0xc89a1a, { rep: 20, rough: 0.9 } ) );
+		add( g, CX( 0.003, 0.09, 8, 0.0015 ), steel(), [ 0.125, 0.006, 0.04 ], [ 0, - 0.22, 0 ] );
+		add( g, new THREE.ConeGeometry( 0.003, 0.02, 6 ).rotateZ( - PI / 2 ), steel(), [ 0.178, 0.006, 0.052 ], [ 0, - 0.22, 0 ] );
+		add( g, TORUS( 0.02, 0.003, 6, 20 ).rotateX( PI / 2 ), steel(), [ 0.05, 0.003, - 0.005 ] );
 		return ground( g );
 	} );
 
@@ -671,7 +674,8 @@ export function register( reg ) {
 	reg( 'out_rack_bundle', () => {
 		const g = group(), bark = wood( 0x6a4a2e, 0.95 );
 		for ( let i = 0; i < 4; i ++ ) add( g, CX( 0.022, 1.5, 7 ), bark, [ 0, 0.022 + ( i >= 2 ? 0.04 : 0 ), ( i % 2 - 0.5 ) * 0.045 + ( i >= 2 ? 0.02 : 0 ) ], [ 0, ( i - 1.5 ) * 0.02, 0 ] );
-		for ( let i = 0; i < 5; i ++ ) add( g, CX( 0.012, 0.6, 6 ), bark, [ ( i - 2 ) * 0.04, 0.09, 0 ], [ 0, PI / 2 + ( i - 2 ) * 0.05, 0 ] );
+		// the cross sticks laid over the poles (long enough that the icon looks down on the bundle)
+		for ( let i = 0; i < 5; i ++ ) add( g, CX( 0.012, 0.74, 6 ), bark, [ ( i - 2 ) * 0.04, 0.09, 0 ], [ 0, PI / 2 + ( i - 2 ) * 0.05, 0 ] );
 		for ( const x of [ - 0.5, 0.5 ] ) add( g, CX( 0.06, 0.03, 10 ), cord( 0xc8b07a ), [ x, 0.045, 0.01 ], null, [ 1, 0.9, 1.3 ] );
 		return ground( g );
 	} );
@@ -679,7 +683,9 @@ export function register( reg ) {
 	reg( 'out_frame_bundle', () => {
 		const g = group(), bark = wood( 0x7a5a38, 0.95 );
 		for ( let i = 0; i < 4; i ++ ) add( g, CX( 0.025, 1.45, 7 ), bark, [ 0, 0.025 + ( i >= 2 ? 0.045 : 0 ), ( i % 2 - 0.5 ) * 0.05 + ( i >= 2 ? 0.024 : 0 ) ], [ 0, ( i - 1.5 ) * 0.015, 0 ] );
-		add( g, spiral( 0.03, 0.08, 3, 0.005, 0.11 ), cord( 0xc8b07a ) );
+		// the two cross bars of the frame laid across the poles, crossed
+		for ( const a of [ - 0.5, 0.5 ] ) add( g, CX( 0.02, 0.8, 7 ), bark, [ a * 0.2, 0.11, 0 ], [ 0, PI / 2 + a, 0 ] );
+		add( g, spiral( 0.03, 0.08, 3, 0.005, 0.11 ), cord( 0xc8b07a ), [ 0.3, 0.02, 0 ] );
 		for ( const x of [ - 0.45, 0.45 ] ) add( g, CX( 0.065, 0.03, 10 ), cord( 0xc8b07a ), [ x, 0.05, 0.012 ], null, [ 1, 0.9, 1.3 ] );
 		return ground( g );
 	} );
@@ -734,9 +740,9 @@ export function register( reg ) {
 	reg( 'out_thatch_kit', () => {
 		const g = group();
 		const m = fabric( 0xb8a060, 'weave', 0x8a7a40, { rep: 4, rough: 0.95 } );
-		for ( let i = 0; i < 3; i ++ ) add( g, RB( 0.8, 0.028, 0.5, 0.008 ), m, [ ( i - 1 ) * 0.02, 0.014 + i * 0.03, ( i - 1 ) * 0.02 ], [ 0, ( i - 1 ) * 0.05, 0 ] );
+		for ( let i = 0; i < 3; i ++ ) add( g, RB( 0.8, 0.028, 0.66, 0.008 ), m, [ ( i - 1 ) * 0.02, 0.014 + i * 0.03, ( i - 1 ) * 0.02 ], [ 0, ( i - 1 ) * 0.05, 0 ] );
 		for ( const z of [ - 0.12, 0.12 ] ) add( g, CX( 0.025, 1.4, 7 ), wood( 0x6a4a2e, 0.95 ), [ 0, 0.12, z ] );
-		for ( const x of [ - 0.3, 0.3 ] ) add( g, TORUS( 0.08, 0.005, 4, 16 ).rotateY( PI / 2 ), M( 0xffffff, { map: fibreTex( 0x8a6438 ), rough: 0.95 } ), [ x, 0.06, 0 ], null, [ 1, 1.0, 3.6 ] );
+		for ( const x of [ - 0.3, 0.3 ] ) add( g, TORUS( 0.08, 0.005, 4, 16 ).rotateY( PI / 2 ), M( 0xffffff, { map: fibreTex( 0x8a6438 ), rough: 0.95 } ), [ x, 0.06, 0 ], null, [ 1, 1.0, 4.3 ] );
 		return ground( g );
 	} );
 
@@ -780,7 +786,7 @@ export function register( reg ) {
 		add( g, tube( bow, 0.009, 20, 6 ), bark );
 		add( g, tube( [ [ - 0.255, 0, 0.004 ], [ 0, 0, 0.01 ], [ 0.255, 0, 0.004 ] ], 0.0015, 8, 4 ), cord( 0x2a2a2a ) );
 		add( g, CX( 0.009, 0.22, 8 ), pale, [ 0.0, 0.0, - 0.06 ] );
-		add( g, RB( 0.26, 0.016, 0.06, 0.003 ), M( 0xffffff, { map: charTex(), rough: 0.9 } ), [ 0.02, - 0.003, - 0.14 ] );
+		add( g, RB( 0.26, 0.016, 0.06, 0.003 ), M( 0xffffff, { map: charTex(), rough: 0.9 } ), [ 0.02, - 0.003, - 0.17 ] );
 		add( g, RB( 0.06, 0.03, 0.05, 0.01 ), bark, [ - 0.2, 0.0, - 0.07 ] );
 		return ground( g );
 	} );

@@ -96,8 +96,12 @@ function waterTrap( type ) {
 		},
 		show( p, g ) {
 			// the float rides on the surface, however deep the trap sits
+			const surf = ( g.physics?.waterLevel?.( p.pos.x, p.pos.z ) ?? p.pos.y ) - p.pos.y;
 			const f = p._obj?.userData?.float;
-			if ( f ) f.position.y = ( g.physics?.waterLevel?.( p.pos.x, p.pos.z ) ?? p.pos.y ) - p.pos.y;
+			if ( f ) f.position.y = surf;
+			// and the trap is picked by it: the sea's own prompt (Drink, Fill) is on the surface, nearer than the trap
+			// under it (Placeables picks with a sphere at _cy, radius _rr)
+			p._cy = Math.max( 0.15, surf ); p._rr = 0.55;
 		},
 		update( p, dt, g, dh ) {
 			const D = p.data;

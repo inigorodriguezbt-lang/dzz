@@ -9,6 +9,9 @@
 //   the mixes on the real Combine: herbs in the mortar, teas at a fire, noni juice, kukui oil and salve, candles,
 //   used bandages boiled, soaked and washed, swabs, tinder, ORS; herbs eaten raw; save and load
 import * as THREE from 'three';
+// (canvas labels and leaf textures for the model checks at the end)
+import { installFakeDom } from './lib/fake-dom.mjs';
+installFakeDom();
 const warnings = [];
 const warn0 = console.warn;
 console.warn = ( ...a ) => { warnings.push( a.join( ' ' ) ); };
@@ -37,7 +40,7 @@ let fails = 0, passes = 0;
 const ok = ( cond, msg ) => { if ( cond ) passes ++; else { fails ++; console.error( '  ✗ ' + msg ); } };
 const near = ( a, b, eps, msg ) => ok( Math.abs( a - b ) <= eps, `${msg} (${a} vs ${b})` );
 // a run with Math.random pinned (a chance that must, or must not, come up)
-const withRandom = ( v, fn ) => { const r0 = Math.random; Math.random = () => v; try { return fn(); } finally { Math.random = r0; } };
+const withRandom = ( v, fn ) => { const r0 = Math.random; Math.random = typeof v === 'function' ? v : () => v; try { return fn(); } finally { Math.random = r0; } };
 
 // the pharmacy's ids, from its def file
 const SRC = fs.readFileSync( new URL( '../src/game/items/defs/ext/pharmacy.js', import.meta.url ), 'utf8' );
@@ -90,7 +93,20 @@ for ( const r of allRecipes().filter( r => MINE.includes( r.out[ 0 ] ) || r.in.s
 	const ph = share( 'pharmacy', 800 ), bath = share( 'house_bathroom', 800 ), farm = share( 'site_farm_stand', 800 ), office = share( 'office', 800 );
 	ok( ph > 0.2 && ph < 0.6, `a pharmacy shelf holds the new medicine, not only (${( ph * 100 ).toFixed( 0 )}%)` );
 	ok( bath > 0.2 && bath < 0.6, `a bathroom (${( bath * 100 ).toFixed( 0 )}%)` );
-	ok( farm > 0.1 && farm < 0.45, `the farm stand's herbs (${( farm * 100 ).toFixed( 0 )}%)` );
+	// (a share with room to spare: the other domains keep adding to the stand's table)
+	ok( farm > 0.08 && farm < 0.45, `the farm stand's herbs (${( farm * 100 ).toFixed( 0 )}%)` );
+	const HERBS = [ 'noni_fruit', 'olena_root', 'awa_root', 'kukui_nuts', 'aloe_leaf', 'mamaki_leaves', 'popolo_berries', 'uhaloa_root' ];
+	const seen = new Set();
+	for ( let i = 0; i < 3000; i ++ ) for ( const s of rollLoot( 'site_farm_stand', R, 1 ) ) seen.add( s.id );
+	ok( HERBS.every( id => seen.has( id ) ), `every remedy herb shows at a farm stand (missing: ${HERBS.filter( id => ! seen.has( id ) ).join( ', ' ) || 'none'})` );
+	// a stand has three counter slots on its own table (p 0.6, 0.45, 0.35: sites/layout.js): about one in six shows a herb
+	let stands = 0, withHerb = 0;
+	for ( let i = 0; i < 1500; i ++ ) {
+		let got = false;
+		for ( const p of [ 0.6, 0.45, 0.35 ] ) if ( R() < p && rollLoot( 'site_farm_stand', R, 1 ).some( s => HERBS.includes( s.id ) ) ) got = true;
+		stands ++; if ( got ) withHerb ++;
+	}
+	ok( withHerb / stands > 0.1, `farm stands with a remedy herb out (${( withHerb / stands * 100 ).toFixed( 0 )}%)` );
 	ok( office < 0.15, `an office: little of it (${( office * 100 ).toFixed( 0 )}%)` );
 	let aed = 0, rolls = 0;
 	for ( const t of [ 'hospital', 'fire_station', 'school', 'office' ] ) for ( let i = 0; i < 500; i ++ ) for ( const s of rollLoot( t, R ) ) { rolls ++; if ( s.id === 'defibrillator' ) aed ++; }
@@ -152,7 +168,8 @@ function fresh() {
 console.log( 'box jellyfish' );
 {
 	fresh();
-	const count = ( n ) => { let k = 0; for ( let i = 0; i < n; i ++ ) { S.sting = 0; S._ailRoll(); if ( S.sting > 0 ) k ++; } return k; };
+	// (seeded, so the rates compare the same way every run)
+	const count = ( n ) => { let sd = 12345, k = 0; withRandom( () => ( sd = ( sd * 16807 ) % 2147483647 ) / 2147483647, () => { for ( let i = 0; i < n; i ++ ) { S.sting = 0; S._ailRoll(); if ( S.sting > 0 ) k ++; } } ); return k; };
 	p.swimming = true; sky.night = 1;
 	S._ailEnv();
 	const nightN = count( 6000 );
@@ -741,6 +758,64 @@ console.log( 'save and load' );
 	S.stung(); S.sunburn = 0.5; S.update( 0.1 );
 	ok( S.sting === 0 && S.sunburn === 0, 'creative: none of it' );
 	game.mode = 'survival';
+}
+
+// ---- review (the pharmacy and outdoors pass) ----------------------------------------------------------------------
+console.log( 'review' );
+{
+	// box jellyfish: night swims (and dusk), never by day
+	fresh();
+	p.swimming = true; sky.night = 0; S._ailEnv();
+	let day = 0;
+	for ( let i = 0; i < 20000; i ++ ) { S.sting = 0; S._ailRoll(); if ( S.sting > 0 ) day ++; }
+	ok( day === 0, `no stings by day (${day} in 20000 s)` );
+	sky.night = 0.3;
+	let dusk = 0;
+	withRandom( 0.0005, () => { S.sting = 0; S._ailRoll(); if ( S.sting > 0 ) dusk ++; } );
+	ok( dusk === 1, 'at dusk they come' );
+	p.swimming = false;
+	// a fever is not the heat: leptospirosis or an infected cut warms you without building towards heat stroke
+	fresh();
+	S.lepto = 1; S.leptoPeak = true;
+	for ( let i = 0; i < 400; i ++ ) { S.temp = 38.9; S._ailments( 0.5 ); }
+	ok( S.heat < 0.05, `a fever of 38.9 °C: no heat stroke from it (${S.heat.toFixed( 2 )})` );
+	fresh();
+	for ( let i = 0; i < 400; i ++ ) { S.temp = 38.9; S._ailments( 0.5 ); }
+	ok( S.heat > AIL.heat.exhaust, `38.9 °C from the sun and running: heat exhaustion (${S.heat.toFixed( 2 )})` );
+	// a small infection in a cut that has closed passes on its own; a big one doesn't
+	fresh();
+	S.cut = 0.12; S.wound = 0;
+	step( 600, 1 );
+	ok( S.cut === 0 && toasts.includes( 'Infection gone' ), 'a small infected cut, closed: it passes' );
+	fresh();
+	S.cut = 0.4; S.wound = 0;
+	step( 60, 1 );
+	ok( S.cut > 0.4, 'a bad one keeps growing until treated' );
+	// an untreated infected cut gets serious slowly (game hours, not minutes)
+	fresh();
+	S.cut = 0.08; S.wound = 300;
+	let t = 0;
+	while ( S.cut < 0.5 && t < 7200 ) { S._ailments( 1 ); S.wound = Math.max( S.wound, 1 ); t ++; }
+	ok( t > 600, `from infected to fever: ${( t / 60 ).toFixed( 0 )} min of play` );
+	// the lifeguard's vinegar spray is medicine, not pickling vinegar: the kitchen's pickle mix doesn't take it
+	fresh();
+	put( 'vinegar_spray' );
+	const jar = put( 'canning_jar' ), cab = put( 'cabbage' );
+	ok( ! getItem( 'vinegar_spray' ).tags.includes( 'vinegar' ), 'the spray is not tagged vinegar' );
+	if ( combo( 'pickle' ) ) ok( KB.state( combo( 'pickle' ), cab, jar ).reason === 'Need vinegar', 'pickling with only the spray: "Need vinegar"' );
+	// models: what the icon camera sees (render/Icons.js: long things side on, flat things from above); a leaf or a
+	// poultice seen side on is a green line
+	const { buildItemModel } = await import( '../src/render/ItemModels.js' );
+	const box = ( id ) => new THREE.Box3().setFromObject( buildItemModel( getItem( id ) ), true ).getSize( new THREE.Vector3() );
+	for ( const id of [ 'aloe_leaf', 'olena_poultice', 'popolo_poultice', 'ti_leaf_wrap', 'mamaki_leaves' ] ) {
+		const sz = box( id );
+		ok( sz.x <= 2.2 * Math.max( sz.y, sz.z ), `${id}: not a side-on sliver in its icon (${sz.x.toFixed( 2 )} × ${sz.z.toFixed( 2 )})` );
+	}
+	ok( box( 'crutch' ).y > 0.05, 'the crutch lies tipped on its pad, its frame showing from the side' );
+	for ( const id of MINE ) {
+		const sz = box( id );
+		ok( sz.y > 0.002 && sz.y < 0.6 && sz.x < 1.6 && sz.x > 0.01, `${id}: a sane size (${sz.x.toFixed( 2 )} × ${sz.y.toFixed( 2 )} × ${sz.z.toFixed( 2 )})` );
+	}
 }
 
 console.log( `\n${passes} passed, ${fails} failed` );

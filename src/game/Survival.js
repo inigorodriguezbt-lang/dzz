@@ -30,9 +30,9 @@ export const DIFFICULTY = {
 
 // the ailments' numbers (per real second unless noted; severities 0..1)
 export const AIL = {
-	// a box jellyfish sting while swimming: chance per second by night / at dusk / by day; ×3 on the jellyfish days
-	// (8-10 days after the full moon); a rash guard or wetsuit ×0.35
-	sting: { night: 1 / 150, dusk: 1 / 400, day: 1 / 2000, add: 0.55, fade: 0.0025, drain: 0.02 },
+	// a box jellyfish sting while swimming: chance per second by night / at dusk (none by day); ×moon on the jellyfish
+	// days (8-10 days after the full moon); a rash guard or wetsuit ×0.35
+	sting: { night: 1 / 180, dusk: 1 / 600, day: 0, moon: 2.5, add: 0.55, fade: 0.0025, drain: 0.02 },
 	// a centipede in the brush (moist open ground off roads and towns) while moving: night / day, ×1.5 crouched
 	centipede: { night: 1 / 600, day: 1 / 2400, add: 0.7, fade: 0.002, sleep: 0.2 },
 	// sunburn: full sun on bare skin; covered skin, shade and clouds cut it; sunscreen ×0.12
@@ -41,8 +41,9 @@ export const AIL = {
 	heat: { from: 38.1, rate: 0.006, fade: 0.003, exhaust: 0.3, stroke: 0.65 },
 	// leptospirosis: chance per drink of untreated water, incubation (s), rise, recovery
 	lepto: { chance: 0.15, incub: [ 240, 600 ], rise: 0.0008, fall: 0.0006 },
-	// an open cut: seconds to close, infection chance per second by dressing (none, clean, dirty) and when cleaned
-	wound: { close: 600, risk: 0.0005, dress: [ 1, 0.3, 2 ], clean: 0.25, soil: 480, grow: 0.0009 },
+	// an open cut: seconds to close, infection chance per second by dressing (none, clean, dirty) and when cleaned;
+	// an infected cut grows (grow), and once closed a small one (under `settle`) fades on its own (fade)
+	wound: { close: 600, risk: 0.0003, dress: [ 1, 0.3, 2 ], clean: 0.25, soil: 480, grow: 0.0006, settle: 0.25, fade: 0.0003 },
 	cough: { cold: 35.9, rate: 0.0012, fade: 0.0006 },
 	sprain: { chance: 0.45, fade: 0.0006, sling: 3 },
 	eye: { rate: 0.02, fade: 0.004 },
@@ -325,7 +326,7 @@ export class Survival {
 		if ( ! m ) return res;
 		if ( m.infection ) {
 			if ( this.wound > 0 && ! this.woundClean ) { this.woundClean = true; res.treated = true; }
-			if ( this.cut > 0 ) { this.cut = Math.max( 0, this.cut - m.infection * 1.5 ); res.treated = true; if ( this.cut < 0.02 ) { this.cut = 0; this.msg( 'cutok', 'Infection gone', 'good', 0 ); } }
+			if ( this.cut > 0 ) { this.cut = Math.max( 0, this.cut - m.infection * 1.5 ); res.treated = true; if ( this.cut < 0.02 ) { this.cut = 0; this.msg( 'cutok', 'Infection gone', 'good', 10 ); } }
 			// the antibiotics (not a wipe of antiseptic) fight leptospirosis, and stop it incubating
 			if ( m.infection >= 0.3 && ( this.lepto > 0 || this.leptoT > 0 ) ) { this.lepto = Math.max( 0, this.lepto - m.infection * 2 ); this.leptoT = 0; res.treated = true; }
 		}
@@ -618,7 +619,7 @@ export class Survival {
 			let c = night > 0.5 ? A.sting.night : night > 0.1 ? A.sting.dusk : A.sting.day;
 			// box jellyfish come inshore 8-10 days after the full moon
 			const ph = g.world?.sky?.moonPhase;
-			if ( ph != null && ph > 0.75 && ph < 0.86 ) c *= 3;
+			if ( ph != null && ph > 0.75 && ph < 0.86 ) c *= A.sting.moon;
 			if ( this._suit ) c *= 0.35;
 			if ( Math.random() < c ) this.stung();
 		}
@@ -689,8 +690,10 @@ export class Survival {
 		// the sun on you, thirst and burnt skin heat the body
 		tAdd += this._uv * 0.35 * ( this._hat ? 0.7 : 1 ) + ( this.thirst < 20 ? ( 20 - this.thirst ) / 20 * 0.6 : 0 ) + this.sunburn * 0.25;
 
-		// heat exhaustion, then heat stroke: water, shade, a swim or a cold pack bring it down
-		if ( this.temp > A.heat.from ) this.heat = clamp01( this.heat + dt * ( this.temp - A.heat.from ) * A.heat.rate );
+		// heat exhaustion, then heat stroke: water, shade, a swim or a cold pack bring it down. A fever (leptospirosis,
+		// an infected cut) raises the temperature but is not the heat: it doesn't build towards heat stroke
+		const fever = this.lepto * 1.1 + ( this.cut > 0.5 ? ( this.cut - 0.5 ) * 2 : 0 );
+		if ( this.temp - fever > A.heat.from ) this.heat = clamp01( this.heat + dt * ( this.temp - fever - A.heat.from ) * A.heat.rate );
 		else this.heat = Math.max( 0, this.heat - dt * A.heat.fade * ( p.swimming || this._indoorsA ? 2 : 1 ) );
 		if ( this.heat > A.heat.stroke ) {
 			this.health -= dt * 0.05 * ( this.heat - A.heat.stroke ) / ( 1 - A.heat.stroke );
@@ -725,12 +728,14 @@ export class Survival {
 			}
 			if ( this.wound <= 0 ) { this.wound = 0; this.woundClean = false; this.dressing = 0; this.dressAge = 0; }
 		}
-		// an infected cut grows until treated (cleaned and dressed clean, a small one settles); a big one brings fever
+		// an infected cut grows until treated (cleaned and dressed clean, a small one settles; once the cut has closed a
+		// small one fades on its own); a big one brings fever
 		if ( this.cut > 0 ) {
 			if ( this.woundClean && this.dressing === 1 && this.cut < 0.4 ) this.cut = Math.max( 0, this.cut - dt * 0.0004 );
+			else if ( this.wound <= 0 && this.cut < A.wound.settle ) { this.cut = Math.max( 0, this.cut - dt * A.wound.fade ); if ( this.cut <= 0 ) this.msg( 'cutok', 'Infection gone', 'good', 10 ); }
 			else this.cut = Math.min( 1, this.cut + dt * A.wound.grow );
 			this.pain = Math.max( this.pain, this.cut * 0.4 );
-			if ( this.cut > 0.5 ) { tAdd += ( this.cut - 0.5 ) * 2; this.health -= dt * 0.02 * ( this.cut - 0.5 ); this.msg( 'cutfever', 'Fever', 'bad', 120 ); }
+			if ( this.cut > 0.5 ) { tAdd += ( this.cut - 0.5 ) * 2; this.health -= dt * 0.012 * ( this.cut - 0.5 ); this.msg( 'cutfever', 'Fever', 'bad', 120 ); }
 		}
 
 		// a cough from the cold (or a fever): fits the infected hear, unless an inhaler opens the chest

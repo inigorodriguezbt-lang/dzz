@@ -647,6 +647,55 @@ console.log( 'looks' );
 	ok( !! t.userData.float, 'a trap has a float to lift to the surface' );
 }
 
+// ---- review (the pharmacy and outdoors pass) ----------------------------------------------------------------------
+console.log( 'review' );
+{
+	// the throw net from the sand: the crosshair on the beach, the sea a few metres ahead (as in the real game)
+	const h0 = hf.heightAt, f0 = game.fishing;
+	game.player.pos.set( 0, 2, 0 ); game.player.swimming = false;
+	game.camera.position.set( 0, 3.6, 0 ); game.camera.rotation.set( - 0.5, 0, 0 ); game.camera.updateMatrixWorld( true );
+	game.fishing = { target: () => null };
+	wl = 0;
+	hf.heightAt = ( x, z ) => z < - 4 ? - 1.1 : 0.5;
+	const spot = D.netSpot( game );
+	ok( spot && Math.abs( spot.depth - 1.1 ) < 0.01 && spot.pos.z < - 4 && spot.pos.z > - 5, `facing the sea from the sand: the net lands in it (${spot && spot.depth.toFixed( 2 )} m)` );
+	hf.heightAt = ( x, z ) => z < - 4 ? - 6 : 0.5;
+	ok( D.netSpot( game ) === null, 'deep water ahead: no' );
+	hf.heightAt = ( x, z ) => z < - 12 ? - 1 : 0.5;
+	ok( D.netSpot( game ) === null, 'the sea out of reach: no' );
+	// the crosshair on the water still wins, when it is within a throw
+	game.fishing = { target: () => ( { pos: new THREE.Vector3( 0, 0, - 6 ), depth: 0.8 } ) };
+	ok( D.netSpot( game )?.depth === 0.8, 'the water under the crosshair' );
+	hf.heightAt = h0; game.fishing = f0; game.camera.rotation.set( 0, 0, 0 ); game.camera.updateMatrixWorld( true );
+	// a trap set in the sea is picked by its float: looking down at it from above the water, its prompt is nearer than
+	// the surface (where the sea's own Drink / Fill prompt sits)
+	{
+		wl = 1.2; ground = 0.1;
+		const tr = M.add( 'fish_trap', makeStack( 'fish_trap' ), at( 60, 0 ), 0 );
+		M.refresh( tr );
+		// (wading beside it, looking down at the basket on the bottom)
+		const eye = new THREE.Vector3( 61.3, 2.9, 0 ), dir = new THREE.Vector3( 60, 0.2, 0 ).sub( eye ).normalize();
+		const c = M.provide( { origin: eye, dir }, 4.1 )?.find( x => x );
+		const tSurface = ( eye.y - wl ) / - dir.y;
+		ok( Math.abs( tr._cy - 1.1 ) < 0.01 && c && c.t < tSurface, `looking down at it: the trap's prompt (t ${c?.t?.toFixed( 2 )}) before the water (t ${tSurface.toFixed( 2 )})` );
+		M.remove( tr, { give: false } );
+		wl = 0; ground = 2;
+	}
+	// every non-crafted item lies where you can see it: the pig trap at the hardware store and the farm stands
+	for ( const tbl of [ 'hardware', 'site_farm_stand' ] ) ok( compileTable( LOOT_TABLES[ tbl ] ).entries.some( e => e.ids.includes( 'pig_trap' ) ), `a pig trap in ${tbl}` );
+	// models: kits and coils the icon camera looks down on (long thin ones it shows side on: a hairline)
+	const { buildItemModel } = await import( '../src/render/ItemModels.js' );
+	const box = ( id ) => new THREE.Box3().setFromObject( buildItemModel( getItem( id ) ), true ).getSize( new THREE.Vector3() );
+	for ( const id of [ 'fish_stringer', 'bow_drill', 'smoking_rack', 'tanning_frame', 'thatch_shelter' ] ) {
+		const sz = box( id );
+		ok( sz.x <= 2.2 * Math.max( sz.y, sz.z ), `${id}: its icon looks down on it (${sz.x.toFixed( 2 )} × ${sz.z.toFixed( 2 )})` );
+	}
+	for ( const id of MINE ) {
+		const sz = box( id );
+		ok( sz.y > 0.002 && sz.y < 0.7 && sz.x > 0.01 && sz.x < 2.5, `${id}: a sane size (${sz.x.toFixed( 2 )} × ${sz.y.toFixed( 2 )} × ${sz.z.toFixed( 2 )})` );
+	}
+}
+
 Math.random = random0;
 console.log( `\n${passes} passed, ${fails} failed` );
 process.exit( fails ? 1 : 0 );

@@ -199,7 +199,7 @@ add( 'sports', [ [ 'ferro_rod', 0.5 ], [ 'paracord', 0.6 ], [ 'carabiner', 0.5 ]
 	[ 'hammock', 0.3 ], [ 'bug_spray', 0.6 ], [ 'filter_straw', 0.35 ], [ 'gravity_filter', 0.1 ], [ 'fishing_lure', 0.4 ], [ 'squid_jig', 0.3 ], [ 'spear_gun', 0.08 ],
 	[ 'hawaiian_sling', 0.2 ], [ 'deer_call', 0.2 ], [ 'skinning_knife', 0.25 ], [ 'mosquito_net', 0.3 ], [ 'signal_mirror', 0.15 ], [ 'solar_still', 0.08 ], [ 'fishing_line', 0.4 ] ] );
 add( 'surf', [ [ 'hawaiian_sling', 0.5 ], [ 'spear_gun', 0.12 ], [ 'dive_knife', 0.4 ], [ 'throw_net', 0.2 ], [ 'fish_stringer', 0.3 ], [ 'bug_spray', 0.2 ] ] );
-add( 'hardware', [ [ 'bucket', 0.8 ], [ 'plastic_sheet', 0.6 ], [ 'paracord', 0.5 ], [ 'mosquito_coil', 0.4, [ 2, 6 ] ], [ 'carabiner', 0.3 ], [ 'bug_spray', 0.3 ] ] );
+add( 'hardware', [ [ 'bucket', 0.8 ], [ 'plastic_sheet', 0.6 ], [ 'paracord', 0.5 ], [ 'mosquito_coil', 0.4, [ 2, 6 ] ], [ 'carabiner', 0.3 ], [ 'bug_spray', 0.3 ], [ 'pig_trap', 0.1 ] ] );
 add( 'farm', [ [ 'bucket', 0.6 ], [ 'bamboo_pole', 0.6, [ 1, 3 ] ], [ 'meat_hook', 0.3 ], [ 'pig_trap', 0.1 ], [ 'water_bag', 0.3 ], [ 'coconut_husk', 0.3, [ 1, 3 ] ] ] );
 add( 'house_garage', [ [ 'bucket', 0.4 ], [ 'camping_chair', 0.3 ], [ 'sleeping_pad', 0.15 ], [ 'paracord', 0.25 ], [ 'fishing_line', 0.3 ], [ 'mosquito_coil', 0.2 ] ] );
 add( 'house_living', [ [ 'mosquito_coil', 0.5, [ 1, 4 ] ], [ 'magnifying_glass', 0.15 ], [ 'bug_spray', 0.25 ] ] );
@@ -237,7 +237,8 @@ add( 'site_military_checkpoint', [ [ 'emergency_blanket', 0.4 ], [ 'paracord', 0
 add( 'site_heli_crash', [ [ 'signal_mirror', 0.3 ], [ 'emergency_blanket', 0.5 ], [ 'solar_still', 0.15 ] ] );
 add( 'site_supply_drop', [ [ 'emergency_blanket', 0.6 ], [ 'filter_straw', 0.5 ], [ 'gravity_filter', 0.2 ], [ 'solar_still', 0.25 ] ] );
 add( 'site_body', [ [ 'paracord', 0.2 ], [ 'ferro_rod', 0.1 ], [ 'emergency_blanket', 0.2 ] ] );
-add( 'site_farm_stand', [ [ 'bamboo_pole', 0.4, [ 1, 2 ] ], [ 'coconut_husk', 0.3, [ 1, 3 ] ], [ 'bucket', 0.3 ] ] );
+// (farmers cage the feral pigs that raid their plots)
+add( 'site_farm_stand', [ [ 'bamboo_pole', 0.4, [ 1, 2 ] ], [ 'coconut_husk', 0.3, [ 1, 3 ] ], [ 'bucket', 0.3 ], [ 'pig_trap', 0.12 ] ] );
 add( 'site_picnic', [ [ 'camping_chair', 0.4 ], [ 'bug_spray', 0.3 ], [ 'mosquito_coil', 0.3, [ 1, 3 ] ] ] );
 add( 'site_crash_car', [ [ 'emergency_blanket', 0.4 ], [ 'camping_chair', 0.2 ] ] );
 add( 'site_roadside', [ [ 'bug_spray', 0.15 ] ] );
@@ -401,17 +402,26 @@ function gain( g, id, n ) {
 	return n;
 }
 
-// where a throw net lands: shallow water in front of you (the fishing module's own cast target), or around you when
-// you're wading
+// where a throw net lands: around you when you're wading; else the water under the crosshair (the fishing module's
+// own cast target), or the first water straight ahead within a throw (standing on the sand facing the sea, the
+// crosshair on the beach)
+export const NET_REACH = 9;
 export function netSpot( g ) {
 	const w = water( g );
 	if ( w && ! w.swimming ) return w.depth < 3.5 ? { depth: w.depth } : null;
-	const cam = g.camera;
-	if ( ! cam?.getWorldDirection || ! g.fishing?.target ) return null;
-	const tg = g.fishing.target( { origin: cam.position.clone(), dir: cam.getWorldDirection( cam.position.clone() ) } );
-	if ( ! tg || tg.depth > 3.5 ) return null;
-	if ( Math.hypot( tg.pos.x - g.player.pos.x, tg.pos.z - g.player.pos.z ) > 9 ) return null;
-	return { depth: tg.depth, pos: tg.pos };
+	const cam = g.camera, P = g.player?.pos;
+	if ( ! cam?.getWorldDirection || ! P ) return null;
+	const dir = cam.getWorldDirection( cam.position.clone() );
+	const tg = g.fishing?.target?.( { origin: cam.position.clone(), dir } );
+	if ( tg && Math.hypot( tg.pos.x - P.x, tg.pos.z - P.z ) <= NET_REACH ) return tg.depth > 3.5 ? null : { depth: tg.depth, pos: tg.pos };
+	const L = Math.hypot( dir.x, dir.z );
+	if ( L < 0.2 ) return null;
+	for ( let r = 1.5; r <= NET_REACH; r += 0.5 ) {
+		const x = P.x + dir.x / L * r, z = P.z + dir.z / L * r;
+		const wl = g.physics?.waterLevel?.( x, z ) ?? 0, depth = wl - ( g.hf?.heightAt?.( x, z ) ?? 0 );
+		if ( depth > 0.25 ) return depth > 3.5 ? null : { depth, pos: cam.position.clone().set( x, wl, z ) };
+	}
+	return null;
 }
 
 function castTheNet( g, use, stack ) {
