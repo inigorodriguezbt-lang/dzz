@@ -59,11 +59,25 @@ const inCombo = ( d ) => {
 	const st = makeStack( d.id, d.stack, { full: true } ); st.cond = 0.5;
 	return C.allCombos().some( c => C.matches( c.a, st, d ) || C.matches( c.b, st, d ) );
 };
-for ( const d of GEAR ) ok( !! ( d.clothing || d.backpack || d.place || d.dismantle || d.container || inRecipe.has( d.id ) || inCombo( d ) || d.id === 'dog_tags' ), `${d.id}: does something` );
+for ( const d of GEAR ) ok( !! ( d.clothing || d.backpack || d.place || d.dismantle || d.container || inRecipe.has( d.id ) || inCombo( d ) || [ 'dog_tags', 'lanyard_keys' ].includes( d.id ) ), `${d.id}: does something` );
 // rare things stay rare: a plated vest is a sliver of an armory's loot
 {
 	const t = compileTable( LOOT_TABLES.military_armory ), e = t.entries.find( x => x.ids.length === 1 && x.ids[ 0 ] === 'tactical_vest_plated' );
 	ok( e && e.w / t.total < 0.02, `plated vest ${( e.w / t.total * 100 ).toFixed( 2 )}% of armory rolls` );
+}
+// models that must read as an icon (a square, dark background): not a thin strip, not black on black, not too heavy
+{
+	const box = ( id ) => new THREE.Box3().setFromObject( buildItemModel( getItem( id ) ) ).getSize( new THREE.Vector3() );
+	const tris = ( id ) => { let n = 0; buildItemModel( getItem( id ) ).traverse( m => { if ( m.isMesh ) n += ( m.geometry.index ? m.geometry.index.count : m.geometry.attributes.position.count ) / 3; } ); return n; };
+	const lv = box( 'lavalava' );
+	ok( Math.max( lv.x, lv.z ) / Math.min( lv.x, lv.z ) < 2, `the lavalava folds square-ish (${lv.x.toFixed( 2 )} x ${lv.z.toFixed( 2 )})` );
+	for ( const id of [ 'chest_protector', 'beekeeper_veil', 'trash_bag_poncho', 'holoku', 'lanyard_keys' ] ) ok( tris( id ) < 5000, `${id}: ${tris( id )} triangles` );
+	const lum = ( c ) => ( ( c >> 16 & 255 ) * 0.3 + ( c >> 8 & 255 ) * 0.59 + ( c & 255 ) * 0.11 ) / 255;
+	let plate = 0; buildItemModel( getItem( 'armor_plate' ) ).traverse( m => { if ( m.isMesh ) plate = Math.max( plate, lum( m.material.color.getHex() ) ); } );
+	ok( plate > 0.3, `the steel plate's coat shows against a dark background (${plate.toFixed( 2 )})` );
+	ok( lum( getItem( 'trash_bag_poncho' ).model.color ) > 0.12, 'the trash bag poncho is a shade off black' );
+	const veil = box( 'beekeeper_veil' );
+	ok( veil.y < 0.25 && veil.x > 0.4, 'the veil slumps round the hat (not a drum)' );
 }
 // the needle exists as a tool kind and a sewing kit provides one
 ok( GEAR.some( d => d.tool?.kind === 'needle' ) && getItem( 'sewing_kit' ).tool.provides.includes( 'needle' ), 'needle: a tool kind, and a sewing kit has one' );
@@ -97,6 +111,14 @@ console.log( 'looks' );
 	ok( camo.model.print === 'woodland' && camo.model.type === 'pants', 'camo prints woodland' );
 	ok( getItem( 'tshirt' ).model.color !== L.lookDef( 'tshirt~bleach' ).model.color && L.dyedName( getItem( 'tshirt_black' ), 'tiedye' ) === 'Tie-dye t-shirt' && L.dyedName( getItem( 'hoodie' ), 'camo' ) === 'Camo hoodie', 'bleach fades; names drop the old colour' );
 	ok( buildItemModel( camo ) && ! buildItemModel( camo ).userData.fallback, 'a look builds its own model' );
+	// every dyeable gear item builds in every look, and the dye's print shows (a camo vest, poncho, rain hat)
+	for ( const g of GEAR.filter( x => L.dyeable( x ) ) ) for ( const dye of Object.keys( L.DYES ) ) {
+		let o = null; try { o = buildItemModel( L.lookDef( g.id + '~' + dye ) ); } catch ( e ) { /* reported */ }
+		ok( o && ! o.userData.fallback, `${g.id}~${dye} builds` );
+	}
+	const printed = ( id ) => { let n = 0; buildItemModel( L.lookDef( id ) ).traverse( m => { if ( m.isMesh && m.material?.map ) n ++; } ); return n > 0; };
+	for ( const id of [ 'tactical_vest~camo', 'rain_poncho~camo', 'sou_wester~tiedye', 'lavalava~tiedye' ] ) ok( printed( id ), `${id}: the print shows` );
+	ok( ! L.dyeable( getItem( 'bandolier' ) ), 'a bandolier is not dyed (its shells would take the colour)' );
 	RT.setLook( s, null );
 	ok( ! s.data.look && ! s.data.name, 'a look comes off' );
 	// tailoring bonuses are capped
@@ -106,6 +128,20 @@ console.log( 'looks' );
 	L.subMods( j, j.data.mods );
 	ok( ! j.data.mods, 'mods taken off clear' );
 	ok( L.camoFactor( {} ) > 0.95 && L.camoFactor( {} ) < 1.05, 'bare: seen as usual' );
+	// how much clothes matter: everyday clothes a little, a hi-vis vest more, camouflage a lot, less so at night
+	const outfit = ( o ) => { const e = {}; for ( const k in o ) e[ k ] = makeStack( o[ k ], 1 ); return e; };
+	const civ = { torso: 'tshirt', legs: 'jeans', feet: 'sneakers', back: 'backpack_school' };
+	const fc = ( o, night = 0 ) => L.camoFactor( outfit( o ), night );
+	const cv = fc( civ ), dark = fc( { ...civ, torso: 'tshirt_black' } ), loud = fc( { ...civ, torso: 'aloha_shirt_yellow' } ), hv = fc( { ...civ, vest: 'hivis_vest' } );
+	const camoKit = { torso: 'military_jacket', legs: 'camo_pants', head: 'boonie_hat', feet: 'combat_boots', hands: 'tactical_gloves', face: 'balaclava', vest: 'plate_carrier' };
+	const cm = fc( camoKit ), ghillie = fc( { torso: 'ghillie_suit', head: 'ghillie_hood', legs: 'camo_pants' } );
+	ok( cv > 0.95 && cv < 1.04, `everyday clothes: about as seen as bare (${cv.toFixed( 3 )})` );
+	ok( dark > 0.85 && loud < 1.1 && loud - dark < 0.2, `dark or loud clothes shift it a little (${dark.toFixed( 3 )} .. ${loud.toFixed( 3 )})` );
+	ok( hv >= cv + 0.07, `a hi-vis vest over a t-shirt shows (${hv.toFixed( 3 )})` );
+	ok( cm < 0.8 && ghillie <= 0.7, `camouflage hides (${cm.toFixed( 3 )}, ghillie ${ghillie.toFixed( 3 )})` );
+	ok( Math.abs( fc( { ...civ, vest: 'bandolier' } ) - cv ) < 0.03, 'a bandolier hardly covers the shirt' );
+	ok( Math.abs( 1 - fc( camoKit, 1 ) ) < Math.abs( 1 - cm ) * 0.5 && Math.abs( 1 - fc( { ...civ, vest: 'hivis_vest' }, 1 ) ) < Math.abs( 1 - hv ) * 0.5, 'colours count less at night' );
+	ok( L.camoFactor( { torso: makeStack( 'water_bottle', 1 ) } ) > 0.9, 'something odd in a slot: seen as skin' );
 	ok( L.wetOnEquip( 0, 1, 'torso' ) > 0.8 && L.wetOnEquip( 0, 1, 'feet' ) < 0.3 && L.wetOnRemove( 1, 'torso' ) < 0.8, 'a wet shirt soaks you more than wet socks' );
 	ok( L.strain( 'grocery_bag', 1, 10, { sprinting: true } ) === 0 && L.strain( 'grocery_bag', 8, 10, { sprinting: true } ) > 0.1 && L.strain( 'tshirt', 9, 10, { sprinting: true } ) === 0, 'plastic strains when loaded' );
 }
@@ -234,6 +270,20 @@ console.log( 'mixes' );
 	const shorts = inv.findUid( uid );
 	ok( shorts?.id === 'denim_shorts' && shorts.data.items?.[ 0 ]?.id === 'cash' && shorts.data.look?.dye === 'black' && displayName( shorts ) === 'Black cutoffs', `cutoffs keep the pockets and the dye: ${displayName( shorts )}` );
 	ok( has( 'denim_scrap' ) === 2, 'and the legs come off as denim scraps' );
+	// padded, patched jeans: the patches stay on the shorts, the pads come back
+	{
+		const pj = put( 'jeans' ), pd = put( 'skate_pads' );
+		L.addMods( pj, L.PATCH.leather ); pj.data.patches = 1;
+		combo( 'gear_pads', pd, pj );
+		ok( ! has( 'skate_pads' ) && pj.data.pads, 'pads on the jeans' );
+		const pu = pj.uid;
+		ok( combo( 'gear_cut_jeans', knife, pj ).ok, 'cut the padded jeans' );
+		const ps = inv.findUid( pu );
+		ok( ps?.id === 'denim_shorts' && ps.data.patches === 1 && Math.abs( ( ps.data.mods?.bite || 0 ) - L.PATCH.leather.bite ) < 1e-9 && ! ps.data.pads && has( 'skate_pads' ) === 1, `patches kept, pads back (${JSON.stringify( ps?.data.mods )})` );
+		inv.remove( ps ); inv.remove( inv.find( s => s.id === 'skate_pads' ) );
+		for ( const s of inv.findAll( s => s.id === 'denim_scrap' ) ) inv.remove( s );
+		put( 'denim_scrap', 2 );
+	}
 	// plates into the vest and out again
 	const vest = put( 'tactical_vest' ), plates = put( 'armor_plate', 2 );
 	vest.data.items = [ makeStack( 'bandage', 1 ) ];
@@ -289,6 +339,22 @@ console.log( 'cases' );
 	run( pc, 'Pick lock' );
 	ok( ! RT.locked( pc ) && pc.cond === 1 && pc.data.items?.length >= 1, 'picked: a pistol case, its gun inside' );
 	ok( pc.data.items.some( s => getItem( s.id ).cat === 'firearm' || getItem( s.id ).cat === 'magazine' || getItem( s.id ).cat === 'ammo' ), 'a gun case holds gun things' );
+	// someone's keys: tried once on each case, quiet, and they fit about a third of them
+	{
+		const keys = put( 'lanyard_keys' );
+		let fit = null, miss = null;
+		for ( let i = 0; i < 40 && ! ( fit && miss ); i ++ ) { const c = makeStack( 'briefcase', 1 ); if ( L.keyFits( c.uid, keys.uid ) ) fit = fit || c; else miss = miss || c; }
+		let n = 0; for ( let i = 0; i < 2000; i ++ ) if ( L.keyFits( 'case' + i, keys.uid ) ) n ++;
+		ok( n > 2000 * L.KEY_FIT * 0.8 && n < 2000 * L.KEY_FIT * 1.2, `keys fit about a third of cases (${n} of 2000)` );
+		inv.add( fit, { autoEquip: false } ); inv.add( miss, { autoEquip: false } );
+		ok( verb( fit, 'Try keys' ) && verb( miss, 'Try keys' ), 'Try keys on locked cases' );
+		noises.length = 0; opened.length = 0; toasts.length = 0;
+		run( miss, 'Try keys' );
+		ok( RT.locked( miss ) && toasts.includes( 'No key fits' ) && ! verb( miss, 'Try keys' ) && verb( miss, 'Force open' ), 'no key fits: not offered again, still forceable' );
+		run( fit, 'Try keys' );
+		ok( ! RT.locked( fit ) && fit.cond === 1 && noises.length === 0 && opened.some( c => c.owner === fit ), 'a key fits: open, quiet, unharmed' );
+		inv.remove( keys ); inv.remove( fit ); inv.remove( miss );
+	}
 	// an ammo can opens and stashes
 	const can = put( 'ammo_can' );
 	ok( verb( can, 'Open' ) && ! verb( can, 'Force open' ), 'an ammo can just opens' );
@@ -391,7 +457,18 @@ console.log( 'system' );
 	ok( ! osys.protectedNow( game.player.pos ) || out.state( game ).sprayUntil > game.time.hours, 'no net, no protection (nothing sprayed)' );
 	inv.equip.head = makeStack( 'beekeeper_veil', 1 );
 	ok( osys.protectedNow( game.player.pos ), 'a beekeeper veil keeps them off' );
+	ok( osys._sleepLevel() === 0, 'and off you while you sleep in it' );
 	delete inv.equip.head;
+	ok( osys._sleepLevel() > 0, 'no net, no tent: bitten in the night' );
+	// a game whose outdoors system isn't there yet: the gear system brings it in and still wraps it
+	{
+		const g2 = { ...game, systems: [], register( s ) { this.systems.push( s ); } };
+		const gs = RT.attach( g2 ), os2 = out.attach( g2 );
+		ok( gs && os2 && g2.systems.includes( os2 ) && g2.systems.filter( x => x === os2 ).length === 1, 'the outdoors system comes in once with the gear system' );
+		inv.equip.head = makeStack( 'boonie_net', 1 );
+		ok( os2.protectedNow( game.player.pos ), 'a boonie net keeps them off there too' );
+		delete inv.equip.head;
+	}
 }
 
 // ---- the hydration pack, dog tags, recipes, the poncho rig, saving ----------------------------------------------------------

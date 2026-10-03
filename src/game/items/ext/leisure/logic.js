@@ -11,8 +11,9 @@ export const daySeconds = ( g ) => Math.max( 60, ( g?.time?.dayMinutes || 48 ) *
 export const COLLECT = { step: 0.1, max: 1.5, displayR: 10 };
 export const collectionK = ( kinds ) => Math.min( COLLECT.max, 1 + COLLECT.step * Math.max( 0, kinds - 1 ) );
 
-// keepsakes on display: each within reach eases boredom and gloom a little a minute, three at most
-export const DECOR = { r: 8, max: 3, boredom: - 0.7, unhappy: - 0.25 };
+// keepsakes on display: each within reach eases boredom and gloom a little a minute, three at most (three take
+// about two thirds off the boredom of sitting about indoors, 1.55 a minute, and lift gloom a little faster than calm)
+export const DECOR = { r: 8, max: 3, boredom: - 0.35, unhappy: - 0.1 };
 export const decorRate = ( n ) => {
 	const k = Math.min( DECOR.max, Math.max( 0, n ) );
 	return { boredom: DECOR.boredom * k, unhappy: DECOR.unhappy * k };

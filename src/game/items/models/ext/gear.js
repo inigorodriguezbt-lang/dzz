@@ -13,7 +13,7 @@
 //   gear_case     { style: briefcase | pistol | ammo | lunch, color, color2 }
 //   gear_bag      { style: grocery | trash | drawstring | sling | messenger | tackle | waist | hydration | lauhala | rifle
 //                   | camera, color, color2, print }
-//   gear_small    { style: dogtags | marker | pouch | feathers | kapa | needle | denim, color, color2 }
+//   gear_small    { style: dogtags | lanyard | marker | pouch | feathers | kapa | needle | denim, color, color2 }
 import * as THREE from 'three';
 import { M, MAT, G, PI, add, group, ground, canvasTex, labelTex, fabric, shade, css } from '../lib.js';
 import { patchMaterial } from '../../../../render/Materials.js';
@@ -119,6 +119,14 @@ function netMat( color, rep = 6, cell = 8 ) {
 	return m;
 }
 
+// a copy of a flat part scaled about its own centre in x and z: laid under it, it shows as a rim round the edge
+function rimOf( geo, kx, kz ) {
+	const r = geo.clone();
+	r.computeBoundingBox();
+	const c = r.boundingBox.getCenter( new THREE.Vector3() );
+	return r.translate( - c.x, 0, - c.z ).scale( kx, 1, kz ).translate( c.x, 0, c.z );
+}
+
 // fine netting seen as dark gauze
 const gauze = ( c = 0x1a1a1a, op = 0.45 ) => M( c, { rough: 0.9, transparent: true, opacity: op, side: THREE.DoubleSide } );
 
@@ -182,12 +190,15 @@ export function register( reg ) {
 			// the waist seam and the neckline
 			add( g, G.box( 0.012, 0.003, w( xw ) * 2 ), dark, [ xw, T, 0 ] );
 			if ( gown ) {
-				// a high collar and puffed short sleeves
+				// a high collar and long sleeves laid out from the shoulders, angled back towards the hem (-x), cuffed
 				add( g, G.cyl( 0.03, 0.034, 0.012, 14 ).scale( 0.7, 1, 1.2 ), trim, [ x1 - 0.012, T * 0.6, 0 ] );
+				const SL = 0.19, ang = 2.35;
 				for ( const z of [ - 1, 1 ] ) {
-					const sl = slab( outline( 0, 0.11, ( x ) => lerp( 0.04, 0.032, x / 0.11 ) + Math.sin( x / 0.11 * PI ) * 0.008 ), T * 0.9 );
-					add( g, sl, cloth, [ x1 - 0.085, 0, z * 0.115 ], [ 0, z * 1.2, 0 ] );
-					add( g, G.box( 0.012, 0.003, 0.07 ), trim, [ x1 - 0.085 - Math.cos( 1.2 ) * 0.1, T * 0.9, z * ( 0.115 + Math.sin( 1.2 ) * 0.1 ) ], [ 0, z * 1.2, 0 ] );
+					// a slab's local +x runs down the sleeve: turned to point out to ±z and back
+					const rot = - z * ang, dx = Math.cos( ang ), dz = Math.sin( ang ) * z, sx = x1 - 0.06, sz = z * 0.085;
+					const sl = slab( outline( 0, SL, ( x ) => lerp( 0.042, 0.03, x / SL ) + Math.sin( x / SL * PI ) * 0.006 ), T * 0.9 );
+					add( g, sl, cloth, [ sx, 0, sz ], [ 0, rot, 0 ] );
+					add( g, G.box( 0.014, 0.003, 0.066 ), trim, [ sx + dx * ( SL - 0.01 ), T * 0.9, sz + dz * ( SL - 0.01 ) ], [ 0, rot, 0 ] );
 				}
 				for ( let i = 0; i < 5; i ++ ) add( g, G.cyl( 0.004, 0.004, 0.003, 8 ), trim, [ x1 - 0.04 - i * 0.03, T, 0 ] );
 			} else {
@@ -211,14 +222,23 @@ export function register( reg ) {
 			add( g, G.rbox( 0.03, T * 2.2, w( x1 ) * 2 + 0.01, 0.006 ), M( s.trim ?? shade( c, - 0.2 ), { rough: 0.85 } ), [ x1 - 0.012, 0, 0 ] );
 			return ground( g );
 		}
-		// wrap (lavalava): a length of printed cloth, the end knotted
-		const L = 0.46, D = 0.22;
-		add( g, G.rbox( L, 0.012, D, 0.004 ), cloth );
-		add( g, G.rbox( L * 0.5, 0.012, D * 0.92, 0.004 ), cloth, [ - L * 0.2, 0.011, 0.005 ] );
-		add( g, G.box( L * 0.5, 0.002, 0.004 ), dark, [ - L * 0.2, 0.023, D * 0.45 ] );
-		const knot = G.sph( 0.035, 12, 8 ).scale( 1.2, 0.7, 1 );
-		add( g, knot, cloth, [ L / 2 - 0.02, 0.012, 0 ] );
-		for ( const z of [ - 1, 1 ] ) add( g, G.sph( 0.03, 10, 6 ).scale( 1.6, 0.35, 0.8 ), cloth, [ L / 2 + 0.03, 0.006, z * 0.035 ], [ 0, z * 0.6, 0 ] );
+		// wrap (lavalava): a length of printed cloth folded in three, one end left hanging out with a knot tied in it
+		// (squarish, so it still reads as cloth in a square icon)
+		const L = 0.3, D = 0.24, H = 0.009;
+		const hem = M( s.trim ?? shade( c, 0.55 ), { rough: 0.85 } );
+		for ( let k = 0; k < 3; k ++ ) {
+			add( g, G.rbox( L - k * 0.004, H, D - k * 0.006, 0.004 ), cloth, [ k * 0.002, k * H * 0.92, 0 ] );
+			add( g, G.box( L - k * 0.004 - 0.01, H * 0.8, 0.006 ), hem, [ k * 0.002, k * H * 0.92 + H * 0.1, ( D - k * 0.006 ) / 2 - 0.001 ] );
+		}
+		// the folds show as soft ridges across the top
+		for ( const x of [ - 0.06, 0.07 ] ) add( g, G.capsX( 0.004, D * 0.9, 6 ).rotateY( PI / 2 ), dark, [ x, H * 2.8, 0 ] );
+		// the loose end draped off one side and its knot
+		const tail = G.rbox( 0.15, H * 0.8, 0.11, 0.004 ), P = tail.attributes.position;
+		for ( let i = 0; i < P.count; i ++ ) P.setY( i, P.getY( i ) - Math.max( 0, P.getX( i ) ) * 0.12 );
+		tail.computeVertexNormals();
+		add( g, tail, cloth, [ L / 2 - 0.01, H * 1.6, 0.05 ], [ 0, - 0.35, 0 ] );
+		add( g, G.sph( 0.028, 12, 8 ).scale( 1.25, 0.65, 1 ), cloth, [ L / 2 + 0.05, 0.016, 0.085 ] );
+		for ( const a of [ - 0.5, 0.6 ] ) add( g, G.sph( 0.022, 10, 6 ).scale( 1.6, 0.3, 0.7 ), cloth, [ L / 2 + 0.08, 0.008, 0.085 + a * 0.04 ], [ 0, a, 0 ] );
 		return ground( g );
 	} );
 
@@ -227,7 +247,7 @@ export function register( reg ) {
 		const g = group(), style = s.style || 'poncho', c = s.color ?? 0x2a5ab0;
 		if ( style === 'poncho' ) {
 			// folded glossy nylon in a clear store pack, a printed header card across the top end
-			const nylon = M( c, { rough: 0.3 } ), seam = M( shade( c, - 0.3 ), { rough: 0.5 } );
+			const nylon = s.print ? fabric( c, s.print, s.color2 ?? 0xffffff, { rep: 1, rough: 0.35 } ) : M( c, { rough: 0.3 } ), seam = M( shade( c, - 0.3 ), { rough: 0.5 } );
 			add( g, G.rbox( 0.2, 0.026, 0.15, 0.008, 2 ), nylon );
 			for ( const z of [ - 0.04, 0.035 ] ) add( g, G.box( 0.18, 0.002, 0.004 ), seam, [ 0, 0.026, z ] );
 			add( g, G.rbox( 0.214, 0.03, 0.164, 0.01, 2 ), MAT.glass( 0xe8f0f4, 0.22 ), [ 0, - 0.001, 0 ] );
@@ -235,18 +255,34 @@ export function register( reg ) {
 			return ground( g );
 		}
 		if ( style === 'trash' ) {
-			// a black bag laid flat and cut: a hole for the head at the closed end, slits for the arms, crumpled plastic
-			const sh = rrect( 0.62, 0.44, 0.03 ), head = new THREE.Path(), r = rng( 5 );
-			head.absellipse( 0.24, 0, 0.045, 0.06, 0, PI * 2, true );
-			sh.holes.push( head );
-			for ( const z of [ - 0.16, 0.16 ] ) { const a = new THREE.Path(); a.absellipse( 0.13, z, 0.05, 0.008, 0, PI * 2, true ); sh.holes.push( a ); }
-			const bl = M( c, { rough: 0.2 } );
-			add( g, slab( sh, 0.005, { bevel: 0.0015, uv: 1, curve: 10 } ), bl );
-			// two long folds from lying in a box
-			for ( const z of [ - 0.075, 0.08 ] ) add( g, G.capsX( 0.012, 0.5 + r() * 0.05, 8 ).scale( 1, 0.3, 1 ), bl, [ - 0.03, 0.003, z ] );
-			// the drawstring hem at the open end
-			add( g, G.box( 0.012, 0.008, 0.44 ), bl, [ - 0.305, 0.004, 0 ] );
-			add( g, tube( [ [ - 0.31, 0.008, 0.2 ], [ - 0.36, 0.006, 0.24 ], [ - 0.4, 0.004, 0.2 ] ], 0.003, 10 ), M( 0xd8c020, { rough: 0.5 } ) );
+			// a black bag slit open and laid out: a hole for the head at the closed end (+x), slits for the arms, the
+			// drawstring hem at the open end; crumpled, so the glossy plastic catches the light (a grid, cells in the
+			// holes left out)
+			const bl = M( c, { rough: 0.16, side: THREE.DoubleSide } );
+			const X = 0.31, Z = 0.22, NX = 44, NZ = 30;
+			const hole = ( x, z ) => ( ( x - 0.22 ) / 0.045 ) ** 2 + ( z / 0.06 ) ** 2 < 1 || ( Math.abs( x - 0.09 ) < 0.05 && Math.abs( Math.abs( z ) - 0.155 ) < 0.007 );
+			const fold = ( v, at, w ) => Math.exp( - ( ( ( v - at ) / w ) ** 2 ) );
+			const hgt = ( x, z ) => 0.002 + 0.003 * ( 1 + Math.sin( x * 31 + z * 7 ) ) * ( 0.5 + 0.5 * Math.sin( z * 23 - x * 11 ) )
+				+ 0.012 * fold( z, 0.075, 0.014 ) * ( 0.7 + 0.3 * Math.sin( x * 9 ) ) + 0.009 * fold( z, - 0.09, 0.012 ) + 0.006 * fold( x, - 0.05, 0.02 );
+			const pos = [], idx = [];
+			for ( let j = 0; j <= NZ; j ++ ) for ( let i = 0; i <= NX; i ++ ) { const x = - X + 2 * X * i / NX, z = - Z + 2 * Z * j / NZ; pos.push( x, hgt( x, z ), z ); }
+			for ( let j = 0; j < NZ; j ++ ) for ( let i = 0; i < NX; i ++ ) {
+				const x = - X + 2 * X * ( i + 0.5 ) / NX, z = - Z + 2 * Z * ( j + 0.5 ) / NZ;
+				if ( hole( x, z ) ) continue;
+				const a0 = j * ( NX + 1 ) + i, a1 = a0 + 1, b0 = a0 + NX + 1, b1 = b0 + 1;
+				idx.push( a0, b0, a1, a1, b0, b1 );
+			}
+			const sheet = new THREE.BufferGeometry();
+			sheet.setAttribute( 'position', new THREE.Float32BufferAttribute( pos, 3 ) );
+			sheet.setAttribute( 'uv', new THREE.Float32BufferAttribute( new Float32Array( pos.length / 3 * 2 ), 2 ) );
+			sheet.setIndex( idx );
+			sheet.computeVertexNormals();
+			add( g, sheet, bl );
+			// a rolled edge round the head hole (hides the grid's steps)
+			add( g, G.torus( 0.05, 0.0045, 4, 28 ).rotateX( PI / 2 ).scale( 0.95, 1, 1.22 ), bl, [ 0.22, hgt( 0.22, 0.06 ) + 0.002, 0 ] );
+			// the drawstring hem at the open end and its yellow tie
+			add( g, G.capsX( 0.006, 2 * Z, 8 ).rotateY( PI / 2 ), bl, [ - X + 0.004, 0.004, 0 ] );
+			add( g, tube( [ [ - X, 0.006, 0.19 ], [ - X - 0.05, 0.005, 0.23 ], [ - X - 0.09, 0.004, 0.19 ], [ - X - 0.07, 0.004, 0.15 ] ], 0.0035, 16 ), M( 0xe8c820, { rough: 0.45 } ) );
 			return ground( g );
 		}
 		if ( style === 'apron' ) {
@@ -277,7 +313,7 @@ export function register( reg ) {
 		const g = group(), style = s.style || 'sou_wester', c = s.color ?? 0xf0c020;
 		switch ( style ) {
 			case 'sou_wester': {
-				const oil = M( c, { rough: 0.3 } );
+				const oil = s.print ? fabric( c, s.print, s.color2 ?? 0xffffff, { rep: 1, rough: 0.35 } ) : M( c, { rough: 0.3 } );
 				const crown = G.sph( 0.095, 18, 10, 0, PI * 2, 0, PI / 2 ); crown.scale( 1, 0.72, 0.95 );
 				add( g, crown, oil, [ 0, 0.012, 0 ] );
 				add( g, G.cyl( 0.096, 0.098, 0.016, 18, true ), oil, [ 0, 0.004, 0 ] );
@@ -297,15 +333,32 @@ export function register( reg ) {
 				break;
 			}
 			case 'veil': {
-				// a vented helmet with a brim, the mesh veil hanging to an elastic hem
-				const hat = M( c, { rough: 0.6 } );
-				const H = 0.2;
-				add( g, G.cyl( 0.165, 0.21, H, 28, true ), gauze( 0x2a2a2a, 0.32 ), [ 0, 0.008, 0 ] );
-				add( g, G.cyl( 0.202, 0.202, 0.014, 28, true ), M( 0xf2f2ee, { rough: 0.85 } ), [ 0, 0, 0 ] );
-				add( g, G.cyl( 0.2, 0.2, 0.006, 26 ), hat, [ 0, H, 0 ] );
-				const dome = G.sph( 0.11, 18, 9, 0, PI * 2, 0, PI / 2 ); dome.scale( 1.05, 0.9, 1 );
-				add( g, dome, hat, [ 0, H + 0.004, 0 ] );
-				for ( let i = 0; i < 6; i ++ ) { const a = i / 6 * PI * 2; add( g, G.box( 0.03, 0.004, 0.006 ), M( 0x9a9a92 ), [ Math.cos( a ) * 0.08, H + 0.05, Math.sin( a ) * 0.08 ], [ 0, - a, 0.6 ] ); }
+				// a round white hat, its black mesh veil slumped round it in folds down to a white cloth hem
+				const hat = M( c, { rough: 0.6 } ), white = M( 0xf2f2ee, { rough: 0.85, side: THREE.DoubleSide } );
+				// an open frustum with folds that deepen towards the bottom (k0 at the top, k1 at the bottom)
+				const drape = ( r0, r1, h, k0, k1 ) => {
+					const geo = new THREE.CylinderGeometry( r0, r1, h, 48, 3, true ), P = geo.attributes.position;
+					for ( let i = 0; i < P.count; i ++ ) {
+						const x = P.getX( i ), z = P.getZ( i ), t = 0.5 - P.getY( i ) / h, a = Math.atan2( z, x );
+						const f = 1 + ( Math.sin( a * 11 ) + 0.5 * Math.sin( a * 5 + 1.3 ) ) * lerp( k0, k1, t );
+						P.setX( i, x * f ); P.setZ( i, z * f );
+					}
+					geo.computeVertexNormals();
+					return geo.translate( 0, h / 2, 0 );
+				};
+				const R0 = 0.15, R1 = 0.215, VH = 0.11, HEM = 0.022, CO = 0.02;
+				add( g, drape( R1, R1 + 0.01, HEM, 0.05, 0.055 ), white );
+				const net = drape( R0, R1, VH, 0.004, 0.05 );
+				add( g, net, gauze( 0x121212, 0.5 ), [ 0, HEM, 0 ] );
+				add( g, net, netMat( 0x080808, 12, 8 ), [ 0, HEM, 0 ] );
+				add( g, drape( R0 - 0.002, R0, CO, 0.004, 0.004 ), white, [ 0, HEM + VH, 0 ] ); // the cloth collar under the brim
+				const top = HEM + VH + CO;
+				add( g, G.cyl( 0.19, 0.19, 0.005, 32 ), hat, [ 0, top, 0 ] );
+				add( g, G.torus( 0.19, 0.004, 4, 40 ), hat, [ 0, top + 0.0025, 0 ], [ PI / 2, 0, 0 ] );
+				const dome = G.sph( 0.105, 20, 9, 0, PI * 2, 0, PI / 2 ); dome.scale( 1.05, 0.85, 1 );
+				add( g, dome, hat, [ 0, top + 0.004, 0 ] );
+				add( g, G.cyl( 0.108, 0.11, 0.018, 24, true ), M( shade( c, - 0.12 ), { rough: 0.7 } ), [ 0, top + 0.004, 0 ] );
+				for ( let i = 0; i < 6; i ++ ) { const a = i / 6 * PI * 2; add( g, G.box( 0.026, 0.004, 0.006 ), M( 0x8a8a84 ), [ Math.cos( a ) * 0.075, top + 0.06, Math.sin( a ) * 0.075 ], [ 0, - a, 0.6 ] ); }
 				break;
 			}
 			case 'boonie_net': {
@@ -454,22 +507,41 @@ export function register( reg ) {
 		const g = group(), c = s.color ?? 0xf2f2ee;
 		const hard = M( c, { rough: 0.35 } ), acc = M( s.color2 ?? 0x1a1a1a, { rough: 0.6 } ), strap = webbing();
 		if ( s.style === 'chest' ) {
-			// a motocross roost guard: chest plate, shoulder cups, back plate peeking out, straps
-			// the chest plate (neck scoop at +x) over the belly plate, shoulder cups strapped on, vents, side panels
+			// a motocross roost guard laid face up: a moulded chest plate (neck scoop at +x) over a hinged belly plate,
+			// shoulder caps of two overlapping shells, every plate edged in black foam, vent slots, a flash down each side
+			const edge = M( 0x151515, { rough: 0.85 } ), vent = M( 0x2a2a2a, { rough: 0.7 } );
 			const chest = new THREE.Shape();
 			chest.moveTo( - 0.02, - 0.15 ); chest.lineTo( 0.12, - 0.15 ); chest.quadraticCurveTo( 0.16, - 0.12, 0.16, - 0.06 ); chest.quadraticCurveTo( 0.11, 0, 0.16, 0.06 );
-			chest.quadraticCurveTo( 0.16, 0.12, 0.12, 0.15 ); chest.lineTo( - 0.02, 0.15 ); chest.quadraticCurveTo( - 0.06, 0, - 0.02, - 0.15 );
-			add( g, bulge( slab( chest, 0.012, { bevel: 0.003, uv: 1 } ), 0.035, 1.3, 1.1 ), hard, [ 0, 0.012, 0 ] );
-			add( g, bulge( slab( rrect( 0.17, 0.24, 0.05 ), 0.012, { bevel: 0.003, uv: 1 } ), 0.022, 1.5, 1.2 ), hard, [ - 0.1, 0, 0 ] );
+			chest.quadraticCurveTo( 0.16, 0.12, 0.12, 0.15 ); chest.lineTo( - 0.02, 0.15 ); chest.quadraticCurveTo( - 0.045, 0, - 0.02, - 0.15 );
+			const K = 0.018, AX = 1.4, AZ = 1.15, CX = 0.06;
+			const cg = slab( chest, 0.008, { bevel: 0.002, uv: 1, curve: 8 } ).translate( - CX, 0, 0 );
+			bulge( cg, K, AX, AZ ).translate( CX, 0, 0 );
+			add( g, cg, hard, [ 0, 0.01, 0 ] );
+			add( g, rimOf( cg, 1.045, 1.04 ), edge, [ 0, 0.007, 0 ] );
+			// the plate's height at (x, z): vents and flashes sit on it
+			const yAt = ( x, z ) => 0.01 + 0.01 + Math.max( 0, K - ( ( ( x - CX ) * AX ) ** 2 + ( z * AZ ) ** 2 ) * K * 8 );
+			const belly = bulge( slab( rrect( 0.15, 0.24, 0.045 ), 0.008, { bevel: 0.002, uv: 1, curve: 6 } ), 0.012, 1.6, 1.2 );
+			add( g, belly, hard, [ - 0.115, 0.004, 0 ] );
+			add( g, rimOf( belly, 1.06, 1.04 ), edge, [ - 0.115, 0.001, 0 ] );
+			for ( const z of [ - 0.06, 0.06 ] ) add( g, G.box( 0.05, 0.006, 0.03 ), edge, [ - 0.035, 0.012, z ] ); // the hinge straps
 			for ( const z of [ - 1, 1 ] ) {
-				// shoulder cups riveted over the plate's top corners
-				const cup = G.sph( 0.06, 16, 8, 0, PI * 2, 0, PI / 2 ); cup.scale( 1.25, 0.45, 0.85 );
-				add( g, cup, hard, [ 0.135, 0.01, z * 0.15 ], [ 0, z * 0.5, 0 ] );
-				add( g, G.cyl( 0.006, 0.006, 0.004, 8 ), MAT.metal(), [ 0.11, 0.04, z * 0.125 ] );
-				add( g, G.rbox( 0.16, 0.01, 0.026, 0.004 ), acc, [ 0.03, 0.044, z * 0.105 ], [ z * 0.35, - z * 0.1, 0 ] ); // the side flash
-				for ( let i = 0; i < 3; i ++ ) add( g, G.rbox( 0.05, 0.004, 0.008, 0.003 ), M( 0x2a2a2a ), [ 0.05, 0.047 - Math.abs( i - 1 ) * 0.002, z * ( 0.035 + i * 0.022 ) ], [ 0, z * 0.5, 0 ] ); // vents
-				add( g, G.box( 0.025, 0.004, 0.12 ), strap, [ - 0.12, 0.006, z * 0.14 ] );
+				// the shoulder cap: a long half dome over the plate's corner, open side in, edged, a moulded ridge across it
+				const cap = G.sph( 0.065, 12, 5, 0, PI, 0, PI / 2 ); cap.scale( 1.35, 0.32, 0.8 );
+				const cp = [ 0.1, 0.014, z * 0.13 ], cr = [ 0, z > 0 ? 0 : PI, 0 ];
+				add( g, cap, hard, cp, cr );
+				const rim = G.torus( 0.065, 0.0045, 3, 14, PI ); rim.rotateX( PI / 2 ).scale( 1.35, 1, 0.8 );
+				add( g, rim, edge, cp, cr );
+				add( g, G.torus( 0.045, 0.0025, 3, 12, PI ).rotateX( PI / 2 ).scale( 1.35, 1, 0.8 ), edge, [ cp[ 0 ], 0.03, cp[ 2 ] ], cr );
+				// a flash of colour down the side of the chest plate, three vent slots beside it
+				const fx = 0.06, fz = z * 0.105;
+				add( g, G.rbox( 0.17, 0.004, 0.022, 0.003, 1 ), acc, [ fx, yAt( fx, fz ) - 0.001, fz ], [ z * 0.12, - z * 0.12, 0 ] );
+				for ( let i = 0; i < 3; i ++ ) { const vx = 0.02 + i * 0.035, vz = z * 0.05; add( g, G.box( 0.024, 0.004, 0.007 ), vent, [ vx, yAt( vx, vz ) - 0.001, vz ], [ 0, z * 0.5, 0 ] ); }
+				// side straps with buckles
+				add( g, G.box( 0.025, 0.004, 0.11 ), strap, [ - 0.13, 0.003, z * 0.165 ] );
+				add( g, G.box( 0.03, 0.008, 0.02 ), buckle(), [ - 0.13, 0.005, z * 0.215 ] );
 			}
+			// a maker's badge at the neck
+			add( g, G.rbox( 0.03, 0.003, 0.05, 0.004 ), acc, [ 0.125, yAt( 0.125, 0 ) - 0.0005, 0 ] );
 			return ground( g );
 		}
 		// skate pads: two knee pads and two elbow pads, hard caps over foam
@@ -487,7 +559,8 @@ export function register( reg ) {
 	// ---- vests and rigs ----
 	reg( 'gear_vest', ( s ) => {
 		const g = group(), c = s.color ?? 0x2a2e26, style = s.style || 'tactical';
-		const cloth = fabric( c, 'canvas', 0xffffff, { rep: 2 } ), acc = M( s.color2 ?? shade( c, - 0.35 ), { rough: 0.85 } ), strap = webbing( shade( c, - 0.35 ) );
+		// (a dyed vest carries the dye's print: camo)
+		const cloth = s.print ? fabric( c, s.print, s.color2 ?? 0xffffff, { rep: 1.5 } ) : fabric( c, 'canvas', 0xffffff, { rep: 2 } ), acc = M( s.color2 ?? shade( c, - 0.35 ), { rough: 0.85 } ), strap = webbing( shade( c, - 0.35 ) );
 		if ( style === 'bandolier' ) {
 			// a leather sash laid in a loop, shotgun shells in elastic loops along one side
 			const lea = M( c, { rough: 0.6 } ), shell = M( s.color2 ?? 0xc8282a, { rough: 0.5 } ), b = brass(), loop = M( shade( c, - 0.3 ), { rough: 0.8 } );
@@ -558,7 +631,9 @@ export function register( reg ) {
 		const P = geo.attributes.position;
 		for ( let i = 0; i < P.count; i ++ ) { const z = P.getZ( i ), x = P.getX( i ); P.setY( i, P.getY( i ) + 0.022 - z * z * 1.4 + ( scrap ? Math.sin( x * 60 ) * Math.sin( z * 50 ) * 0.002 : 0 ) ); }
 		geo.computeVertexNormals();
-		add( g, geo, scrap ? M( 0x8a8e94, { rough: 0.45, metal: 0.85 } ) : M( 0x2a2c2e, { rough: 0.75 } ) );
+		add( g, geo, scrap ? M( 0x8a8e94, { rough: 0.45, metal: 0.85 } ) : M( 0x7d6a4c, { rough: 0.85 } ) );
+		// a steel plate is coated (coyote bedliner) with a dark edge seal
+		if ( ! scrap ) add( g, rimOf( geo, 1.04, 1.05 ), M( 0x232325, { rough: 0.7 } ), [ 0, - 0.002, 0 ] );
 		if ( scrap ) {
 			// duct tape round the edges, rivets where two sheets were joined
 			const tape = M( 0x9a9ea4, { rough: 0.5, metal: 0.4 } );
@@ -779,12 +854,47 @@ export function register( reg ) {
 		const g = group(), style = s.style || 'pouch';
 		switch ( style ) {
 			case 'dogtags': {
-				const tag = M( 0xb8bcc2, { rough: 0.35, metal: 0.9 } );
-				add( g, G.rbox( 0.05, 0.002, 0.028, 0.008 ), tag, [ 0, 0, 0 ] );
-				add( g, G.rbox( 0.05, 0.002, 0.028, 0.008 ), tag, [ 0.012, 0.002, 0.012 ], [ 0, 0.35, 0 ] );
-				for ( let i = 0; i < 4; i ++ ) add( g, G.box( 0.03, 0.0006, 0.002 ), M( 0x6a6e74, { metal: 0.8, rough: 0.5 } ), [ 0.003, 0.0022, - 0.008 + i * 0.005 ] );
-				const chain = G.torus( 0.07, 0.0012, 3, 40 ); chain.rotateX( PI / 2 ); chain.scale( 1, 1, 0.55 );
-				add( g, chain, tag, [ - 0.08, 0.0012, 0 ] );
+				// two tags, one in a black rubber silencer, on a ball chain coiled beside them (kept close so the tags
+				// fill the icon)
+				const tag = M( 0xb8bcc2, { rough: 0.35, metal: 0.9 } ), rub = M( 0x141414, { rough: 0.85 } );
+				add( g, G.rbox( 0.054, 0.0018, 0.032, 0.009 ), rub, [ 0, 0, 0 ] );
+				add( g, G.rbox( 0.05, 0.002, 0.028, 0.008 ), tag, [ 0, 0.0004, 0 ] );
+				add( g, G.rbox( 0.05, 0.002, 0.028, 0.008 ), tag, [ 0.016, 0.0024, 0.016 ], [ 0, 0.35, 0 ] );
+				for ( let i = 0; i < 4; i ++ ) add( g, G.box( 0.03, 0.0006, 0.002 ), M( 0x5a5e64, { metal: 0.8, rough: 0.5 } ), [ 0.018, 0.0046, 0.009 + i * 0.005 ], [ 0, 0.35, 0 ] );
+				for ( const [ x, z ] of [ [ - 0.019, 0 ], [ - 0.003, 0.025 ] ] ) add( g, G.cyl( 0.0022, 0.0022, 0.004, 8 ), rub, [ x, 0.001, z ] ); // the holes
+				const chain = M( 0xa8acb2, { rough: 0.3, metal: 0.9 } );
+				for ( const [ R, x, z, y ] of [ [ 0.034, - 0.05, - 0.004, 0.0016 ], [ 0.026, - 0.056, 0.006, 0.0036 ] ] ) {
+					const loop = G.torus( R, 0.0017, 4, 36 ); loop.rotateX( PI / 2 ); loop.scale( 1.15, 1, 0.8 );
+					add( g, loop, chain, [ x, y, z ] );
+				}
+				break;
+			}
+			case 'lanyard': {
+				// a work lanyard laid in a loop: the ribbon, its clip, an ID badge in a clear sleeve, a ring of keys
+				const rib = M( s.color ?? 0x1a4a8a, { rough: 0.8 } ), metal = M( 0xb8bcc2, { rough: 0.35, metal: 0.9 } );
+				const RX = 0.085, RZ = 0.03, N = 26, cx = - 0.05;
+				for ( let i = 0; i < N; i ++ ) {
+					const a0 = i / N * PI * 2, a1 = ( i + 1 ) / N * PI * 2;
+					const x0 = Math.cos( a0 ) * RX, z0 = Math.sin( a0 ) * RZ, x1 = Math.cos( a1 ) * RX, z1 = Math.sin( a1 ) * RZ;
+					add( g, G.box( Math.hypot( x1 - x0, z1 - z0 ) + 0.001, 0.0015, 0.014 ), rib, [ cx + ( x0 + x1 ) / 2, 0, ( z0 + z1 ) / 2 ], [ 0, - Math.atan2( z1 - z0, x1 - x0 ), 0 ] );
+				}
+				// white stitching dots along the ribbon so it reads as one at a glance
+				for ( let i = 0; i < 12; i ++ ) { const a = i / 12 * PI * 2; add( g, G.box( 0.008, 0.0004, 0.003 ), M( 0xf2f2ee ), [ cx + Math.cos( a ) * RX, 0.0016, Math.sin( a ) * RZ ], [ 0, - a - PI / 2, 0 ] ); }
+				add( g, G.rbox( 0.026, 0.006, 0.016, 0.003 ), M( 0x1a1a1a, { rough: 0.5 } ), [ cx + RX + 0.01, 0, 0 ] ); // the clip
+				add( g, G.torus( 0.006, 0.0015, 4, 10 ), metal, [ cx + RX + 0.028, 0.002, 0 ], [ PI / 2, 0, 0 ] );
+				// the badge: a card in a clear sleeve
+				add( g, G.rbox( 0.058, 0.0016, 0.088, 0.004 ), MAT.glass( 0xe8f0f4, 0.35 ), [ 0.085, 0.001, 0 ] );
+				decal( g, { bg: 0xf8f8f4, fg: 0x1a3a6a, text: 'STAFF', sub: 'HALE KAI HOTEL', style: 'band', band: s.color ?? 0x1a4a8a, glyph: 'palm', glyphColor: s.color ?? 0x1a4a8a, w: 160, h: 256 }, 0.05, 0.08, [ 0.085, 0.0012, 0 ] );
+				// a key ring with three keys fanned out
+				add( g, G.torus( 0.014, 0.0016, 4, 18 ), metal, [ 0.0, 0.002, 0.045 ], [ PI / 2, 0, 0 ] );
+				const brass2 = M( 0xc8a050, { rough: 0.3, metal: 0.9 } );
+				for ( const [ a, m ] of [ [ 0.2, metal ], [ 0.75, brass2 ], [ 1.3, metal ] ] ) {
+					const k = new THREE.Group(); k.position.set( 0.0, 0.002, 0.045 ); k.rotation.y = - a;
+					add( k, G.cyl( 0.009, 0.009, 0.002, 12 ), m, [ 0.022, 0, 0 ] );
+					add( k, G.box( 0.032, 0.002, 0.007 ), m, [ 0.045, 0, 0 ] );
+					for ( let t = 0; t < 3; t ++ ) add( k, G.box( 0.004, 0.002, 0.003 ), m, [ 0.038 + t * 0.008, 0, 0.004 ] );
+					g.add( k );
+				}
 				break;
 			}
 			case 'marker': {

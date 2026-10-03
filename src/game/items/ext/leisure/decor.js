@@ -20,7 +20,7 @@ addPlaceable( 'leisure_decor', {
 		const pl = g.player;
 		if ( ! pl || ! ( dt > 0 ) ) return;
 		if ( ( p.pos.x - pl.pos.x ) ** 2 + ( p.pos.z - pl.pos.z ) ** 2 > DECOR.r * DECOR.r || Math.abs( p.pos.y - pl.pos.y ) > 2.5 ) return;
-		const near = g.placeables?.near?.( pl.pos, DECOR.r, 'leisure_decor' ).filter( q => Math.abs( q.pos.y - pl.pos.y ) <= 2.5 ) || [ p ];
+		const near = ( g.placeables?.near?.( pl.pos, DECOR.r, 'leisure_decor' ) || [ p ] ).filter( q => Math.abs( q.pos.y - pl.pos.y ) <= 2.5 );
 		if ( near[ 0 ] !== p ) return;
 		const r = decorRate( near.length ), m = Math.min( dt, 4 ) / 60;
 		g.survival?.mood?.( { boredom: r.boredom * m, unhappy: r.unhappy * m } );

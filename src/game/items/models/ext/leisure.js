@@ -645,10 +645,11 @@ export function register( reg ) {
 	// a Niʻihau shell lei: several strands of tiny pink, white and brown shells, a gold clasp
 	reg( 'leis_shells', () => {
 		const g = group(), cols = [ 0xf2d8d0, 0xe8a8a0, 0xfaf2e8, 0x8a5a3a ].map( c => M( c, { rough: 0.35 } ) );
-		const shell = G.sph( 0.0026, 6, 4 ); shell.scale( 1.5, 0.8, 1 );
+		// (low-poly shells and three strands: a lei is a few hundred tiny shells, kept to about 3k triangles)
+		const shell = G.sph( 0.003, 5, 3 ); shell.scale( 1.5, 0.8, 1 );
 		const r = rng( 17 );
-		for ( let st = 0; st < 4; st ++ ) {
-			const rx = 0.075 + st * 0.007, rz = 0.06 + st * 0.006, n = 64 + st * 6;
+		for ( let st = 0; st < 3; st ++ ) {
+			const rx = 0.075 + st * 0.008, rz = 0.06 + st * 0.007, n = 44 + st * 5;
 			for ( let i = 0; i < n; i ++ ) {
 				const a = i / n * PI * 2;
 				add( g, shell, cols[ ( i + st ) % 4 === 3 && r() < 0.5 ? 3 : Math.floor( r() * 3 ) ], [ Math.cos( a ) * rx, 0.0022 + st * 0.0015, Math.sin( a ) * rz ], [ 0, - a, 0 ] );

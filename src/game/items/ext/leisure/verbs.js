@@ -203,8 +203,9 @@ addUseActions( ( stack, def, ctx ) => {
 	const t = def.tool;
 
 	// keepsakes
+	// (the double-click default for a keepsake; a watch keeps Check time first)
 	const A = admireSpec( def );
-	if ( A ) ctx.add( A.verb, () => admire( g, stack, def ) );
+	if ( A ) ( t ? ctx.add : ctx.first )( A.verb, () => admire( g, stack, def ) );
 	if ( def.flip ) ctx.add( 'Flip', () => {
 		playLeisSound( g, 'leis_coin' );
 		g.toast( coinText( Math.random() ), 'info' );

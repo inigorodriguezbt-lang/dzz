@@ -12,7 +12,7 @@ import { getItem, displayName } from '../../ItemDB.js';
 import { rollLoot } from '../../Loot.js';
 import { capacityOf, itemsOf, containerWeight } from '../../../Inventory.js';
 import { provides } from '../../util.js';
-import { DYES, dyedName, WET_SHARE, DRY, wetOnEquip, wetOnRemove, FRAGILE, strain, RIP_AT, SUITCASE, DRAGGED, camoFactor, clamp } from './logic.js';
+import { DYES, dyedName, WET_SHARE, DRY, wetOnEquip, wetOnRemove, FRAGILE, strain, RIP_AT, SUITCASE, DRAGGED, camoFactor, clamp, keyFits } from './logic.js';
 import { attach as outdoorsAttach } from '../outdoors/runtime.js';
 
 // ---- looks ------------------------------------------------------------------------------------------------------------
@@ -35,7 +35,9 @@ function unpackFirst( stack, def ) {
 	stack.data.opened = true;
 	const items = itemsOf( stack ), cap = capacityOf( stack );
 	let vol = 0;
-	for ( const s of rollLoot( def.opens ) ) {
+	// the biggest thing first (a pistol before its cleaning kit), then whatever still fits
+	const rolled = rollLoot( def.opens ).sort( ( a, b ) => ( getItem( b.id )?.size || 1 ) - ( getItem( a.id )?.size || 1 ) );
+	for ( const s of rolled ) {
 		const v = ( getItem( s.id )?.size || 1 ) * ( getItem( s.id )?.stack > 1 ? 1 : s.qty );
 		if ( vol + v > cap + 1e-6 ) continue;
 		items.push( s );
@@ -54,9 +56,23 @@ export function openCase( g, stack ) {
 	return c;
 }
 
-// a lockpick takes a while and keeps the lock; prying is quick, loud and bends the case
+// a lockpick takes a while and keeps the lock; prying is quick, loud and bends the case; someone's keys are quiet and
+// quick, if one of them fits
 export function unlock( g, stack, how, use ) {
 	const inv = g.player.inventory;
+	if ( how === 'keys' ) {
+		const keys = inv.find( ( s ) => s.id === 'lanyard_keys' );
+		if ( ! keys ) { g.toast( 'No keys', 'warn' ); return false; }
+		use.timed( 'Trying keys', 4, 'click', () => {
+			if ( ! use.exists( stack ) ) return;
+			( stack.data.tried ||= [] ).push( keys.uid );
+			if ( ! keyFits( stack.uid, keys.uid ) ) { g.toast( 'No key fits', 'info' ); return; }
+			stack.data.unlocked = true;
+			g.toast( 'Unlocked', 'good' );
+			openCase( g, stack );
+		} );
+		return true;
+	}
 	if ( how === 'pick' ) {
 		const pick = inv.find( ( s ) => provides( s, 'lockpick' ) || getItem( s.id )?.tool?.kind === 'lockpick' );
 		if ( ! pick ) { g.toast( 'Need a lockpick', 'warn' ); return false; }
@@ -126,10 +142,16 @@ export class GearSystem {
 				return m;
 			};
 		}
+		// (attach is the outdoors domain's own, idempotent: whichever domain rides in first creates its system)
 		const out = outdoorsAttach( g );
 		if ( out && typeof out.protectedNow === 'function' ) {
 			const base = out.protectedNow.bind( out );
 			out.protectedNow = ( pos ) => base( pos ) || this.netOn();
+		}
+		// and a night out under the stars with a net over your face: no bites either
+		if ( out && typeof out._sleepLevel === 'function' ) {
+			const base = out._sleepLevel.bind( out );
+			out._sleepLevel = () => this.netOn() ? 0 : base();
 		}
 	}
 
@@ -140,9 +162,9 @@ export class GearSystem {
 		if ( ! S || ! pl?.inventory || g.dead ) return;
 		this.t += dt;
 		this.rollT -= dt;
-		// a suitcase rattles along behind you
-		const back = pl.inventory.equip.back;
-		if ( back && DRAGGED.has( back.id ) && pl.moving && ! pl.vehicle && ! pl.swimming && this.rollT <= 0 ) {
+		// a suitcase rattles along behind you (creative: no noise, no wear)
+		const back = pl.inventory.equip.back, creative = g.mode === 'creative';
+		if ( back && DRAGGED.has( back.id ) && pl.moving && ! pl.vehicle && ! pl.swimming && ! creative && this.rollT <= 0 ) {
 			this.rollT = SUITCASE.every;
 			const pos = pl.pos.clone ? pl.pos.clone() : { ...pl.pos };
 			g.events?.emit?.( 'noise', { pos, radius: SUITCASE.radius * ( pl.stance === 'crouch' ? 0.6 : 1 ), source: pl, kind: 'suitcase' } );
@@ -155,8 +177,8 @@ export class GearSystem {
 		this.lastH = h;
 		this._equipChanges();
 		this._wet( dh );
-		this._bags( step );
-		pl.camo = camoFactor( pl.inventory.equip );
+		if ( ! creative ) this._bags( step );
+		pl.camo = camoFactor( pl.inventory.equip, g.world?.sky?.night || 0 );
 		this.hp = S.health;
 	}
 

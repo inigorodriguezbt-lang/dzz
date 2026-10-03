@@ -47,6 +47,11 @@ const MINE = allItems().filter( d => d.tags.includes( 'leisure' ) ).map( d => d.
 // ---- the catalogue ---------------------------------------------------------------------------------------------------
 console.log( 'items' );
 ok( MINE.length >= 50, `leisure items (${MINE.length})` );
+// the boards are big: a surfboard fills most of a hiking pack, two don't fit a military one; a bodyboard is half that
+{
+	const sb = getItem( 'surfboard' ).size, bb = getItem( 'bodyboard' ).size;
+	ok( sb <= getItem( 'backpack_hiking' ).backpack.capacity && sb * 2 > getItem( 'backpack_military' ).backpack.capacity && bb >= sb * 0.4 && bb < sb, `board sizes (${sb}, ${bb})` );
+}
 ok( ! warnings.some( w => /duplicate|no table/.test( w ) ), 'no duplicate ids or missing tables: ' + warnings.join( '; ' ) );
 const MENU_ONLY = new Set( [ 'car_trunk', 'car_glovebox' ] );
 const visible = new Set();
@@ -311,6 +316,11 @@ console.log( 'flask' );
 	U.drinkItem( full ); finish();
 	ok( full.data.left === 3 && S.drunk > 0, 'a nip' );
 	ok( run( 'leis_fill_flask', find( 'whiskey' ), full ) && full.data.left === 4 && find( 'whiskey' ).data.left === 3, 'topped up from whiskey: one shot' );
+	// a metal flask is no molotov bottle (the base combo takes a strong spirit whole); a bottle of rum still is
+	const rags = put( 'rags' );
+	ok( ! KB.find( rags, full ).some( m => m.combo.id === 'molotov_spirit' ) && ! KB.partners( rags ).some( p => p.combo.id === 'molotov_spirit' && p.other === full ), 'no molotov from the flask' );
+	ok( KB.find( rags, makeStack( 'whiskey' ) ).some( m => m.combo.id === 'molotov_spirit' ), 'a bottle of whiskey still makes one' );
+	inv.remove( rags );
 	// the flask counts as spirits: it cleans a rag
 	const rag = put( 'bandage_rag' );
 	ok( run( 'disinfect_rag', full, rag ) && has( 'bandage' ) === 1 && full.data.left === 3, 'a shot from the flask makes a sterile bandage' );
@@ -364,6 +374,8 @@ console.log( 'keepsakes' );
 	// watches still tell the time
 	const lw = put( 'luxury_watch' );
 	ok( !! verb( lw, 'Check time' ) && !! verb( lw, 'Admire' ), 'the luxury watch: Check time and Admire' );
+	// a double-click admires a keepsake (not Display); a watch still tells the time first
+	ok( U.actions( sg )[ 0 ].verb === 'Shake' && U.actions( tr )[ 0 ].verb === 'Admire' && U.actions( lw )[ 0 ].verb === 'Check time', `defaults: ${U.actions( tr ).map( a => a.verb ).join( ', ' )}` );
 	ok( getItem( 'duke_poster' ).place?.kind === 'leisure_decor' && ! getItem( 'whale_tooth_pendant' ).place, 'posters go on display, a pendant does not' );
 }
 
@@ -375,10 +387,17 @@ console.log( 'display' );
 	const mk = ( item, x ) => ( { id: 'd' + x, kind: 'leisure_decor', item, pos: { x, y: 0.5, z: 0 }, stack: makeStack( item ), data: {} } );
 	decor = [ mk( 'snow_globe', 1 ), mk( 'surf_trophy', 2 ), mk( 'duke_poster', 3 ), mk( 'koa_bowl', 4 ), mk( 'hula_figure', 5 ) ];
 	for ( let i = 0; i < 60; i ++ ) for ( const d of decor ) K.update( d, 1, game, 0 );
-	ok( Math.abs( ( 50 - S.boredom ) - 3 * 0.7 ) < 0.01 && S.unhappy < 50, `a minute among five pieces: three count (${( 50 - S.boredom ).toFixed( 2 )})` );
+	ok( Math.abs( ( 50 - S.boredom ) - 3 * - L.DECOR.boredom ) < 0.01 && S.unhappy < 50, `a minute among five pieces: three count (${( 50 - S.boredom ).toFixed( 2 )})` );
 	S.boredom = 50; p.pos.set( 40, 0.5, 0 );
 	for ( let i = 0; i < 60; i ++ ) for ( const d of decor ) K.update( d, 1, game, 0 );
 	ok( S.boredom === 50, 'far off: nothing' );
+	// sitting about indoors with three pieces out: bored more slowly, not cured
+	ok( 3 * - L.DECOR.boredom < 1.55 * 0.8, 'a display slows boredom, it doesn\'t stop it' );
+	// a game without the placeables' near(): the one piece counts
+	p.pos.set( 0, 0.5, 0 ); S.boredom = 50;
+	const noNear = { ...game, placeables: {} };
+	for ( let i = 0; i < 60; i ++ ) K.update( decor[ 0 ], 1, noNear, 0 );
+	ok( Math.abs( ( 50 - S.boredom ) + L.DECOR.boredom ) < 0.01, `without near(): one piece (${( 50 - S.boredom ).toFixed( 2 )})` );
 	p.pos.set( 0, 0.5, 0 );
 	ok( A.collectionKinds( game ) === 5, 'pieces on display count towards the collection' );
 	const acts = K.actions( decor[ 0 ], { ...game, placeables: { ...game.placeables, pickUpAction: () => ( { label: 'Pick up', run() {} } ) } } );
@@ -402,6 +421,7 @@ console.log( 'surfing' );
 	sky.night = 1; toasts.length = 0; verb( sb, 'Surf' ).run(); finish();
 	ok( toasts.includes( 'Too dark' ), 'not at night' );
 	sky.night = 0;
+	inv.remove( sb ); // (two boards don't fit one pack)
 	const bb = put( 'bodyboard' );
 	S.boredom = 60; game.playTime += 5000; S.stamina = 100;
 	act( bb, 'Bodyboard' );

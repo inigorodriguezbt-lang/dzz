@@ -5,7 +5,7 @@
 //     (keeps jellyfish off), a beekeeper suit and veil (the veil keeps mosquitoes off), a leather apron;
 //   military and police: a ghillie hood, a boonie with netting (a boonie and a mosquito net), a tactical vest that takes
 //     steel plates or plates beaten from sheet metal, a pilot's helmet, a civil defence gas mask, a bandolier, a leg rig,
-//     dog tags (read: their unit's post on the map);
+//     dog tags (read: their unit's post on the map); someone's lanyard of keys (try them on the locked cases);
 //   sports: motocross helmet and chest protector, a hockey mask, bike and football helmets, knee and elbow pads (strap
 //     them onto trousers), sport sunglasses;
 //   carrying: a rolling suitcase (big, but slow and loud to drag), a briefcase and a pistol case (locked: pick or force
@@ -26,7 +26,7 @@ import { addRecipes, R } from '../../recipes.js';
 import { addCombos } from '../../combos.js';
 import { addUseActions, addSpoilHook } from '../../hooks.js';
 import { provides } from '../../util.js';
-import { dyeable, markable, PATCH, MAX_PATCHES, POUCH_CAP, MAX_POUCHES, PADS, patchable, pouchable, addMods, subMods, wetLabel, dryTime } from '../../ext/gear/logic.js';
+import { dyeable, markable, PATCH, MAX_PATCHES, POUCH_CAP, MAX_POUCHES, PADS, patchable, pouchable, addMods, subMods, wetLabel, dryTime, keysTried } from '../../ext/gear/logic.js';
 import { attach, setLook, isCase, locked, openCase, unlock } from '../../ext/gear/runtime.js';
 // the outdoor sites' tables (site_<kind>) are defined there; imported first so they can be extended here
 import '../../sites/tables.js';
@@ -87,7 +87,7 @@ defineItems( [
 		model: { type: 'shirt', style: 'aloha', color: 0x1d3566, print: 'plaid', color2: 0xf2f2ee, color3: 0x0e1a36, rep: 1.6, button: 0xf2f2ee }, desc: 'Heavy plantation work shirt.' } ),
 	cl( 'aloha_dress', 'Aloha dress', 'torso', { color: 0xc8283a, cap: 0, ins: 0.06, vis: 0.75, w: 0.25, size: 2, tags: [ 'casual', 'tourist', 'hawaiian' ],
 		model: { type: 'gear_dress', style: 'sundress', color: 0xc8283a, print: 'hibiscus', color2: 0xf6e7d0, color3: 0x2f6b3a }, desc: 'Light and cool.' } ),
-	cl( 'holoku', 'Holokū', 'torso', { color: 0xf2eee4, cap: 0, ins: 0.14, vis: 0.7, w: 0.6, size: 4, rarity: 'uncommon', tags: [ 'formal', 'church', 'hawaiian' ],
+	cl( 'holoku', 'Holokū', 'torso', { color: 0xf2eee4, cap: 0, ins: 0.16, vis: 0.7, w: 0.6, size: 4, rarity: 'uncommon', tags: [ 'formal', 'church', 'hawaiian' ],
 		model: { type: 'gear_dress', style: 'gown', color: 0xf4f0e6, print: 'floral', color2: 0xe8dcc8, color3: 0xd8c8b0, rep: 2.2, trim: 0xe8e0d0 }, desc: 'A long formal gown.' } ),
 	cl( 'kapa_kihei', 'Kapa kīhei', 'torso', { color: KAPA, cap: 0, ins: 0.22, vis: 0.4, w: 0.5, size: 3, rarity: 'rare', tags: [ 'hawaiian', 'church', 'nodye' ],
 		model: { type: 'gear_smock', style: 'kihei', color: KAPA }, dismantle: [ [ 'kapa_cloth', 2 ] ], dismantleTools: [ 'cut' ], desc: 'A bark-cloth shoulder wrap. Warm.' } ),
@@ -95,7 +95,7 @@ defineItems( [
 		model: { type: 'gear_small', style: 'kapa' }, desc: 'Bark cloth. A warm patch.' } ),
 	bp( 'lauhala_bag', 'Lauhala bag', { cap: 8, w: 0.3, size: 4, color: 0xcfa860, vis: 0.5, tags: [ 'tourist', 'hawaiian', 'market', 'nodye' ],
 		model: { type: 'gear_bag', style: 'lauhala', color: 0xcfa860 }, desc: 'Woven pandanus tote.' } ),
-	misc( 'feather_lei_band', 'Feather lei hat band', { w: 0.03, size: 0.5, rarity: 'uncommon', tags: [ 'hawaiian', 'valuable' ],
+	misc( 'feather_lei_band', 'Feather lei hat band', { w: 0.03, size: 0.5, rarity: 'rare', tags: [ 'hawaiian', 'valuable' ],
 		model: { type: 'gear_small', style: 'feathers', color: 0xd83a2a, color2: 0xf2c230 }, desc: 'Goes on a lauhala hat.' } ),
 	cl( 'lauhala_hat_lei', 'Lauhala hat with lei', 'head', { color: 0xcfa860, ins: 0.05, vis: 0.55, w: 0.18, size: 3, rarity: 'rare', tags: [ 'hawaiian', 'nodye' ],
 		model: { type: 'gear_hat', style: 'lei', color: 0xcfa860, color2: 0xd83a2a, color3: 0xf2c230 }, desc: 'A lauhala hat with a feather band.' } ),
@@ -138,12 +138,14 @@ defineItems( [
 		model: { type: 'gear_helmet', style: 'pilot', color: 0x4a5034, color2: 0x1a1a1a, visor: 0x2a2a30 }, desc: 'Flight helmet with a visor.' } ),
 	cl( 'gas_mask_civil', 'Civil defence gas mask', 'face', { color: 0x3a3a34, ins: 0.05, bite: 0.25, vis: 0.45, w: 0.8, size: 3, rarity: 'uncommon', tags: [ 'police', 'hazmat', 'nodye' ],
 		model: { type: 'gear_mask', style: 'civil', color: 0x3a3a34 }, desc: 'Old rubber mask. Covers the face.' } ),
-	cl( 'bandolier', 'Bandolier', 'vest', { color: 0x5a4a30, cap: 5, ins: 0, vis: 0.4, w: 0.45, size: 2, tags: [ 'hunting', 'military', 'farm' ],
+	cl( 'bandolier', 'Bandolier', 'vest', { color: 0x5a4a30, cap: 5, ins: 0, vis: 0.4, w: 0.45, size: 2, tags: [ 'hunting', 'military', 'farm', 'nodye' ],
 		model: { type: 'gear_vest', style: 'bandolier', color: 0x5a4a30, color2: 0xc8282a }, desc: 'Ammo across the chest.' } ),
 	cl( 'leg_rig', 'Leg rig', 'belt', { color: 0x2a2e26, cap: 4, ins: 0, vis: 0.3, w: 0.6, size: 3, rarity: 'uncommon', tags: [ 'military', 'police' ],
 		model: { type: 'gear_vest', style: 'legrig', color: 0x2a2e26 }, desc: 'Pouches on the thigh.' } ),
 	misc( 'dog_tags', 'Dog tags', { w: 0.02, size: 0.2, rarity: 'uncommon', tags: [ 'military' ],
 		model: { type: 'gear_small', style: 'dogtags' }, desc: 'Read to mark their unit\'s post.' } ),
+	misc( 'lanyard_keys', 'Lanyard with keys', { w: 0.08, size: 0.5, tags: [ 'office', 'work' ],
+		model: { type: 'gear_small', style: 'lanyard', color: 0x1a4a8a }, desc: 'Try them on locked cases.' } ),
 
 	// ---------------- sports protection ----------------
 	cl( 'motocross_helmet', 'Motocross helmet', 'head', { color: 0xf2f2ee, ins: 0.2, bite: 0.62, bullet: 0.04, vis: 0.75, w: 1.3, size: 6, rarity: 'uncommon', tags: [ 'motor', 'sports', 'garage' ],
@@ -166,7 +168,7 @@ defineItems( [
 		model: { type: 'gear_suitcase', color: 0x2a4a7a, color2: 0x1a1a1a }, desc: 'Holds a lot. Slow and loud to drag.' } ),
 	box( 'briefcase', 'Briefcase', 5, { w: 1.6, size: 6, rarity: 'uncommon', tags: [ 'office', 'bank' ], lock: true, opens: 'gear_briefcase',
 		model: { type: 'gear_case', style: 'briefcase', color: 0x2a1a12, color2: 0xc8a050 }, desc: 'Locked. Someone\'s papers inside.' } ),
-	box( 'pistol_case', 'Pistol case', 3, { w: 1.1, size: 4, rarity: 'rare', tags: [ 'gunstore', 'police' ], lock: true, opens: 'gear_pistol_case',
+	box( 'pistol_case', 'Pistol case', 4, { w: 1.1, size: 4, rarity: 'rare', tags: [ 'gunstore', 'police' ], lock: true, opens: 'gear_pistol_case',
 		model: { type: 'gear_case', style: 'pistol', color: 0x1a1a1c, color2: 0x8a8e94 }, desc: 'Locked hard case.' } ),
 	box( 'lunch_box', 'Lunch box', 2, { w: 0.5, size: 2, tags: [ 'school', 'work' ], opens: 'gear_lunch_box',
 		model: { type: 'gear_case', style: 'lunch', color: 0xc8282a, color2: 0xb8bcc2 }, desc: 'Metal box. Maybe a lunch inside.' } ),
@@ -181,7 +183,7 @@ defineItems( [
 	bp( 'trash_bag', 'Trash bag', { cap: 26, w: 0.08, size: 1, color: 0x161618, wp: 0.8, vis: 0.4, bite: 0, noBagTag: true, tags: [ 'hardware', 'fragile', 'plastic', 'nodye', 'trash' ],
 		model: { type: 'gear_bag', style: 'trash', color: 0x161618 }, desc: 'Over the shoulder. Big, but it tears.' } ),
 	cl( 'trash_bag_poncho', 'Trash bag poncho', 'vest', { color: 0x161618, ins: 0.05, wp: 0.75, vis: 0.4, w: 0.08, size: 1, tags: [ 'crafted', 'plastic', 'nodye', 'fragile' ],
-		model: { type: 'gear_smock', style: 'trash', color: 0x161618 }, desc: 'Keeps the rain off. Tears.' } ),
+		model: { type: 'gear_smock', style: 'trash', color: 0x2a2c31 }, desc: 'Keeps the rain off. Tears.' } ),
 	bp( 'sling_bag', 'Sling bag', { cap: 8, w: 0.5, size: 5, color: 0x3a3e46, vis: 0.4, tags: [ 'casual', 'tourist', 'sports' ],
 		model: { type: 'gear_bag', style: 'sling', color: 0x3a3e46, color2: 0x1a1a1a }, desc: 'One strap, quick to reach.' } ),
 	bp( 'waist_pack', 'Hiking waist pack', { slot: 'belt', cap: 6, w: 0.35, size: 3, color: 0xe8601a, vis: 0.6, tags: [ 'sports', 'outdoor' ],
@@ -229,10 +231,11 @@ const I = ( ids, w, q ) => ( { ids, w, q } );
 const PISTOLS = [ 'glock17', 'm1911', 'beretta_m9', 'sig_p226', 'revolver_357', 'ruger_mk4' ];
 defineLootTable( 'gear_briefcase', { rolls: [ 1, 3 ], items: [
 	[ 'cash', 3, [ 20, 250 ] ], [ 'newspaper', 1 ], [ 'phone', 0.8 ], [ 'stash_note', 0.4 ], [ 'car_keys', 0.6 ], [ 'watch', 0.3 ], [ 'gold_chain', 0.15 ],
-	[ 'painkillers', 0.4 ], [ 'lighter_zippo', 0.2 ], [ 'candy_bar', 0.4 ], [ 'marker', 0.6 ], I( [ 'glock17', 'm1911' ], 0.1 ), [ 'ammo_9mm', 0.15 ], [ 'treasure_map', 0.03 ],
+	[ 'painkillers', 0.4 ], [ 'lighter_zippo', 0.2 ], [ 'candy_bar', 0.4 ], [ 'marker', 0.6 ], [ 'lanyard_keys', 0.3 ], I( [ 'glock17', 'm1911' ], 0.1 ), [ 'ammo_9mm', 0.15 ], [ 'treasure_map', 0.03 ],
 ] } );
+// a pistol most of the time (the biggest thing goes in first: runtime unpackFirst), else its magazines and rounds
 defineLootTable( 'gear_pistol_case', { rolls: [ 1, 2 ], items: [
-	I( PISTOLS, 4 ), I( [ 'mag_glock17', 'mag_1911', 'mag_m9', 'mag_p226', 'mag_ruger22' ], 1.5 ), I( [ 'ammo_9mm', 'ammo_45acp', 'ammo_357', 'ammo_22lr' ], 2 ), [ 'weapon_cleaning_kit', 0.4 ],
+	I( PISTOLS, 8 ), I( [ 'mag_glock17', 'mag_1911', 'mag_m9', 'mag_p226', 'mag_ruger22' ], 1.5 ), I( [ 'ammo_9mm', 'ammo_45acp', 'ammo_357', 'ammo_22lr' ], 2 ),
 ] } );
 defineLootTable( 'gear_lunch_box', { rolls: [ 0, 2 ], items: [
 	[ 'spam_musubi', 2 ], [ 'manapua', 0.8 ], [ 'granola_bar', 1 ], [ 'li_hing_mui', 0.8 ], [ 'macadamia_nuts', 0.6 ], [ 'lilikoi_juicebox', 1 ], [ 'arare', 0.6 ],
@@ -267,7 +270,7 @@ put( 'hardware', [ [ 'trash_bag', 0.8, [ 1, 3 ] ], [ 'rain_poncho', 0.8 ], [ 'up
 put( 'sports', [ [ 'camo_dye_kit', 0.3 ], [ 'utility_pouch', 0.3 ], [ 'boonie_net', 0.2 ], [ 'tackle_bag', 0.5 ], [ 'rain_poncho', 0.4 ] ] );
 put( 'surf', [ [ 'lavalava', 0.4 ], [ 'tiedye_kit', 0.3 ], [ 'skate_pads', 0.2 ] ] );
 put( 'pawn', [ [ 'briefcase', 0.3 ], [ 'pistol_case', 0.3 ], [ 'ammo_can', 0.2 ], [ 'rifle_case', 0.2 ], [ 'camera_bag', 0.5 ], [ 'kapa_kihei', 0.2 ], [ 'kapa_cloth', 0.2 ],
-	[ 'feather_lei_band', 0.4 ], [ 'dog_tags', 0.2 ], [ 'gas_mask_civil', 0.2 ], [ 'hockey_mask', 0.1 ], [ 'oilskin_coat', 0.1 ], [ 'lauhala_hat_lei', 0.1 ] ] );
+	[ 'feather_lei_band', 0.15 ], [ 'dog_tags', 0.2 ], [ 'gas_mask_civil', 0.2 ], [ 'hockey_mask', 0.1 ], [ 'oilskin_coat', 0.1 ], [ 'lauhala_hat_lei', 0.1 ] ] );
 put( 'gunstore', [ [ 'pistol_case', 0.8 ], [ 'rifle_case', 0.6 ], [ 'ammo_can', 0.6 ], [ 'bandolier', 0.4 ], [ 'leg_rig', 0.3 ], [ 'tactical_vest', 0.3 ], [ 'camo_dye_kit', 0.4 ],
 	[ 'boonie_net', 0.3 ], [ 'ghillie_hood', 0.15 ], [ 'utility_pouch', 0.4 ] ] );
 // services
@@ -279,17 +282,17 @@ put( 'military_armory', [ [ 'armor_plate', 0.4 ], [ 'tactical_vest_plated', 0.25
 put( 'military_locker', [ [ 'dog_tags', 0.5 ], [ 'utility_pouch', 0.5 ], [ 'hydration_pack', 0.3 ], [ 'pilot_helmet', 0.08 ], [ 'ammo_can', 0.4 ] ] );
 put( 'hangar', [ [ 'pilot_helmet', 0.5 ], [ 'rolling_suitcase', 0.3 ], [ 'briefcase', 0.2 ] ] );
 put( 'garage_shop', [ [ 'motocross_helmet', 0.4 ], [ 'chest_protector', 0.3 ], [ 'leather_apron', 0.4 ], [ 'lunch_box', 0.4 ], [ 'trash_bag', 0.3 ] ] );
-put( 'hospital', [ [ 'gas_mask_civil', 0.1 ] ] );
+put( 'hospital', [ [ 'gas_mask_civil', 0.1 ], [ 'lanyard_keys', 0.15 ] ] );
 put( 'restaurant_kitchen', [ [ 'trash_bag', 0.5, [ 1, 2 ] ], [ 'leather_apron', 0.3 ] ] );
 // offices, schools, public buildings
-put( 'office', [ [ 'briefcase', 0.6 ], [ 'messenger_bag', 0.4 ], [ 'marker', 0.8 ], [ 'lunch_box', 0.3 ] ] );
-put( 'desk', [ [ 'marker', 0.5 ], [ 'briefcase', 0.12 ] ] );
+put( 'office', [ [ 'briefcase', 0.6 ], [ 'messenger_bag', 0.4 ], [ 'marker', 0.8 ], [ 'lunch_box', 0.3 ], [ 'lanyard_keys', 0.3 ] ] );
+put( 'desk', [ [ 'marker', 0.5 ], [ 'briefcase', 0.12 ], [ 'lanyard_keys', 0.25 ] ] );
 put( 'bank', [ [ 'briefcase', 0.5 ] ] );
 put( 'school', [ [ 'lunch_box', 0.8 ], [ 'drawstring_bag', 0.8 ], [ 'marker', 0.8 ], [ 'football_helmet', 0.3 ], [ 'bike_helmet', 0.2 ], [ 'skate_pads', 0.2 ], [ 'tiedye_kit', 0.3 ], [ 'messenger_bag', 0.3 ] ] );
 put( 'church', [ [ 'holoku', 0.3 ], [ 'pau_skirt', 0.4 ], [ 'kapa_kihei', 0.15 ], [ 'kapa_cloth', 0.25 ], [ 'feather_lei_band', 0.15 ], [ 'lauhala_bag', 0.3 ] ] );
-put( 'post', [ [ 'messenger_bag', 0.6 ], [ 'marker', 0.4 ], [ 'grocery_bag', 0.3 ] ] );
-put( 'hotel_room', [ [ 'rolling_suitcase', 0.5 ], [ 'briefcase', 0.15 ], [ 'aloha_dress', 0.3 ], [ 'camera_bag', 0.3 ], [ 'lauhala_bag', 0.2 ], [ 'grocery_bag', 0.3 ] ] );
-put( 'warehouse', [ [ 'trash_bag', 0.6, [ 1, 3 ] ], [ 'lunch_box', 0.4 ], [ 'ammo_can', 0.1 ] ] );
+put( 'post', [ [ 'messenger_bag', 0.6 ], [ 'marker', 0.4 ], [ 'grocery_bag', 0.3 ], [ 'lanyard_keys', 0.12 ] ] );
+put( 'hotel_room', [ [ 'rolling_suitcase', 0.5 ], [ 'briefcase', 0.15 ], [ 'aloha_dress', 0.3 ], [ 'camera_bag', 0.3 ], [ 'lauhala_bag', 0.2 ], [ 'grocery_bag', 0.3 ], [ 'lanyard_keys', 0.08 ] ] );
+put( 'warehouse', [ [ 'trash_bag', 0.6, [ 1, 3 ] ], [ 'lunch_box', 0.4 ], [ 'ammo_can', 0.1 ], [ 'lanyard_keys', 0.2 ] ] );
 put( 'observatory', [ [ 'camera_bag', 0.3 ], [ 'messenger_bag', 0.2 ] ] );
 put( 'farm', [ [ 'palaka_shirt', 0.6 ], [ 'beekeeper_suit', 0.4 ], [ 'beekeeper_veil', 0.5 ], [ 'leather_apron', 0.3 ], [ 'oilskin_coat', 0.3 ], [ 'sou_wester', 0.2 ],
 	[ 'lunch_box', 0.3 ], [ 'trash_bag', 0.3 ], [ 'bandolier', 0.15 ] ] );
@@ -299,7 +302,7 @@ put( 'trash', [ [ 'grocery_bag', 0.8 ], [ 'trash_bag', 0.4 ], [ 'denim_scrap', 0
 
 // the outdoor sites (ground loot you can always see)
 put( 'site_roadside', [ [ 'rolling_suitcase', 0.6 ], [ 'grocery_bag', 0.5 ], [ 'briefcase', 0.15 ], [ 'sling_bag', 0.3 ], [ 'bike_helmet', 0.3 ], [ 'camera_bag', 0.15 ], [ 'rain_poncho', 0.2 ] ] );
-put( 'site_bus_stop', [ [ 'grocery_bag', 0.6 ], [ 'lunch_box', 0.3 ], [ 'messenger_bag', 0.4 ], [ 'drawstring_bag', 0.4 ], [ 'rain_poncho', 0.3 ] ] );
+put( 'site_bus_stop', [ [ 'grocery_bag', 0.6 ], [ 'lunch_box', 0.3 ], [ 'messenger_bag', 0.4 ], [ 'drawstring_bag', 0.4 ], [ 'rain_poncho', 0.3 ], [ 'lanyard_keys', 0.15 ] ] );
 put( 'site_crash_car', [ [ 'rolling_suitcase', 0.3 ], [ 'briefcase', 0.2 ], [ 'pistol_case', 0.08 ], [ 'rifle_case', 0.12 ], [ 'motocross_helmet', 0.15 ], [ 'trash_bag', 0.2 ] ] );
 put( 'site_beach_camp', [ [ 'lavalava', 0.4 ], [ 'lauhala_bag', 0.3 ], [ 'camera_bag', 0.2 ], [ 'waist_pack', 0.3 ], [ 'dive_skin', 0.3 ], [ 'aloha_dress', 0.2 ], [ 'grocery_bag', 0.4 ] ] );
 put( 'site_campsite', [ [ 'rain_poncho', 0.4 ], [ 'hydration_pack', 0.2 ], [ 'rifle_case', 0.1 ], [ 'trash_bag', 0.4 ], [ 'boonie_net', 0.1 ] ] );
@@ -311,11 +314,12 @@ put( 'site_heli_crash', [ [ 'pilot_helmet', 0.4 ], [ 'dog_tags', 0.5 ], [ 'armor
 put( 'site_fema_camp', [ [ 'rain_poncho', 0.6 ], [ 'trash_bag', 0.4, [ 1, 3 ] ], [ 'rolling_suitcase', 0.2 ], [ 'grocery_bag', 0.4 ], [ 'gas_mask_civil', 0.1 ] ] );
 put( 'site_farm_stand', [ [ 'lauhala_bag', 0.4 ], [ 'grocery_bag', 0.6, [ 1, 2 ] ], [ 'palaka_shirt', 0.15 ] ] );
 put( 'site_picnic', [ [ 'grocery_bag', 0.5 ], [ 'lunch_box', 0.3 ], [ 'trash_bag', 0.2 ] ] );
-put( 'site_body', [ [ 'dog_tags', 0.15 ], [ 'tactical_vest_scrap', 0.05 ], [ 'scrap_plate', 0.1 ], [ 'bandolier', 0.1 ], [ 'messenger_bag', 0.2 ], [ 'drawstring_bag', 0.2 ], [ 'trash_bag', 0.15 ] ] );
+put( 'site_body', [ [ 'lanyard_keys', 0.12 ], [ 'dog_tags', 0.15 ], [ 'tactical_vest_scrap', 0.05 ], [ 'scrap_plate', 0.1 ], [ 'bandolier', 0.1 ], [ 'messenger_bag', 0.2 ], [ 'drawstring_bag', 0.2 ], [ 'trash_bag', 0.15 ] ] );
 put( 'site_stash', [ [ 'ammo_can', 0.4 ] ] );
 // the infected's pockets (menus only; their clothes are dressed by the creatures module)
 put( 'zombie_military', [ [ 'dog_tags', 1.2 ] ] );
 put( 'zombie_tourist', [ [ 'camera_bag', 0.1 ] ] );
+put( 'zombie_civilian', [ [ 'lanyard_keys', 0.06 ] ] );
 
 // ======================================================================================================================
 // recipes (the crafting panel)
@@ -353,9 +357,13 @@ addCombos( [
 	{ id: 'gear_cut_jeans', verb: 'Cut', label: 'Cut into shorts', a: { tool: 'cut' }, b: { ids: [ 'jeans', 'cargo_pants' ] }, use: { a: 0, b: 0 }, wear: { a: 0.01 },
 		time: 6, sound: 'tear', skill: 'tailoring', xp: 4,
 		run: ( c ) => {
-			const jeans = c.b.id === 'jeans', look = keep( c.b );
+			const jeans = c.b.id === 'jeans', look = keep( c.b ), pads = !! c.b.data.pads;
 			if ( look.name ) look.name = look.name.replace( /jeans|cargo pants/i, jeans ? 'cutoffs' : 'cargo shorts' );
-			c.replace( c.b, jeans ? 'denim_shorts' : 'cargo_shorts', look );
+			// sewn-on patches stay on what's left; pads strapped round the knees come off first
+			if ( c.b.data.mods ) look.mods = JSON.parse( JSON.stringify( c.b.data.mods ) );
+			if ( c.b.data.patches ) look.patches = c.b.data.patches;
+			const one = c.replace( c.b, jeans ? 'denim_shorts' : 'cargo_shorts', look ) || c.b;
+			if ( pads ) { subMods( one, PADS ); c.give( 'skate_pads', 1 ); }
 			c.give( jeans ? 'denim_scrap' : 'fabric', jeans ? 2 : 1 );
 		} },
 
@@ -435,8 +443,10 @@ addUseActions( ( stack, def, ctx ) => {
 	if ( isCase( def ) ) {
 		if ( locked( stack, def ) ) {
 			const pick = inv.find( ( s, d ) => d?.tool?.kind === 'lockpick' && s.cond > 0 );
+			const keys = inv.find( ( s ) => s.id === 'lanyard_keys' );
 			ctx.first( 'Force open', () => unlock( g, stack, 'force', use ) );
 			if ( pick ) ctx.first( 'Pick lock', () => unlock( g, stack, 'pick', use ) );
+			if ( keys && ! keysTried( stack, keys ) ) ctx.first( 'Try keys', () => unlock( g, stack, 'keys', use ) );
 		} else ctx.first( 'Open', () => openCase( g, stack ), [ stack.data.items?.length ? `${stack.data.items.length}` : null ] );
 	}
 

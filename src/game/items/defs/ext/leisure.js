@@ -7,7 +7,7 @@
 //     at the shore (a game hour passes, a big lift);
 //   vices: cigarettes in packs and cartons, cigars, rolled cigarettes (tobacco + papers), chewing tobacco, a vape
 //     (charge it, refill it), all calming; smoking needs a lighter, matches or a fire and makes a little noise; a hip
-//     flask you fill with any spirit (it then counts as spirits: drink it, clean a cut with it);
+//     flask you fill with any spirit (it then counts as spirits: drink it, clean a cut with it; it is no molotov bottle);
 //   keepsakes (`admire` + `fun`): souvenirs and valuables you Admire once a game day, more with a collection; set out
 //     on display (`leisure_decor`) they ease boredom nearby; a koa bowl serves ʻawa stronger than a plain bowl;
 //   seasonal: a party popper (loud), a glow bracelet (a weak light for hours).
@@ -15,7 +15,7 @@
 import { defineItems } from '../../ItemDB.js';
 import { extendLoot } from '../../Loot.js';
 import { addRecipes, R } from '../../recipes.js';
-import { addCombos, unitsIn } from '../../combos.js';
+import { addCombos, unitsIn, getCombo } from '../../combos.js';
 import { isSpirit, flaskRoom, flaskName, FLASK_SHOTS, VAPE_TANK, vapeJuice } from '../../ext/leisure/logic.js';
 import { smoke } from '../../ext/leisure/verbs.js';
 import '../../ext/leisure/decor.js';
@@ -127,9 +127,9 @@ defineItems( [
 		desc: 'Throw to draw the infected away.' } ),
 	misc( 'plush_honu', 'Plush honu', { w: 0.25, size: 2, tags: [ 'toy', 'cloth', 'tourist' ], model: P( 'plush' ),
 		toy: { verb: 'Hug', gerund: 'Hugging', time: 2, move: true, repeat: 600 }, fun: { stress: - 8, unhappy: - 5, panic: - 15 }, desc: 'Hug to calm down.' } ),
-	misc( 'bodyboard', 'Bodyboard', { w: 1.2, size: 8, tags: [ 'surf', 'beach', 'plastic' ], model: P( 'bodyboard', { color: 0x1a8ad6, color2: 0xf2c21a } ), ride: 'bodyboard',
+	misc( 'bodyboard', 'Bodyboard', { w: 1.2, size: 10, tags: [ 'surf', 'beach', 'plastic' ], model: P( 'bodyboard', { color: 0x1a8ad6, color2: 0xf2c21a } ), ride: 'bodyboard',
 		desc: 'Ride waves at the shore.' } ),
-	misc( 'surfboard', 'Surfboard', { w: 3.5, size: 16, rarity: 'uncommon', tags: [ 'surf', 'beach' ], model: P( 'surfboard', { color: 0xf4efe2, stripe: 0x1a8ad6 } ), ride: 'surf',
+	misc( 'surfboard', 'Surfboard', { w: 3.5, size: 22, rarity: 'uncommon', tags: [ 'surf', 'beach' ], model: P( 'surfboard', { color: 0xf4efe2, stripe: 0x1a8ad6 } ), ride: 'surf',
 		desc: 'Surf at the shore.' } ),
 
 	// ================= vices =================
@@ -154,8 +154,8 @@ defineItems( [
 	misc( 'vape_juice', 'Vape juice', { w: 0.04, size: 0.5, stack: 3, tags: [ 'tobacco', 'plastic' ],
 		model: { type: 'pharm_dropper', color: 0xf2f2f2, cap: 0x2a8a6a, label: { text: 'GUAVA CLOUD', sub: 'E-liquid · 3 mg', bg: 0x2a8a6a, fg: 0xffffff, band: 0xf2c21a, style: 'plain', size: 0.3 } },
 		desc: 'Refills a vape.' } ),
-	misc( 'hip_flask', 'Hip flask', { w: 0.2, size: 0.5, rarity: 'uncommon', tags: [ 'metal', 'bar' ], model: P( 'flask' ), desc: 'Fill with spirits.' } ),
-	base( 'hip_flask_full', 'Flask (spirits)', 'drink', { w: 0.45, size: 0.5, rarity: 'uncommon', pre: [ 'drink' ], tags: [ 'crafted', 'metal' ], model: P( 'flask', { cap: true } ),
+	misc( 'hip_flask', 'Hip flask', { w: 0.2, size: 0.5, rarity: 'uncommon', tags: [ 'metal', 'bar', 'flask' ], model: P( 'flask' ), desc: 'Fill with spirits.' } ),
+	base( 'hip_flask_full', 'Flask (spirits)', 'drink', { w: 0.45, size: 0.5, rarity: 'uncommon', pre: [ 'drink' ], tags: [ 'crafted', 'metal', 'flask' ], model: P( 'flask', { cap: true } ),
 		drink: { water: 6, kcal: 300, alcohol: 0.3, caffeine: 0, container: 'hip_flask', sick: 0, portions: FLASK_SHOTS }, desc: 'A few shots of spirits.' } ),
 
 	// ================= keepsakes and valuables =================
@@ -333,6 +333,13 @@ addCombos( [
 	{ id: 'leis_refill_vape', verb: 'Refill', label: 'Refill vape', a: 'vape_juice', b: { tool: 'vape' }, use: { a: 1, b: 0 }, time: 3, sound: 'pour', check: vapeFull,
 		run: ( c ) => { c.b.data.juice = VAPE_TANK; } },
 ] );
+
+// a metal hip flask is no bottle for a molotov: the base combo takes any strong spirit whole, so flasks are left out
+// of it here (the flask still counts as spirits for a sterile rag or a cut)
+{
+	const m = getCombo( 'molotov_spirit' );
+	if ( m && ! m.b?.flaskFree ) m.b = { any: [ m.b ], not: { tag: 'flask' }, flaskFree: true };
+}
 
 // made at a bench: a board game from a plank and pebbles, dice whittled from bone
 addRecipes( [

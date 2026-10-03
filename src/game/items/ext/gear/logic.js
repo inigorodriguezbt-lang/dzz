@@ -193,6 +193,15 @@ export function strain( kind, kg, dt, { sprinting = false, moving = false } = {}
 }
 export const RIP_AT = 0.05;
 
+// ---- someone's keys on a lanyard --------------------------------------------------------------------------------------
+
+// a set of keys fits about a third of the locked cases you find; each set is tried once on a case (the same answer
+// every time: it hashes the two stacks' uids)
+export const KEY_FIT = 0.35;
+const hashStr = ( s ) => { let h = 2166136261; for ( let i = 0; i < s.length; i ++ ) { h ^= s.charCodeAt( i ); h = Math.imul( h, 16777619 ); } return h >>> 0; };
+export const keyFits = ( caseUid, keysUid ) => hashStr( String( caseUid ) + ':' + String( keysUid ) ) % 1000 < KEY_FIT * 1000;
+export const keysTried = ( caseStack, keysStack ) => !! caseStack?.data?.tried?.includes( keysStack?.uid );
+
 // ---- dragging a suitcase --------------------------------------------------------------------------------------------
 
 export const SUITCASE = { speed: 0.85, every: 2.6, radius: 13 };
@@ -200,17 +209,25 @@ export const DRAGGED = new Set( [ 'rolling_suitcase' ] );
 
 // ---- how much your clothes hide you (player.camo, read by the infected's sight) ---------------------------------------
 
-// a bare slot shows skin (0.55); hi-vis 1.0, a ghillie 0.05
-const CAMO_SHARE = { torso: 0.32, legs: 0.24, head: 0.1, vest: 0.1, back: 0.1, face: 0.06, hands: 0.04, feet: 0.04 };
-export function camoFactor( equip ) {
+// Each slot counts by how much of you it shows; a bare one shows skin (0.55). Hi-vis is 1.0, a ghillie 0.05. A vest or
+// a poncho covers most of the torso, so there it is mostly what shows (a bandolier hardly). The average is measured
+// from everyday clothes (0.5): dark or loud clothes shift it a little (about ±0.1), a hi-vis vest a little more,
+// full camouflage a lot. Colours fade at night, so the effect does too.
+const CAMO_SHARE = { torso: 0.34, legs: 0.26, head: 0.1, back: 0.1, face: 0.06, hands: 0.04, feet: 0.04 };
+const VEST_COVER = { bandolier: 0.25 };
+export const CAMO = { norm: 0.5, slope: 0.9, cover: 0.8, night: 0.6, min: 0.65, max: 1.3 };
+const visOf = ( st ) => ( st && wornStats( st )?.vis ) ?? 0.55;
+export function camoFactor( equip, night = 0 ) {
 	let s = 0, n = 0;
 	for ( const slot in CAMO_SHARE ) {
 		const st = equip?.[ slot ], k = CAMO_SHARE[ slot ];
-		let v = 0.55;
-		if ( st ) { const w = wornStats( st ); if ( w ) v = w.vis; }
-		else if ( slot === 'back' || slot === 'vest' ) continue; // nothing there: nothing to see
+		if ( ! st && slot === 'back' ) continue; // no pack: nothing there to see
+		let v = visOf( st );
+		const vest = slot === 'torso' && equip?.vest;
+		if ( vest ) v += ( visOf( vest ) - v ) * ( VEST_COVER[ vest.id ] ?? CAMO.cover );
 		s += v * k; n += k;
 	}
 	const avg = n > 0 ? s / n : 0.55;
-	return clamp( 0.62 + 0.72 * avg, 0.65, 1.3 );
+	const day = 1 - CAMO.night * clamp( night || 0, 0, 1 );
+	return clamp( 1 + ( avg - CAMO.norm ) * CAMO.slope * day, CAMO.min, CAMO.max );
 }
