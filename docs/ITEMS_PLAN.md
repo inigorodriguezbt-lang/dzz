@@ -243,28 +243,26 @@ Camping, survival craft, fishing, hunting and traps.
   a rain barrel, a hammock (sleep anywhere).
 
 ### arms (~45)
-Improvised weapons, weapon mods, explosives and distractions, armour.
+Improvised melee, Hawaiian museum weapons, gun care and attachments, simple ranged weapons, noise distractions,
+armour. Game items only, with no real-world construction detail (no explosives, no home-made gun parts).
 - **Improvised melee, PZ.**
-  - A spiked plank, a barbed-wire bat, a pipe with a wrench head, a machete taped to a pole (a spear), a
-    screwdriver shiv, a hockey stick, a shovel with a sharpened edge, a pool cue, a golf driver (exists?).
-  - A rolling pin, a meat cleaver, a tire-iron hook, a sickle, a bamboo spear, a surfboard fin blade.
-- **Hawaiian weapons** (museum rare): a leiomano (shark-tooth club), a pāhoa dagger, a newa war club, a koa spear.
-- **Weapon mods by combo.**
-  - A bottle suppressor (plastic bottle + duct tape → muzzle attachment, breaks fast), an oil-filter suppressor.
-  - A taped flashlight (light attachment), a bayonet (knife + rifle; adds a melee stab), a sling.
-  - A sawed-off barrel (hacksaw + shotgun: the `sawed_off` exists), a stock wrap, gun oil (condition), a cleaning
-    rod, spare parts kits by class (pistol, rifle, shotgun) that repair condition.
-- **Ranged.** A slingshot with steel balls and stones, sling ammo, a blowgun with darts, throwing knives, a spear
-  gun (shared with outdoors; coordinate ids), a nail gun (short range), a flare gun.
-- **Explosives and distractions,** wired into `src/weapons/Throwables.js` (this domain may edit it and weapons FX in
-  phase B):
-  - A pipe bomb (a pipe + gunpowder + a fuse or a timer), firecrackers (New Year strings that draw zombies with noise
-    for a while), a noise maker (alarm clock + battery: a timed noise), a smoke bomb.
-  - An aerosol bomb (a spray can + a lighter, PZ), a flashbang (exists), a molotov (exists).
-  - A tripwire alarm (cans on a string, placeable), a remote detonator.
-  - Gunpowder comes from dismantling ammunition.
-- **Armour, PZ.** Magazine armour taped to the forearms (`armor.bite`), sports pads (hockey, motocross), a welder's
-  mask, a riot shield (melee block?), a chainmail glove from a butcher.
+  - A spiked plank, a barbed-wire bat, a pipe wrench, a machete lashed to a pole, a screwdriver shiv, a hockey
+    stick, a sharpened shovel, a pool cue.
+  - A rolling pin, a meat cleaver, a sickle, a cane knife variant, a cricket bat.
+- **Hawaiian weapons** (rare, in museums and pawn shops): a leiomano (shark-tooth club), a pāhoa dagger, a newa war
+  club, a koa spear.
+- **Gun care and attachments,** as combos onto firearms:
+  - Gun oil and a cleaning rod (condition), parts kits by class (pistol, rifle, shotgun) that repair condition.
+  - A rifle sling, a taped-on flashlight (light attachment), a bayonet (adds a stab), a stock wrap.
+- **Ranged.** A slingshot with steel balls and stones, throwing knives, a flare gun with flares.
+- **Distractions** (noise that draws the infected away), using the existing noise events and throwables:
+  - Firecracker strings (New Year): a long burst of noise.
+  - A thrown alarm clock or radio, a party horn.
+  - A tripwire of cans (placeable): it rattles when the infected walk through.
+- **Armour, PZ.**
+  - Magazine armour taped to the forearms (`armor.bite`), a welder's mask, a riot shield, a butcher's chainmail
+    glove.
+  - Sports pads belong to gear: reuse them.
 
 ### tech (~60)
 Electronics, power, tools, materials and the junk economy.
@@ -282,7 +280,7 @@ Electronics, power, tools, materials and the junk economy.
 - **Materials.**
   - Glue, epoxy, zip ties, screws, bolts, springs, sheet metal, metal pipe, a garden hose, chain, a padlock, wood
     glue, fabric, thread, leather, a tin can, an empty jar, a plastic bottle.
-  - Electronics scrap, copper wire, circuit boards, a magnet, gunpowder (from ammo), sandpaper, motor oil, WD-40,
+  - Electronics scrap, copper wire, circuit boards, a magnet, sandpaper, motor oil, WD-40,
     bleach (never drink it), vinegar, charcoal (exists).
 - **The junk economy, PZ.** "Dismantle" on electronics, furniture-like items and vehicles' parts gives materials
   (`dismantle`). Materials feed recipes and combos for repairs and builds. Glue, epoxy and duct tape fix things to
@@ -394,7 +392,7 @@ should refer to an id that exists already, or to one from its own domain. To ref
 - flare gun: arms
 - spear gun and Hawaiian sling: outdoors
 - handheld game, frisbee, surfboard, flask: leisure
-- firecrackers and noise makers you throw: arms
+- firecrackers and thrown noise makers: arms
 - alarm clock: tech, unless placeables already made it
 - bug spray and snorkel gear: outdoors
 - sunscreen: pharmacy
