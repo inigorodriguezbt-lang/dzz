@@ -276,8 +276,8 @@ export function register( reg ) {
 		}
 		const alu = M( 0xb8bec6, { rough: 0.3, metal: 0.85 } ), foam = M( 0x4a4e54, { rough: 0.9 } ), rub = MAT.rubber();
 		const y = 0.026, f = group();
-		for ( const sgn of [ 1, - 1 ] ) add( f, G.tube( [ [ 0.56, y, sgn * 0.045 ], [ 0.3, y, sgn * 0.042 ], [ 0.02, y, sgn * 0.03 ], [ - 0.14, y, sgn * 0.008 ] ], 0.0095, 16, 8 ), alu );
-		add( f, G.cylX( 0.012, 0.48, 12 ), alu, [ - 0.38, y, 0 ] );
+		for ( const sgn of [ 1, - 1 ] ) add( f, G.tube( [ [ 0.56, y, sgn * 0.045 ], [ 0.3, y, sgn * 0.042 ], [ 0.02, y, sgn * 0.03 ], [ - 0.14, y, sgn * 0.008 ] ], 0.0115, 16, 8 ), alu );
+		add( f, G.cylX( 0.0135, 0.48, 12 ), alu, [ - 0.38, y, 0 ] );
 		for ( let i = 0; i < 6; i ++ ) add( f, G.cyl( 0.003, 0.003, 0.001, 8 ), MAT.darkMetal(), [ - 0.22 - i * 0.035, y + 0.0115, 0 ] );
 		add( f, G.cylX( 0.016, 0.05, 12 ), rub, [ - 0.63, y, 0 ] );
 		add( f, G.rbox( 0.05, 0.05, 0.13, 0.018, 3 ), foam, [ 0.585, 0.001, 0 ] );

@@ -782,6 +782,11 @@ console.log( 'review' );
 	fresh();
 	for ( let i = 0; i < 400; i ++ ) { S.temp = 38.9; S._ailments( 0.5 ); }
 	ok( S.heat > AIL.heat.exhaust, `38.9 °C from the sun and running: heat exhaustion (${S.heat.toFixed( 2 )})` );
+	// two fevers at once are no hotter than one bad one
+	fresh();
+	S.lepto = 1; S.leptoPeak = true; S.cut = 1;
+	S._ailments( 0.1 );
+	ok( S._tempAdd <= AIL.feverMax + 1e-6 && S._tempAdd > 1, `leptospirosis and a bad cut: +${S._tempAdd.toFixed( 2 )} °C` );
 	// a small infection in a cut that has closed passes on its own; a big one doesn't
 	fresh();
 	S.cut = 0.12; S.wound = 0;

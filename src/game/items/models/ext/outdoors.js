@@ -641,11 +641,17 @@ export function register( reg ) {
 		return ground( g );
 	} );
 
+	// a small welded-wire cage, its drop door up in the guides (flat-packed panels read as a grille, not a trap)
 	reg( 'out_pigtrap_pack', () => {
-		const g = group();
-		// welded-wire panels folded flat in a stack, wired together
-		for ( let i = 0; i < 4; i ++ ) { const p = wirePanel( 1.0, 0.55, i === 3 ); p.rotation.x = - PI / 2; p.position.set( 0, 0.012 + i * 0.024, 0 ); g.add( p ); }
-		for ( const x of [ - 0.35, 0.35 ] ) add( g, CX( 0.05, 0.012, 8 ).rotateZ( PI / 2 ), dull(), [ x, 0.05, 0.28 ] );
+		const g = group(), L = 0.95, W = 0.5, H = 0.48, rod = M( 0x5a6a5a, { rough: 0.5, metal: 0.6 } );
+		for ( const z of [ - W / 2, W / 2 ] ) { const p = wirePanel( L, H ); p.position.set( 0, H / 2, z ); g.add( p ); }
+		{ const top = wirePanel( L, W ); top.rotation.x = PI / 2; top.position.set( 0, H, 0 ); g.add( top ); }
+		{ const back = wirePanel( W, H ); back.rotation.y = PI / 2; back.position.set( - L / 2, H / 2, 0 ); g.add( back ); }
+		const door = wirePanel( W, H, true ); door.rotation.y = PI / 2; door.position.set( L / 2, H / 2 + H * 0.8, 0 ); g.add( door );
+		for ( const z of [ - W / 2, W / 2 ] ) add( g, C( 0.01, 0.01, H * 1.9, 6 ), rod, [ L / 2 + 0.02, H * 0.95, z ] );
+		// the trip rod and the carry handle
+		add( g, tube( [ [ L / 2 - 0.05, H * 1.75, 0 ], [ 0.1, H + 0.04, 0 ], [ - 0.1, H * 0.4, 0 ] ], 0.004, 8, 4 ), rod );
+		add( g, tube( [ [ - 0.12, H, 0 ], [ - 0.1, H + 0.08, 0 ], [ 0.1, H + 0.08, 0 ], [ 0.12, H, 0 ] ], 0.008, 10, 5 ), dull() );
 		return ground( g );
 	} );
 

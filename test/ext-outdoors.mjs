@@ -692,7 +692,7 @@ console.log( 'review' );
 	}
 	for ( const id of MINE ) {
 		const sz = box( id );
-		ok( sz.y > 0.002 && sz.y < 0.7 && sz.x > 0.01 && sz.x < 2.5, `${id}: a sane size (${sz.x.toFixed( 2 )} × ${sz.y.toFixed( 2 )} × ${sz.z.toFixed( 2 )})` );
+		ok( sz.y > 0.002 && sz.y < 1 && sz.x > 0.01 && sz.x < 2.5, `${id}: a sane size (${sz.x.toFixed( 2 )} × ${sz.y.toFixed( 2 )} × ${sz.z.toFixed( 2 )})` );
 	}
 }
 

@@ -125,7 +125,7 @@ defineItems( [
 		desc: 'Stops a cough.' } ),
 	med( 'eye_drops', 'Eye drops', { w: 0.03, size: 0.5, uses: 6, use: 2, pain: 0.05, cure: { eye: 1 }, need: [ 'eye' ], needMsg: 'Eyes fine', verb: 'Use',
 		tags: [ 'pharmacy', 'house', 'convenience', 'medicine_cabinet', 'plastic' ],
-		model: P( 'dropper', { color: 0xf2f2f2, cap: 0x2a8ad6, label: L( 'CLEAR EYES', 'Lubricant drops', 0xffffff, 0x1a6ab8, 0x2a8ad6, 'drop', 'plain', { glyphColor: 0x2a8ad6, size: 0.3 } ) } ),
+		model: P( 'dropper', { color: 0xf2f2f2, cap: 0x2a8ad6, label: L( 'MAKA', 'Lubricant eye drops', 0xffffff, 0x1a6ab8, 0x2a8ad6, 'drop', 'plain', { glyphColor: 0x2a8ad6, size: 0.3 } ) } ),
 		desc: 'Soothes sore eyes.' } ),
 	med( 'inhaler', 'Inhaler', { w: 0.04, size: 0.5, uses: 8, use: 1.5, stamina: true, cure: { cough: 0.15 }, fx: { breathe: 1 }, verb: 'Inhale', gerund: 'Inhaling',
 		sound: 'pharm_puff', rarity: 'uncommon', tags: [ 'pharmacy', 'school', 'house', 'medicine_cabinet', 'plastic' ], model: P( 'inhaler' ),

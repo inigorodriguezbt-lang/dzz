@@ -419,7 +419,8 @@ export function netSpot( g ) {
 	for ( let r = 1.5; r <= NET_REACH; r += 0.5 ) {
 		const x = P.x + dir.x / L * r, z = P.z + dir.z / L * r;
 		const wl = g.physics?.waterLevel?.( x, z ) ?? 0, depth = wl - ( g.hf?.heightAt?.( x, z ) ?? 0 );
-		if ( depth > 0.25 ) return depth > 3.5 ? null : { depth, pos: cam.position.clone().set( x, wl, z ) };
+		// (knee-deep at least: the wet edge of the beach holds no fish)
+		if ( depth > 0.4 ) return depth > 3.5 ? null : { depth, pos: cam.position.clone().set( x, wl, z ) };
 	}
 	return null;
 }

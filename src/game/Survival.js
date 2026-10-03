@@ -47,6 +47,8 @@ export const AIL = {
 	cough: { cold: 35.9, rate: 0.0012, fade: 0.0006 },
 	sprain: { chance: 0.45, fade: 0.0006, sling: 3 },
 	eye: { rate: 0.02, fade: 0.004 },
+	// the most a fever adds to the body's temperature (°C): leptospirosis and an infected cut together are no hotter
+	feverMax: 1.2,
 };
 const AIL_KEYS = [ 'sting', 'centipede', 'sunburn', 'burn', 'heat', 'lepto', 'cut', 'cough', 'sprain', 'eye' ];
 // condition labels: [ id, label, kind, from ] (shown from that severity)
@@ -664,7 +666,9 @@ export class Survival {
 		if ( this.godMode ) { for ( const k of AIL_KEYS ) this[ k ] = 0; this.wound = 0; this.leptoT = 0; this._tempAdd = 0; return; }
 		this._envT -= dt;
 		if ( this._envT <= 0 ) { this._envT = 1; this._ailEnv(); this._ailRoll(); }
-		let tAdd = 0;
+		// a fever (leptospirosis, an infected cut): they don't add up past feverMax (°C)
+		const fever = Math.min( A.feverMax, this.lepto * 1.1 + ( this.cut > 0.5 ? ( this.cut - 0.5 ) * 2 : 0 ) );
+		let tAdd = fever;
 
 		// a box jellyfish sting burns for a few minutes; vinegar stops it
 		if ( this.sting > 0 ) {
@@ -692,7 +696,6 @@ export class Survival {
 
 		// heat exhaustion, then heat stroke: water, shade, a swim or a cold pack bring it down. A fever (leptospirosis,
 		// an infected cut) raises the temperature but is not the heat: it doesn't build towards heat stroke
-		const fever = this.lepto * 1.1 + ( this.cut > 0.5 ? ( this.cut - 0.5 ) * 2 : 0 );
 		if ( this.temp - fever > A.heat.from ) this.heat = clamp01( this.heat + dt * ( this.temp - fever - A.heat.from ) * A.heat.rate );
 		else this.heat = Math.max( 0, this.heat - dt * A.heat.fade * ( p.swimming || this._indoorsA ? 2 : 1 ) );
 		if ( this.heat > A.heat.stroke ) {
@@ -709,7 +712,6 @@ export class Survival {
 		if ( this.lepto > 0 ) {
 			if ( ! this.leptoPeak ) { this.lepto = Math.min( 1, this.lepto + dt * A.lepto.rise ); if ( this.lepto >= 1 ) this.leptoPeak = true; }
 			else { this.lepto = Math.max( 0, this.lepto - dt * A.lepto.fall ); if ( this.lepto <= 0 ) this.msg( 'leptook', 'Fever gone', 'good', 10 ); }
-			tAdd += this.lepto * 1.1;
 			this.pain = Math.max( this.pain, this.lepto * 0.4 );
 			this.energy = Math.max( 0, this.energy - dt * 0.01 * this.lepto );
 			if ( this.lepto > 0.6 ) this.health -= dt * 0.012;
@@ -735,7 +737,7 @@ export class Survival {
 			else if ( this.wound <= 0 && this.cut < A.wound.settle ) { this.cut = Math.max( 0, this.cut - dt * A.wound.fade ); if ( this.cut <= 0 ) this.msg( 'cutok', 'Infection gone', 'good', 10 ); }
 			else this.cut = Math.min( 1, this.cut + dt * A.wound.grow );
 			this.pain = Math.max( this.pain, this.cut * 0.4 );
-			if ( this.cut > 0.5 ) { tAdd += ( this.cut - 0.5 ) * 2; this.health -= dt * 0.012 * ( this.cut - 0.5 ); this.msg( 'cutfever', 'Fever', 'bad', 120 ); }
+			if ( this.cut > 0.5 ) { this.health -= dt * 0.012 * ( this.cut - 0.5 ); this.msg( 'cutfever', 'Fever', 'bad', 120 ); }
 		}
 
 		// a cough from the cold (or a fever): fits the infected hear, unless an inhaler opens the chest
