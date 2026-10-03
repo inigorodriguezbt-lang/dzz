@@ -17,7 +17,9 @@ npm test           # core logic tests (Node)
 
 More Node test suites: `node test/items.mjs`, `node test/weapons.mjs`, `node test/creatures-ai.mjs`,
 `node test/vehicles.mjs`, `node test/vehicles-play.mjs`, `node test/buildings.mjs`, `node test/buildings-runtime.mjs`,
-`node test/vegetation.mjs`, `node test/roads.mjs`. Headless screenshots run on Mesa's lavapipe (see `CLAUDE.md`).
+`node test/vegetation.mjs`, `node test/roads.mjs`, `node test/combos.mjs`, `node test/mood.mjs`,
+`node test/placeables.mjs`, `node test/sites.mjs` and one per item domain (`node test/ext-tech.mjs`, `ext-kitchen`,
+`ext-pharmacy`, `ext-outdoors`, `ext-arms`, `ext-gear`, `ext-leisure`). Headless screenshots run on Mesa's lavapipe (see `CLAUDE.md`).
 
 ## The world
 
@@ -49,6 +51,31 @@ protected you are. Loot lies where it would be — on shelves, counters and floo
 Guns, ammunition and magazines, attachments, melee weapons, food and drink, medicine and tools; crafting,
 fires and cooking; the infected, which follow noise and sight; wild boar, goats, deer, chickens and sharks;
 cars, trucks, boats and helicopters.
+
+## Items and what you can do with them
+
+About 900 items, each a 3D model you can see lying in the world: on shelves, counters and floors, and outdoors.
+- **Outdoor loot.** Sites you spot from the road: dropped bags and suitcases, bus stops, crashed cars, beach camps,
+  campsites, dead hikers and survivors, fishing spots, police and military checkpoints, FEMA camps, farm stands,
+  picnics, smoking helicopter wrecks, supply drops under a parachute, and buried stashes you find with a note, a
+  treasure map or a metal detector and dig up with a shovel.
+- **Mixes.** Drag one item onto another, or pick Combine, for hundreds of mixes: batteries into devices, duct tape
+  and sewing kits on worn gear, spirits on rags for sterile bandages, a taped flashlight or a bayonet on a rifle,
+  cocktails (rum and POG make a Mai Tai), shoyu on raw ahi for poke, herbs ground into poultices, dyes and patches on
+  clothes.
+- **Cooking.** Build dishes in a pot, a pan, a bowl or on bread from whatever you have ("Stew (taro, Spam,
+  onion)"), then cook them at a fire or a stove. Salt and smoke meat to keep it, boil seawater down to salt, chill
+  food with ice, slow-cook a pig in an imu.
+- **Things you place.** Snares and spring traps, fish and crab traps, rain barrels, solar stills, smoking racks, tarp
+  shelters and hammocks, a generator that lights and charges what's around it, solar panels, alarm clocks and can
+  tripwires that draw or warn of the infected, buried stashes, planks across doors.
+- **Mood and skills.** Boredom, stress, panic and unhappiness, with books, music, games, cigarettes, good food and
+  surfing to fight them. Thirteen skills level up as you fish, cook, patch people up, craft, repair and shoot, and
+  skill books speed them up.
+- **More to deal with.** Box jellyfish at night, centipedes in the brush, sunburn at noon, heat stroke,
+  leptospirosis from bad water and infected cuts, each with a cure. Scanners and CB radios mark camps, drops and
+  crashes on your map; a satellite phone calls in a supply drop. Electronics dismantle into parts for repairs and
+  builds.
 
 ## Controls
 
