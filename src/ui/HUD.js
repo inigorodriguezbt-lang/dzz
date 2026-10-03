@@ -1,6 +1,8 @@
-// In-game HUD (docs/UI_SPEC.md 5): crosshair, hit marker, compass + heading tab, location card, minimap,
-// vitals strip, conditions, weapon / vehicle panel, hotbar, stamina, key hints, interaction prompt,
-// timed-action ring, damage arc, toasts, pickups, FPS and debug.
+// In-game HUD, DayZ style (docs/UI_DAYZ.md; docs/UI_SPEC.md 5 where that is silent). Almost nothing on screen:
+// status notifiers with tendency arrows and the stance bottom right, condition badges above them, a thin stamina
+// bar and the quickbar bottom centre, prompts right of centre with a thin timed-action bar, a tiny crosshair, red
+// hit and damage flashes, toasts and pickups as plain text lines. The compass bar, minimap, ammo counter and
+// location card are settings (off by default); the vehicle panel, key hints, FPS and debug stay small.
 // Every element is built once. update() writes to the DOM only when a formatted value or a class changes
 // (the helpers below cache the last write) and never reads layout, so an idle frame costs a few compares.
 import { h, kc, fmtDist } from './dom.js';
@@ -10,13 +12,15 @@ import { setIcon } from './itemIcons.js';
 import { lookKey } from '../game/items/ext/gear/logic.js';
 
 const LINGER = 3; // s an element stays after whatever woke it stops (5.2)
+const BRIEF = 2.5; // s the weapon readout shows a change while the ammo counter is off
 const NS = 'http://www.w3.org/2000/svg';
 
 // ---- cached DOM writes ------------------------------------------------------------------------------
 function text( el, v ) { v = String( v ); if ( el._t !== v ) { el._t = v; el.textContent = v; } }
 function flag( el, c, on ) { on = !! on; const k = '$' + c; if ( el[ k ] !== on ) { el[ k ] = on; el.classList.toggle( c, on ); } }
 function show( el, on ) { on = !! on; if ( el._s !== on ) { el._s = on; el.hidden = ! on; } }
-function fill( el, f ) { const v = ( Math.max( 0, Math.min( 1, f || 0 ) ) * 100 ).toFixed( 1 ) + '%'; if ( el._w !== v ) { el._w = v; el.style.width = v; } }
+// a bar's fill as a scale (no layout): the <i> is full width with transform-origin left
+function fill( el, f ) { const v = 'scaleX(' + Math.max( 0, Math.min( 1, f || 0 ) ).toFixed( 3 ) + ')'; if ( el._w !== v ) { el._w = v; el.style.transform = v; } }
 function prop( el, k, v ) { if ( el[ '_' + k ] !== v ) { el[ '_' + k ] = v; el.style.setProperty( k, v ); } }
 // fades out with .gone, then leaves the layout; fading in plays the .fade entry animation
 function fade( el, on ) {
@@ -43,27 +47,36 @@ const hhmm = hr => { hr = ( ( hr % 24 ) + 24 ) % 24; const a = Math.floor( hr ),
 const headingOf = yaw => ( ( - yaw * 180 / Math.PI ) % 360 + 360 ) % 360;
 const bearingOf = ( dx, dz ) => ( Math.atan2( dx, - dz ) * 180 / Math.PI + 360 ) % 360;
 const angDiff = ( a, b ) => ( ( a - b + 540 ) % 360 ) - 180;
-// trend marks beside a vital's icon: 1-3 chevrons stacked in a 12 x 16 box, pointing up (rising) or down (falling)
-const TREND_Y = [ [], [ 8 ], [ 5.5, 10.5 ], [ 3, 8, 13 ] ];
-const trendPath = ( n, dir ) => TREND_Y[ n ].map( y => `M1.5 ${y + 2.25 * dir}L6 ${y - 2.25 * dir}L10.5 ${y + 2.25 * dir}` ).join( '' );
+const cap1 = s => s ? s[ 0 ].toUpperCase() + s.slice( 1 ) : s;
+// tendency arrows beside a notifier (DayZ's ↑ ↑↑ ↑↑↑): 1-3 small triangles stacked in an 8 x 18 box
+const TREND_Y = [ [], [ 9 ], [ 6.5, 11.5 ], [ 4, 9, 14 ] ];
+const trendPath = ( n, dir ) => TREND_Y[ n ].map( y => `M1 ${y + 1.9 * dir}L4 ${y - 1.9 * dir}L7 ${y + 1.9 * dir}Z` ).join( '' );
 
-// ---- vitals (5.5): value in display units, show / low / critical thresholds, trend tiers per minute --------
-const VITALS = [
-	{ k: 'health', val: S => S.health, show: v => v < 95, low: v => v < 50, crit: v => v < 25 },
-	{ k: 'blood', val: S => S.blood / 50, show: v => v < 95, low: v => v < 76, crit: v => v < 60 },
-	{ k: 'food', val: S => Math.min( 100, S.hunger ), show: v => v < 50, low: v => v < 30, crit: v => v < 10 },
-	{ k: 'water', val: S => Math.min( 100, S.thirst ), show: v => v < 50, low: v => v < 30, crit: v => v < 10 },
-	{ k: 'temp', val: S => S.temp, show: v => v < 36 || v > 37.8, fmt: v => v.toFixed( 1 ) + '°', frac: v => 1 - Math.min( 1, Math.abs( v - 36.9 ) / 2.2 ),
-		state: v => v < 35.2 || v > 38.6 ? 'crit' : v < 36 ? 'cold' : v > 38 ? 'warn' : '', tiers: [ 0.08, 0.3, 0.9 ],
-		// body heat drifts with every sprint; a trend only matters once it nears the edge of the comfort band
-		trendWakes: v => v < 36.4 || v > 37.4 },
-	{ k: 'energy', val: S => S.energy, show: v => v < 30, low: v => v < 25, crit: v => v < 10 },
+// ---- status notifiers: value, colour state, which way is good, trend tiers per minute ------------------------
+// white when fine, yellow (warn) when low, red (crit, blinking) when critical; temperature turns blue when cold
+const NOTIFIERS = [
+	{ k: 'health', icon: 'nf_health', val: S => S.health, warn: v => v < 50, crit: v => v < 25 },
+	{ k: 'blood', icon: 'nf_blood', val: S => S.blood / 50, warn: v => v < 76, crit: v => v < 60 },
+	{ k: 'food', icon: 'nf_food', val: S => Math.min( 100, S.hunger ), warn: v => v < 30, crit: v => v < 10 },
+	{ k: 'water', icon: 'nf_water', val: S => Math.min( 100, S.thirst ), warn: v => v < 30, crit: v => v < 10 },
+	{ k: 'temp', icon: 'nf_temp', val: S => S.temp, tiers: [ 0.08, 0.3, 0.9 ],
+		state: v => v < 35.2 ? 'freeze' : v < 36 ? 'cold' : v > 38.6 ? 'crit' : v > 38 ? 'warn' : '',
+		// towards 36.9 °C is good; body heat drifts with every sprint, so a trend only shows near the edge of the band
+		good: ( v, dir ) => ( v < 36.9 ) === ( dir > 0 ), trendShows: v => v < 36.4 || v > 37.4 },
+	// sleep: only when low
+	{ k: 'energy', icon: 'nf_energy', val: S => S.energy, warn: v => v < 25, crit: v => v < 10, only: ( v, was ) => v < ( was ? 33 : 30 ) },
 ];
 const TIERS = [ 4, 15, 45 ];
 export const COND_ICON = { blood: 'blood', tired: 'energy' }; // condition id -> icon when they differ
 
+// badges: most urgent first; the blood and energy notifiers already say 'Low blood' and 'Exhausted'
+const BADGE_ORDER = [ 'bleed', 'frac', 'inf', 'cut', 'lepto', 'sting', 'centipede', 'sick', 'hot', 'cold', 'wet', 'burn', 'sunburn',
+	'cough', 'sprain', 'eye', 'wound', 'dressing', 'drunk', 'drowsy', 'heavy', 'stress', 'unhappy', 'bored', 'caf', 'pk', 'sunscreen', 'steady' ];
+const BADGE_RANK = new Map( BADGE_ORDER.map( ( id, i ) => [ id, i ] ) );
+const NO_BADGE = new Set( [ 'blood', 'tired' ] );
+
 // moodle glyphs (Survival.moodles() ids), faces in the style of the 'sick' condition icon: the set gains them
-// here so the HUD chips and the Status screen both draw them with icon()
+// here so the HUD badges and the Status screen both draw them with icon()
 const MOOD_GLYPHS = {
 	// grimace with a bead of sweat
 	stress: '<circle cx="11" cy="13" r="7.5"/><path d="M7.75 16.5l1.6-1.25 1.6 1.25 1.6-1.25 1.6 1.25M8.5 11h.01M13.5 11h.01M19 3c1.1 1.35 2.1 2.55 2.1 3.6a2.1 2.1 0 0 1-4.2 0c0-1.05 1-2.25 2.1-3.6Z"/>',
@@ -73,6 +86,27 @@ const MOOD_GLYPHS = {
 	bored: '<circle cx="12" cy="12" r="8.5"/><path d="M7.75 10.25h3M13.25 10.25h3M9.5 15.5h5"/>',
 };
 for ( const [ k, v ] of Object.entries( MOOD_GLYPHS ) ) PATHS[ k ] ??= v;
+
+// prompts name the target above the action: 'Take Canned tuna ×2' -> CANNED TUNA ×2 over [F] Take. Only verbs whose
+// object is the target split; anything else ('Cut lock', 'Drink' at a tap) is the action as given
+const VERBS = /^(Take|Search|Open|Drive|Fly|Fill|Add|Pick|Shake|Gather|Pack up|Read) (.+)$/;
+function promptParts( t ) {
+	let name = '', act = t.label || '', info = t.sub || '';
+	const id = String( t.id || '' );
+	if ( t.plRec ) {
+		// a placeable: its name, then its state ('Tent · Pitched · hold for more')
+		const seg = info.split( ' · ' );
+		name = seg.shift() || '';
+		info = seg.filter( s => s !== 'hold for more' ).join( ' · ' );
+	} else if ( id.startsWith( 'veh-' ) && typeof t.owner?.name === 'string' ) {
+		name = t.owner.name;
+		if ( act.endsWith( ' ' + name ) ) act = act.slice( 0, - name.length - 1 );
+	} else if ( id.startsWith( 'door:' ) ) name = t.owner?.kind === 'vault' ? 'Vault door' : 'Door';
+	else { const m = VERBS.exec( act ); if ( m ) { act = m[ 1 ]; name = cap1( m[ 2 ] ); } }
+	return { name, act, info };
+}
+// weapon handling that ends with a look at the rounds (reload, a clip, single shells, checking, clearing a jam)
+const AMMO_ACT = /^(reload|clip|shells|revolver|break|inspect|jam|charge|nock)/;
 
 // canvas versions of the icon set (minimap): Path2D built from the same SVG markup
 const GLYPHS = new Map();
@@ -120,90 +154,94 @@ export class HUD {
 		this.el = h( 'div.hud' );
 
 		// top left: FPS and debug; toasts live in .feed, a sibling above screens
-		this.fps = h( 'div.fps.plate', { hidden: true } );
+		this.fps = h( 'div.fps', { hidden: true } );
 		this.debug = h( 'div.debug.t-mono', { hidden: true } );
 		this.tl = h( 'div.tl', {}, this.fps, this.debug );
 		this.feed = h( 'div.feed' );
 
-		// centre
+		// centre: crosshair, hit flash, damage glow, prompt, timed action
 		this.cross = h( 'div.crosshair' );
 		this.hit = h( 'div.hitmarker', {}, h( 'i' ), h( 'i' ), h( 'i' ), h( 'i' ) );
-		// one 36° arc of radius 120 at the top, rotated towards the hit
-		this.dmg = svg( 'dmg', '-120 -120 240 240', '<path d="M-37.08 -114.13A120 120 0 0 1 37.08 -114.13"/>' );
+		// a soft red glow at the screen edge, rotated towards the hit (transform and opacity only)
+		this.dmg = h( 'div.dmg', {}, h( 'i' ) );
 		this.dmg.style.display = 'none';
-		this.ring = svg( 'ring', '0 0 48 48', '<circle class="track" cx="24" cy="24" r="21"/><circle class="arc" cx="24" cy="24" r="21" stroke-dasharray="131.9" stroke-dashoffset="131.9"/>' );
-		this.ring.style.display = 'none';
-		this.ringArc = this.ring.querySelector( '.arc' );
-		this.ringLabel = h( 'div.ring-label.plate', { hidden: true }, this.ringName = h( 'span.t-strong' ), this.ringSec = h( 'span.s' ) );
-		this.prompt = h( 'div.prompt.plate', { hidden: true }, this.promptCap = h( 'span.cap' ), this.promptLbl = h( 'span.lbl' ), this.promptSub = h( 'span.sub', { hidden: true } ) );
+		this.prompt = h( 'div.iprompt', { hidden: true },
+			this.pName = h( 'div.pn', { hidden: true }, this.pNameT = h( 'span' ), this.pNameI = h( 'span.ni', { hidden: true } ) ),
+			h( 'div.pa', {}, this.pCap = h( 'span.cap' ), this.pAct = h( 'span.lb' ) ),
+			this.pHold = h( 'div.ph', { hidden: true }, this.pHoldI = h( 'i' ) ),
+			this.pAlt = h( 'div.palt', { hidden: true } ),
+			this.pInfo = h( 'div.pi', { hidden: true } ) );
+		this.tact = h( 'div.tact', { hidden: true },
+			h( 'div.tn', {}, this.tName = h( 'span' ), this.tSec = h( 'span.s' ) ),
+			h( 'div.tb', {}, this.tBar = h( 'i' ) ) );
 
 		// top centre: compass, heading tab, location card
 		this.strip = h( 'div.compass-strip' );
-		this.compass = h( 'div.compass.plate', {}, this.strip, h( 'div.compass-needle' ) );
-		this.heading = h( 'div.heading.plate', {}, this.headDeg = h( 'span' ), this.headDist = h( 'span.d', { hidden: true } ) );
-		this.place = h( 'div.place.plate', { hidden: true }, this.placeName = h( 'div.t-title' ), this.placeIsl = h( 'div.isl.t-label' ) );
+		this.compass = h( 'div.compass', {}, this.strip, h( 'div.compass-needle' ) );
+		this.heading = h( 'div.heading', {}, this.headDeg = h( 'span' ), this.headDist = h( 'span.d', { hidden: true } ) );
+		this.place = h( 'div.place', { hidden: true }, this.placeName = h( 'div.pl' ), this.placeIsl = h( 'div.isl' ) );
 		this._buildCompass();
 
 		// top right: minimap
 		this.miniCanvas = h( 'canvas', { width: 184, height: 184 } );
-		this.minimap = h( 'div.minimap.plate', {}, this.miniCanvas, h( 'div.foot', {}, this.miniPlace = h( 'span' ), this.miniTime = h( 'span' ) ) );
+		this.minimap = h( 'div.minimap', {}, this.miniCanvas, h( 'div.foot', {}, this.miniPlace = h( 'span' ), this.miniTime = h( 'span' ) ) );
 
-		// bottom left: conditions over the vitals strip
-		this.conds = h( 'div.conds', { hidden: true } );
-		this.vitals = h( 'div.vitals', { hidden: true } );
-		this.vit = VITALS.map( d => {
-			const tr = svg( 'tr', '0 0 12 16', '<path/>' );
-			const v = h( 'span.v' ), bar = h( 'i' );
-			const el = h( 'div.vital.fade', {}, icon( d.k ), tr, v, h( 'div.meter', {}, bar ) );
-			return { d, el, v, bar, tr, trPath: tr.firstChild, rate: 0, last: null, tier: 0, dir: 0, inDom: false, fadeT: 0 };
+		// bottom right, from the corner up: notifiers and stance, badges, the badge caption, the weapon readout or
+		// the vehicle panel, pickups
+		this.ntf = NOTIFIERS.map( d => {
+			const tr = svg( 'tr', '0 0 8 18', '<path/>' );
+			const el = h( 'div.ntf.fade.' + d.k, { hidden: !! d.only }, icon( d.icon ), tr );
+			return { d, el, tr, trPath: tr.firstChild, rate: 0, last: null, tier: 0, dir: 0, st: null, on: ! d.only };
 		} );
-		this.bl = h( 'div.bl', {}, this.conds, this.vitals );
-		this.condEls = new Map();
+		this.stanceIcon = icon( 'stance_stand', 24 );
+		this.stance = h( 'div.stance', {}, this.stanceIcon );
+		this.vitals = h( 'div.vitals', {}, ...this.ntf.map( o => o.el ) );
+		this.ntfs = h( 'div.ntfs', {}, this.vitals, this.stance );
+		this.badges = h( 'div.badges', { hidden: true } );
+		this.badgeCap = h( 'div.bcap', { hidden: true } );
+		this.badgeEls = new Map();
 
-		// bottom centre: key hints, stamina, hotbar
-		this.keyhints = h( 'div.keyhints.plate.fade', { hidden: true } );
-		this.stamina = h( 'div.stamina.fade.gone', {}, this.stamFill = h( 'i' ), this.stamIcon = icon( 'breath', 12 ) );
+		this.pickups = h( 'div.pickups' );
+		this.pickQ = [];
+		// the weapon readout: name, then rounds | spare and the fire mode (or JAM)
+		this.weapon = h( 'div.wpn.fade', { hidden: true },
+			this.wName = h( 'div.wn' ),
+			this.wRow = h( 'div.wa', {},
+				this.wNum = h( 'span.n' ), this.wUnit = h( 'span.u', { hidden: true } ),
+				this.wRes = h( 'span.r' ),
+				this.wMode = h( 'span.m' ), this.wJam = h( 'span.jam', { hidden: true, text: 'Jam' } ) ) );
+		this.vehicle = h( 'div.veh', { hidden: true },
+			h( 'div.vn', {}, this.vName = h( 'span' ), this.vGear = h( 'span.gear' ) ),
+			h( 'div.vs', {}, this.vSpd = h( 'span.n' ), this.vUnit = h( 'span.u' ) ),
+			this.vFuelRow = h( 'div.vg', {}, icon( 'fuel' ), h( 'div.bar', {}, this.vFuel = h( 'i' ) ), this.vFuelPc = h( 'span.pc' ) ),
+			this.vHpRow = h( 'div.vg', {}, icon( 'wrench' ), h( 'div.bar', {}, this.vHp = h( 'i' ) ), this.vHpPc = h( 'span.pc' ) ),
+			this.vAltRow = h( 'div.vg', { hidden: true }, icon( 'altitude' ), this.vAlt = h( 'span.pc' ) ) );
+		this.br = h( 'div.br', {}, this.pickups, this.weapon, this.vehicle, this.badgeCap, this.badges, this.ntfs );
+
+		// bottom centre: key hints, the quickbar, the stamina bar
+		this.keyhints = h( 'div.keyhints.fade', { hidden: true } );
+		this.stamina = h( 'div.stamina.fade.gone', {}, this.stamIcon = icon( 'breath', 12 ), h( 'div.sb', {}, this.stamFill = h( 'i' ) ) );
 		this.stamIcon.style.display = 'none';
-		this.hotbar = h( 'div.hotbar.fade', { hidden: true } );
+		this.hotbar = h( 'div.qbar.fade', { hidden: true } );
 		this.hotSlots = [];
 		for ( let i = 0; i < 9; i ++ ) {
 			const img = h( 'img', { alt: '' } ), q = h( 'span.q' ), n = h( 'span.n', { text: i + 1 } );
-			const el = h( 'div.hot.plate', { hidden: true }, img, n, q );
+			const el = h( 'div.qs', {}, img, n, q );
 			this.hotSlots.push( { el, img, q, uid: null } );
 			this.hotbar.appendChild( el );
 		}
-		this.bc = h( 'div.bc', {}, this.keyhints, this.stamina, this.hotbar );
-
-		// bottom right: pickups over the weapon or vehicle panel
-		this.pickups = h( 'div.pickups' );
-		this.pickQ = [];
-		// the name row and the condition bar each sit in a one-row grid that collapses to 0fr (idle, aiming)
-		this.weapon = h( 'div.weapon.plate.fade', { hidden: true },
-			h( 'div.wn', {}, h( 'div', {}, this.wName = h( 'div.name.t-label' ) ) ),
-			this.wAmmo = h( 'div.ammo', {},
-				this.wNum = h( 'span.t-num' ), this.wUnit = h( 'span.unit.t-label', { hidden: true } ),
-				// reserve rounds after a hairline: '31 | 60' (loaded | spare)
-				this.wRes = h( 'span.res', {}, this.wResN = h( 'span' ) ),
-				this.wMode = h( 'span.mode.t-label' ), this.wJam = h( 'span.jam.t-label', { hidden: true, text: 'Jam' } ) ),
-			this.wBarWrap = h( 'div.wb', {}, h( 'div', {}, this.wBar = h( 'div.meter', {}, this.wBarI = h( 'i' ) ) ) ) );
-		this.vehicle = h( 'div.vehicle.plate', { hidden: true },
-			h( 'div.top', {}, this.vName = h( 'span.t-label' ), this.vGear = h( 'span.gear.t-label' ) ),
-			h( 'div.spd', {}, this.vSpd = h( 'span.t-num' ), this.vUnit = h( 'span.t-label' ) ),
-			h( 'div.g', {}, icon( 'fuel' ), this.vFuelM = h( 'div.meter', {}, this.vFuel = h( 'i' ) ), this.vFuelPc = h( 'span.pc' ) ),
-			h( 'div.g', {}, icon( 'wrench' ), this.vHpM = h( 'div.meter', {}, this.vHp = h( 'i' ) ), this.vHpPc = h( 'span.pc' ) ),
-			this.vAltRow = h( 'div.g', { hidden: true }, icon( 'altitude' ), this.vAlt = h( 'span.alt' ) ) );
-		this.br = h( 'div.br', {}, this.pickups, this.weapon, this.vehicle );
+		this.bc = h( 'div.bc', {}, this.keyhints, this.hotbar, this.stamina );
 
 		// panic: a dark, slowly breathing edge (under everything else)
 		this.vig = h( 'div.panic-vig', { hidden: true } );
 
-		this.el.append( this.vig, this.tl, this.dmg, this.cross, this.hit, this.ring, this.ringLabel, this.prompt, this.compass, this.heading, this.place, this.minimap, this.bl, this.bc, this.br );
+		this.el.append( this.vig, this.tl, this.dmg, this.cross, this.hit, this.prompt, this.tact, this.compass, this.heading, this.place, this.minimap, this.bc, this.br );
 		this.zoom = 1.1;
 		this.miniDt = 0;
 		this.hitT = 0;
 		this.toasts = []; this.picks = [];
-		this._screenH = innerHeight;
-		addEventListener( 'resize', () => { this._screenH = innerHeight; } );
+		this._screenH = innerHeight; this._screenW = innerWidth;
+		addEventListener( 'resize', () => { this._screenH = innerHeight; this._screenW = innerWidth; } );
 	}
 
 	attach( game ) {
@@ -212,12 +250,13 @@ export class HUD {
 		this.seen = {}; this.ticks = {};
 		this._hintObj = undefined; this._hintKey = null;
 		this.placeCur = null; this.placeShown = null; this.placeSeen = new Map(); this.placeAt = 0; this.placeHide = 0; this.placeOut = 0;
-		for ( const o of this.vit ) { o.last = null; o.rate = 0; o.tier = 0; }
-		this.condEls.clear(); this.conds.replaceChildren(); this._condKey = null;
+		for ( const o of this.ntf ) { o.last = null; o.rate = 0; o.tier = 0; }
+		this.badgeEls.clear(); this.badges.replaceChildren(); this._badgeKey = null; this.capUntil = 0;
 		this.pickups.replaceChildren(); this.pickQ = []; this.picks = [];
 		this.feed.replaceChildren(); this.toasts = [];
-		this._lastInv = - 1; this._hands = undefined; this._hotKey = null;
-		this._mKey = null; this._act = null; this._cancelT = 0; this._allow = undefined; this._wKey = null;
+		this._lastInv = - 1; this._hands = undefined; this._hotKey = null; this._qtyKey = null;
+		this._mKey = null; this._act = null; this._cancelT = 0; this._allow = undefined;
+		this._held = null; this._wUid = undefined; this._wMode = undefined; this._ammoAct = false; this._pT = null;
 		const on = ( n, f ) => this.ui.offs.push( game.events.on( n, f ) );
 		on( 'toast', t => this.toast( t.text, t.kind, t.icon ) );
 		on( 'hitmarker', e => this.hitmarker( e ) );
@@ -228,6 +267,7 @@ export class HUD {
 	// time-based cadence, so slow frames don't stretch the refresh (vitals 10 Hz, conditions 3 Hz, place 2 Hz)
 	due( key, period ) { const last = this.ticks[ key ] ?? - 1e9; if ( this.t - last < period ) return 0; this.ticks[ key ] = this.t; return Math.min( 1, this.t - last ); }
 	shown( key, cond, linger = LINGER ) { return this.mode === 'always' || cond || this.t - ( this.seen[ key ] ?? - 99 ) < linger; }
+	recent( key, linger ) { return this.t - ( this.seen[ key ] ?? - 99 ) < linger; }
 
 	toggleDebug() {
 		this.debugOn = ! this.debugOn;
@@ -239,21 +279,24 @@ export class HUD {
 	// ---- events -----------------------------------------------------------------------------------------
 
 	// Toasts and pickups live on HUD time (not timers), so a stalled frame or a hidden tab never eats them.
-	// One line on a plate: item render when there is one, else a warn / bad dot. A repeat within 2 s bumps ×N.
+	// One plain line: item render when there is one, else a warn / bad mark.
 	toast( text, kind = 'info', iconId = null ) {
+		// the fire mode: the weapon readout shows it
+		if ( kind === 'info' && text && this.game?.hands?.ammoInfo?.()?.mode === text ) return;
 		const life = kind === 'bad' ? 5 : 3.5;
 		if ( kind === 'bad' || kind === 'warn' ) this.app.audio.ui?.( 'ui_error', 0.25 );
+		// the same line still on screen: a repeat within 2 s counts (×2), a later one only keeps it up
 		const old = this.toasts.find( o => o.text === text && ! o.out );
-		if ( old && this.t - old.at < 2 ) {
-			old.n ++; old.at = this.t; old.until = this.t + life;
-			old.x.textContent = '×' + old.n; old.x.hidden = false;
+		if ( old ) {
+			if ( this.t - old.at < 2 ) { old.n ++; old.x.textContent = '×' + old.n; old.x.hidden = false; }
+			old.at = this.t; old.until = this.t + life;
 			return;
 		}
-		const el = h( 'div.toast.plate' );
+		const el = h( 'div.note.' + kind );
 		if ( iconId ) { const img = h( 'img', { alt: '' } ); setIcon( img, iconId ); el.appendChild( img ); }
-		else if ( kind === 'warn' || kind === 'bad' ) el.appendChild( h( 'span.sd.' + kind ) );
+		else if ( kind === 'warn' || kind === 'bad' ) el.appendChild( h( 'span.sd' ) );
 		const x = h( 'span.x', { hidden: true } );
-		el.append( h( 'span', { text } ), x );
+		el.append( h( 'span.tx', { text } ), x );
 		this.toasts.push( { el, x, text, n: 1, at: this.t, until: this.t + life, out: 0 } );
 		this.feed.appendChild( el );
 		// newest at the bottom; the oldest leaves first
@@ -276,7 +319,7 @@ export class HUD {
 		}
 		const img = h( 'img', { alt: '' } ); setIcon( img, id );
 		const x = h( 'span.x', { text: '×' + qty, hidden: qty < 2 } );
-		const el = h( 'div.pickup.plate', {}, img, h( 'span', { text: name } ), x );
+		const el = h( 'div.pickup', {}, h( 'span.tx', { text: name } ), x, img );
 		this.picks.push( { el, x, id, qty, at: this.t, until: this.t + 2.4, out: 0 } );
 		this.pickups.appendChild( el );
 		while ( this.picks.length > 4 ) this.picks.shift().el.remove();
@@ -291,11 +334,12 @@ export class HUD {
 		}
 	}
 
+	// a short red flash at the crosshair (a kill: a little longer and wider)
 	hitmarker( e ) {
 		if ( ! this.app.settings.get( 'hitMarkers' ) ) return;
 		this.hit.classList.toggle( 'kill', !! e.kill );
 		this.hit.classList.add( 'on' );
-		this.hitT = e.kill ? 0.35 : 0.18;
+		this.hitT = e.kill ? 0.25 : 0.12;
 		this.app.audio.play?.( e.kill ? 'hit_flesh' : 'ui_click', { bus: 'ui', vol: e.kill ? 0.25 : 0.2, rate: e.headshot ? 1.4 : 1 } );
 	}
 
@@ -326,7 +370,6 @@ export class HUD {
 		const S = g.survival, p = g.player, inv = p.inventory, set = this.app.settings, input = this.app.input, frame = this.app.frame;
 		const ui = this.ui, screen = ui.screen != null;
 		this.mode = set.get( 'hudMode' ) ?? 'auto';
-		const always = this.mode === 'always';
 		const creative = g.mode === 'creative';
 		const dead = !! g.dead;
 		flag( this.el, 'off', this.hidden || dead );
@@ -340,7 +383,6 @@ export class HUD {
 		this._vh = vh;
 		const inVeh = !! vh || !! p.vehicle;
 		const aiming = !! g.hands?.aiming && ! inVeh;
-		if ( aiming && ! this._aim ) this.wake( 'weapon' );
 		if ( ! aiming && this._aim ) { for ( const q of this.pickQ ) this._pickup( q.id, q.qty, q.name ); this.pickQ = []; }
 		this._aim = aiming;
 		flag( this.el, 'aim', aiming );
@@ -353,43 +395,54 @@ export class HUD {
 		if ( fpsOn && ( this.due( 'fps', 0.25 ) || fpsNew ) ) text( this.fps, `${Math.round( this.app.fps )} fps` );
 		if ( this.debugOn && this.due( 'debug', 0.25 ) ) this._debug();
 
-		// what the settings and carried items allow (checked twice a second: inventory scans are not free)
+		// the held stack: looked up again only when the hands or the inventory change
+		if ( inv.hands !== this._hands || inv.version !== this._heldV ) {
+			if ( inv.hands !== this._hands && this._hands !== undefined ) this.wake( 'hotbar' );
+			this._hands = inv.hands; this._heldV = inv.version;
+			this._held = inv.heldStack();
+		}
+		const held = inVeh ? null : this._held;
+		const heldDef = held ? getItem( held.id ) : null;
+
+		// what the settings and carried items allow (checked twice a second: inventory scans are not free). A compass
+		// in the hands always shows the bar (DayZ's way to read one)
 		if ( this.due( 'allow', 0.5 ) || this._allow === undefined ) {
 			const real = set.get( 'realisticMap' );
 			this._allow = {
-				compass: set.get( 'compass' ) !== false && ( ! real || creative || inv.count( 'compass' ) > 0 ),
-				map: set.get( 'minimap' ) !== false && ( ! real || creative || inv.count( 'map_hawaii' ) > 0 ),
+				compass: !! set.get( 'compass' ) && ( ! real || creative || inv.count( 'compass' ) > 0 ),
+				map: !! set.get( 'minimap' ) && ( ! real || creative || inv.count( 'map_hawaii' ) > 0 ),
 				clock: ! real || creative || inv.count( 'watch' ) > 0,
 				maxSt: S.maxStamina(),
 			};
 		}
 		const allow = this._allow;
+		const compassOn = allow.compass || heldDef?.tool?.kind === 'compass' || held?.id === 'compass';
 
 		this._crosshair( g, set, aiming || inVeh || screen );
 		if ( this.hitT > 0 ) { this.hitT -= dt; if ( this.hitT <= 0 ) this.hit.classList.remove( 'on' ); }
-		this._compass( g, p, vh, allow.compass, frame );
-		this._placeCard( g, p, screen );
+		this._compass( g, p, vh, compassOn, frame );
+		this._placeCard( g, p, screen, !! set.get( 'locationCard' ) );
 		show( this.minimap, allow.map );
 		this.miniDt += dt;
 		if ( allow.map && frame % 2 === 0 ) { this._minimap( this.miniDt, allow.clock ); this.miniDt = 0; }
 
-		// vitals at 10 Hz, conditions three times a second
+		// notifiers at 10 Hz, badges three times a second
 		const vdt = this.due( 'vitals', 0.1 );
-		if ( vdt ) { this._vitals( S, vdt, creative, always ); this._panic( S, creative ); }
-		if ( this.due( 'conds', 0.33 ) ) this._conditions( S, inv, creative, input );
+		if ( vdt ) { this._vitals( S, vdt, creative ); this._stance( p, inVeh ); this._panic( S, creative ); }
+		if ( this.due( 'conds', 0.33 ) ) this._badges( S, inv, creative, input );
+		if ( this.capUntil && this.t >= this.capUntil ) { this.capUntil = 0; fade( this.badgeCap, false ); }
 		if ( frame % 2 === 0 ) this._stamina( S, p, creative, allow.maxSt );
 
-		// hotbar: slot keys, the wheel, a new held item or new bindings wake it
+		// quickbar: slot keys, the wheel, a new held item, new bindings or a bound stack used up wake it
 		if ( ! screen && ! inVeh ) {
 			for ( let i = 1; i <= 9; i ++ ) if ( input.codes( 'slot' + i ).some( c => input.codePressed( c ) ) ) { this.wake( 'hotbar' ); break; }
 			if ( input.codePressed( 'WheelUp' ) || input.codePressed( 'WheelDown' ) ) this.wake( 'hotbar' );
 		}
-		if ( inv.hands !== this._hands ) { if ( this._hands !== undefined ) this.wake( 'hotbar' ); this._hands = inv.hands; }
 		if ( inv.version !== this._lastInv || frame % 30 === 0 ) { this._lastInv = inv.version; this._hotbar( inv ); }
 		show( this.hotbar, this._hotAny && ! inVeh );
 		flag( this.hotbar, 'gone', ! this.shown( 'hotbar', false ) );
 
-		if ( frame % 4 === 0 ) this._weapon( g, inv, aiming, inVeh, always );
+		if ( frame % 4 === 0 ) this._weapon( g, held, heldDef, set );
 		show( this.vehicle, !! vh );
 		if ( vh && frame % 3 === 0 ) this._vehicle( vh );
 
@@ -423,7 +476,7 @@ export class HUD {
 		for ( let d = - 360; d <= 720; d += 5 ) {
 			const deg = ( ( d % 360 ) + 360 ) % 360, left = `calc(${d * 3} * var(--u))`;
 			frag.appendChild( h( 'i.compass-tick' + ( deg % 15 === 0 ? '.major' : '' ), { style: { left } } ) );
-			if ( names[ deg ] ) frag.appendChild( h( 'span.compass-label.t-label' + ( deg % 90 === 0 ? '.card' : '' ), { style: { left }, text: names[ deg ] } ) );
+			if ( names[ deg ] ) frag.appendChild( h( 'span.compass-label' + ( deg % 90 === 0 ? '.card' : '' ), { style: { left }, text: names[ deg ] } ) );
 		}
 		this.markerLayer = h( 'div' );
 		frag.appendChild( this.markerLayer );
@@ -459,7 +512,7 @@ export class HUD {
 		if ( best ) text( this.headDist, fmtDist( bd ) );
 	}
 
-	_placeCard( g, p, screen ) {
+	_placeCard( g, p, screen, enabled ) {
 		const card = this.place;
 		if ( this.due( 'place', 0.5 ) || this.placeCur == null ) {
 			const pl = this.ui.placeOf( p.pos );
@@ -476,14 +529,17 @@ export class HUD {
 			const pl = this.ui.placeOf( p.pos );
 			this.placeShown = this.placeCur = pl.name;
 			this.placeSeen.set( pl.name, this.t );
-			text( this.placeName, pl.name );
-			const isl = pl.island && pl.island !== pl.name ? pl.island : '';
-			text( this.placeIsl, isl ); show( this.placeIsl, !! isl );
-			clearTimeout( card._ft );
-			card.classList.remove( 'gone' );
-			card.hidden = false;
-			this.placeHide = this.t + 3;
-			this.placeOut = 0;
+			// the card is a setting (off like DayZ); the bookkeeping above runs either way
+			if ( enabled ) {
+				text( this.placeName, pl.name );
+				const isl = pl.island && pl.island !== pl.name ? pl.island : '';
+				text( this.placeIsl, isl ); show( this.placeIsl, !! isl );
+				clearTimeout( card._ft );
+				card.classList.remove( 'gone' );
+				card.hidden = false;
+				this.placeHide = this.t + 3;
+				this.placeOut = 0;
+			}
 		}
 		if ( this.placeHide && this.t >= this.placeHide ) { this.placeHide = 0; card.classList.add( 'gone' ); this.placeOut = this.t + 0.4; }
 		if ( this.placeOut && this.t >= this.placeOut ) { this.placeOut = 0; card.hidden = true; card.classList.remove( 'gone' ); }
@@ -528,7 +584,8 @@ export class HUD {
 		}
 		for ( const m of g.markers?.list?.() || [] ) {
 			const [ sx, sy ] = toScreen( m.x, m.z );
-			const death = m.kind === 'death', col = death ? '#FF5C5C' : '#FF7A2E';
+			// DayZ's palette: markers white, your body in the muted red
+			const death = m.kind === 'death', col = death ? '#c33a32' : '#ffffff';
 			if ( sx > edge && sy > edge && sx < W - edge && sy < W - edge ) {
 				if ( death ) drawGlyph( ctx, 'skull', sx, sy, 12 * s, { color: col, lw: 1.5 * s, halo: s } );
 				else if ( m.kind === 'locate' ) drawGlyph( ctx, 'marker', sx, sy, 12 * s, { color: col, lw: 2 * s, halo: s } );
@@ -551,90 +608,91 @@ export class HUD {
 		ctx.translate( mid - 8 * s, mid - 8 * s ); ctx.scale( 16 * s / 24, 16 * s / 24 );
 		ctx.lineJoin = 'round'; ctx.lineWidth = 1.5 * s / ( 16 * s / 24 ); ctx.strokeStyle = '#000'; ctx.stroke( glyph( 'player' ).fill );
 		ctx.restore();
-		// N badge on the rim towards north: world -z lands at ( sin yaw, -cos yaw ) on the heading-up map (as in
-		// MapView's toScreen); the map is a rounded square, so the badge follows its edge
+		// N on the rim towards north: world -z lands at ( sin yaw, -cos yaw ) on the heading-up map (as in MapView's
+		// toScreen); the map is a square, so the badge follows its edge
 		const nx = Math.sin( yaw ), ny = - Math.cos( yaw ), nk = ( mid - 10 * s ) / Math.max( Math.abs( nx ), Math.abs( ny ) );
 		const bx = mid + nx * nk, by = mid + ny * nk;
-		ctx.beginPath(); ctx.arc( bx, by, 8 * s, 0, Math.PI * 2 ); ctx.fillStyle = '#121316'; ctx.fill();
-		ctx.font = `600 ${10 * s}px Inter, system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+		ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect( bx - 7 * s, by - 7 * s, 14 * s, 14 * s );
+		ctx.font = `700 ${10 * s}px 'Roboto Condensed', Roboto, Inter, system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
 		ctx.fillStyle = '#fff'; ctx.fillText( 'N', bx, by + 0.5 * s );
 	}
 
-	// ---- vitals, conditions, stamina (5.5, 5.6, 5.12) ------------------------------------------------------------
+	// ---- notifiers, stance, badges, stamina ------------------------------------------------------------------
 
-	_vitals( S, dt, creative, always ) {
-		let dirty = false, n = 0;
-		for ( const o of this.vit ) {
+	_vitals( S, dt, creative ) {
+		let n = 0;
+		for ( const o of this.ntf ) {
 			const d = o.d, v = d.val( S );
 			// trend: EMA of the rate of change in display units per minute
-			if ( o.last !== null && dt > 0 ) o.rate += ( ( v - o.last ) / dt * 60 - o.rate ) * ( 1 - Math.exp( - dt / 1.5 ) );
+			if ( o.last !== null && dt > 0 ) o.rate += ( ( v - o.last ) / dt * 60 - o.rate ) * ( 1 - Math.exp( - dt / 2 ) );
 			o.last = v;
+			// tiers with a little hysteresis, so an arrow doesn't flicker on its threshold
 			const th = d.tiers || TIERS, r = Math.abs( o.rate );
-			const tier = r >= th[ 2 ] ? 3 : r >= th[ 1 ] ? 2 : r >= th[ 0 ] ? 1 : 0;
-			const key = 'v.' + d.k;
-			if ( d.show( v ) || ( tier >= 1 && ( ! d.trendWakes || d.trendWakes( v ) ) ) ) this.wake( key );
-			const want = ! creative && ( always || this.shown( key, false ) );
-			if ( want ) {
-				if ( ! o.inDom ) { o.inDom = true; dirty = true; }
-				if ( o.fadeT ) { o.fadeT = 0; }
-				flag( o.el, 'gone', false );
-			} else if ( o.inDom ) {
-				if ( ! o.fadeT ) { o.fadeT = this.t + 0.4; flag( o.el, 'gone', true ); } else if ( this.t >= o.fadeT ) { o.fadeT = 0; o.inDom = false; dirty = true; }
-			}
-			if ( o.inDom ) n ++;
-			if ( ! o.inDom ) continue;
-			text( o.v, d.fmt ? d.fmt( v ) : Math.round( v ) );
-			fill( o.bar, d.frac ? d.frac( v ) : v / 100 );
-			const st = d.state ? d.state( v ) : d.crit( v ) ? 'crit' : d.low( v ) ? 'warn' : '';
-			flag( o.el, 'crit', st === 'crit' ); flag( o.el, 'warn', st === 'warn' ); flag( o.el, 'cold', st === 'cold' );
+			let tier = o.tier;
+			while ( tier < 3 && r >= th[ tier ] ) tier ++;
+			while ( tier > 0 && r < th[ tier - 1 ] * 0.7 ) tier --;
+			o.tier = tier;
+			const on = ! creative && ( ! d.only || d.only( v, o.on ) );
+			if ( on !== o.on ) { o.on = on; fade( o.el, on ); }
+			if ( ! on ) continue;
+			n ++;
+			const st = d.state ? d.state( v ) : d.crit( v ) ? 'crit' : d.warn( v ) ? 'warn' : '';
+			if ( st !== o.st ) { o.st = st; for ( const c of [ 'warn', 'crit', 'cold', 'freeze' ] ) flag( o.el, c, st === c ); }
+			const shownTier = d.trendShows && ! d.trendShows( v ) ? 0 : tier;
 			const dir = o.rate < 0 ? - 1 : 1;
-			if ( tier !== o.tier || ( tier && dir !== o.dir ) ) {
-				o.tier = tier; o.dir = dir;
-				o.trPath.setAttribute( 'd', trendPath( tier, dir ) );
+			if ( shownTier !== o.shown || ( shownTier && dir !== o.dir ) ) {
+				o.shown = shownTier; o.dir = dir;
+				o.trPath.setAttribute( 'd', trendPath( shownTier, dir ) );
 			}
+			// green only where the change is good; a bad one turns red when fast or when the value is already low
+			const good = shownTier > 0 && ( d.good ? d.good( v, dir ) : dir > 0 );
+			flag( o.tr, 'good', good );
+			flag( o.tr, 'bad', shownTier > 0 && ! good && ( shownTier >= 3 || !! st ) );
 		}
-		if ( dirty ) sync( this.vitals, this.vit.filter( o => o.inDom ).map( o => o.el ) );
 		show( this.vitals, n > 0 );
 	}
 
-	_conditions( S, inv, creative, input ) {
-		// Low blood repeats the blood cell of the vitals strip (it always shows by then): the Status screen keeps it
-		const bloodCell = this.vit[ 1 ].inDom;
-		const list = creative ? [] : S.conditions().filter( c => ! ( c.id === 'blood' && bloodCell ) );
+	_stance( p, inVeh ) {
+		const name = inVeh ? null : p.swimming ? 'stance_swim' : p.stance === 'crouch' ? 'stance_crouch' : p.stance === 'prone' ? 'stance_prone' : 'stance_stand';
+		show( this.stance, !! name );
+		if ( name && name !== this._stanceName ) { this._stanceName = name; this.stanceIcon.innerHTML = PATHS[ name ]; }
+	}
+
+	_badges( S, inv, creative, input ) {
+		const list = creative ? [] : S.conditions().filter( c => ! NO_BADGE.has( c.id ) );
+		list.sort( ( a, b ) => ( BADGE_RANK.get( a.id ) ?? 99 ) - ( BADGE_RANK.get( b.id ) ?? 99 ) );
 		const ids = new Set();
+		let fresh = null;
 		for ( const c of list ) {
 			ids.add( c.id );
-			let o = this.condEls.get( c.id );
+			let o = this.badgeEls.get( c.id );
 			if ( ! o ) {
-				o = { lab: h( 'span' ), x: h( 'span.x', { hidden: true } ), label: null, until: 0, lv: null, bars: null };
-				// moodles carry a level: four pips beside the face, filled from the bottom
-				if ( c.level ) { o.bars = [ 0, 1, 2, 3 ].map( () => h( 'i' ) ); o.lv = h( 'span.lv', {}, ...o.bars ); }
-				o.el = h( 'div.cond.plate.fade', {}, icon( COND_ICON[ c.id ] || c.id ), o.lv, o.lab, o.x );
-				this.condEls.set( c.id, o );
+				o = { n: h( 'span.n', { hidden: true } ), lv: null, pips: null, label: null };
+				// moodles carry a level 1-4: pips along the bottom edge
+				if ( c.level ) { o.pips = [ 0, 1, 2, 3 ].map( () => h( 'i' ) ); o.lv = h( 'span.lv', {}, ...o.pips ); }
+				o.el = h( 'div.badge.b-' + c.id, {}, icon( COND_ICON[ c.id ] || c.id ), o.lv, o.n );
+				this.badgeEls.set( c.id, o );
 			}
-			if ( o.bars ) for ( let i = 0; i < 4; i ++ ) flag( o.bars[ i ], 'on', i < ( c.level || 0 ) );
-			// the label shows for 6 s when the condition appears or changes (Cold -> Hypothermia, Bleeding -> ×2,
-			// a moodle's level)
-			const lk = c.label + ( c.level ? '|' + c.level : '' );
-			if ( lk !== o.label ) { o.label = lk; o.until = this.t + 6; }
-			const open = this.t < o.until;
-			const extra = c.id === 'bleed' && S.bleeding > 1 ? '×' + S.bleeding : '';
-			text( o.lab, open ? c.label : '' ); show( o.lab, open );
-			text( o.x, extra ); show( o.x, ! open && !! extra );
-			flag( o.el, 'lab', open || !! extra );
+			if ( o.pips ) for ( let i = 0; i < 4; i ++ ) flag( o.pips[ i ], 'on', i < ( c.level || 0 ) );
+			const count = c.id === 'bleed' && S.bleeding > 1 ? S.bleeding : 0;
+			text( o.n, count || '' ); show( o.n, count > 0 );
 			for ( const k of [ 'bad', 'warn', 'good', 'mild' ] ) flag( o.el, 'k-' + k, c.kind === k );
+			// a new badge or a new label (Cold -> Hypothermia, Bleeding -> ×2, a moodle's level) is named for 4 s
+			const lk = c.label + ( c.level ? '|' + c.level : '' );
+			if ( lk !== o.label ) { o.label = lk; fresh ??= c; }
 		}
-		for ( const id of [ ...this.condEls.keys() ] ) if ( ! ids.has( id ) ) this.condEls.delete( id );
+		for ( const id of [ ...this.badgeEls.keys() ] ) if ( ! ids.has( id ) ) this.badgeEls.delete( id );
+		if ( fresh ) { text( this.badgeCap, fresh.label ); fade( this.badgeCap, true ); this.capUntil = this.t + 4; }
 		// K Bandage while bleeding with something that stops it
 		const heal = ! creative && S.bleeding > 0 && !! inv.find( ( s, d ) => d?.medical?.bleed );
 		const kl = heal ? input.label( 'quickHeal' ) : '';
-		if ( heal && ( ! this.healChip || this.healChip._k !== kl ) ) { this.healChip = h( 'div.cond.plate.act.fade', {}, kc( kl ), h( 'span', { text: 'Bandage' } ) ); this.healChip._k = kl; }
+		if ( heal && ( ! this.healChip || this.healChip._k !== kl ) ) { this.healChip = h( 'div.badge.act', {}, kc( kl ), h( 'span', { text: 'Bandage' } ) ); this.healChip._k = kl; }
 		const key = list.map( c => c.id ).join( ',' ) + ( heal ? '|' + kl : '' );
-		if ( key !== this._condKey ) {
-			this._condKey = key;
-			sync( this.conds, [ ...list.map( c => this.condEls.get( c.id ).el ), ...( heal ? [ this.healChip ] : [] ) ] );
+		if ( key !== this._badgeKey ) {
+			this._badgeKey = key;
+			sync( this.badges, [ ...( heal ? [ this.healChip ] : [] ), ...list.map( c => this.badgeEls.get( c.id ).el ) ] );
 		}
-		show( this.conds, list.length > 0 || heal );
+		show( this.badges, list.length > 0 || heal );
 	}
 
 	// the panic vignette: in from a third of panic, deeper as it climbs
@@ -644,37 +702,40 @@ export class HUD {
 		if ( v > 0.01 ) prop( this.vig, '--k', v.toFixed( 2 ) );
 	}
 
+	// DayZ's thin white bar: only while not full, flashing when nearly spent; underwater it shows the breath
 	_stamina( S, p, creative, maxSt ) {
 		const under = !! p.underwater || S.breath < 99.5;
 		let f, max, low;
-		if ( under ) { f = S.breath / 100; max = 1; low = S.breath < 25; } else { f = S.stamina / maxSt; max = maxSt / 100; low = S.stamina < 20; }
+		if ( under ) { f = S.breath / 100; max = 1; low = S.breath < 25; } else { f = S.stamina / maxSt; max = maxSt / 100; low = S.stamina < 15; }
 		if ( ! creative && ( under || S.stamina < maxSt - 0.5 ) ) this.wake( 'stamina' );
-		flag( this.stamina, 'gone', creative || ! ( this.t - ( this.seen.stamina ?? - 99 ) < 1 ) );
+		flag( this.stamina, 'gone', creative || ! this.recent( 'stamina', 1 ) );
 		prop( this.stamina, '--max', max.toFixed( 3 ) );
 		fill( this.stamFill, f );
 		flag( this.stamina, 'low', low );
+		flag( this.stamina, 'air', under );
 		if ( under !== this._under ) { this._under = under; this.stamIcon.style.display = under ? '' : 'none'; }
 	}
 
-	// ---- hotbar, weapon, vehicle ------------------------------------------------------------------------------
+	// ---- quickbar, weapon, vehicle ------------------------------------------------------------------------------
 
 	_hotbar( inv ) {
-		let top = 0;
+		let any = false, qk = '';
 		const st = [];
 		for ( let i = 0; i < 9; i ++ ) {
 			const s = inv.findUid( inv.hotbar[ i ] );
 			if ( ! s && inv.hotbar[ i ] ) inv.hotbar[ i ] = null;
 			st.push( s );
-			if ( s ) top = i + 1;
+			if ( s ) { any = true; if ( s.uid !== inv.hands ) qk += s.uid + ':' + s.qty + ','; }
 		}
+		// a new binding, or a bound stack used from the bar (eaten, a bandage applied), shows it for a moment
 		const key = inv.hotbar.join( ',' );
 		if ( key !== this._hotKey ) { if ( this._hotKey != null ) this.wake( 'hotbar' ); this._hotKey = key; }
-		this._hotAny = top > 0;
-		// slots 1 up to the highest bound one; unbound ones in between keep their place as faint plates
+		else if ( qk !== this._qtyKey && this._qtyKey != null ) this.wake( 'hotbar' );
+		this._qtyKey = qk;
+		this._hotAny = any;
+		// all nine slots, like DayZ's quickbar: an empty one is a dark square with its number
 		for ( let i = 0; i < 9; i ++ ) {
 			const o = this.hotSlots[ i ], s = st[ i ];
-			show( o.el, i < top );
-			if ( i >= top ) continue;
 			flag( o.el, 'unb', ! s );
 			// keyed by what it looks like too: a stack changed in place (dyed, cut into shorts) keeps its uid
 			const k = s ? s.uid + '|' + lookKey( s ) : null;
@@ -686,117 +747,140 @@ export class HUD {
 		}
 	}
 
-	_weapon( g, inv, aiming, inVeh, always ) {
-		const held = inVeh ? null : inv.heldStack();
+	// The ammo counter (a setting, off like DayZ): rounds | spare and the fire mode under the weapon's name, the
+	// name fading after a few seconds. Off, the readout still shows for a moment what changed: the weapon and its
+	// mode when switched, the rounds after a reload or a check; a jam always shows.
+	_weapon( g, held, d, set ) {
+		const counter = !! set.get( 'ammoCounter' );
 		show( this.weapon, !! held );
 		this._jam = false; this._reload = false;
-		if ( ! held ) return;
-		const d = getItem( held.id );
+		if ( ! held ) { this._wUid = null; return; }
 		const gun = d?.cat === 'firearm';
-		let num = '', unit = '', res = null, mode = '', jam = false, bar = null, tint = '';
+		let num = '', unit = '', res = '', mode = '', jam = false, tint = '';
 		if ( gun ) {
 			const rounds = ammoOf( held ) ?? 0, info = g.hands?.ammoInfo?.(), f = d.firearm;
-			res = info?.reserve ?? 0;
+			const spare = info?.reserve ?? 0;
 			jam = info?.mode === 'jammed';
 			mode = jam ? '' : info?.mode || '';
-			num = rounds; bar = held.cond;
+			num = rounds; res = spare;
 			const cap = f.feed === 'internal' ? f.capacity : getItem( held.data.mag?.id || f.mags?.[ 0 ] )?.magazine?.capacity || 0;
 			tint = rounds === 0 ? 'alarm' : cap && rounds <= cap * 0.2 ? 'warn' : '';
 			this._jam = jam;
-			this._reload = rounds === 0 && res > 0 && ! jam;
+			this._reload = rounds === 0 && spare > 0 && ! jam;
 		} else if ( d?.tool?.liquid || d?.fuel ) { num = ( held.data.amount || 0 ).toFixed( 1 ); unit = 'L'; }
 		else if ( d?.tool?.battery && held.data.charge != null ) { num = Math.round( held.data.charge / d.tool.battery * 100 ); unit = '%'; }
 		else if ( held.qty > 1 ) num = held.qty;
-		else if ( d?.cat === 'melee' || d?.cat === 'tool' ) bar = held.cond;
-		// a new item, a round fired or loaded, a mode switch: expand for LINGER seconds
-		const key = `${held.uid}|${num}|${res}|${mode}|${jam}`;
-		if ( key !== this._wKey ) { this._wKey = key; this.wake( 'weapon' ); }
-		const fresh = this.shown( 'weapon', false );
-		text( this.wName, displayName( held ) );
-		show( this.wAmmo, num !== '' );
-		text( this.wNum, num );
-		text( this.wUnit, unit ); show( this.wUnit, !! unit );
-		show( this.wRes, gun ); if ( gun ) text( this.wResN, res );
-		text( this.wMode, mode ); show( this.wMode, !! mode );
+		// what woke it: a new item or mode (the name), the end of a reload or a check (the rounds)
+		if ( held.uid !== this._wUid || mode !== this._wMode ) {
+			if ( this._wUid !== undefined ) this.wake( 'wname' );
+			this._wUid = held.uid; this._wMode = mode;
+		}
+		const ammoAct = gun && AMMO_ACT.test( g.hands?.act?.type || '' );
+		if ( this._ammoAct && ! ammoAct ) this.wake( 'wammo' );
+		this._ammoAct = ammoAct;
+		const named = this.recent( 'wname', counter ? LINGER : BRIEF ) || this.mode === 'always';
+		const counted = counter ? gun || named : gun ? this.recent( 'wammo', BRIEF ) : named;
+		const showName = named, showNum = num !== '' && counted, showMode = !! mode && ( counter ? gun : named );
+		text( this.wName, displayName( held ) ); show( this.wName, showName );
+		text( this.wNum, num ); show( this.wNum, showNum );
+		text( this.wUnit, unit ); show( this.wUnit, showNum && !! unit );
+		text( this.wRes, res ); show( this.wRes, gun && showNum );
+		text( this.wMode, mode ); show( this.wMode, showMode );
 		show( this.wJam, jam );
-		show( this.wBarWrap, bar != null );
-		if ( bar != null ) { fill( this.wBarI, bar ); flag( this.wBar, 'warn', bar < 0.5 && bar >= 0.25 ); flag( this.wBar, 'alarm', bar < 0.25 ); }
-		flag( this.weapon, 'warn', tint === 'warn' ); flag( this.weapon, 'alarm', tint === 'alarm' );
-		// firearms collapse to the ammo row when idle or aiming; anything else fades out entirely
-		flag( this.weapon, 'col', gun && ! always && ( aiming || ! fresh ) );
-		flag( this.weapon, 'gone', ! gun && ! fresh );
+		show( this.wRow, showNum || showMode || jam );
+		flag( this.wRow, 'warn', counter && tint === 'warn' ); flag( this.wRow, 'alarm', counter && tint === 'alarm' );
+		flag( this.weapon, 'gone', ! ( showName || showNum || showMode || jam ) );
 	}
 
+	// speed, fuel and condition in the notifiers' manner: white, yellow when low, red when nearly gone
 	_vehicle( v ) {
 		const boat = v.kind === 'boat', kmh = Math.abs( v.speed ) * 3.6;
 		text( this.vName, v.name || '' );
 		show( this.vGear, v.gear != null ); if ( v.gear != null ) text( this.vGear, v.gear );
 		text( this.vSpd, Math.round( boat ? kmh / 1.852 : kmh ) );
 		text( this.vUnit, boat ? 'kn' : 'km/h' );
-		fill( this.vFuel, v.fuel ); text( this.vFuelPc, Math.round( ( v.fuel || 0 ) * 100 ) + '%' ); flag( this.vFuelM, 'alarm', v.fuel < 0.15 );
-		fill( this.vHp, v.health ); text( this.vHpPc, Math.round( ( v.health || 0 ) * 100 ) + '%' ); flag( this.vHpM, 'alarm', v.health < 0.3 );
+		const fu = v.fuel || 0, hp = v.health || 0;
+		fill( this.vFuel, fu ); text( this.vFuelPc, Math.round( fu * 100 ) + '%' );
+		flag( this.vFuelRow, 'warn', fu < 0.25 && fu >= 0.1 ); flag( this.vFuelRow, 'crit', fu < 0.1 );
+		fill( this.vHp, hp ); text( this.vHpPc, Math.round( hp * 100 ) + '%' );
+		flag( this.vHpRow, 'warn', hp < 0.5 && hp >= 0.3 ); flag( this.vHpRow, 'crit', hp < 0.3 );
 		show( this.vAltRow, v.altitude != null );
 		if ( v.altitude != null ) text( this.vAlt, Math.round( v.altitude ) + ' m' );
 	}
 
 	// ---- prompt, timed action, damage (5.9, 5.10, 5.12) ----------------------------------------------------------
 
+	// DayZ's prompt right of centre: the target's name in caps on a dark strip, [F] Action under it, then the other
+	// actions in grey (a placeable's list: tap does the first, holding opens the list)
 	_prompt( g, set, input, screen, inVeh ) {
 		const t = g.interact?.target, busy = g.actions?.busy;
-		let act = null, label = '', sub = '', hold = null;
+		let act = null, parts = null, hold = null;
 		if ( ! screen && ! busy ) {
-			if ( t && set.get( 'showInteractHints' ) !== false ) { act = t.key || 'interact'; label = t.label; sub = t.sub || ''; if ( t.hold ) hold = Math.min( 1, ( g.interact.holdT || 0 ) / t.hold ); }
-			else if ( ! t && ! inVeh && this._jam ) { act = 'reload'; label = 'Clear'; }
-			else if ( ! t && ! inVeh && this._reload && set.get( 'tutorial' ) ) { act = 'reload'; label = 'Reload'; }
+			if ( t && set.get( 'showInteractHints' ) !== false ) { act = t.key || 'interact'; if ( t.hold ) hold = Math.min( 1, ( g.interact.holdT || 0 ) / t.hold ); }
+			else if ( ! t && ! inVeh && this._jam ) { act = 'reload'; parts = { name: '', act: 'Clear', info: '' }; }
+			else if ( ! t && ! inVeh && this._reload && set.get( 'tutorial' ) ) { act = 'reload'; parts = { name: '', act: 'Reload', info: '' }; }
 		}
 		show( this.prompt, !! act );
-		if ( ! act ) return;
-		// hold targets fill a ring around the key cap instead of saying "hold"
-		const capKey = input.label( act ) + ( hold != null ? ':h' : '' );
-		if ( capKey !== this._capKey ) {
-			this._capKey = capKey;
-			const cap = kc( input.label( act ) );
-			this.promptCap.replaceChildren( hold != null ? h( 'span.kc-hold', {}, cap ) : cap );
-			this._holdEl = hold != null ? this.promptCap.firstChild : null;
+		if ( ! act ) { this._pT = null; return; }
+		const kl = input.label( act );
+		if ( kl !== this._capKey ) { this._capKey = kl; this.pCap.replaceChildren( kc( kl ) ); }
+		// the target's words change only with the target (or its label: a door opened, a placeable's state)
+		if ( parts || t !== this._pT || t.label !== this._pL || t.sub !== this._pS ) {
+			this._pT = parts ? null : t; this._pL = t?.label; this._pS = t?.sub;
+			const pp = parts || promptParts( t );
+			// the detail (weight, state, items inside) rides on the name's strip, or under the action without one
+			text( this.pNameT, pp.name ); show( this.pName, !! pp.name );
+			text( this.pNameI, pp.name ? pp.info : '' ); show( this.pNameI, !! pp.name && !! pp.info );
+			text( this.pAct, pp.act );
+			text( this.pInfo, pp.name ? '' : pp.info ); show( this.pInfo, ! pp.name && !! pp.info );
+			let alts = [];
+			if ( ! parts && t.plRec ) { try { alts = ( g.placeables?.actionsOf?.( t.plRec ) || [] ).slice( 1, 5 ).map( a => a.label ); } catch ( e ) { alts = []; } }
+			const ak = alts.join( '|' );
+			if ( ak !== this._altKey ) {
+				this._altKey = ak;
+				this.pAlt.replaceChildren( ...alts.map( l => h( 'div', { text: l } ) ), ...( alts.length ? [ h( 'div.more', { text: 'Hold for all' } ) ] : [] ) );
+			}
+			show( this.pAlt, alts.length > 0 );
 		}
-		if ( this._holdEl ) prop( this._holdEl, '--p', hold.toFixed( 3 ) );
-		text( this.promptLbl, label );
-		text( this.promptSub, sub ); show( this.promptSub, !! sub );
+		// a hold fills a thin bar under the action
+		show( this.pHold, hold != null );
+		if ( hold != null ) fill( this.pHoldI, hold );
 	}
 
+	// a timed action: its name and the seconds left over a thin bar where the prompt was
 	_action( g ) {
 		const c = g.actions?.busy ? g.actions.current : null;
 		if ( c ) {
 			this._act = c; this._cancelT = 0;
-			flag( this.ring, 'cancel', false );
-			if ( this.ring.style.display ) this.ring.style.display = '';
-			show( this.ringLabel, true );
-			const off = ( 131.9 * ( 1 - ( g.actions.progress || 0 ) ) ).toFixed( 1 );
-			if ( off !== this._off ) { this._off = off; this.ringArc.setAttribute( 'stroke-dashoffset', off ); }
-			text( this.ringName, c.label || '' );
-			text( this.ringSec, c.time != null ? Math.max( 0, c.time - ( c.t || 0 ) ).toFixed( 1 ) + ' s' : '' );
+			flag( this.tact, 'cancel', false );
+			show( this.tact, true );
+			fill( this.tBar, g.actions.progress || 0 );
+			text( this.tName, c.label || '' );
+			text( this.tSec, c.time != null ? Math.max( 0, c.time - ( c.t || 0 ) ).toFixed( 1 ) + ' s' : '' );
 			return;
 		}
 		if ( this._act ) {
 			const a = this._act;
 			this._act = null;
-			// cancelled (moved away): the arc flashes red for 200 ms
-			if ( a.time != null && ( a.t || 0 ) < a.time - 1e-3 ) { flag( this.ring, 'cancel', true ); this._cancelT = this.t + 0.2; show( this.ringLabel, false ); return; }
+			// cancelled (moved away): the bar flashes red for 200 ms
+			if ( a.time != null && ( a.t || 0 ) < a.time - 1e-3 ) { flag( this.tact, 'cancel', true ); this._cancelT = this.t + 0.2; return; }
 		}
 		if ( this._cancelT && this.t < this._cancelT ) return;
 		this._cancelT = 0;
-		if ( ! this.ring.style.display ) this.ring.style.display = 'none';
-		show( this.ringLabel, false );
+		show( this.tact, false );
 	}
 
+	// hit from a direction: a soft red glow on that side of the screen, fading with lastHitDir.t
 	_damage( S, p, set ) {
 		const hd = S.lastHitDir;
 		const on = !! hd && set.get( 'damageIndicators' ) !== false;
 		if ( on !== this._dmgOn ) { this._dmgOn = on; this.dmg.style.display = on ? '' : 'none'; }
 		if ( ! on ) return;
-		const ang = Math.atan2( hd.dir.x, - hd.dir.z ) + p.yaw;
-		this.dmg.style.transform = `translate(-50%, -50%) rotate(${( - ang * 180 / Math.PI + 180 ).toFixed( 1 )}deg)`;
-		this.dmg.style.opacity = Math.min( 1, hd.t ).toFixed( 2 );
+		// screen angle, clockwise from the top: the glow sits on the screen's edge there, its long side along it
+		const a = Math.PI - Math.atan2( hd.dir.x, - hd.dir.z ) - p.yaw;
+		const x = Math.sin( a ) * this._screenW * 0.5, y = - Math.cos( a ) * this._screenH * 0.5;
+		this.dmg.style.transform = `translate(${x.toFixed( 0 )}px, ${y.toFixed( 0 )}px) rotate(${( a * 180 / Math.PI ).toFixed( 1 )}deg)`;
+		this.dmg.style.opacity = Math.min( 1, hd.t * 1.2 ).toFixed( 2 );
 	}
 
 	// toasts start under the FPS / debug block; its height is known from what it shows, so no layout read.
@@ -807,7 +891,7 @@ export class HUD {
 		flag( this.feed, 'at-inv', at === 'inv' ); flag( this.feed, 'at-map', at === 'map' );
 		if ( at ) { this.feed.style.top = ''; return; }
 		let top = 24;
-		if ( this._fpsOn ) top += 20 + 8;
+		if ( this._fpsOn ) top += 14 + 6;
 		if ( this.debugOn ) top += ( this._debugLines || 9 ) * 16 + 16 + 8;
 		this.feed.style.top = `calc(${top} * var(--u))`;
 	}

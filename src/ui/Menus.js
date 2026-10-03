@@ -13,7 +13,7 @@ const TABS = [ [ 'graphics', 'Graphics' ], [ 'interface', 'Interface' ], [ 'audi
 // keys each tab's `Reset tab` restores (Graphics also goes back to the default preset)
 const TAB_KEYS = {
 	graphics: [ 'fov', 'nightBrightness', 'exposure', 'motionBlur' ],
-	interface: [ 'guiScale', 'hudMode', 'crosshair', 'compass', 'minimap', 'hitMarkers', 'damageIndicators', 'showInteractHints', 'tutorial', 'showFps' ],
+	interface: [ 'guiScale', 'hudMode', 'crosshair', 'compass', 'minimap', 'ammoCounter', 'locationCard', 'hitMarkers', 'damageIndicators', 'showInteractHints', 'tutorial', 'showFps' ],
 	audio: [ 'masterVolume', 'sfxVolume', 'ambientVolume', 'musicVolume', 'uiVolume' ],
 	controls: [ 'sensitivity', 'invertY', 'toggleCrouch', 'toggleAim', 'toggleSprint', 'headBob' ],
 	gameplay: [ 'autoPickupAmmo', 'realisticMap' ],
@@ -545,8 +545,10 @@ export class Menus {
 				sl( 'GUI scale', 'guiScale', 0.7, 1.6, 0.05, pct, { commit: true } ),
 				sg( 'HUD', 'hudMode', [ [ 'auto', 'Auto' ], [ 'always', 'Always' ] ], { get: () => S.get( 'hudMode' ) ?? 'auto' } ),
 				sg( 'Crosshair', 'crosshair', [ [ 'dot', 'Dot' ], [ 'lines', 'Dynamic' ], [ 'none', 'None' ] ] ),
-				tg( 'Compass', 'compass' ),
+				tg( 'Compass bar', 'compass' ),
 				tg( 'Minimap', 'minimap' ),
+				tg( 'Ammo counter', 'ammoCounter' ),
+				tg( 'Location card', 'locationCard' ),
 				tg( 'Hit markers', 'hitMarkers' ),
 				tg( 'Damage direction', 'damageIndicators' ),
 				tg( 'Prompts', 'showInteractHints' ),

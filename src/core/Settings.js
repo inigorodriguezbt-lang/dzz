@@ -42,8 +42,11 @@ export const DEFAULTS = {
 	sensitivity: 1, invertY: false, toggleCrouch: true, toggleAim: false, toggleSprint: false, bindings: DEFAULT_BINDINGS,
 	// gameplay
 	subtitles: true, autoPickupAmmo: true, realisticMap: false, damageIndicators: true, hitMarkers: true,
-	showInteractHints: true, compass: true, minimap: true, units: 'metric', tutorial: true,
+	// the HUD reads like DayZ's (docs/UI_DAYZ.md): no compass bar, minimap, ammo counter or location card
+	showInteractHints: true, compass: false, minimap: false, ammoCounter: false, locationCard: false, units: 'metric', tutorial: true,
 };
+// v4 gives saved settings the DayZ HUD once; after that the player's choices stand
+const HUD_V4 = { compass: false, minimap: false, ammoCounter: false, locationCard: false, crosshair: 'dot' };
 
 // low: integrated GPUs; medium: integrated / entry-level; high: mid-range at 1080p; ultra: high-end.
 // Most of a frame is per-pixel work, so low and medium render at a lower scale and the TAA resolve upsamples
@@ -65,11 +68,12 @@ const PRESETS_V2 = {
 // settings saved before the rendering port: the old default FOV (80) becomes 62, the high / ultra presets'
 // MSAA becomes TAA, and keys new to a saved preset take that preset's value (so it isn't shown as custom).
 // v3: the retuned low / medium presets (TAA upsampling, a near shadow cascade on low) replace the v2 values
-// the player kept
-const VERSION = 3;
+// the player kept. v4: the DayZ HUD defaults (HUD_V4), once
+const VERSION = 4;
 function migrate( s ) {
 	const v = s.version ?? 1;
 	if ( v >= VERSION ) return;
+	if ( v < 4 ) Object.assign( s, HUD_V4 );
 	if ( v < 2 && s.fov === 80 ) s.fov = 62;
 	const p = QUALITY_PRESETS[ s.quality ];
 	if ( p ) {
@@ -89,9 +93,12 @@ export class Settings {
 		try {
 			const s = JSON.parse( localStorage.getItem( KEY ) || 'null' );
 			if ( s ) {
+				const old = ( s.version ?? 1 ) < VERSION;
 				migrate( s );
 				Object.assign( this.values, s );
 				this.values.bindings = { ...structuredClone( DEFAULT_BINDINGS ), ...( s.bindings || {} ) };
+				// stored at once, so a migration runs only once
+				if ( old ) this.save();
 			}
 		} catch ( e ) { /* private mode */ }
 	}

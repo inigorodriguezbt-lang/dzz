@@ -95,6 +95,18 @@ export const PATHS = {
 	mouseL: '<rect x="6" y="3" width="12" height="18" rx="6"/><path d="M12 3v6M6 9h12"/><path d="M12 3a6 6 0 0 0-6 6h6V3Z" fill="currentColor"/>',
 	mouseR: '<rect x="6" y="3" width="12" height="18" rx="6"/><path d="M12 3v6M6 9h12"/><path d="M12 3a6 6 0 0 1 6 6h-6V3Z" fill="currentColor"/>',
 	player: '<path d="M12 3 19 20l-7-4-7 4 7-17Z" fill="currentColor"/>',
+	// HUD status notifiers (docs/UI_DAYZ.md): solid glyphs that stay legible small over a bright scene
+	nf_health: '<path fill="currentColor" stroke="none" fill-rule="evenodd" d="M12 21.2C11.6 21.2 2.8 15.6 2.8 9.3 2.8 6.2 5.1 3.8 8 3.8c1.7 0 3.1.8 4 2.1.9-1.3 2.3-2.1 4-2.1 2.9 0 5.2 2.4 5.2 5.5 0 6.3-8.8 11.9-9.2 11.9ZM10.9 8.1h2.2v2.6h2.6v2.2h-2.6v2.6h-2.2v-2.6H8.3v-2.2h2.6Z"/>',
+	nf_blood: '<path fill="currentColor" stroke="none" d="M12 2.2c4 4.6 7.2 8.6 7.2 12.4a7.2 7.2 0 0 1-14.4 0C4.8 10.8 8 6.8 12 2.2Z"/>',
+	nf_food: '<path fill="currentColor" stroke="none" d="M4.5 2.8h1.2V8h1.2V2.8h1.2V8h1.2V2.8h1.2v5.8a3 3 0 0 1-1.85 2.8v8.9a1.15 1.15 0 0 1-2.3 0v-8.9A3 3 0 0 1 4.5 8.6ZM19.5 2.8v17.5a1.15 1.15 0 0 1-2.3 0v-6.1h-2.6V9.2c0-3.6 2-5.9 4.9-6.4Z"/>',
+	nf_water: '<path fill="currentColor" stroke="none" fill-rule="evenodd" d="M9.5 1.6h5v2h-5ZM10.2 4.3h3.6l2.5 3.2v13a1.5 1.5 0 0 1-1.5 1.5H9.2a1.5 1.5 0 0 1-1.5-1.5v-13ZM12 10.6c1.3 1.6 2.4 2.9 2.4 4.1a2.4 2.4 0 0 1-4.8 0c0-1.2 1.1-2.5 2.4-4.1Z"/>',
+	nf_temp: '<path fill="currentColor" stroke="none" d="M10.5 2a3 3 0 0 0-3 3v8.6a5 5 0 1 0 6 0V5a3 3 0 0 0-3-3ZM15.6 4.6h3.4v1.8h-3.4ZM15.6 8.1h3.4v1.8h-3.4ZM15.6 11.6h3.4v1.8h-3.4Z"/>',
+	nf_energy: '<path fill="currentColor" stroke="none" d="M20.5 14.6A8.8 8.8 0 0 1 9.4 3.5a8.8 8.8 0 1 0 11.1 11.1Z"/>',
+	// stance silhouettes (standing, crouched, prone, swimming), facing right
+	stance_stand: '<circle cx="12" cy="3.6" r="2.3" fill="currentColor" stroke="none"/><rect x="9.6" y="6.8" width="4.8" height="7.4" rx="1.6" fill="currentColor" stroke="none"/><path d="M10.9 13.6v7.6M13.1 13.6v7.6" stroke-width="2.5"/><path d="M9.3 8.4 8 13.4M14.7 8.4l1.3 5" stroke-width="2"/>',
+	stance_crouch: '<circle cx="14" cy="6.4" r="2.3" fill="currentColor" stroke="none"/><path d="M12.9 10 10.7 14.4" stroke-width="4.4"/><path d="M10.6 15 14.6 16.6 13.6 21.2M10.6 15l.9 3.4-3.4 2.8" stroke-width="2.5"/><path d="M13 10.6l2.6 3" stroke-width="2"/>',
+	stance_prone: '<circle cx="19.4" cy="15.4" r="2.3" fill="currentColor" stroke="none"/><path d="M16.2 18.6H10" stroke-width="4.2"/><path d="M10 18.8H3.4M10 19.4l-6 1.9" stroke-width="2.5"/><path d="M16 17.6l4.8 2.6" stroke-width="2"/>',
+	stance_swim: '<circle cx="9" cy="8" r="2.3" fill="currentColor" stroke="none"/><path d="M11.4 11.4 15.6 9l4 2.2" stroke-width="2.2"/><path d="M2.5 15.5c2 0 2-1.5 4-1.5s2 1.5 4 1.5 2-1.5 4-1.5 2 1.5 4 1.5 2-1.5 3-1.5M2.5 19.5c2 0 2-1.5 4-1.5s2 1.5 4 1.5 2-1.5 4-1.5 2 1.5 4 1.5 2-1.5 3-1.5" stroke-width="1.8"/>',
 };
 
 // conditions drawn with another glyph

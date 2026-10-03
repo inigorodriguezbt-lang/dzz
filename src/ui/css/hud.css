@@ -1,7 +1,19 @@
-/* ---- HUD (docs/UI_SPEC.md 5, 5.13) ------------------------------------------------------------------------
-   Every HUD string sits on a .plate. Elements fade with .gone (400 ms) and come back with a 160 ms fade-in;
-   HUD.js toggles classes only when a value changes. */
-.hud { position: absolute; inset: 0; pointer-events: none; transition: opacity var(--d-4) var(--ease-out); z-index: 1; }
+/* ---- HUD, DayZ style (docs/UI_DAYZ.md; layout notes in HUD.js) --------------------------------------------------
+   Almost nothing on screen. What there is reads as white glyphs and text with a tight dark halo straight on the
+   scene, or sits on near-black see-through strips with square corners. Colour only for state: yellow when low,
+   red when critical, blue when cold, green for a good tendency. Elements fade with .gone (400 ms) and come back in
+   160 ms; HUD.js toggles classes only when a value changes. */
+.hud, .feed {
+	--hud-ink: var(--hud-1); --hud-dim: var(--hud-2); --hud-faint: rgba(255, 255, 255, 0.42);
+	--hud-strip: var(--m-panel, rgba(0, 0, 0, 0.62)); --hud-slot: var(--m-slot, rgba(0, 0, 0, 0.45)); --hud-line: var(--line-2);
+	--hud-track: rgba(0, 0, 0, 0.42);
+	--hud-cond: var(--font-cond, 'Roboto Condensed', var(--font));
+	--hud-caps: var(--caps, 0.06em);
+	/* white on a bright beach: a tight dark halo under glyphs (filter) and text (shadow) */
+	--hud-glow: drop-shadow(0 0 1px rgba(0, 0, 0, 0.9)) drop-shadow(0 1px 2px rgba(0, 0, 0, 0.4));
+	--hud-tglow: 0 0 2px rgba(0, 0, 0, 0.9), 0 1px 3px rgba(0, 0, 0, 0.55);
+}
+.hud { position: absolute; inset: 0; pointer-events: none; transition: opacity var(--d-4) var(--ease-out); z-index: 1; color: var(--hud-ink); }
 .hud.under { opacity: 0; transition-duration: var(--d-2); }
 .hud.off { opacity: 0; }
 .hud .gone { opacity: 0; }
@@ -9,180 +21,207 @@
 .hud .fade { transition: opacity var(--d-2) var(--ease-out); }
 .hud .fade.gone { transition: opacity var(--d-4) var(--ease-in); }
 @starting-style { .hud .fade { opacity: 0; } }
-/* aiming: vitals, conditions, hotbar, key hints and pickups step aside in 160 ms. Hotbar and key hints
-   also fade on their own (.gone), so aiming uses filter: opacity() to keep the two apart. */
-.hud .bl, .hud .pickups { transition: opacity var(--d-2) var(--ease-out); }
-.hud.aim .bl, .hud.aim .pickups { opacity: 0; }
-.hud .keyhints, .hud .hotbar { transition: opacity var(--d-2) var(--ease-out), filter var(--d-2) var(--ease-out); }
-.hud .keyhints.gone, .hud .hotbar.gone { transition: opacity var(--d-4) var(--ease-in), filter var(--d-2) var(--ease-out); }
-.hud.aim .keyhints, .hud.aim .hotbar { filter: opacity(0); }
+/* aiming: the quickbar, key hints and pickups step aside in 160 ms. The quickbar and key hints also fade on their
+   own (.gone), so aiming uses filter: opacity() to keep the two apart. */
+.hud .keyhints, .hud .qbar, .hud .pickups { transition: opacity var(--d-2) var(--ease-out), filter var(--d-2) var(--ease-out); }
+.hud .keyhints.gone, .hud .qbar.gone { transition: opacity var(--d-4) var(--ease-in), filter var(--d-2) var(--ease-out); }
+.hud.aim .keyhints, .hud.aim .qbar, .hud.aim .pickups { filter: opacity(0); }
+@keyframes hud-flash { 50% { opacity: 0.25; } }
+/* a critical notifier blinks, but stays readable */
+@keyframes hud-blink { 50% { opacity: 0.45; } }
+@keyframes hud-in-l { from { opacity: 0; transform: translateX(calc(-8 * var(--u))); } }
+@keyframes hud-in-r { from { opacity: 0; transform: translateX(calc(8 * var(--u))); } }
 
-/* ---- crosshair, hit marker ------------------------------------------------------------------------------ */
+/* key caps on the HUD: a white outline square, like DayZ's [F] */
+.hud .kc { min-width: calc(18 * var(--u)); height: calc(18 * var(--u)); padding: 0 calc(4 * var(--u)); border-radius: var(--r-xs, 2px); background: rgba(0, 0, 0, 0.4); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.85); color: #fff; font: 700 max(10px, calc(11 * var(--u))) / 1 var(--hud-cond); text-shadow: none; }
+.hud .kc .i { width: calc(11 * var(--u)); height: calc(11 * var(--u)); }
+
+/* ---- crosshair, hit flash, damage glow ------------------------------------------------------------------- */
 .crosshair { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
-.crosshair .dot { width: calc(4 * var(--u)); height: calc(4 * var(--u)); border-radius: 50%; background: #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55); }
+.crosshair .dot { width: max(2px, calc(3 * var(--u))); height: max(2px, calc(3 * var(--u))); border-radius: 50%; background: rgba(255, 255, 255, 0.92); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45); }
 .crosshair .lines { position: relative; width: 0; height: 0; }
-.crosshair .lines i { position: absolute; background: #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45); }
-.crosshair .lines i:nth-child(1) { width: 2px; height: calc(8 * var(--u)); left: -1px; top: calc(-8 * var(--u) - var(--gap-px, 6px)); }
-.crosshair .lines i:nth-child(2) { width: 2px; height: calc(8 * var(--u)); left: -1px; top: var(--gap-px, 6px); }
-.crosshair .lines i:nth-child(3) { height: 2px; width: calc(8 * var(--u)); top: -1px; left: calc(-8 * var(--u) - var(--gap-px, 6px)); }
-.crosshair .lines i:nth-child(4) { height: 2px; width: calc(8 * var(--u)); top: -1px; left: var(--gap-px, 6px); }
-.hitmarker { position: absolute; left: 50%; top: 50%; width: calc(26 * var(--u)); height: calc(26 * var(--u)); transform: translate(-50%, -50%) rotate(45deg); opacity: 0; transition: opacity var(--d-2) var(--ease-in); }
+.crosshair .lines i { position: absolute; background: rgba(255, 255, 255, 0.92); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4); }
+.crosshair .lines i:nth-child(1) { width: 1.5px; height: calc(7 * var(--u)); left: -0.75px; top: calc(-7 * var(--u) - var(--gap-px, 6px)); }
+.crosshair .lines i:nth-child(2) { width: 1.5px; height: calc(7 * var(--u)); left: -0.75px; top: var(--gap-px, 6px); }
+.crosshair .lines i:nth-child(3) { height: 1.5px; width: calc(7 * var(--u)); top: -0.75px; left: calc(-7 * var(--u) - var(--gap-px, 6px)); }
+.crosshair .lines i:nth-child(4) { height: 1.5px; width: calc(7 * var(--u)); top: -0.75px; left: var(--gap-px, 6px); }
+/* a hit: four short red ticks around the centre for 120 ms (a kill 250 ms, a little wider), then gone in 120 ms */
+.hitmarker { position: absolute; left: 50%; top: 50%; width: calc(22 * var(--u)); height: calc(22 * var(--u)); transform: translate(-50%, -50%) rotate(45deg); opacity: 0; transition: opacity 120ms var(--ease-in); }
 .hitmarker.on { opacity: 1; transition: none; }
-.hitmarker i { position: absolute; background: #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45); }
-.hitmarker i:nth-child(1), .hitmarker i:nth-child(2) { left: calc(50% - 0.75px); width: 1.5px; height: calc(6 * var(--u)); }
-.hitmarker i:nth-child(1) { top: calc(50% - 11 * var(--u)); } .hitmarker i:nth-child(2) { top: calc(50% + 5 * var(--u)); }
-.hitmarker i:nth-child(3), .hitmarker i:nth-child(4) { top: calc(50% - 0.75px); height: 1.5px; width: calc(6 * var(--u)); }
-.hitmarker i:nth-child(3) { left: calc(50% - 11 * var(--u)); } .hitmarker i:nth-child(4) { left: calc(50% + 5 * var(--u)); }
-.hitmarker.kill i { background: var(--alarm); }
-.hitmarker.kill i:nth-child(1), .hitmarker.kill i:nth-child(2) { height: calc(8 * var(--u)); } .hitmarker.kill i:nth-child(1) { top: calc(50% - 13 * var(--u)); }
-.hitmarker.kill i:nth-child(3), .hitmarker.kill i:nth-child(4) { width: calc(8 * var(--u)); } .hitmarker.kill i:nth-child(3) { left: calc(50% - 13 * var(--u)); }
+.hitmarker i { position: absolute; background: var(--alarm); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35); }
+.hitmarker i:nth-child(1), .hitmarker i:nth-child(2) { left: calc(50% - 1px); width: 2px; height: calc(5 * var(--u)); }
+.hitmarker i:nth-child(1) { top: calc(50% - 9 * var(--u)); } .hitmarker i:nth-child(2) { top: calc(50% + 4 * var(--u)); }
+.hitmarker i:nth-child(3), .hitmarker i:nth-child(4) { top: calc(50% - 1px); height: 2px; width: calc(5 * var(--u)); }
+.hitmarker i:nth-child(3) { left: calc(50% - 9 * var(--u)); } .hitmarker i:nth-child(4) { left: calc(50% + 4 * var(--u)); }
+.hitmarker.kill { width: calc(28 * var(--u)); height: calc(28 * var(--u)); }
+.hitmarker.kill i:nth-child(1) { top: calc(50% - 12 * var(--u)); } .hitmarker.kill i:nth-child(2) { top: calc(50% + 6 * var(--u)); }
+.hitmarker.kill i:nth-child(3) { left: calc(50% - 12 * var(--u)); } .hitmarker.kill i:nth-child(4) { left: calc(50% + 6 * var(--u)); }
+.hitmarker.kill i:nth-child(1), .hitmarker.kill i:nth-child(2) { height: calc(6 * var(--u)); }
+.hitmarker.kill i:nth-child(3), .hitmarker.kill i:nth-child(4) { width: calc(6 * var(--u)); }
+/* hit from a direction: a soft red glow half off the screen edge on that side; HUD.js moves it (transform only) */
+.dmg { position: absolute; left: 50%; top: 50%; width: 0; height: 0; will-change: transform, opacity; }
+.dmg > i { position: absolute; left: -36vh; top: -13vh; width: 72vh; height: 26vh; background: radial-gradient(closest-side, rgba(195, 58, 50, 0.62), rgba(195, 58, 50, 0.28) 55%, rgba(195, 58, 50, 0)); }
 
-/* ---- compass, heading tab, location card ------------------------------------------------------------------ */
-.compass { position: absolute; top: var(--edge); left: 50%; width: calc(480 * var(--u)); height: calc(28 * var(--u)); margin-left: calc(-240 * var(--u)); overflow: hidden; -webkit-mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent); mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent); }
+/* ---- prompt and timed action, just right of centre --------------------------------------------------------- */
+/* the target's name in caps on a dark strip, centred on the crosshair's line; [F] Action under it; then the other
+   actions in grey and the detail line */
+.iprompt { position: absolute; left: calc(50% + 36 * var(--u)); top: calc(50% - 12 * var(--u)); display: flex; flex-direction: column; align-items: flex-start; gap: calc(4 * var(--u)); max-width: calc(380 * var(--u)); text-shadow: var(--hud-tglow); }
+.iprompt .pn { max-width: 100%; padding: calc(3 * var(--u)) calc(8 * var(--u)); background: var(--hud-strip); font: 700 calc(14 * var(--u)) / calc(18 * var(--u)) var(--hud-cond); letter-spacing: var(--hud-caps); text-transform: uppercase; color: #fff; text-shadow: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.iprompt .pn .ni { margin-left: calc(10 * var(--u)); font: 500 calc(12 * var(--u)) / 1 var(--font); letter-spacing: 0; text-transform: none; color: var(--hud-dim); font-variant-numeric: tabular-nums; }
+.iprompt .pa { display: flex; align-items: center; gap: calc(7 * var(--u)); min-height: calc(22 * var(--u)); padding-left: calc(2 * var(--u)); font: 500 calc(14 * var(--u)) / calc(18 * var(--u)) var(--font); color: #fff; white-space: nowrap; }
+.iprompt .pa > .cap { display: inline-flex; }
+.iprompt .lb { overflow: hidden; text-overflow: ellipsis; }
+.iprompt .ph { position: relative; width: calc(132 * var(--u)); height: max(2px, calc(2 * var(--u))); margin-left: calc(2 * var(--u)); background: var(--hud-track); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.18); overflow: hidden; }
+.iprompt .ph > i, .tact .tb > i, .stamina .sb > i, .veh .bar > i { position: absolute; inset: 0; background: #fff; transform-origin: left center; transform: scaleX(0); }
+.iprompt .palt { display: flex; flex-direction: column; gap: calc(2 * var(--u)); padding-left: calc(27 * var(--u)); font: 500 calc(13 * var(--u)) / calc(17 * var(--u)) var(--font); color: var(--hud-dim); white-space: nowrap; }
+.iprompt .palt > .more { font: 500 max(10px, calc(11 * var(--u))) / calc(15 * var(--u)) var(--hud-cond); letter-spacing: var(--hud-caps); text-transform: uppercase; color: var(--hud-faint); }
+.iprompt .pi { padding-left: calc(27 * var(--u)); font: 500 calc(12 * var(--u)) / calc(16 * var(--u)) var(--font); color: var(--hud-dim); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+/* a timed action (bandaging, searching): its name and the seconds left on the strip, a thin bar under it */
+.tact { position: absolute; left: calc(50% + 36 * var(--u)); top: calc(50% - 12 * var(--u)); display: flex; flex-direction: column; gap: calc(5 * var(--u)); min-width: calc(200 * var(--u)); }
+.tact .tn { display: flex; justify-content: space-between; gap: calc(16 * var(--u)); padding: calc(3 * var(--u)) calc(8 * var(--u)); background: var(--hud-strip); font: 700 calc(14 * var(--u)) / calc(18 * var(--u)) var(--hud-cond); letter-spacing: var(--hud-caps); text-transform: uppercase; white-space: nowrap; }
+.tact .tn .s { color: var(--hud-dim); font-weight: 500; font-variant-numeric: tabular-nums; text-transform: none; letter-spacing: 0; }
+.tact .tb { position: relative; height: max(2px, calc(3 * var(--u))); background: var(--hud-track); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.18); overflow: hidden; }
+.tact.cancel .tb > i { background: var(--alarm); }
+
+/* ---- compass bar, heading, location card (settings, off by default) ---------------------------------------- */
+.compass { position: absolute; top: var(--edge); left: 50%; width: calc(480 * var(--u)); height: calc(26 * var(--u)); margin-left: calc(-240 * var(--u)); overflow: hidden; background: rgba(0, 0, 0, 0.38); -webkit-mask-image: linear-gradient(90deg, transparent, #000 14%, #000 86%, transparent); mask-image: linear-gradient(90deg, transparent, #000 14%, #000 86%, transparent); }
 .compass-strip { position: absolute; left: 50%; top: 0; height: 100%; will-change: transform; }
-.compass-tick { position: absolute; bottom: 0; width: 1px; height: calc(5 * var(--u)); margin-left: -0.5px; background: var(--hud-2); }
-.compass-tick.major { height: calc(9 * var(--u)); background: var(--hud-1); }
-.compass-label { position: absolute; top: calc(4 * var(--u)); transform: translateX(-50%); color: var(--hud-2); }
-.compass-label.card { color: var(--hud-1); }
-.compass .compass-marker { position: absolute; top: calc(16 * var(--u)); width: calc(10 * var(--u)); height: calc(10 * var(--u)); margin-left: calc(-5 * var(--u)); color: var(--accent); overflow: visible; }
+.compass-tick { position: absolute; bottom: 0; width: 1px; height: calc(5 * var(--u)); margin-left: -0.5px; background: rgba(255, 255, 255, 0.5); }
+.compass-tick.major { height: calc(8 * var(--u)); background: rgba(255, 255, 255, 0.9); }
+.compass-label { position: absolute; top: calc(4 * var(--u)); transform: translateX(-50%); font: 700 max(10px, calc(11 * var(--u))) / 1 var(--hud-cond); letter-spacing: var(--hud-caps); color: var(--hud-dim); }
+.compass-label.card { color: #fff; }
+.compass .compass-marker { position: absolute; top: calc(15 * var(--u)); width: calc(9 * var(--u)); height: calc(9 * var(--u)); margin-left: calc(-4.5 * var(--u)); color: #fff; overflow: visible; }
 .compass-marker.user path { fill: currentColor; stroke: #000; stroke-width: 1.5px; vector-effect: non-scaling-stroke; }
 .compass-marker.locate path { stroke-width: 1.5px; vector-effect: non-scaling-stroke; }
 .compass .compass-marker.death { color: var(--alarm); }
-.compass-needle { position: absolute; left: 50%; bottom: 0; width: 2px; height: calc(12 * var(--u)); margin-left: -1px; background: var(--hud-1); }
-.heading { position: absolute; top: calc(56 * var(--u)); left: 50%; transform: translateX(-50%); display: flex; align-items: center; height: calc(20 * var(--u)); padding: 0 var(--s-2); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.heading .d { margin-left: var(--s-2); color: var(--hud-2); font-weight: 500; }
-.place { position: absolute; top: calc(88 * var(--u)); left: 50%; transform: translateX(-50%); padding: var(--s-2) var(--s-4); text-align: center; white-space: nowrap; transition: opacity var(--d-4) var(--ease-in); animation: place-in var(--d-3) var(--ease-out); }
-.place .isl { color: var(--hud-2); margin-top: 2px; }
+.compass-needle { position: absolute; left: 50%; bottom: 0; width: 2px; height: calc(12 * var(--u)); margin-left: -1px; background: #fff; }
+.heading { position: absolute; top: calc(54 * var(--u)); left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: calc(8 * var(--u)); font: 700 calc(12 * var(--u)) / 1 var(--hud-cond); letter-spacing: var(--hud-caps); font-variant-numeric: tabular-nums; text-shadow: var(--hud-tglow); white-space: nowrap; }
+.heading .d { color: var(--hud-dim); font-weight: 500; }
+.place { position: absolute; top: calc(92 * var(--u)); left: 50%; transform: translateX(-50%); text-align: center; white-space: nowrap; text-shadow: var(--hud-tglow); transition: opacity var(--d-4) var(--ease-in); animation: place-in var(--d-3) var(--ease-out); }
+.place .pl { font: 700 calc(22 * var(--u)) / 1.1 var(--hud-cond); letter-spacing: 0.08em; text-transform: uppercase; }
+.place .isl { margin-top: calc(3 * var(--u)); font: 500 max(10px, calc(12 * var(--u))) / 1.2 var(--hud-cond); letter-spacing: var(--hud-caps); text-transform: uppercase; color: var(--hud-dim); }
 .place.gone { opacity: 0; }
 @keyframes place-in { from { opacity: 0; transform: translate(-50%, calc(-4 * var(--u))); } }
 
 /* ---- top left: FPS, debug; toasts (.feed) sit outside .hud so they stay above screens -------------------- */
-.tl { position: absolute; left: var(--edge); top: var(--edge); display: flex; flex-direction: column; align-items: flex-start; gap: var(--s-2); }
-.fps { display: flex; align-items: center; height: calc(20 * var(--u)); padding: 0 var(--s-2); color: var(--hud-2); font: 500 calc(11 * var(--u)) / 1 var(--mono); font-variant-numeric: tabular-nums; }
-.debug { max-width: calc(720 * var(--u)); padding: var(--s-2) var(--s-3); border-radius: var(--r-md); background: var(--m-pop); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink-1); white-space: pre; overflow: hidden; }
-.feed { position: absolute; left: var(--edge); top: var(--edge); z-index: 20; display: flex; flex-direction: column; align-items: flex-start; gap: var(--s-1); pointer-events: none; transition: opacity var(--d-4) var(--ease-out); }
+.tl { position: absolute; left: var(--edge); top: var(--edge); display: flex; flex-direction: column; align-items: flex-start; gap: calc(6 * var(--u)); }
+.fps { height: calc(14 * var(--u)); font: 500 max(9px, calc(11 * var(--u))) / calc(14 * var(--u)) var(--hud-cond); font-variant-numeric: tabular-nums; color: rgba(255, 255, 255, 0.6); text-shadow: var(--hud-tglow); }
+.debug { max-width: calc(720 * var(--u)); padding: calc(6 * var(--u)) calc(10 * var(--u)); background: rgba(0, 0, 0, 0.62); color: #d8d8d8; white-space: pre; overflow: hidden; }
+.feed { position: absolute; left: var(--edge); top: var(--edge); z-index: 20; display: flex; flex-direction: column; align-items: flex-start; gap: calc(2 * var(--u)); pointer-events: none; transition: opacity var(--d-4) var(--ease-out); }
 .feed.off { opacity: 0; }
 /* the map: under its title plate (top 24 + 56 + 8) */
 .feed.at-map { top: calc(88 * var(--u)); }
-/* the inventory: one status line in the empty middle of its top bar (the panel is centred with its hotbar strip
-   under it: 16u gap + 48u strip), the newest toast only */
-.feed.at-inv { left: 50%; top: calc((100vh - min(800 * var(--u), 100vh - 112 * var(--u)) - 64 * var(--u)) / 2 + 10 * var(--u)); transform: translateX(-50%); align-items: center; }
-.feed.at-inv > .toast:not(:last-child) { display: none; }
-.lock { position: absolute; left: 50%; top: 58%; transform: translateX(-50%); z-index: 3; display: flex; align-items: center; height: calc(32 * var(--u)); padding: 0 var(--s-3); pointer-events: none; white-space: nowrap; }
+/* the inventory: one status line at the top centre, the newest toast only (inventory.css fits it to its layout) */
+.feed.at-inv { left: 50%; top: calc(5 * var(--u)); transform: translateX(-50%); align-items: center; }
+.feed.at-inv > .note:not(:last-child) { display: none; }
+/* a toast: one plain white line on a dark wash that fades out to the right */
+.note { display: flex; align-items: center; gap: calc(7 * var(--u)); height: calc(24 * var(--u)); max-width: calc(400 * var(--u)); padding: 0 calc(32 * var(--u)) 0 calc(8 * var(--u)); background: linear-gradient(90deg, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0.35) 60%, rgba(0, 0, 0, 0)); color: #fff; font: 500 calc(13 * var(--u)) / calc(18 * var(--u)) var(--font); text-shadow: var(--hud-tglow); white-space: nowrap; animation: hud-in-l var(--d-2) var(--ease-out); }
+.note > .tx { overflow: hidden; text-overflow: ellipsis; }
+.note > .x { flex: none; color: var(--hud-dim); font-weight: 700; font-variant-numeric: tabular-nums; }
+.note > .sd { flex: none; width: calc(6 * var(--u)); height: calc(6 * var(--u)); }
+.note.warn > .sd { background: var(--warn); } .note.bad > .sd { background: var(--alarm); }
+.note > img { flex: none; width: calc(18 * var(--u)); height: calc(18 * var(--u)); object-fit: contain; }
+.note.out { opacity: 0; transition: opacity var(--d-3) var(--ease-in); }
+.feed.at-inv > .note { padding: 0 calc(28 * var(--u)); background: linear-gradient(90deg, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.6) 20%, rgba(0, 0, 0, 0.6) 80%, rgba(0, 0, 0, 0)); }
+.lock { position: absolute; left: 50%; top: 58%; transform: translateX(-50%); z-index: 3; display: flex; align-items: center; height: calc(28 * var(--u)); padding: 0 calc(12 * var(--u)); border-radius: 0; background: var(--m-panel, rgba(0, 0, 0, 0.62)); box-shadow: none; font: 700 calc(13 * var(--u)) / 1 var(--font-cond, var(--font)); letter-spacing: var(--caps, 0.06em); text-transform: uppercase; pointer-events: none; white-space: nowrap; }
 
-/* ---- minimap ------------------------------------------------------------------------------------------- */
-.minimap { position: absolute; right: var(--edge); top: var(--edge); width: calc(192 * var(--u)); height: calc(216 * var(--u)); padding: var(--s-1); }
-.minimap canvas { display: block; width: calc(184 * var(--u)); height: calc(184 * var(--u)); border-radius: var(--r-sm); }
-.minimap .foot { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); height: calc(24 * var(--u)); padding: 0 var(--s-1); }
+/* ---- minimap (a setting, off by default) -------------------------------------------------------------------- */
+.minimap { position: absolute; right: var(--edge); top: var(--edge); width: calc(192 * var(--u)); padding: calc(4 * var(--u)); background: var(--hud-strip); box-shadow: inset 0 0 0 1px var(--hud-line); }
+.minimap canvas { display: block; width: calc(184 * var(--u)); height: calc(184 * var(--u)); }
+.minimap .foot { display: flex; align-items: center; justify-content: space-between; gap: calc(8 * var(--u)); height: calc(22 * var(--u)); padding: 0 calc(2 * var(--u)); font: 700 max(10px, calc(11 * var(--u))) / 1 var(--hud-cond); letter-spacing: var(--hud-caps); text-transform: uppercase; }
 .minimap .foot > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.minimap .foot > span:last-child { flex: none; color: var(--hud-2); font-variant-numeric: tabular-nums; }
+.minimap .foot > span:last-child { flex: none; color: var(--hud-dim); font-variant-numeric: tabular-nums; }
 
-/* ---- bottom left: conditions over the vitals strip ------------------------------------------------------- */
-.bl { position: absolute; left: var(--edge); bottom: var(--edge); display: flex; flex-direction: column; align-items: flex-start; gap: var(--s-2); }
-.conds { display: flex; flex-wrap: wrap; gap: var(--s-1); max-width: calc(440 * var(--u)); }
-.cond { display: inline-flex; align-items: center; gap: calc(6 * var(--u)); height: calc(24 * var(--u)); padding: 0 var(--s-1); border-radius: var(--r-sm); white-space: nowrap; }
-.cond.lab { padding-right: var(--s-2); }
-/* the kind colours only the icon (k-* so a warn chip doesn't pick up the .plate.warn tint) */
-.cond.k-bad > .i { color: var(--alarm); } .cond.k-warn > .i { color: var(--warn); } .cond.k-good > .i { color: var(--hud-2); }
-.cond .x { font-weight: 600; font-variant-numeric: tabular-nums; }
-.cond.act { padding-left: 2px; padding-right: var(--s-2); }
-/* moodles (stress, unhappy, bored): the face plus four level pips filled from the bottom in the kind colour */
-.cond.k-mild > .i { color: var(--hud-1); }
-.cond .lv { display: inline-flex; flex-direction: column-reverse; justify-content: center; gap: calc(1.5 * var(--u)); height: calc(16 * var(--u)); margin-left: calc(-2 * var(--u)); }
-.cond .lv > i { display: block; width: calc(4 * var(--u)); height: max(2px, calc(2 * var(--u))); border-radius: 1px; background: rgba(255, 255, 255, 0.2); }
-.cond .lv > i.on { background: var(--hud-1); }
-.cond.k-warn .lv > i.on { background: var(--warn); } .cond.k-bad .lv > i.on { background: var(--alarm); }
+/* ---- bottom right: notifiers and stance, badges over them, then the weapon or vehicle readout, pickups ----- */
+.br { position: absolute; right: var(--edge); bottom: var(--edge); display: flex; flex-direction: column; align-items: flex-end; gap: calc(8 * var(--u)); }
+.ntfs { display: flex; align-items: flex-end; gap: calc(12 * var(--u)); }
+.vitals { display: flex; align-items: center; gap: calc(7 * var(--u)); }
+/* a notifier: a solid 26u glyph, white / yellow / red (blinking) / blue, and its tendency arrows in an 8u column */
+.ntf { display: flex; align-items: center; height: calc(34 * var(--u)); color: var(--hud-ink); filter: var(--hud-glow); }
+.ntf > .i { width: calc(26 * var(--u)); height: calc(26 * var(--u)); }
+.ntf > .tr { flex: none; width: calc(9 * var(--u)); height: calc(20 * var(--u)); margin-left: calc(2 * var(--u)); fill: currentColor; stroke: none; color: var(--hud-ink); }
+.ntf > .tr.good { color: var(--good); } .ntf > .tr.bad { color: var(--alarm); }
+.ntf.warn > .i { color: var(--warn); }
+.ntf.crit > .i { color: var(--alarm); animation: hud-blink 1s steps(1) infinite; }
+.ntf.cold > .i { color: var(--cold); }
+.ntf.freeze > .i { color: var(--cold); animation: hud-blink 1s steps(1) infinite; }
+.stance { display: flex; align-items: flex-end; height: calc(36 * var(--u)); color: var(--hud-ink); filter: var(--hud-glow); }
+.stance > .i { width: calc(36 * var(--u)); height: calc(36 * var(--u)); stroke-linecap: round; stroke-linejoin: round; }
+/* badges: small dark squares, the condition's glyph in its colour, a count (bleeding) or level pips (moods) */
+.badges { display: flex; flex-wrap: wrap-reverse; justify-content: flex-end; gap: calc(4 * var(--u)); max-width: calc(320 * var(--u)); }
+.badge { position: relative; display: flex; align-items: center; justify-content: center; width: calc(28 * var(--u)); height: calc(28 * var(--u)); background: var(--hud-slot); box-shadow: inset 0 0 0 1px var(--hud-line); color: var(--hud-ink); }
+.badge > .i { width: calc(18 * var(--u)); height: calc(18 * var(--u)); stroke-width: 1.8; }
+.badge.k-bad > .i { color: var(--alarm); } .badge.k-warn > .i { color: var(--warn); } .badge.k-good > .i { color: var(--hud-dim); }
+.badge.b-cold.k-warn > .i { color: var(--cold); }
+.badge > .n { position: absolute; right: calc(2 * var(--u)); bottom: calc(1 * var(--u)); font: 700 max(9px, calc(11 * var(--u))) / 1 var(--hud-cond); font-variant-numeric: tabular-nums; color: #fff; text-shadow: var(--hud-tglow); }
+.badge > .lv { position: absolute; left: calc(4 * var(--u)); right: calc(4 * var(--u)); bottom: calc(3 * var(--u)); display: flex; gap: 1px; }
+.badge > .lv > i { flex: 1; height: max(2px, calc(2 * var(--u))); background: rgba(255, 255, 255, 0.2); }
+.badge > .lv > i.on { background: var(--hud-ink); }
+.badge.k-warn > .lv > i.on { background: var(--warn); } .badge.k-bad > .lv > i.on { background: var(--alarm); }
+.badge.act { width: auto; gap: calc(6 * var(--u)); padding: 0 calc(8 * var(--u)) 0 calc(5 * var(--u)); font: 700 max(10px, calc(11 * var(--u))) / 1 var(--hud-cond); letter-spacing: var(--hud-caps); text-transform: uppercase; color: var(--hud-dim); }
+/* a new badge's name, for a few seconds */
+.bcap { margin-bottom: calc(-4 * var(--u)); font: 700 max(10px, calc(11 * var(--u))) / calc(14 * var(--u)) var(--hud-cond); letter-spacing: var(--hud-caps); text-transform: uppercase; color: var(--hud-ink); text-shadow: var(--hud-tglow); white-space: nowrap; }
 .st-row.mild > .i { color: var(--ink-1); }
+/* the weapon readout: the name in grey caps, then rounds | spare and the fire mode */
+.wpn { display: flex; flex-direction: column; align-items: flex-end; gap: calc(2 * var(--u)); text-shadow: var(--hud-tglow); }
+.wpn .wn { max-width: calc(280 * var(--u)); font: 700 max(10px, calc(12 * var(--u))) / calc(16 * var(--u)) var(--hud-cond); letter-spacing: var(--hud-caps); text-transform: uppercase; color: rgba(255, 255, 255, 0.85); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wpn .wa { display: flex; align-items: baseline; gap: calc(6 * var(--u)); white-space: nowrap; }
+.wpn .n { font: 700 calc(24 * var(--u)) / 1 var(--hud-cond); font-variant-numeric: tabular-nums; }
+.wpn .u { margin-left: calc(-3 * var(--u)); font: 500 calc(12 * var(--u)) / 1 var(--hud-cond); color: var(--hud-dim); }
+.wpn .r { font: 500 calc(15 * var(--u)) / 1 var(--hud-cond); font-variant-numeric: tabular-nums; color: var(--hud-dim); }
+.wpn .r::before { content: '/'; margin-right: calc(5 * var(--u)); color: var(--hud-faint); }
+.wpn .m { margin-left: calc(4 * var(--u)); font: 700 max(10px, calc(12 * var(--u))) / 1 var(--hud-cond); letter-spacing: var(--hud-caps); text-transform: uppercase; }
+.wpn .jam { align-self: center; padding: calc(2 * var(--u)) calc(6 * var(--u)); background: var(--alarm); color: #fff; font: 700 max(10px, calc(11 * var(--u))) / 1 var(--hud-cond); letter-spacing: var(--hud-caps); text-transform: uppercase; text-shadow: none; }
+.wpn .wa.warn .n { color: var(--warn); } .wpn .wa.alarm .n { color: var(--alarm); }
+/* the vehicle: name and gear, speed, then fuel and condition as glyph + thin bar + percent, coloured like notifiers */
+.veh { display: flex; flex-direction: column; align-items: flex-end; gap: calc(3 * var(--u)); text-shadow: var(--hud-tglow); }
+.veh .vn { display: flex; align-items: center; gap: calc(8 * var(--u)); font: 700 max(10px, calc(12 * var(--u))) / calc(18 * var(--u)) var(--hud-cond); letter-spacing: var(--hud-caps); text-transform: uppercase; color: rgba(255, 255, 255, 0.85); white-space: nowrap; }
+.veh .gear { display: inline-flex; align-items: center; justify-content: center; min-width: calc(18 * var(--u)); height: calc(18 * var(--u)); padding: 0 calc(4 * var(--u)); background: rgba(0, 0, 0, 0.4); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.7); color: #fff; font-variant-numeric: tabular-nums; text-shadow: none; }
+.veh .vs { display: flex; align-items: baseline; gap: calc(5 * var(--u)); }
+.veh .vs .n { font: 700 calc(28 * var(--u)) / 1 var(--hud-cond); font-variant-numeric: tabular-nums; }
+.veh .vs .u { font: 500 max(10px, calc(12 * var(--u))) / 1 var(--hud-cond); letter-spacing: var(--hud-caps); text-transform: uppercase; color: var(--hud-dim); }
+.veh .vg { display: flex; align-items: center; gap: calc(7 * var(--u)); height: calc(18 * var(--u)); color: var(--hud-ink); }
+.veh .vg > .i { width: calc(15 * var(--u)); height: calc(15 * var(--u)); stroke-width: 1.8; filter: var(--hud-glow); }
+.veh .bar { position: relative; width: calc(96 * var(--u)); height: max(2px, calc(3 * var(--u))); background: var(--hud-track); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.18); overflow: hidden; }
+.veh .bar > i { background: currentColor; }
+.veh .vg .pc { min-width: calc(34 * var(--u)); text-align: right; font: 500 max(10px, calc(12 * var(--u))) / 1 var(--hud-cond); font-variant-numeric: tabular-nums; }
+.veh .vg.warn { color: var(--warn); } .veh .vg.crit { color: var(--alarm); }
+/* pickups: plain lines over a dark wash from the right edge */
+.pickups { display: flex; flex-direction: column; align-items: flex-end; gap: calc(2 * var(--u)); }
+.pickup { display: flex; align-items: center; gap: calc(7 * var(--u)); height: calc(24 * var(--u)); max-width: calc(380 * var(--u)); padding: 0 calc(4 * var(--u)) 0 calc(32 * var(--u)); background: linear-gradient(270deg, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0.35) 60%, rgba(0, 0, 0, 0)); font: 500 calc(13 * var(--u)) / calc(18 * var(--u)) var(--font); text-shadow: var(--hud-tglow); white-space: nowrap; animation: hud-in-r var(--d-2) var(--ease-out); }
+.pickup > .tx { overflow: hidden; text-overflow: ellipsis; }
+.pickup > .x { flex: none; color: var(--hud-dim); font-weight: 700; font-variant-numeric: tabular-nums; }
+.pickup > img { flex: none; width: calc(20 * var(--u)); height: calc(20 * var(--u)); object-fit: contain; }
+.pickup.out { opacity: 0; transition: opacity var(--d-3) var(--ease-in); }
 /* panic (Survival.panic): a dark edge that breathes, under every other HUD element; --k is its strength */
 .panic-vig { position: absolute; inset: 0; opacity: var(--k, 0); transition: opacity var(--d-4) var(--ease-out);
 	background: radial-gradient(ellipse at 50% 50%, transparent 42%, rgba(26, 2, 2, 0.42) 70%, rgba(26, 2, 2, 0.85) 100%);
 	animation: panic-breathe 0.9s ease-in-out infinite; }
 @keyframes panic-breathe { 50% { transform: scale(1.06); } }
-.vitals { display: flex; border-radius: var(--r-md); box-shadow: inset 0 0 0 1px var(--line-2), var(--sh-plate); color: var(--hud-1); }
-/* the number stays white on every tint (status hues only colour the icon, the meter and the plate) */
-.vital { position: relative; display: flex; flex-direction: column; align-items: center; width: calc(48 * var(--u)); height: calc(56 * var(--u)); padding-top: calc(10 * var(--u)); color: var(--hud-1); }
-.vitals > .vital { background: var(--m-hud); overflow: hidden; }
-/* a cell that comes or goes opens / closes its slot instead of leaving a hole in the strip */
-.hud .vital.fade { transition: opacity var(--d-2) var(--ease-out), width var(--d-3) var(--ease-out); }
-.hud .vital.fade.gone { width: 0; transition: opacity var(--d-4) var(--ease-in), width var(--d-4) var(--ease-in); }
-@starting-style { .hud .vital.fade { width: 0; } }
-.vital + .vital { box-shadow: -1px 0 0 var(--line-1); }
-.vital:first-child { border-radius: var(--r-md) 0 0 var(--r-md); } .vital:last-child { border-radius: 0 var(--r-md) var(--r-md) 0; } .vital:only-child { border-radius: var(--r-md); }
-.vital .v { margin-top: calc(4 * var(--u)); font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1; }
-.vital .meter { position: absolute; left: var(--s-2); right: var(--s-2); bottom: calc(6 * var(--u)); background: rgba(255, 255, 255, 0.14); }
-.vital .meter > i { background: var(--hud-1); }
-/* trend: 1-3 chevrons in a 12 x 16 box right of the icon, centred on it */
-.vital .tr { position: absolute; right: calc(3 * var(--u)); top: calc(10 * var(--u)); width: calc(12 * var(--u)); height: calc(16 * var(--u)); overflow: visible; }
-.vital .tr path { fill: none; stroke: var(--hud-1); stroke-width: max(1.5px, calc(1.75 * var(--u))); stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
-.vitals > .vital.warn { background: linear-gradient(var(--tint-warn), var(--tint-warn)), var(--m-hud); } .vital.warn > .i { color: var(--warn); } .vital.warn .meter > i { background: var(--warn); }
-.vitals > .vital.crit { background: linear-gradient(var(--tint-alarm), var(--tint-alarm)), var(--m-hud); } .vital.crit > .i { color: var(--alarm); animation: blink 1s steps(1) infinite; } .vital.crit .meter > i { background: var(--alarm); }
-.vitals > .vital.cold { background: linear-gradient(var(--tint-cold), var(--tint-cold)), var(--m-hud); } .vital.cold > .i { color: var(--cold); } .vital.cold .meter > i { background: var(--cold); }
 
-/* ---- bottom centre: key hints, stamina, hotbar ------------------------------------------------------------ */
-.bc { position: absolute; left: 50%; bottom: var(--edge); transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: var(--s-3); }
-.keyhints { display: flex; align-items: center; gap: var(--s-4); height: calc(32 * var(--u)); padding: 0 var(--s-3); white-space: nowrap; }
+/* ---- bottom centre: key hints, the quickbar, the stamina bar (bottom) -------------------------------------- */
+.bc { position: absolute; left: 50%; bottom: var(--edge); transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: calc(8 * var(--u)); }
+.keyhints { display: flex; align-items: center; gap: calc(16 * var(--u)); height: calc(22 * var(--u)); font: 500 calc(12 * var(--u)) / 1 var(--font); color: var(--hud-dim); text-shadow: var(--hud-tglow); white-space: nowrap; }
+.keyhints .hint { display: inline-flex; align-items: center; gap: calc(6 * var(--u)); }
 .keyhints .caps { display: inline-flex; gap: 2px; }
-.keyhints .suf { margin-left: calc(-4 * var(--u)); color: var(--hud-2); font-weight: 600; }
-.stamina { --max: 1; position: relative; width: calc(160 * var(--u) * var(--max)); /* --max = maxStamina() / 100, set by HUD.js */ height: 3px; border-radius: 2px; background: rgba(0, 0, 0, 0.45); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25); }
-.stamina > i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 2px; background: var(--hud-1); }
-.stamina.low > i { background: var(--alarm); }
-.stamina > .i { position: absolute; right: calc(100% + 6 * var(--u)); top: 50%; transform: translateY(-50%); width: calc(12 * var(--u)); height: calc(12 * var(--u)); color: var(--hud-1); filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.8)); }
-.hotbar { display: flex; gap: var(--gap); }
-.hot { position: relative; width: var(--hot); height: var(--hot); }
-.hot > img { position: absolute; left: 50%; top: 50%; width: calc(36 * var(--u)); height: calc(36 * var(--u)); transform: translate(-50%, -50%); object-fit: contain; }
-.hot > .n { position: absolute; left: calc(4 * var(--u)); top: calc(3 * var(--u)); font: 600 max(9px, calc(10 * var(--u))) / 1 var(--mono); color: var(--hud-2); }
-.hot > .q { position: absolute; right: calc(4 * var(--u)); bottom: calc(3 * var(--u)); font-weight: 600; font-size: max(10px, calc(11 * var(--u))); line-height: 1; font-variant-numeric: tabular-nums; text-shadow: 0 1px 1px rgba(0, 0, 0, 0.9); }
-.hot.on { box-shadow: inset 0 0 0 1.5px var(--accent), var(--sh-plate); } .hot.on > .n { color: var(--accent); }
-.hot.unb { opacity: 0.4; background: transparent; }
-
-/* ---- bottom right: pickups, weapon or vehicle panel ------------------------------------------------------- */
-.br { position: absolute; right: var(--edge); bottom: var(--edge); display: flex; flex-direction: column; align-items: flex-end; gap: var(--s-3); }
-.pickups { display: flex; flex-direction: column; align-items: flex-end; gap: var(--s-1); }
-.pickup { display: flex; align-items: center; gap: var(--s-2); height: calc(28 * var(--u)); max-width: calc(360 * var(--u)); padding: 0 var(--s-3) 0 var(--s-1); white-space: nowrap; animation: toast-in var(--d-2) var(--ease-out); }
-.pickup > span:not(.x) { overflow: hidden; text-overflow: ellipsis; }
-.pickup img { width: calc(20 * var(--u)); height: calc(20 * var(--u)); object-fit: contain; flex: none; }
-.pickup .x { color: var(--hud-2); font-weight: 600; font-variant-numeric: tabular-nums; flex: none; }
-.pickup.out { opacity: 0; transition: opacity var(--d-3) var(--ease-in); }
-/* expanded 78u: name (18), ammo row (28), condition meter (6 + 2); .col (idle or aiming) keeps only the 52u ammo
-   row. The name and the meter each sit in a one-row grid that collapses 1fr -> 0fr, so each keeps its own height. */
-.weapon { display: flex; flex-direction: column; width: calc(240 * var(--u)); padding: var(--s-3); }
-.weapon > .wn, .weapon > .wb { display: grid; grid-template-rows: 1fr; transition: grid-template-rows var(--d-4) var(--ease-out), opacity var(--d-4) var(--ease-out); }
-.weapon > .wn > div, .weapon > .wb > div { min-height: 0; overflow: hidden; }
-.weapon.col > .wn, .weapon.col > .wb { grid-template-rows: 0fr; opacity: 0; }
-.weapon .name { padding-bottom: var(--s-1); color: var(--hud-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.weapon .ammo { display: flex; align-items: center; gap: var(--s-2); height: calc(28 * var(--u)); }
-.weapon .ammo .unit { color: var(--hud-2); margin-left: calc(-4 * var(--u)); align-self: flex-end; padding-bottom: calc(2 * var(--u)); }
-/* reserve: a hairline, then the spare rounds (loaded | spare) */
-.weapon .ammo .res { display: flex; align-items: center; gap: var(--s-2); color: var(--hud-2); font-weight: 600; font-variant-numeric: tabular-nums; }
-.weapon .ammo .res::before { content: ''; width: 1px; height: calc(16 * var(--u)); background: rgba(255, 255, 255, 0.28); }
-.weapon .ammo .mode { margin-left: auto; }
-.weapon .ammo .jam { margin-left: auto; height: calc(20 * var(--u)); padding: 0 var(--s-2); border-radius: var(--r-sm); background: var(--alarm); color: var(--on-accent); display: inline-flex; align-items: center; }
-.weapon .wb > div { padding-top: calc(6 * var(--u)); }
-.weapon .meter { background: rgba(255, 255, 255, 0.14); } .weapon .meter > i { background: var(--hud-2); }
-.weapon .meter.warn > i { background: var(--warn); } .weapon .meter.alarm > i { background: var(--alarm); }
-.vehicle { width: calc(240 * var(--u)); padding: var(--s-3); }
-.vehicle .top { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); height: calc(20 * var(--u)); color: var(--hud-2); margin-bottom: var(--s-1); }
-.vehicle .top > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.vehicle .gear { flex: none; min-width: calc(20 * var(--u)); height: calc(20 * var(--u)); padding: 0 calc(6 * var(--u)); border-radius: var(--r-sm); background: var(--fill-3); color: var(--hud-1); display: inline-flex; align-items: center; justify-content: center; font-variant-numeric: tabular-nums; }
-.vehicle .spd { display: flex; align-items: baseline; gap: calc(6 * var(--u)); margin-bottom: var(--s-2); }
-.vehicle .spd .t-label { color: var(--hud-2); }
-.vehicle .g { display: flex; align-items: center; gap: var(--s-2); height: calc(22 * var(--u)); color: var(--hud-2); }
-.vehicle .g .meter { flex: 1; background: rgba(255, 255, 255, 0.14); } .vehicle .g .meter > i { background: var(--hud-1); }
-.vehicle .g .meter.alarm > i { background: var(--alarm); }
-.vehicle .g .pc { width: calc(36 * var(--u)); text-align: right; color: var(--hud-1); font-variant-numeric: tabular-nums; }
-.vehicle .g .alt { color: var(--hud-1); font-variant-numeric: tabular-nums; }
-
-/* ---- prompt key cap, timed action, damage arc ----------------------------------------------------------- */
-.prompt > .cap { display: inline-flex; }
-.ring { position: absolute; left: 50%; top: 50%; width: calc(48 * var(--u)); height: calc(48 * var(--u)); transform: translate(-50%, -50%) rotate(-90deg); }
-.ring circle { fill: none; }
-.ring .track { stroke: rgba(0, 0, 0, 0.45); stroke-width: 3; }
-.ring .arc { stroke: var(--accent); stroke-width: 2; stroke-linecap: round; }
-.ring.cancel .arc { stroke: var(--alarm); }
-.ring-label { position: absolute; left: 50%; top: calc(50% + 36 * var(--u)); transform: translateX(-50%); display: flex; align-items: center; gap: calc(6 * var(--u)); height: calc(28 * var(--u)); padding: 0 calc(10 * var(--u)); white-space: nowrap; }
-.ring-label .s { color: var(--hud-2); font-variant-numeric: tabular-nums; }
-.dmg { position: absolute; left: 50%; top: 50%; width: calc(240 * var(--u)); height: calc(240 * var(--u)); transform: translate(-50%, -50%); overflow: visible; }
-.dmg path { fill: none; stroke: var(--alarm); stroke-width: 3px; stroke-linecap: round; vector-effect: non-scaling-stroke; filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.8)); }
+.keyhints .kc { background: rgba(0, 0, 0, 0.3); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.5); color: var(--hud-dim); }
+.keyhints .suf { margin-left: calc(-4 * var(--u)); font-weight: 700; }
+/* the quickbar: nine dark squares, numbered; the held one outlined in white over a lighter fill */
+.qbar { display: flex; gap: calc(3 * var(--u)); }
+.qs { position: relative; width: calc(44 * var(--u)); height: calc(44 * var(--u)); background: var(--hud-slot); box-shadow: inset 0 0 0 1px var(--hud-line); }
+.qs > img { position: absolute; left: calc(5 * var(--u)); top: calc(5 * var(--u)); width: calc(34 * var(--u)); height: calc(34 * var(--u)); object-fit: contain; }
+.qs > .n { position: absolute; left: calc(3 * var(--u)); top: calc(2 * var(--u)); font: 500 max(9px, calc(10 * var(--u))) / 1 var(--hud-cond); color: var(--hud-dim); }
+.qs > .q { position: absolute; right: calc(3 * var(--u)); bottom: calc(2 * var(--u)); font: 700 max(10px, calc(11 * var(--u))) / 1 var(--hud-cond); font-variant-numeric: tabular-nums; text-shadow: var(--hud-tglow); }
+.qs.on { background: var(--accent-soft, rgba(255, 255, 255, 0.14)); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.85); }
+.qs.on > .n { color: #fff; }
+.qs.unb { background: rgba(0, 0, 0, 0.28); }
+/* stamina: DayZ's thin white bar, its length the part not lost to weight, hunger or blood (--max, from HUD.js);
+   flashing when nearly spent. Underwater it is the breath, with the bubbles glyph */
+.stamina { --max: 1; position: relative; display: flex; align-items: center; height: calc(10 * var(--u)); }
+.stamina > .sb { position: relative; width: calc(240 * var(--u) * var(--max)); height: max(2px, calc(3 * var(--u))); background: var(--hud-track); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.18); overflow: hidden; }
+.stamina.low > .sb > i { animation: hud-flash 0.6s steps(1) infinite; }
+.stamina.air.low > .sb > i { background: var(--alarm); }
+.stamina > .i { position: absolute; right: calc(100% + 6 * var(--u)); top: 50%; transform: translateY(-50%); width: calc(12 * var(--u)); height: calc(12 * var(--u)); color: #fff; filter: var(--hud-glow); }
 
 /* ---- chat layer: hidden under screens and with F1 unless it is open (UI.js sets the classes) ------------- */
 .chat { transition: opacity var(--d-2) var(--ease-out); }
@@ -203,7 +242,7 @@
 .status-panel .stats > div > .cold:last-child { color: var(--cold); }
 
 @media (prefers-reduced-motion: reduce) {
-	.vital.crit > .i { animation: none; }
+	.ntf.crit > .i, .ntf.freeze > .i, .stamina.low > .sb > i { animation: none; }
 	.panic-vig { animation: none; }
 	.place { animation-name: fade-in; }
 }
