@@ -393,7 +393,11 @@ add( 'site_stash', [ [ 'salt_meat', 0.3 ], [ 'salt_fish', 0.25 ], [ 'coffee_grou
 // a carried stack (not one of the two being combined)
 const carried = ( c, pred ) => c.inv.find( ( s, d ) => s !== c.a && s !== c.b && d && pred( s, d ) );
 // one portion (or one unit) of a carried thing, used up
-const useOne = ( c, s ) => { const d = getItem( s.id ); c.consume( s, ( d.food?.portions || d.drink?.portions || 1 ) > 1 ? { portions: 1 } : { qty: 1 } ); };
+// a measure of something: a use of a bottle that counts uses (a vinegar spray), a portion, else one of the stack
+const useOne = ( c, s ) => {
+	const d = getItem( s.id );
+	c.consume( s, d.tool?.uses || d.medical?.uses ? { uses: 1 } : ( d.food?.portions || d.drink?.portions || 1 ) > 1 ? { portions: 1 } : { qty: 1 } );
+};
 const isOil = ( s, d ) => d.id === 'cooking_oil' || ( d.tags?.includes( 'oil' ) && d.tags.includes( 'kitchen' ) );
 const isSalt = ( s, d ) => d.tags?.includes( 'salt' ) && d.cat === 'food';
 const isSugar = ( s, d ) => [ 'sugar', 'honey' ].includes( d.id );
@@ -836,7 +840,7 @@ addUseActions( ( stack, def, ctx ) => {
 	if ( def.id === 'rice_cooker' && g.combine ) {
 		const rice = ctx.inv.find( ( s ) => s.id === 'rice_bag' );
 		const combo = getCombo( 'rice_cooker' );
-		if ( rice && combo ) ctx.add( 'Cook rice', () => g.combine.run( combo, rice, stack ) );
+		if ( rice && combo ) ctx.add( 'Cook rice', () => g.combine.run( combo, rice, stack ), null, [ 'rice_cooker' ] );
 	}
 } );
 

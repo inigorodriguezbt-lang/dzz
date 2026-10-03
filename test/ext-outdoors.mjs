@@ -194,11 +194,13 @@ const tick = ( p, hours, steps = 8 ) => { const K = R.getPlaceable( p.kind ); fo
 const act = ( p, label ) => M.actionsOf( p ).find( a => a.label === label || a.label.startsWith( label ) );
 const labels = ( p ) => M.actionsOf( p ).map( a => a.label );
 const clear = () => { for ( const c of inv.containers() ) c.items.length = 0; };
-// the outdoors system rides in on the first spoil tick
-U.update( 1.1 ); game.time.hours += 0.05; U.update( 1.1 );
+// the outdoors system starts with the items module (hooks.js addSystem; WorldItems install calls startSystems)
+const { startSystems } = await import( '../src/game/items/hooks.js' );
+startSystems( game );
 const sys = game.systems.find( s => s instanceof RT.OutdoorsSystem );
-ok( !! sys && RT.state( game ) === sys.st, 'the outdoors system attached itself once, through the spoil hook' );
-U.update( 1.1 );
+ok( !! sys && RT.state( game ) === sys.st, 'the outdoors system starts with the items module' );
+U.update( 1.1 ); game.time.hours += 0.05; U.update( 1.1 );
+startSystems( game );
 ok( game.systems.filter( s => s instanceof RT.OutdoorsSystem ).length === 1, 'and only once' );
 
 // ---- mixes and recipes --------------------------------------------------------------------------------------------------------

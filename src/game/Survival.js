@@ -63,8 +63,17 @@ export class Survival {
 	constructor( game ) {
 		this.game = game;
 		game.skills = game.skills || new Skills( game );
+		// other modules' say in damage and movement (kept across deaths, unlike the body): see addHurtGuard / addMoveMod
+		this.hurtGuards = [];
+		this.moveMods = [];
 		this.reset();
 	}
+
+	// fn( amount, kind, info ) -> true stops a blow before it lands (a riot shield held up to it)
+	addHurtGuard( fn ) { if ( ! this.hurtGuards.includes( fn ) ) this.hurtGuards.push( fn ); return fn; }
+	// fn( m ) changes { speed, canSprint, canJump } after the base rules, creative included (a shield's weight, a
+	// suitcase in tow; a mod that shouldn't apply in creative checks it)
+	addMoveMod( fn ) { if ( ! this.moveMods.includes( fn ) ) this.moveMods.push( fn ); return fn; }
 
 	reset() {
 		this.health = 100; this.blood = 5000;
@@ -170,7 +179,9 @@ export class Survival {
 		if ( this.blood < 3000 ) speed *= 0.85;
 		if ( this.drunk > 0.6 ) speed *= 0.9;
 		if ( this.creative ) { speed = 1; canSprint = true; canJump = true; }
-		return { speed, canSprint, canJump };
+		const m = { speed, canSprint, canJump };
+		for ( const fn of this.moveMods ) fn( m );
+		return m;
 	}
 
 	// footstep noise: a broken leg drags, practice at sneaking softens every step
@@ -185,6 +196,7 @@ export class Survival {
 
 	// kind: 'bite' | 'scratch' | 'bullet' | 'melee' | 'fall' | 'burn' | 'drown' | 'starve' | 'explosion' | 'vehicle' | 'animal'
 	hurt( amount, kind = 'melee', info = {} ) {
+		for ( const fn of this.hurtGuards ) if ( fn( amount, kind, info ) ) return;
 		if ( this.godMode || this.creative || this.health <= 0 ) return;
 		const inv = this.game.player.inventory;
 		let dmg = amount * this.diff.dmgIn;

@@ -27,7 +27,7 @@ import { KINDS, addPlaceable, getPlaceable, placeOf, makeRecord, serializeRecord
 import { VERB } from './placeables/verbs.js';
 import { Placer } from './placeables/ghost.js';
 import { openActionMenu } from './placeables/menu.js';
-import { tickFlames, itemModel } from './placeables/fx.js';
+import { tickFlames, itemModel, placedDef } from './placeables/fx.js';
 import { ensureSound } from './placeables/sounds.js';
 import { ensureItemSound } from './sounds.js';
 import { doorAhead, barricadeDoor, wrapDoor } from './placeables/barricade.js';
@@ -83,7 +83,7 @@ export class Placeables {
 		this.visT = 0;
 		this.doorT = 0;
 		this.offProvider = game.interact.addProvider( ( ray, maxDist ) => this.provide( ray, maxDist ) );
-		this._wrapMovement();
+		this._hookMovement();
 	}
 
 	// ---- placing ------------------------------------------------------------------------------------------------
@@ -186,7 +186,7 @@ export class Placeables {
 		const K = getPlaceable( p.kind );
 		let obj = null;
 		try { obj = K?.model?.( p, this.game ) || null; } catch ( e ) { console.error( 'placeable model', p.kind, e ); }
-		return obj || itemModel( getItem( p.item ) );
+		return obj || itemModel( placedDef( p ) );
 	}
 
 	_build( p ) {
@@ -329,16 +329,12 @@ export class Placeables {
 	hold( p ) { this.held = p; this.game.player.vel?.set?.( 0, 0, 0 ); }
 	release() { this.held = null; }
 
-	_wrapMovement() {
+	// a trap holding you: no walking (survival.addMoveMod)
+	_hookMovement() {
 		const S = this.game.survival;
-		if ( ! S?.moveModifiers || S._placeablesHold ) return;
-		const base = S.moveModifiers.bind( S );
+		if ( ! S?.addMoveMod || S._placeablesHold ) return;
 		S._placeablesHold = true;
-		S.moveModifiers = () => {
-			const m = base();
-			if ( this.held ) { m.speed = 0; m.canSprint = false; m.canJump = false; }
-			return m;
-		};
+		S.addMoveMod( ( m ) => { if ( this.held ) { m.speed = 0; m.canSprint = false; m.canJump = false; } } );
 	}
 
 	// ---- F ----------------------------------------------------------------------------------------------------------------

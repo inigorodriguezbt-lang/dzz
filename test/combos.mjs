@@ -573,5 +573,51 @@ const clearInv = () => { for ( const s of [ ...inv.allStacks() ] ) if ( s !== in
 	clearInv();
 }
 
+// ---- one action, one menu row: an item-use verb that does a mix stands for it (ItemUse.actions: combos) and the
+// inventory's Combine list leaves that mix out; a tool's "Verb X" on something else is only in the Combine list
+console.log( 'menu: no action twice' );
+{
+	clearInv();
+	const U = game.itemUse;
+	const verbs = ( s ) => U.actions( s );
+	const one = ( s, v ) => verbs( s ).find( a => a.verb === v );
+	const jeans = put( 'jeans' ); jeans.cond = 0.5;
+	const kit = put( 'sewing_kit' ), tape = put( 'duct_tape' ), knife = put( 'kitchen_knife' ), clean = put( 'weapon_cleaning_kit' );
+	const glock = put( 'glock17' ); glock.cond = 0.5;
+	const lighter = put( 'lighter' ), torch = put( 'torch' ), opener = put( 'can_opener' ), beans = put( 'canned_beans' ), coco = put( 'coconut' );
+	const aa = put( 'batteries', 2 ), fl = put( 'flashlight' ); fl.data.charge = 0;
+	const tabs = put( 'purification_tablets', 4 ), dirty = put( 'water_bottle' ); dirty.data.liquid = 'dirty'; dirty.data.amount = 0.5;
+	// the tools: no one-click "Repair Jeans", "Patch Jeans", "Clean Glock", "Light torch", "Open Baked beans", "Insert into Flashlight"
+	for ( const [ s, re ] of [ [ kit, /^Repair / ], [ tape, /^Patch / ], [ clean, /^Clean / ], [ lighter, /^Light torch/ ], [ opener, /^Open / ], [ aa, /^Insert into/ ] ] ) {
+		ok( ! verbs( s ).some( a => re.test( a.verb ) ), `${s.id}: no ${re} verb (Combine has it): ${verbs( s ).map( a => a.verb ).join( ', ' )}` );
+		ok( K.partners( s ).length > 0, `${s.id}: its Combine list has the mixes` );
+	}
+	// the things themselves keep their verb, which stands for the mix
+	const stands = ( s, v, id ) => ok( one( s, v )?.combos?.some( c => ( c.id || c ) === id ), `${s.id}: "${v}" stands for ${id}` );
+	stands( jeans, 'Repair', 'sew_clothing' );
+	stands( jeans, 'Rip into rags', 'cut_rags' );
+	stands( beans, 'Open', 'open_can' );
+	stands( coco, 'Crack open', 'crack_coconut' );
+	stands( torch, 'Light', 'light_torch' );
+	stands( fl, 'Replace batteries', 'insert_batteries' );
+	stands( tabs, 'Purify water', 'purify_water' );
+	ok( one( tabs, 'Purify water' ).combos[ 0 ].other === dirty, 'the tablets\' Purify water names the bottle it picks' );
+	// what the inventory menu shows: the Combine list without what the verbs stand for (InventoryUI._combineRow)
+	const shown = ( s ) => {
+		const cov = new Set();
+		for ( const a of verbs( s ) ) for ( const c of a.combos || [] ) cov.add( typeof c === 'string' ? c : c.id + '|' + c.other?.uid );
+		return K.partners( s ).filter( p => ! cov.has( p.combo.id ) && ! cov.has( p.combo.id + '|' + p.other?.uid ) );
+	};
+	ok( ! shown( jeans ).some( p => [ 'sew_clothing', 'cut_rags' ].includes( p.combo.id ) ) && shown( jeans ).some( p => p.combo.id === 'tape_clothing' ), 'jeans: Combine keeps the tape patch, not the repair or the rags' );
+	ok( ! shown( coco ).some( p => p.combo.id === 'crack_coconut' ), 'coconut: no "Crack Coconut" under Combine' );
+	ok( ! shown( fl ).some( p => p.combo.id === 'insert_batteries' ), 'flashlight: no "Insert into Flashlight" under Combine' );
+	ok( shown( aa ).some( p => p.combo.id === 'insert_batteries' && p.other === fl ), 'the AAs: Combine offers the flashlight' );
+	// a crack with a stone, as the mix allows (no blade carried)
+	take( knife ); put( 'stone' );
+	verbs( coco ).find( a => a.verb === 'Crack open' ).run(); finish();
+	ok( inv.count( 'coconut_open' ) === 1, 'a stone cracks a coconut too' );
+	clearInv();
+}
+
 console.log( `\n${passes} passed, ${fails} failed` );
 process.exit( fails ? 1 : 0 );

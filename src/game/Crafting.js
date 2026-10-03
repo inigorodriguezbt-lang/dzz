@@ -15,7 +15,7 @@ import * as THREE from 'three';
 import { ITEMS, getItem, makeStack } from './items/ItemDB.js';
 import { allRecipes } from './items/recipes.js';
 import { Campfire } from './items/Campfire.js';
-import { provides } from './items/util.js';
+import { provides, toolNeed, toolWord } from './items/util.js';
 import { raySphere } from './Entities.js';
 import { ensureItemSound } from './items/sounds.js';
 
@@ -31,7 +31,7 @@ export class Crafting {
 		this.lights = lights;
 		this.recipes = allRecipes().filter( r => ITEMS.has( r.out[ 0 ] ) && r.in.every( ( [ id ] ) => ITEMS.has( id ) ) );
 		// display names for the tool kinds ('cut' -> 'blade') so the crafting panel can show them plainly
-		for ( const r of this.recipes ) r.toolLabels = ( r.tools || [] ).map( t => TOOL_LABEL[ t ] || t );
+		for ( const r of this.recipes ) r.toolLabels = ( r.tools || [] ).map( toolWord );
 		this.fires = [];
 		this.lastHours = game.time.hours;
 		game.nearFire = ( pos, r = null ) => this.nearFire( pos, r );
@@ -115,7 +115,7 @@ export class Crafting {
 			// there are enough, but one is a piece of clothing with something in it
 			return { ok: false, reason: inv.count( id ) >= q ? 'Empty it first' : `Need ${q}× ${getItem( id )?.name || id}` };
 		}
-		for ( const t of r.tools || [] ) if ( ! this.hasTool( t ) ) return { ok: false, reason: `Need ${TOOL_NEED[ t ] || t}` };
+		for ( const t of r.tools || [] ) if ( ! this.hasTool( t ) ) return { ok: false, reason: `Need ${toolNeed( t )}` };
 		if ( r.station === 'fire' && ! this.nearFire( g.player.pos ) ) return { ok: false, reason: 'Need a fire' };
 		if ( r.liquid && this.liquidAvailable( r.liquid.kind ) < r.liquid.litres - 1e-6 ) return { ok: false, reason: r.liquid.kind === 'fuel' ? `Need ${r.liquid.litres} L gasoline` : `Need ${r.liquid.litres} L water` };
 		if ( r.special === 'boil' ) {
@@ -336,5 +336,3 @@ export class Crafting {
 	}
 }
 
-const TOOL_LABEL = { cut: 'blade', chop: 'axe', saw: 'saw', hammer: 'hammer', pot: 'cooking pot', toolbox: 'toolbox', canopener: 'can opener' };
-const TOOL_NEED = { cut: 'a blade', chop: 'an axe or machete', saw: 'a saw', hammer: 'a hammer', pot: 'a cooking pot', toolbox: 'a toolbox', canopener: 'a can opener' };

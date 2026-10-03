@@ -1,6 +1,6 @@
 // The gear domain at runtime (docs/ITEMS_PLAN.md "gear"): what the verbs share and a small system for what you wear.
 //
-//   attach( g )            once per game (the first spoil tick hands us the game, as the outdoors domain does): the
+//   attach( g )            once per game (hooks.js addSystem, when the items module starts, as the outdoors domain's): the
 //                          gear system (game.register) — wet clothes, plastic bags that tear, a suitcase dragged along
 //                          (slow, no sprinting, the wheels rattle), how much your clothes hide you (player.camo), and a
 //                          net over your face keeping the mosquitoes off
@@ -128,31 +128,18 @@ export class GearSystem {
 		this.hooked = false;
 	}
 
-	// the wrappers: a suitcase in tow slows you (survival.moveModifiers); a net over the face is as good as repellent
+	// the hooks: a suitcase in tow slows you (survival.addMoveMod); a net over the face is as good as repellent
 	hook() {
 		if ( this.hooked ) return;
 		this.hooked = true;
 		const g = this.game, S = g.survival;
-		if ( S && typeof S.moveModifiers === 'function' ) {
-			const base = S.moveModifiers.bind( S );
-			S.moveModifiers = () => {
-				const m = base();
-				const back = g.player?.inventory?.equip?.back;
-				if ( back && DRAGGED.has( back.id ) && ! S.creative && g.mode !== 'creative' ) { m.speed *= SUITCASE.speed; m.canSprint = false; }
-				return m;
-			};
-		}
-		// (attach is the outdoors domain's own, idempotent: whichever domain rides in first creates its system)
-		const out = outdoorsAttach( g );
-		if ( out && typeof out.protectedNow === 'function' ) {
-			const base = out.protectedNow.bind( out );
-			out.protectedNow = ( pos ) => base( pos ) || this.netOn();
-		}
-		// and a night out under the stars with a net over your face: no bites either
-		if ( out && typeof out._sleepLevel === 'function' ) {
-			const base = out._sleepLevel.bind( out );
-			out._sleepLevel = () => this.netOn() ? 0 : base();
-		}
+		S?.addMoveMod?.( ( m ) => {
+			const back = g.player?.inventory?.equip?.back;
+			if ( back && DRAGGED.has( back.id ) && ! S.creative && g.mode !== 'creative' ) { m.speed *= SUITCASE.speed; m.canSprint = false; }
+		} );
+		// a net over your face keeps the mosquitoes off, by day and through a night out (the outdoors system's
+		// protection hook; its attach is idempotent, whichever system starts first creates it)
+		outdoorsAttach( g )?.addProtection?.( () => this.netOn() );
 	}
 
 	netOn() { return NETS.has( this.game.player?.inventory?.equip?.head?.id ); }

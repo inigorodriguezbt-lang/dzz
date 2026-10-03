@@ -10,9 +10,8 @@
 // Devices say what cells they take with tool.cell: 'aa' (the default), 'd', '9v', or 'usb' / 'pack' (recharge only).
 import { defineItems, getItem } from '../../ItemDB.js';
 import { extendLoot, defineLootTable } from '../../Loot.js';
-import { addRecipes, R, allRecipes } from '../../recipes.js';
+import { addRecipes, R } from '../../recipes.js';
 import { addCombos } from '../../combos.js';
-import { provides } from '../../util.js';
 import * as L from '../../ext/tech/logic.js';
 import { feed, fuelIn, takeFuel, genFuel } from '../../ext/tech/power.js';
 import { openLockbox } from '../../ext/tech/verbs.js';
@@ -440,29 +439,6 @@ const gluable = ( s, d ) => d.cat === 'melee' || ( d.cat === 'tool' && d.stack =
 	&& ! SOFT_KINDS.has( d.tool.kind ) && ! d.tags?.some( ( t ) => t === 'device' || t === 'cloth' || t === 'paper' ) );
 const ON_LOCK = ( m ) => ( c ) => { openLockbox( c.game, c.b, m, c.a ); };
 
-// The shared tool kinds in plain words. Combine's and Crafting's own "Need …" lists don't know them yet, so a combo
-// here asks for its tool with `check` (and wears it as `tools` would), and the crafting panel's tool chips get these
-// names below.
-export const TOOL_SAY = { screwdriver: 'a screwdriver', pliers: 'pliers', wrench: 'a wrench', hacksaw: 'a hacksaw', boltcutter: 'bolt cutters', solder: 'a soldering iron',
-	weld: 'a blowtorch', drill: 'a drill', glue: 'glue', inverter: 'a power inverter' };
-const toolIn = ( c, kind ) => c.inv.find( ( s ) => s !== c.a && s !== c.b && provides( s, kind ) );
-const needs = ( c, kind ) => toolIn( c, kind ) ? null : `Need ${TOOL_SAY[ kind ] || kind}`;
-const wearTool = ( c, kind ) => { const t = toolIn( c, kind ); if ( t ) t.cond = Math.max( 0.05, t.cond - 0.01 ); };
-
-// The crafting panel names a recipe's tools from `toolLabels`, which Crafting fills from its own list ('cut' ->
-// 'blade') and otherwise shows the bare kind ("Solder"). Recipes (any domain's) that ask for these kinds keep plain
-// names: a getter Crafting's assignment can't overwrite. Run once every def module has added its recipes.
-const CHIP = { cut: 'blade', chop: 'axe', saw: 'saw', hammer: 'hammer', pot: 'cooking pot', toolbox: 'toolbox', canopener: 'can opener',
-	...Object.fromEntries( Object.entries( TOOL_SAY ).map( ( [ k, v ] ) => [ k, v.replace( /^an? /, '' ) ] ) ) };
-export function chipNames() {
-	for ( const r of allRecipes() ) {
-		if ( ! r.tools?.some( ( t ) => TOOL_SAY[ t ] ) || Object.getOwnPropertyDescriptor( r, 'toolLabels' )?.get ) continue;
-		const labels = r.tools.map( ( t ) => CHIP[ t ] || t );
-		Object.defineProperty( r, 'toolLabels', { get: () => labels, set() {}, configurable: true, enumerable: true } );
-	}
-}
-Promise.resolve().then( chipNames );
-
 addCombos( [
 	// ---- cells and charge ----
 	{ id: 'tech_insert_d', verb: 'Insert', label: 'Insert into {b}', a: 'battery_d', b: { fn: lowFor( 'd' ) }, use: { a: 1, b: 0 }, time: 3, sound: 'click', skill: 'electrical', xp: 2,
@@ -482,8 +458,8 @@ addCombos( [
 		run: ( c ) => { c.survival?.useStamina?.( 15 ); feed( c.b, 0.22 ); c.toast( `${c.B.name} ${Math.round( L.fracOf( c.b ) * 100 )}%`, 'good' ); } },
 	{ id: 'tech_inverter_charge', verb: 'Charge', label: 'Charge from {a}', a: 'car_battery', b: { fn: ( s, d ) => L.rechargeable( d ) && L.fracOf( s, d ) < 0.97 }, use: { a: 0, b: 0 },
 		time: 6, sound: 'click', skill: 'electrical', xp: 1,
-		check: ( c ) => needs( c, 'inverter' ) || ( L.carEnergy( c.a ) < 0.02 ? 'Car battery flat' : null ),
-		run: ( c ) => { wearTool( c, 'inverter' ); const used = feed( c.b, L.carEnergy( c.a ) * L.CAR_UNITS ); c.a.data.energy = Math.max( 0, L.carEnergy( c.a ) - used / L.CAR_UNITS ); c.toast( `${c.B.name} ${Math.round( L.fracOf( c.b ) * 100 )}%`, 'good' ); } },
+		tools: [ 'inverter' ], check: ( c ) => L.carEnergy( c.a ) < 0.02 ? 'Car battery flat' : null,
+		run: ( c ) => { const used = feed( c.b, L.carEnergy( c.a ) * L.CAR_UNITS ); c.a.data.energy = Math.max( 0, L.carEnergy( c.a ) - used / L.CAR_UNITS ); c.toast( `${c.B.name} ${Math.round( L.fracOf( c.b ) * 100 )}%`, 'good' ); } },
 	{ id: 'tech_antenna', verb: 'Fit', label: 'Fit antenna to {b}', a: 'antenna', b: { ids: [ 'police_scanner', 'cb_radio', 'portable_tv' ], fn: ( s ) => ! s.data?.antenna }, use: { a: 1, b: 0 },
 		tools: [ 'screwdriver' ], time: 4, sound: 'click', skill: 'electrical', xp: 3, run: ( c ) => { c.b.data.antenna = true; c.toast( 'Antenna fitted', 'good' ); } },
 
@@ -493,7 +469,7 @@ addCombos( [
 	{ id: 'tech_refill_sewing', verb: 'Refill', a: 'thread', b: 'sewing_kit', use: { a: 1, b: 0 }, time: 4, sound: 'zipper', skill: 'tailoring', xp: 2, check: ( c ) => full( c.b ),
 		run: ( c ) => { delete c.b.data.uses; } },
 	{ id: 'tech_oil_generator', verb: 'Change oil', label: 'Change oil in {b}', a: 'motor_oil', b: 'generator', use: { a: 1, b: 0 }, repair: { b: 0.45, max: 1 },
-		check: ( c ) => needs( c, 'wrench' ), run: ( c ) => wearTool( c, 'wrench' ), time: 8, sound: 'pour', skill: 'mechanics', xp: 5 },
+		tools: [ 'wrench' ], time: 8, sound: 'pour', skill: 'mechanics', xp: 5 },
 
 	// ---- repairs ----
 	{ id: 'tech_glue_fix', verb: 'Glue', a: 'superglue', b: { fn: gluable }, use: { a: 1, b: 0 },
@@ -503,7 +479,7 @@ addCombos( [
 	{ id: 'tech_wood_glue', verb: 'Glue', a: 'wood_glue', b: { fn: ( s, d ) => WOODEN.has( d.id ) }, use: { a: 1, b: 0 }, repair: { b: 0.3, max: 1 }, time: 6, sound: 'craft', skill: 'carpentry' },
 	{ id: 'tech_oil_tool', verb: 'Oil', a: 'penetrating_oil', b: { fn: metalTool }, use: { a: 1, b: 0 }, repair: { b: 0.12, max: 0.9 }, time: 3, sound: 'spray', skill: 'maintenance' },
 	{ id: 'tech_solder_fix', verb: 'Solder', label: 'Repair {b}', a: 'electronic_scrap', b: { fn: electronic }, use: { a: 1, b: 0 },
-		check: ( c ) => needs( c, 'solder' ), run: ( c ) => wearTool( c, 'solder' ), repair: { b: 0.35, max: 1 }, time: 10, sound: 'sizzle', skill: 'electrical' },
+		tools: [ 'solder' ], repair: { b: 0.35, max: 1 }, time: 10, sound: 'sizzle', skill: 'electrical' },
 	{ id: 'tech_grip_wrap', verb: 'Wrap grip', label: 'Wrap grip of {b}', a: 'leather', b: { cat: 'melee' }, use: { a: 1, b: 0 }, tools: [ 'cut' ], repair: { b: 0.2, max: 1 },
 		time: 6, sound: 'tear', skill: 'maintenance' },
 	{ id: 'tech_zip_strap', verb: 'Fix strap', label: 'Fix {b} strap', a: 'zip_ties', b: { cat: 'backpack' }, use: { a: 2, b: 0 }, repair: { b: 0.15, max: 0.8 }, time: 3, sound: 'zipper', skill: 'tailoring' },

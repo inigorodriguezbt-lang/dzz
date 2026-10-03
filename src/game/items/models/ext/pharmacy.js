@@ -257,6 +257,16 @@ export function register( reg ) {
 
 	// ================= the crutch =================
 
+	// where a hand holds it, in the model's own frame (userData.hold: { p, a, f }: the grip's centre and axis, and which
+	// way the front of the frame faces; the first-person view puts the hand there, weapons/ViewModel.js), from a point
+	// and directions in the part fr
+	const holdAt = ( g, fr, p, a, front = a ) => {
+		g.updateMatrixWorld( true );
+		const P = fr.localToWorld( new THREE.Vector3( ...p ) ), dir = ( v ) => { const d = new THREE.Vector3( ...v ).applyQuaternion( fr.quaternion ); return [ d.x, d.y, d.z ]; };
+		g.userData.hold = { p: [ P.x, P.y, P.z ], a: dir( a ), f: dir( front ) };
+		return g;
+	};
+
 	// an aluminium underarm crutch lying on its side (two rails to one adjustable leg, a grip, a pad, a rubber
 	// foot), or a forked stick with a rag-padded crosspiece
 	reg( 'pharm_crutch', ( s ) => {
@@ -272,7 +282,9 @@ export function register( reg ) {
 			// propped on its padded crosspiece, so the T shows from the side too
 			f.rotation.x = 0.5;
 			g.add( f );
-			return ground( g );
+			// long and flat: the icon reads from above (render/Icons.js)
+			g.userData.iconDir = [ 0.1, 1, 0.45 ];
+			return holdAt( ground( g ), f, [ 0.12, 0.021, 0 ], [ 1, 0, 0 ], [ 0, 0, 1 ] ); // the rag-wrapped shaft
 		}
 		const alu = M( 0xb8bec6, { rough: 0.3, metal: 0.85 } ), foam = M( 0x4a4e54, { rough: 0.9 } ), rub = MAT.rubber();
 		const y = 0.026, f = group();
@@ -286,7 +298,8 @@ export function register( reg ) {
 		// it rests tipped on the edge of its pad and grip, the frame at an angle (flat, the side-on icon was one line)
 		f.rotation.x = 0.6;
 		g.add( f );
-		return ground( g );
+		g.userData.iconDir = [ 0.1, 1, 0.45 ];
+		return holdAt( ground( g ), f, [ 0.14, y, 0 ], [ 0, 0, 1 ] ); // the handgrip across the frame
 	} );
 
 	// ================= instruments =================

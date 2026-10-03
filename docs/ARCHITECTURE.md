@@ -224,8 +224,17 @@ into magazines, magazines into guns, attachments and merges keep precedence over
   pour( from, to, litres ), draw( stack, litres ), liquid( stack ) }`. `replace` turns one unit into another item where
   it lies (same uid, slot and condition); what a bag or pocket held stays in it as far as it fits, the rest goes into
   your other bags (jeans cut into shorts keep what fits).
-- Battery devices may set `tool.cell` (default `'aa'`): the base `insert_batteries` combo only feeds AA devices, so a
-  domain adding D cells or 9 V adds its own combo.
+- Battery devices may set `tool.cell` (default `'aa'`, a phone `'usb'`): the base `insert_batteries` combo and ItemUse's
+  "Replace batteries" / `lowestDevice()` / `replaceBatteries()` only feed AA devices ("Takes D batteries", "Charge it
+  instead"); the tech domain adds the D and 9 V combos and the chargers (see "Item domains").
+- Tool kinds in plain words: `TOOL_NAMES` in `src/game/items/util.js` (`toolNeed( kind )` → "a soldering iron" for
+  refusals, `toolWord( kind )` → "soldering iron" for the crafting panel's chips); Combine and Crafting both read it, so a
+  new kind needs one entry there.
+- One action, one menu row: a mix with a second item the verb doesn't pick (a sewing kit onto a shirt, an AA into a
+  flashlight, a lighter onto a torch) is offered only under "Combine ›". An item's own verb that does a mix (a can's Open,
+  a coconut's Crack open, a torch's Light, a shirt's Repair / Rip into rags, a power bank's Charge X) names it in the
+  action's `combos` (`ItemUse.actions` entries: ids, or `{ id, other }` for one partner) and the inventory's Combine list
+  leaves it out for that stack.
 - Tests: `node test/combos.mjs` (registry ids, matchers, orientation, partners, consumption, liquids, outputs, repair
   caps, refusals, tools and station, the timed action, death and respawn mid-action, a save → load round trip, the
   hotbar hand-over, the chooser's cost line).
@@ -251,7 +260,7 @@ unit of a stack is placed and the rest stays where it was.
   `sound( p, name, vol )`, `loop( p, name, vol, ref )` / `stopLoop`, `noise( p, radius, kind )` (a 'noise' event the
   infected hear), `light( p, { color, intensity, range, flicker, lift } | null )` (a `game.itemLights` source),
   `pickUpAction( p, { label, time, check, before } )`, `hold( p )` / `release()` (a trap holding the player: speed 0
-  through a wrapper on `survival.moveModifiers`).
+  through `survival.addMoveMod`).
 - Records: `{ id, kind, item, pos: { x, y, z }, yaw, stack, data, born }`, saved in `save.world.placeables`
   (`registry.js` serializeRecord / loadRecord; fields starting with `_` are runtime only). Records of a kind nobody
   registered are kept aside and saved again. Each is drawn as a few meshes (its kind's `model()`, else the item model
@@ -359,6 +368,56 @@ Small scenes in the open with their loot lying on the ground as real world items
   loot keys and respawn, bodies, the prompts through the real crosshair ray, salvage, the cash box, digging, a stash
   note, a drop from the sky to expiry, a save → load round trip).
 
+## Item domains (tech, kitchen, pharmacy, outdoors, arms, gear, leisure)
+
+Seven domains on top of the core (docs/ITEMS_PLAN.md): defs, loot, recipes, combos and verbs in
+`src/game/items/defs/ext/<domain>.js`, models in `src/game/items/models/ext/<domain>.js`, runtime helpers in
+`src/game/items/ext/<domain>/*.js`; tests `node test/ext-<domain>.mjs`. What they share:
+
+- Hooks (`src/game/items/hooks.js`, Node-safe): `addUseActions( fn( stack, def, ctx ) )` (right-click verbs;
+  `ctx.add( verb, run, notes, combos )` / `ctx.first( … )`, combos as in "Combine"), `addEatHook`, `addMedHook`,
+  `addSpoilHook` (food ageing only), and `addSystem( fn( game ) )`: a domain's runtime, called once per game by
+  `startSystems( game )` at the end of the items module's install (WorldItems.js), before Game.start loads the save, so a
+  system registered there with `game.register` gets its `load( save )` (the outdoors' mosquitoes and lean-to, saved in
+  `save.world.outdoors`; the gear's wet clothes, tearing bags and camouflage; the riot shield). Modules installed later
+  (placeables, hands, creatures) are there by the first update: look them up then.
+- Survival hooks: `survival.addHurtGuard( fn( amount, kind, info ) -> true )` stops a blow before it lands (the riot
+  shield); `survival.addMoveMod( fn( m ) )` changes `{ speed, canSprint, canJump }` after the base rules (the shield's
+  weight, a suitcase in tow, a trap holding you). The outdoors system's `addProtection( fn() -> true )`: nothing bites you
+  (a net over the face) by day or through the night.
+- `game.itemUse.addFlare( pos, vel, def )`: a lit road flare in the world (the arms domain's quick throw uses it).
+- Placed things draw their stack's look (`placeables/fx.js placedDef( p )`: a dyed poncho rigged as a rain catcher stays
+  dyed; gear's `lookDef( lookKey( stack ) )`).
+- Models: `userData.iconDir = [ x, y, z ]` on a model's root says where its icon is drawn from (a crutch, from above);
+  `userData.hold = { p, a, f }` where a hand holds it (the crutch's grip: the first-person view's crutch pose).
+- World items rest on paved surfaces (`items3d.floor( x, z, y, step )`: a physics box, else the terrain raised by
+  `sites.lift`), so a bill dropped in the street lies on the asphalt. Building loot spots carry `h` (height above the
+  storey's floor); on furniture an item whose model is over 0.8 m (a suitcase, a surfboard, a rod) is rolled again.
+- Status screen remedies for the pharmacy's ailments (`ui/UI.js REMEDY`: Vinegar, Antihistamine, Aloe, Burn cream,
+  Antibiotics, Disinfect, Bandage, Clean bandage, Cough syrup, Sling, Eye drops); every condition icon is in
+  `ui/icons.js`.
+- Tech:
+  - Tool kinds: screwdriver (screwdriver, precision drivers at quality 1.5; a cordless drill and the toolbox provide it),
+    pliers, wrench (socket set, wrench, tire iron, toolbox), hacksaw, boltcutter (also cuts padlocks on lockers in
+    buildings, quietly), solder (soldering iron; a blowtorch provides it), weld (blowtorch), drill (hand drill, cordless
+    drill), glue (super glue, epoxy, wood glue), lubricant (penetrating oil), inverter (power inverter). Device kinds:
+    cell, powerbank, inverter, jumper, crank, generator, worklight, solar_light, scanner, cb, detector, magnet_fish,
+    camera, walkman, boombox, drone, satphone, siren, smoke_detector, remote, siphon, multimeter, motion_light, tv, sonar.
+    The shared vocabulary's 'peeler' kind is unused.
+  - `tool.cell`: 'aa' (default) | 'd' | '9v' | 'usb' | 'pack'. D and 9 V cells go in through `tech_insert_d` /
+    `tech_insert_9v` (a device's own "Insert D battery"). 'usb' / 'pack' devices (and anything `tool.rechargeable`)
+    recharge only: a power bank, a crank, an inverter and a car battery, a running generator ("Charge devices") or a solar
+    panel. A full charge costs clamp( battery / 12, 0.4, 1.5 ) units; a car battery stores `stack.data.energy` (0..1, 16
+    units). Helpers in `ext/tech/logic.js` (cellOf, rechargeable, fracOf, chargeBy).
+  - `powerAt( game, pos, r = 20 )` (`ext/tech/power.js`): the running generator within r, or null (a rice cooker reads it).
+  - Placeable kinds: generator (outdoors, solid; `stack.data.fuel` up to 6 L at 0.45 L/h; noise to 55 m every 3 s; keeps
+    battery light placeables within 18 m lit and charged; Start, Stop, Charge devices, Refuel, Change oil with a wrench),
+    solar (outdoors; `data.dock` holds two devices or a car battery, 0.14 units/h × sunlight), solar_light (charges by day,
+    lit at night), motion_light (at night movement within 10 m lights it for 20 s and warns you from up to 120 m).
+  - Dismantle: a def with `dismantle: [ [ id, qty, chance? ] ]` and optional `dismantleTools`, `dismantleTime`,
+    `dismantleSkill` gets the verb; delicate parts break less with skill and fine tools; cells come back only from a device
+    at 90 % charge or more. Verb-only loot tables: tech_lockbox, tech_detect, tech_magnet.
+
 ## Mood and skills
 
 Project Zomboid's moodles, gentler. `game.survival` (`src/game/Survival.js`) and `game.skills` (`src/game/Skills.js`,
@@ -464,3 +523,9 @@ Owned by Items (everything else), ids others rely on:
 - Hunting: raw_boar, raw_goat, raw_venison, raw_chicken, raw_fish, raw_shark (+ cooked_* versions), animal_hide, feathers, bone
 - Vehicles: jerrycan (fuel, 20 L), gas_can (5 L), car_battery, spark_plug, tire, repair_kit, car_keys
 - Tools others check: flashlight, headlamp, lighter, matches, can_opener, map_hawaii, compass, binoculars, fishing_rod, lockpick, toolbox, cooking_pot, canteen
+- Item domains (others may name these): batteries, battery_d, battery_9v, power_bank, power_inverter, generator, solar_panel,
+  bolt_cutters, hacksaw, socket_set, soldering_iron, blowtorch, siphon_hose, metal_detector, lockbox (tech); wok,
+  rice_cooker, coffee_grinder, canning_jar (kitchen); crutch, crutch_improvised, arm_sling, vinegar_spray, mortar_pestle
+  (pharmacy); throw_net, hawaiian_sling, spear_gun, fish_stringer, mosquito_net (outdoors); riot_shield, slingshot,
+  steel_shot, firecracker_roll, throwing_knife (arms); lanyard_keys, rain_poncho, rolling_suitcase, dog_tags (gear);
+  hip_flask, songbook, surfboard, bodyboard (leisure)

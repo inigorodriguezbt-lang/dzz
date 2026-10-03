@@ -7,7 +7,7 @@ import { addPlaceable } from './registry.js';
 import { getItem, displayName } from '../ItemDB.js';
 import { capacityOf, itemsOf } from '../../Inventory.js';
 import { placedModel } from '../models/ext/placeables.js';
-import { itemModel } from './fx.js';
+import { itemModel, placedDef } from './fx.js';
 import { provides } from '../util.js';
 import { spoilRate } from '../hooks.js';
 
@@ -46,7 +46,7 @@ addPlaceable( 'stash', {
 		const sand = !! game?.world?.isBeach?.( p.pos.x, p.pos.z );
 		if ( p.data.buried ) return placedModel( 'mound', { sand } );
 		if ( hole( p ) || p.spec?.hole ) return placedModel( 'hole', { sand } );
-		return itemModel( getItem( p.item ) );
+		return itemModel( placedDef( p ) );
 	},
 
 	onPlace( p ) { p.data = { buried: false }; itemsIn( p ); },

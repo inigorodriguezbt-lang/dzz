@@ -17,11 +17,9 @@
 import { getItem, makeStack, displayName, stackVolume } from './ItemDB.js';
 import { capacityOf } from '../Inventory.js';
 import { COMBOS, findCombos, comboLabel, useSpec, unitsIn, maxUses, maxPortions, liquidIn, liquidRoom, kindOk } from './combos.js';
-import { provides, liquidName, worstLiquid } from './util.js';
+import { provides, liquidName, worstLiquid, toolNeed } from './util.js';
 import { ensureItemSound, ITEM_SOUNDS } from './sounds.js';
 
-const TOOL_NEED = { cut: 'a blade', chop: 'an axe', saw: 'a saw', hammer: 'a hammer', pot: 'a cooking pot', toolbox: 'a toolbox', canopener: 'a can opener',
-	pliers: 'pliers', screwdriver: 'a screwdriver', sewing: 'a sewing kit', tape: 'duct tape', lighter: 'a lighter', dig: 'a shovel', pry: 'a crowbar' };
 const GROUND_R = 2.6; // the inventory screen's ground radius
 const ITEM_SOUND = new Set( ITEM_SOUNDS );
 
@@ -172,7 +170,7 @@ export class Combine {
 			const have = src ? ( kindOk( lq.kind, liquidIn( src )?.kind ) ? liquidIn( src ).litres : 0 ) : this._carried( lq.kind );
 			if ( have < lq.litres - 1e-6 ) return { ok: false, reason: `Need ${lq.litres} L ${lq.kind === 'any' || Array.isArray( lq.kind ) ? 'water' : liquidName( lq.kind )}` };
 		}
-		for ( const t of combo.tools ) if ( ! this._hasTool( t, a, b, combo ) ) return { ok: false, reason: `Need ${TOOL_NEED[ t ] || t}` };
+		for ( const t of combo.tools ) if ( ! this._hasTool( t, a, b, combo ) ) return { ok: false, reason: `Need ${toolNeed( t )}` };
 		if ( combo.station === 'fire' && ! g.nearFire?.( g.player.pos ) ) return { ok: false, reason: 'Need a fire' };
 		if ( combo.check ) {
 			let r = null;

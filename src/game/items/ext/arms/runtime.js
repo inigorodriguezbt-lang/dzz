@@ -1,6 +1,6 @@
 // The arms domain's runtime (Node-safe with three.js, no DOM): what the verbs and combos in defs/ext/arms.js call.
-//   attach( game )            once per game: the riot shield's block (a wrapper on survival.hurt, the pattern the gear
-//                              and placeables modules use for moveModifiers) and its weight on your step
+//   attach( game )            once per game (hooks.js addSystem, when the items module starts): the riot shield's
+//                              block (survival.addHurtGuard) and its weight on your step (survival.addMoveMod)
 //   shoot( game, slingshot )  a steel ball or a stone off the slingshot, through the weapons module's Throwables
 //   throwThing( game, stack, how )   an alarm clock set to ring or a radio left playing, thrown (it lands and keeps on,
 //                              a placed `noise` thing)
@@ -22,21 +22,12 @@ export function attach( g ) {
 	if ( ! g?.survival || ATTACHED.has( g ) ) return ATTACHED.get( g ) || null;
 	const S = g.survival, st = { lastShot: - 1e9, blocks: 0 };
 	ATTACHED.set( g, st );
-	if ( typeof S.hurt === 'function' ) {
-		const base = S.hurt.bind( S );
-		S.hurt = ( amount, kind = 'melee', info = {} ) => {
-			if ( shieldBlocks( g, kind, info ) ) { st.blocks ++; return; }
-			return base( amount, kind, info );
-		};
-	}
-	if ( typeof S.moveModifiers === 'function' ) {
-		const base = S.moveModifiers.bind( S );
-		S.moveModifiers = () => {
-			const m = base();
-			if ( shieldHeld( g ) && ! S.creative ) m.speed *= SHIELD.slow;
-			return m;
-		};
-	}
+	S.addHurtGuard?.( ( amount, kind = 'melee', info = {} ) => {
+		if ( ! shieldBlocks( g, kind, info ) ) return false;
+		st.blocks ++;
+		return true;
+	} );
+	S.addMoveMod?.( ( m ) => { if ( shieldHeld( g ) && ! S.creative ) m.speed *= SHIELD.slow; } );
 	return st;
 }
 

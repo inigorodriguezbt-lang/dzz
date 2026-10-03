@@ -19,7 +19,6 @@ import { addCombos, liquidIn } from '../../combos.js';
 import { addEatHook } from '../../hooks.js';
 import '../../ext/pharmacy/med.js';
 import '../../ext/pharmacy/verbs.js';
-import '../../ext/pharmacy/icons.js';
 // the outdoor sites' tables (site_<kind>) are defined there; imported first so they can be extended here
 import '../../sites/tables.js';
 

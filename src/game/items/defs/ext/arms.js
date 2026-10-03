@@ -24,7 +24,7 @@ import { defineItems, getItem } from '../../ItemDB.js';
 import { extendLoot } from '../../Loot.js';
 import { addRecipes, R } from '../../recipes.js';
 import { addCombos } from '../../combos.js';
-import { addUseActions, addSpoilHook } from '../../hooks.js';
+import { addUseActions, addSystem } from '../../hooks.js';
 import { provides } from '../../util.js';
 import * as L from '../../ext/arms/logic.js';
 import { attach, shoot, slingCount, throwThing, horn, tapeOn, untape, useTape, guardsOn, guardsOff, takeApart } from '../../ext/arms/runtime.js';
@@ -363,6 +363,6 @@ addUseActions( ( stack, def, ctx ) => {
 	if ( def.cat === 'clothing' && stack.data?.guards ) ctx.add( 'Take off arm guards', () => guardsOff( use, stack ) );
 } );
 
-// the runtime (the riot shield's block) rides in on the first spoil tick, as the outdoors domain's does: this domain
-// has no module of its own to install it
-addSpoilHook( ( items, k, dh, game ) => { attach( game ); return k; } );
+// the runtime (the riot shield's block) starts with the items module (hooks.js addSystem: this domain has no module
+// of its own)
+addSystem( attach );

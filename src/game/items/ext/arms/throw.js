@@ -18,7 +18,7 @@ import { buildItemModel } from '../../../../render/ItemModels.js';
 import { FIRECRACKER, popTimes, hitDamage, SLING, KNIFE_THROW, clamp } from './logic.js';
 import { ensureArmsSound } from './sounds.js';
 
-const rnd = Math.random;
+const rnd = () => Math.random();
 const _v = new THREE.Vector3(), _up = new THREE.Vector3( 0, 1, 0 );
 const POP_COL = 0xffc27a;
 
@@ -193,10 +193,8 @@ export const THROW_KINDS = {
 		launch( o, sys ) {
 			const g = sys.game, U = g.itemUse, d = o.def;
 			o.armed = false;
-			if ( ! U?.flares || ! U._flareVisual ) return;
-			const f = { pos: o.pos.clone(), vel: o.vel.clone(), burn: d.throwable.burn || 420, flying: true, noiseT: 0, light: d.throwable.light || { color: 0xff3a2a, intensity: 6, range: 14 }, sprite: null, snd: null, src: null };
-			U.flares.push( f );
-			U._flareVisual( f );
+			if ( ! U?.addFlare ) return;
+			U.addFlare( o.pos, o.vel, d );
 			o.done = true;
 			o.mesh.visible = false;
 		},

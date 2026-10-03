@@ -539,6 +539,17 @@ console.log( 'world items' );
 	ok( taken.some( t => t.key === '12:0:s5' ) && W.byStack( cans )?.persistent && cans.qty === 2, 'opening one can of a pile on the floor claims the pile' );
 	// small things are drawn less far
 	ok( drawRange( 0.02 ) === 10 && drawRange( 0.1 ) === 35 && drawRange( 0.4 ) === 55, 'draw range scales with model size' );
+	// on a road (drawn 7 cm over the terrain, no collider) a dropped thing lies on the asphalt; on a box it rests on the box
+	game.sites = { lift: ( x, z ) => x > 10 ? 0.07 : 0 };
+	const cash = W.spawn( makeStack( 'cash', 1 ), new THREE.Vector3( 12, 0, 0 ), { persistent: true } );
+	ok( Math.abs( cash.pos.y - 0.07 ) < 1e-6, `an item on a road sits on it (${cash.pos.y.toFixed( 3 )})` );
+	const fall = W.spawn( makeStack( 'cash', 1 ), new THREE.Vector3( 14, 0.5, 0 ), { persistent: true, settle: true } );
+	for ( let i = 0; i < 60 && fall.falling; i ++ ) fall.update( 1 / 30 );
+	ok( ! fall.falling && Math.abs( fall.pos.y - 0.07 ) < 1e-6, `one dropped onto it lands on it (${fall.pos.y.toFixed( 3 )})` );
+	const P0 = game.physics.ground;
+	game.physics.ground = () => ( { y: 0.9, box: { maxY: 0.9 } } );
+	ok( Math.abs( W.floor( 12, 0, 1, 0.1 ).y - 0.9 ) < 1e-6, 'a box under it (a table, a sidewalk\'s collider) is not raised again' );
+	game.physics.ground = P0; delete game.sites;
 	W.dispose(); U.dispose();
 }
 

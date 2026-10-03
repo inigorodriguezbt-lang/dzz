@@ -613,6 +613,9 @@ console.log( 'riot shield' );
 	inv.hands = null;
 	ok( S.moveModifiers().speed === 1, 'put away, you move freely' );
 	ok( getItem( 'riot_shield' ).melee.push && getItem( 'riot_shield' ).melee.stagger > 1, 'it shoves hard' );
+	// through Survival's hooks, not wrappers: attached once however often it is asked
+	RT.attach( game );
+	ok( S.hurt === Survival.prototype.hurt && S.moveModifiers === Survival.prototype.moveModifiers && S.hurtGuards.length === 1, 'the block and the weight are Survival hooks (addHurtGuard, addMoveMod)' );
 	clearInv();
 }
 

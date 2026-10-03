@@ -39,6 +39,11 @@ for ( let i = 0; i < N; i ++ ) {
 				keys.add( c.key );
 				for ( const v of [ c.cx ?? c.x, c.cy ?? c.y, c.cz ?? c.z ] ) if ( ! Number.isFinite( v ) ) throw new Error( 'NaN container / spot ' + c.key );
 			}
+			// a loot spot knows how high above its storey's floor it is (Buildings re-rolls things too big for a shelf)
+			for ( const sp of o.spots ) {
+				if ( ! Number.isFinite( sp.h ) || sp.h < - 0.3 || sp.h > 4 ) throw new Error( `spot ${sp.key} height ${sp.h}` );
+				if ( sp.h > 0.15 ) tot.raised = ( tot.raised || 0 ) + 1;
+			}
 			tot.boxes += o.boxes.length / 9; tot.doors += o.doors.length; tot.cont += o.containers.length; tot.spots += o.spots.length;
 			tot.beds += o.beds.length; tot.taps += o.taps.length; tot.lights += o.lights.length; tot.dec += o.dec ? o.dec.count : 0; tot.glass += o.glass ? o.glass.pos.length / 3 : 0;
 			if ( o.geo ) for ( let k = 0; k < o.geo.pos.length; k ++ ) if ( ! Number.isFinite( o.geo.pos[ k ] ) ) throw new Error( 'NaN in storey ' + si );

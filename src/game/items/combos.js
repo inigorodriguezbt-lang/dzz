@@ -267,7 +267,8 @@ addCombos( [
 		out: [ 'molotov', 1 ], time: 4, sound: 'tear' },
 	{ id: 'molotov_fill', verb: 'Make molotov', label: 'Make molotov', a: 'rags', b: { id: 'empty_bottle', fn: ( s ) => ! liquidIn( s ).kind },
 		liquid: { kind: 'fuel', litres: 0.5 }, out: [ 'molotov', 1 ], time: 6, sound: 'pour' },
-	{ id: 'molotov_spirit', verb: 'Make molotov', label: 'Make molotov', a: 'rags', b: { fn: spirit }, use: { a: 1, b: { qty: 1 } },
+	// (a metal hip flask of spirits is no bottle to throw)
+	{ id: 'molotov_spirit', verb: 'Make molotov', label: 'Make molotov', a: 'rags', b: { fn: spirit, not: { tag: 'flask' } }, use: { a: 1, b: { qty: 1 } },
 		check: ( c ) => fullish( c.b, c.B ) ? null : 'Bottle too empty', out: [ 'molotov', 1 ], time: 5, sound: 'tear' },
 
 	// ---- blades ----

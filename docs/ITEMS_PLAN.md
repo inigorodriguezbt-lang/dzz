@@ -65,9 +65,11 @@ The schema at the top of `src/game/items/ItemDB.js`, plus these optional fields 
 - `extendLoot( table, entries )` / `defineLootTable( name, { rolls, items } )` in `Loot.js`. Entry forms are documented
   at the top of `Loot.js`. Tag entries (`{ tag, cat, not, w }`) pick up new items automatically, so tag your items well.
 - `addRecipes( [ R( id, name, out, inputs, opts ) ] )` in `recipes.js` (the crafting panel; see the format at its top).
-- `addUseActions( ( stack, def, ctx ) => { … } )` in `hooks.js`: right-click verbs. `ctx.add( verb, run, notes )`,
+- `addUseActions( ( stack, def, ctx ) => { … } )` in `hooks.js`: right-click verbs. `ctx.add( verb, run, notes, combos )`,
   `ctx.first( … )` (the double-click default), `ctx.game`, `ctx.use` (game.itemUse helpers: `consumeOne`,
-  `noiseMaker`, …), `ctx.inv`.
+  `noiseMaker`, …), `ctx.inv`. `combos`: the mixes the verb already does, left out of the item's Combine list.
+- `addSystem( ( game ) => { … } )` in `hooks.js`: a domain's runtime (`game.register( system )`), started with the items
+  module before the save loads. `addSpoilHook` is for food ageing only.
 - `addCombos( [ … ] )` in `combos.js` (built in phase A): item-on-item mixes, format below.
 - `register( reg )` in `src/game/items/models/ext/<domain>.js`: `reg( 'type', ( spec, def ) => Object3D )` for new model
   types. Model conventions are at the top of `src/render/ItemModels.js` and the helpers in `models/lib.js` (`M`,

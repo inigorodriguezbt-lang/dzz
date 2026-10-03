@@ -74,7 +74,9 @@ export function frame( O, x, y, z, rot, g = O.g ) {
 			if ( ! table || O.R() > p || ( O.roomSpots || 0 ) >= MAX_SPOTS ) return F;
 			O.roomSpots = ( O.roomSpots || 0 ) + 1;
 			const [ sx, sz ] = T( lx, lz );
-			O.spots.push( { key: `${O.P.bid}:${O.si}:s${O.spots.length}`, x: sx, y: y + ly, z: sz, yaw: O.R() * Math.PI * 2, table } );
+			// h: how high above the storey's floor it lies (on a shelf, a table: no room there for a surfboard)
+			const h = Math.round( ( y + ly - ( O.st?.y ?? y ) ) * 100 ) / 100;
+			O.spots.push( { key: `${O.P.bid}:${O.si}:s${O.spots.length}`, x: sx, y: y + ly, z: sz, yaw: O.R() * Math.PI * 2, table, h } );
 			return F;
 		},
 		bed( x0, y0, z0, x1, y1, z1, q = 1, label = 'Sleep' ) {

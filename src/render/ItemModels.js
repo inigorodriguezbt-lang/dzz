@@ -2,7 +2,8 @@
 //   registerModelBuilder( 'gun', ( spec, def ) => THREE.Object3D )
 //   buildItemModel( def ) -> THREE.Object3D (cached template; clone() it for instances)
 // Convention: the model's origin is at the centre of its bottom face (it rests on the ground at y = 0),
-// its long axis along +x, metres, meshes may share materials.
+// its long axis along +x, metres, meshes may share materials. userData.iconDir = [ x, y, z ] on the root: the
+// direction its inventory icon is drawn from, when the shape's default (render/Icons.js) doesn't read.
 //
 // Also here: modelInfo( def ) (bounds of the template, cached) and instanceParts( def ) (the template's meshes
 // merged per material, transforms baked in — what the world item instancer draws). Untextured opaque parts (buttons,

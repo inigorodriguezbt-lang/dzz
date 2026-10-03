@@ -189,6 +189,7 @@ console.log( 'music' );
 	const sb = put( 'songbook' );
 	U.read( sb ); finish();
 	ok( SK.knows( 'songs' ) && toasts.some( t => /Learned/.test( t ) ), 'the songbook teaches songs' );
+	ok( toasts.includes( 'Learned: songs' ), 'in plain words: ' + toasts.find( t => /Learned/.test( t ) ) );
 	S.boredom = 60; game.playTime += 1000; noises.length = 0;
 	act( uke, 'Play songs' );
 	ok( 60 - S.boredom > strum * 1.4, `songs lift more than strumming (${( 60 - S.boredom ).toFixed( 1 )})` );

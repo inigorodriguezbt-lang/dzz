@@ -24,7 +24,7 @@ import { defineItems, getItem, displayName } from '../../ItemDB.js';
 import { extendLoot, defineLootTable } from '../../Loot.js';
 import { addRecipes, R } from '../../recipes.js';
 import { addCombos } from '../../combos.js';
-import { addUseActions, addSpoilHook } from '../../hooks.js';
+import { addUseActions, addSystem } from '../../hooks.js';
 import { provides } from '../../util.js';
 import { dyeable, markable, PATCH, MAX_PATCHES, POUCH_CAP, MAX_POUCHES, PADS, patchable, pouchable, addMods, subMods, wetLabel, dryTime, keysTried } from '../../ext/gear/logic.js';
 import { attach, setLook, isCase, locked, openCase, unlock } from '../../ext/gear/runtime.js';
@@ -497,5 +497,5 @@ addUseActions( ( stack, def, ctx ) => {
 	} ) );
 } );
 
-// the gear system rides in on the first spoil tick (how a domain without a module of its own gets the game)
-addSpoilHook( ( items, k, dh, game ) => { attach( game ); return k; } );
+// the gear system starts with the items module (hooks.js addSystem: this domain has no module of its own)
+addSystem( attach );

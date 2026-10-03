@@ -6,7 +6,7 @@ import { addPlaceable, lc } from './registry.js';
 import { getItem } from '../ItemDB.js';
 import { rainFill, collectedLiquid, STALE_H } from './logic.js';
 import { placedModel } from '../models/ext/placeables.js';
-import { waterMaterial, itemModel } from './fx.js';
+import { waterMaterial, itemModel, placedDef } from './fx.js';
 import { liquidName, worstLiquid } from '../util.js';
 
 function spec( p ) {
@@ -32,7 +32,7 @@ addPlaceable( 'collector', {
 	place: { time: 2.5, gerund: 'Setting up' },
 
 	model( p ) {
-		const S = spec( p ), d = getItem( p.item );
+		const S = spec( p ), d = placedDef( p );
 		const g = new THREE.Group();
 		g.add( S.tarp ? placedModel( 'tarp', { color: d.model?.color } ) : itemModel( d ) );
 		discGeo = discGeo || new THREE.CircleGeometry( 1, 24 ).rotateX( - Math.PI / 2 );

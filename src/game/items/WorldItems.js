@@ -29,6 +29,7 @@ import { ItemUse } from './ItemUse.js';
 import { Crafting } from '../Crafting.js';
 import { Fishing } from './Fishing.js';
 import { Gathering } from './Gathering.js';
+import { startSystems } from './hooks.js';
 
 const CELL = 16;
 const DRAW_R = 55; // instanced drawing range (m) of the biggest items; small ones stop sooner (drawRange)
@@ -75,7 +76,7 @@ export class WorldItem extends Entity {
 		const ny = this.pos.y + this.vy * dt;
 		// into the sea: a splash (plop for small things), then it sinks slowly
 		if ( ! inWater && ny < water && this.mgr.game.audio && ! this.quiet ) this.mgr._waterSound( this );
-		const floor = P.ground( this.pos.x, this.pos.z, this.pos.y + 0.02, 0.05, 0 );
+		const floor = this.mgr.floor( this.pos.x, this.pos.z, this.pos.y + 0.02, 0.05 );
 		if ( ny <= floor.y ) {
 			this.pos.y = floor.y;
 			this.falling = false;
@@ -130,7 +131,7 @@ export class WorldItems {
 		const it = new WorldItem( this.game, this, stack, pos, opts );
 		// settle onto what is under it: always for drops, only small gaps for placed loot (a shelf that is
 		// not a physics box should not drop its cans to the floor)
-		const floor = this.game.physics.ground( pos.x, pos.z, pos.y + 0.05, 0.1, 0 );
+		const floor = this.floor( pos.x, pos.z, pos.y + 0.05, 0.1 );
 		const gap = pos.y - floor.y;
 		const settle = opts.settle ?? ( gap < 0.6 );
 		if ( gap < - 0.05 ) { it.pos.y = floor.y; this._rest( it, floor.box ); } // inside the ground: pop up
@@ -143,6 +144,15 @@ export class WorldItems {
 		this.game.entities.add( it );
 		this.dirty = true;
 		return it;
+	}
+
+	// what an item rests on at (x, z) below y: a physics box (a shelf, a table, a sidewalk once its collider is in),
+	// else the terrain, raised to the paved surface drawn over it (a road, a lot, a sidewalk: Sites.lift), so a flat
+	// thing dropped in the street lies on the asphalt rather than under it -> { y, box }
+	floor( x, z, y, step ) {
+		const f = this.game.physics.ground( x, z, y, step, 0 );
+		if ( ! f.box ) f.y += this.game.sites?.lift?.( x, z ) || 0;
+		return f;
 	}
 
 	drop( stack, pos ) {
@@ -568,6 +578,8 @@ export function install( game ) {
 	game.crafting = game.register( new Crafting( game, lights ) );
 	game.fishing = game.register( new Fishing( game ) );
 	game.gathering = game.register( new Gathering( game ) );
+	// the item domains' own runtimes (hooks.js addSystem), registered before Game.start loads the save into systems
+	startSystems( game );
 	// creative / debug spawners
 	game.spawnables = game.spawnables || {};
 	game.spawnables.campfire = { desc: 'Lit campfire', spawn: ( pos ) => game.crafting.placeFire( 'campfire', pos, { lit: true, fuel: 3 } ) };

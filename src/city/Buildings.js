@@ -32,6 +32,7 @@ const NEAR_R = 330, NEAR_OUT = 450; // near shells
 const BUDGET_MS = 4; // main-thread integration per frame (a step that starts under it may run a little over)
 const QUALITY = { low: 0.7, medium: 0.85, high: 1, ultra: 1.2 };
 const RESPAWN_H = 72; // loose loot comes back after three game days
+const LOOT_SHELF = 0.15, LOOT_BIG = 0.8; // m above the floor that counts as up on furniture; model size (diagonal) too big for it
 
 const _v = new THREE.Vector3(), _o = new THREE.Vector3();
 
@@ -524,13 +525,21 @@ class City {
 			}
 			const rnd = rng( hash32( strHash( s.key ), this.seed, gen ) );
 			if ( rnd() < 0.35 ) continue; // a third of the spots were cleared out before you came
-			const stack = rollLoot( s.table, rnd, 1 )[ 0 ];
-			if ( ! stack ) continue;
+			let stack = rollLoot( s.table, rnd, 1 )[ 0 ];
+			// up on a shelf, a table or a nightstand only what fits there (no suitcase, surfboard or rod): roll again
+			for ( let k = 0; k < 4 && this._tooBig( stack, s ); k ++ ) stack = rollLoot( s.table, rnd, 1 )[ 0 ];
+			if ( ! stack || this._tooBig( stack, s ) ) continue;
 			const [ x, z ] = this.toWorld( r, s.x, s.z );
 			const it = items.spawn( stack, new THREE.Vector3( x, s.y + 0.005, z ), { yaw: s.yaw, key: s.key, persistent: false, settle: false } );
 			if ( it ) st.items.push( it );
 			if ( ++ n % 6 === 0 ) { yield; if ( st.dead ) return; }
 		}
+	}
+
+	// a rolled stack too big for a raised spot (s.h: its height above the floor, from the interior's kit)
+	_tooBig( stack, s ) {
+		if ( ! stack || ! ( s.h > LOOT_SHELF ) ) return false;
+		return ( this.game.items3d?.info?.( stack.id )?.size.length() || 0 ) > LOOT_BIG;
 	}
 
 	_taken( item ) {
@@ -566,7 +575,7 @@ class City {
 					let label, sub;
 					if ( this._isLocked( c ) ) {
 						const how = this._unlockWith( c );
-						if ( how === 'pry' ) { label = 'Pry open'; sub = c.label; } else if ( how === 'pick' ) { label = 'Pick lock'; sub = c.label; } else { label = 'Open ' + name; sub = 'Locked'; }
+						if ( how === 'cut' ) { label = 'Cut lock'; sub = c.label; } else if ( how === 'pry' ) { label = 'Pry open'; sub = c.label; } else if ( how === 'pick' ) { label = 'Pick lock'; sub = c.label; } else { label = 'Open ' + name; sub = 'Locked'; }
 					} else label = ( this.searched.has( c.key ) || this.saved.containers[ c.key ] ? 'Open ' : 'Search ' ) + name;
 					out.push( { t, id: 'cont:' + c.key, label, sub, action: () => this.search( c ) } );
 				}
@@ -598,8 +607,10 @@ class City {
 	hasPry() { return !! this.game.player.inventory.hasTool?.( 'pry' ); }
 
 	_isLocked( c ) { return !! c.locked && ! this.saved.containers[ c.key ]?.u && ! this.containers.get( c.key )?.unlocked; }
-	// what opens a locked container: a pry tool (anything), a lockpick (not a safe), or nothing at hand
+	// what opens a locked container: bolt cutters (a padlock, not a safe: quick and quiet), a pry tool (anything), a
+	// lockpick (not a safe), or nothing at hand
 	_unlockWith( c ) {
+		if ( c.locked < 2 && this.game.player.inventory.hasTool?.( 'boltcutter' ) ) return 'cut';
 		if ( this.hasPry() ) return 'pry';
 		if ( this.game.player.inventory.count?.( 'lockpick' ) > 0 && c.locked < 2 ) return 'pick';
 		return null;
@@ -609,7 +620,16 @@ class City {
 		const g = this.game;
 		if ( this._isLocked( c ) ) {
 			const how = this._unlockWith( c ), pick = how === 'pick';
-			if ( how === 'pry' ) {
+			if ( how === 'cut' ) {
+				g.actions.start( { label: 'Cutting lock', time: 3, onDone: () => {
+					const at = new THREE.Vector3( c.x, c.y, c.z ), bc = g.player.inventory.hasTool?.( 'boltcutter' );
+					if ( bc ) bc.cond = Math.max( 0.05, bc.cond - 0.01 );
+					this._unlockC( c );
+					g.events.emit( 'noise', { pos: at, radius: 5, source: g.player, kind: 'door' } );
+					g.audio?.play( 'hit_metal', { pos: at, vol: 0.3, rate: 1.7 } );
+					this._open( c );
+				} } );
+			} else if ( how === 'pry' ) {
 				g.actions.start( { label: 'Prying open', time: 4 + c.locked * 3, onDone: () => { this._unlockC( c ); g.events.emit( 'noise', { pos: new THREE.Vector3( c.x, c.y, c.z ), radius: 18, source: g.player, kind: 'door' } ); g.audio?.play( 'hit_metal', { pos: new THREE.Vector3( c.x, c.y, c.z ), vol: 0.8 } ); this._open( c ); } } );
 			} else if ( pick ) {
 				g.actions.start( { label: 'Picking lock', time: 8, onDone: () => { this._unlockC( c ); this._open( c ); } } );

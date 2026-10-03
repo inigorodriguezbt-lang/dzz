@@ -11,6 +11,8 @@ import { addToItems, containerVolume, containerWeight, itemsOf, capacityOf } fro
 import { fmtHour, liquidName } from '../game/items/util.js';
 import * as ops from '../weapons/ops.js';
 import { lookKey } from '../game/items/ext/gear/logic.js';
+import { kcalMul } from '../game/items/ext/kitchen/evolved.js';
+import { SKILL_NAMES } from '../game/Skills.js';
 
 const GROUND_R = 2.6;
 const WEIGHT_MAX = 45, WEIGHT_TIRED = 18, WEIGHT_OVER = 30; // kg: the meter's scale, where stamina starts to drop, overloaded
@@ -617,10 +619,12 @@ export class InventoryUI {
 			num( 'Waterproof', p( c.waterproof || 0 ), ov( o, x => p( x.waterproof || 0 ) ), v => v + '%' );
 		} else if ( d.food ) {
 			const f = d.food;
-			num( 'Food', Math.round( ( f.kcal || 0 ) / 20 ), null, plus );
-			num( 'Water', Math.round( f.water || 0 ), null, plus );
+			// an evolved dish (the kitchen's data.dish) carries its own nutrition: what is left of it, as eating applies it
+			const D = inst && stack.data?.dish, k = ( stack.data?.left ?? f.portions ?? 1 ) / ( f.portions || 1 );
+			num( 'Food', Math.round( ( D ? D.kcal * kcalMul( D ) * k : f.kcal || 0 ) / 20 ), null, plus );
+			num( 'Water', Math.round( D ? ( D.water || 0 ) * k : f.water || 0 ), null, plus );
 			if ( f.spoil && inst ) kv( 'Freshness', pct( freshness( stack ) ) );
-			if ( f.raw ) flags.push( 'Raw' );
+			if ( f.raw || ( D?.raw > 0 && ! D.cooked ) ) flags.push( 'Raw' );
 			if ( f.opener ) flags.push( 'Sealed' );
 			if ( f.spoil && inst && freshness( stack ) <= 0 ) flags.push( [ 'Spoiled' ] );
 		} else if ( d.drink ) {
@@ -652,6 +656,14 @@ export class InventoryUI {
 		} else if ( d.fuel ) {
 			kv( 'Fuel', `${( inst ? stack.data.amount ?? d.fuel.litres : d.fuel.litres ).toFixed( 1 )} L` );
 		} else if ( d.cat === 'book' ) {
+			// what it teaches, how long it takes and how far you got (ItemUse.readSpec, Skills.readProgress)
+			const rs = this.game.itemUse?.readSpec?.( d );
+			if ( rs?.skill && SKILL_NAMES[ rs.skill ] ) kv( 'Skill', SKILL_NAMES[ rs.skill ] );
+			else if ( rs?.learn ) kv( 'Teaches', cap1( rs.learn ) );
+			if ( rs?.hours ) kv( 'Time', rs.hours >= 1 ? `${Math.round( rs.hours * 10 ) / 10} h` : `${Math.round( rs.hours * 60 )} min` );
+			const done = inst ? this.game.skills?.readProgress?.( d.id ) || 0 : 0;
+			if ( rs?.once && done >= 1 ) flags.push( 'Read' );
+			else if ( done > 0.01 && done < 1 ) kv( 'Progress', pct( done ) );
 			if ( d.desc ) line = d.desc;
 		} else if ( d.attachment ) cond();
 
@@ -921,9 +933,12 @@ export class InventoryUI {
 		this.ctxClose = popMenu( items, at, { parent: this.el, audio: this.audio, onClose: () => { this.ctxClose = null; } } );
 	}
 
-	// "Combine ›" with the number that can run now; it opens the list of partners beside the menu
-	_combineRow( stack, add ) {
-		const list = this.game.combine?.partners?.( stack ).slice( 0, 12 ) || [];
+	// "Combine ›" with the number that can run now; it opens the list of partners beside the menu. covered: mixes a
+	// verb of the menu already does (a can's Open is "Open Can"), left out so nothing is offered twice
+	_combineRow( stack, add, covered = null ) {
+		let list = this.game.combine?.partners?.( stack ) || [];
+		if ( covered?.size ) list = list.filter( p => ! covered.has( p.combo.id ) && ! covered.has( p.combo.id + '|' + p.other?.uid ) );
+		list = list.slice( 0, 12 );
 		if ( ! list.length ) return;
 		const n = list.filter( p => p.ok ).length;
 		this._comboAt = null;
@@ -1219,6 +1234,13 @@ export class InventoryUI {
 		};
 		const sep = () => { if ( out.length && out[ out.length - 1 ] ) out.push( null ); };
 		const uses = () => g.itemUse?.actions?.( stack ) || [];
+		// the item-use verbs shown (once: the double-click default is already in), and the mixes they stand for
+		// (ItemUse.actions: combos)
+		const covered = new Set();
+		const addUse = ( a ) => {
+			if ( ! seen.has( a.label.toLowerCase() ) ) add( a.label, a.run );
+			if ( a.combos ) for ( const c of a.combos ) covered.add( typeof c === 'string' ? c : c.id + '|' + c.other?.uid );
+		};
 		if ( loc.type === 'catalog' ) {
 			add( 'Give 1', () => g.give( stack.id, 1 ), { key: 'LMB' } );
 			if ( d.stack !== 5 ) add( 'Give 5', () => g.give( stack.id, 5 ) );
@@ -1228,8 +1250,8 @@ export class InventoryUI {
 		if ( loc.type === 'ground' || loc.type === 'other' ) {
 			add( 'Take', () => this._quickMove( stack, loc ), { key: 'Shift' }, { def: true } );
 			if ( d.cat === 'clothing' || d.cat === 'backpack' ) add( 'Wear', () => this.move( stack, loc, { type: 'equip', slot: slotOf( d ) || 'back' } ) );
-			for ( const a of uses() ) if ( ! /drop/i.test( a.label ) && ! seen.has( a.label.toLowerCase() ) ) add( a.label, a.run );
-			this._combineRow( stack, add );
+			for ( const a of uses() ) if ( ! /drop/i.test( a.label ) ) addUse( a );
+			this._combineRow( stack, add, covered );
 			return out;
 		}
 		if ( ! CARRIED.has( loc.type ) ) return out;
@@ -1255,8 +1277,8 @@ export class InventoryUI {
 			const guns = inv.findAll( ( s, dd ) => dd?.firearm && ( ! ops.attachmentFits || ops.attachmentFits( dd, d ).ok ) );
 			for ( const gun of guns.slice( 0, 4 ) ) add( `Attach to ${getItem( gun.id ).name}`, () => H?.attach?.( gun, stack ) );
 		}
-		for ( const a of uses() ) if ( ! seen.has( a.label.toLowerCase() ) && ! /^drop$/i.test( a.label ) ) add( a.label, a.run );
-		this._combineRow( stack, add );
+		for ( const a of uses() ) if ( ! /^drop$/i.test( a.label ) ) addUse( a );
+		this._combineRow( stack, add, covered );
 		sep();
 		if ( inv.hands === stack.uid ) { if ( ! seen.has( 'put away' ) ) add( 'Put away', () => H?.holster?.() ); }
 		else if ( loc.type !== 'equip' && ! seen.has( 'hold' ) ) add( 'Hold', () => H?.select?.( stack ) );

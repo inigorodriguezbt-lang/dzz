@@ -34,11 +34,23 @@ const REMEDY = {
 	bleed: [ 'Bandage', d => d?.medical?.bleed ],
 	inf: [ 'Antibiotics', d => d?.medical?.infection ],
 	sick: [ 'Charcoal', d => d?.medical?.sick ],
-	hot: [ 'Shade' ], wet: [ 'Shelter' ], tired: [ 'Sleep' ], heavy: [ 'Drop weight' ],
+	hot: [ 'Shade', d => d?.medical?.cure?.heat > 0 || d?.drink?.cure?.heat > 0 ], wet: [ 'Shelter' ], tired: [ 'Sleep' ], heavy: [ 'Drop weight' ],
 	blood: [ 'Saline', d => d?.medical?.blood ],
 	// moodles (Survival.moodles): what lifts each one, highlighted when you carry something that does
 	stress: [ 'Rest', d => d?.fun?.stress < 0 || d?.drink?.alcohol > 0 ], unhappy: [ 'Comfort', d => d?.fun?.unhappy < 0 ],
 	bored: [ 'Read', d => d?.read || d?.cat === 'book' || d?.fun?.boredom < 0 ],
+	// the pharmacy's ailments (Survival AIL_LABEL) and a cut's dressing: medical.cure / drink.cure name what they treat
+	sting: [ 'Vinegar', d => d?.medical?.cure?.sting > 0 || ( d?.tags?.includes( 'vinegar' ) && ! d.medical ) ],
+	centipede: [ 'Antihistamine', d => d?.medical?.cure?.centipede > 0 ],
+	sunburn: [ 'Aloe', d => d?.medical?.cure?.sunburn > 0 ],
+	burn: [ 'Burn cream', d => d?.medical?.cure?.burn > 0 ],
+	lepto: [ 'Antibiotics', d => d?.medical?.infection >= 0.3 || d?.medical?.cure?.lepto > 0 ],
+	cut: [ 'Disinfect', d => d?.medical?.infection > 0 || d?.medical?.cure?.cut > 0 ],
+	wound: [ 'Bandage', d => d?.medical?.bleed > 0 ],
+	dressing: [ 'Clean bandage', d => d?.medical?.bleed > 0 && ! d.medical.dirty ],
+	cough: [ 'Cough syrup', d => d?.medical?.cure?.cough > 0 || d?.drink?.cure?.cough > 0 ],
+	sprain: [ 'Sling', d => d?.medical?.sling || d?.medical?.cure?.sprain > 0 ],
+	eye: [ 'Eye drops', d => d?.medical?.cure?.eye > 0 ],
 };
 
 export class UI {
@@ -266,6 +278,8 @@ export class UI {
 			let rem = REMEDY[ c.id ] || null;
 			if ( c.id === 'frac' ) rem = S.splint ? [ 'Rest' ] : [ 'Splint', d => d?.medical?.splint ];
 			if ( c.id === 'cold' ) rem = [ S.temp < 35.2 ? 'Fire' : 'Warm clothes' ];
+			// a clean dressing needs nothing; a dirty one wants changing
+			if ( c.id === 'dressing' && S.dressing !== 2 ) rem = null;
 			const val = c.id === 'cold' || c.id === 'hot' ? S.temp.toFixed( 1 ) + '°' : c.id === 'wet' ? pct( S.wet * 100 ) : c.id === 'blood' ? pct( S.blood / 50 )
 				: c.id === 'tired' ? pct( S.energy ) : c.id === 'heavy' ? weight.toFixed( 1 ) + ' kg'
 				: c.mood ? String( Math.round( c.id === 'stress' ? Math.max( S.stress, S.panic ) : c.id === 'bored' ? S.boredom : S.unhappy ) ) : '';

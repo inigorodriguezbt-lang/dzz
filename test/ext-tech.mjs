@@ -237,8 +237,11 @@ console.log( 'cells' );
 	ok( combo( 'tech_insert_d', d, cb ) && cb.data.charge === 14 && d.qty === 1, 'a D cell fills the CB' );
 	const sm = put( 'smoke_detector' ); sm.data.charge = 0;
 	const nine = put( 'battery_9v' );
-	const iv = verb( nine, 'Insert into' );
-	ok( iv?.verb === 'Insert into Smoke detector', '9 V: ' + iv?.verb );
+	// a loose cell goes in through Combine (you pick the device); the device's own verb takes the cell you carry
+	ok( ! verb( nine, 'Insert into' ), 'no one-click "Insert into" on a loose cell (the Combine list has it)' );
+	ok( K.partners( nine ).some( p => p.other === sm && p.label === 'Insert into Smoke detector' ), '9 V: Combine offers the smoke detector' );
+	const iv = verb( sm, 'Insert 9 V' );
+	ok( iv?.combos?.includes( 'tech_insert_9v' ), 'the device\'s "Insert 9 V battery" stands for the combo: ' + iv?.verb );
 	iv.run(); finish();
 	ok( sm.data.charge === 4 && ! has( 'battery_9v' ), 'the smoke detector is live' );
 	noises.length = 0;
@@ -560,9 +563,9 @@ console.log( 'combos' );
 }
 
 // ---- the review's fixes ------------------------------------------------------------------------------------------------------
-console.log( 'cells guard' );
+console.log( 'cells by type' );
 {
-	// the core's AA verbs only reach AA devices: no AAs into a D or 9 V device, a phone, a power bank or a drone
+	// ItemUse's AA verbs read tool.cell: no AAs into a D or 9 V device, a phone, a power bank or a drone
 	put( 'batteries', 4 );
 	for ( const id of [ 'cb_radio', 'smoke_detector', 'phone', 'power_bank', 'drone', 'sat_phone', 'cordless_drill', 'solar_light' ] ) {
 		const s = put( id ); s.data.charge = 0;
@@ -573,10 +576,11 @@ console.log( 'cells guard' );
 	}
 	const fl = put( 'flashlight' ); fl.data.charge = 0;
 	ok( !! verb( fl, 'Replace batteries' ), 'a flashlight still takes AAs' );
-	// a loose AA goes to the emptiest AA device even when a D device is emptier
+	// the emptiest AA device even when a D device is emptier
 	const cb = put( 'cb_radio' ); cb.data.charge = 0; fl.data.charge = 2;
+	ok( U.lowestDevice()?.id === 'flashlight', 'lowestDevice: the emptiest AA device' );
 	const aa = inv.find( s => s.id === 'batteries' );
-	ok( verb( aa, 'Insert into' )?.verb === 'Insert into Flashlight', 'AA: ' + verb( aa, 'Insert into' )?.verb );
+	ok( K.partners( aa ).some( p => p.other === fl ) && ! K.partners( aa ).some( p => p.other === cb ), 'AA: Combine offers the flashlight, not the CB' );
 	ok( U.lowestDevice( true )?.id === 'flashlight', 'the solar charger still finds rechargeables' );
 	// no cells out of a rechargeable device (crank it, pull the cells, repeat would be endless AAs)
 	fl.data.charge = 8;
@@ -596,15 +600,20 @@ console.log( 'plain words' );
 	const gen = put( 'generator' ); gen.cond = 0.5; const oil = put( 'motor_oil' );
 	ok( K.state( C.getCombo( 'tech_oil_generator' ), oil, gen ).reason === 'Need a wrench', 'oil change wants a wrench' );
 	clearInv();
-	// the crafting panel's tool chips: plain names that Crafting's own labelling can't overwrite
-	const T = await import( '../src/game/items/defs/ext/tech.js' );
-	T.chipNames();
+	// the crafting panel's tool chips: plain names (Crafting labels every kind from util.js TOOL_NAMES)
 	const cr = new Crafting( game, null );
 	const siren = cr.recipes.find( r => r.id === 'tech_siren' ), cut = cr.recipes.find( r => r.id === 'tech_lock_cut' ) || cr.recipes.find( r => r.id === 'tech_repair_kit' );
 	ok( siren.toolLabels.join() === 'soldering iron', 'siren chip: ' + siren.toolLabels.join() );
 	ok( cut.toolLabels.join() === 'blowtorch,wrench', 'repair kit chips: ' + cut.toolLabels.join() );
-	const rags = cr.recipes.find( r => r.tools?.length && r.tools.every( t => ! T.TOOL_SAY[ t ] ) );
-	ok( ! rags || ! Object.getOwnPropertyDescriptor( rags, 'toolLabels' ).get, 'other recipes keep Crafting\'s labels' );
+	const rags = cr.recipes.find( r => r.tools?.length === 1 && r.tools[ 0 ] === 'cut' );
+	ok( rags?.toolLabels.join() === 'blade', 'a blade is still a blade: ' + rags?.toolLabels.join() );
+	// and refusals name every kind any domain asks for
+	const U2 = await import( '../src/game/items/util.js' );
+	const kinds = new Set();
+	for ( const c of C.allCombos() ) for ( const t of c.tools || [] ) kinds.add( t );
+	for ( const r of allRecipes() ) for ( const t of r.tools || [] ) kinds.add( t );
+	const unnamed = [ ...kinds ].filter( k => ! U2.TOOL_NAMES[ k ] );
+	ok( ! unnamed.length, 'every tool kind in a combo or recipe has a plain name: ' + unnamed.join() );
 }
 console.log( 'dismantle edge cases' );
 {

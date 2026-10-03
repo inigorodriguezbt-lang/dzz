@@ -5,6 +5,14 @@ import * as THREE from 'three';
 import { patchMaterial } from '../../../render/Materials.js';
 import { setReactive } from '../../../render/post/Motion.js';
 import { instanceParts } from '../../../render/ItemModels.js';
+import { getItem } from '../ItemDB.js';
+import { lookDef, lookKey } from '../ext/gear/logic.js';
+
+// the def a placed thing is drawn from: its stack as it looks (a dyed poncho in its dye, the gear domain's looks), or
+// the made thing's own def when the stack is the tool that made it
+export function placedDef( p ) {
+	return ( p?.stack && p.stack.id === p.item ? lookDef( lookKey( p.stack ) ) : null ) || getItem( p?.item );
+}
 
 // an item's model as a few meshes (one per material, the geometry the world items share): a lantern draws in three
 // calls instead of ten

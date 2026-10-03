@@ -19,7 +19,7 @@ import { defineItems, getItem, makeStack, freshness } from '../../ItemDB.js';
 import { extendLoot } from '../../Loot.js';
 import { addRecipes, R } from '../../recipes.js';
 import { addCombos, liquidIn } from '../../combos.js';
-import { addUseActions, addEatHook, addSpoilHook } from '../../hooks.js';
+import { addUseActions, addEatHook, addSpoilHook, addSystem } from '../../hooks.js';
 import { provides } from '../../util.js';
 import { addFishingMod } from '../../Fishing.js';
 import { SPEAR, spearChance, spearCatch, sharkChance, castNet, HARVEST, SIGNAL, signalChance, knapChance, MOSQ, clamp } from '../../ext/outdoors/logic.js';
@@ -357,7 +357,7 @@ addFishingMod( fishingMod );
 
 // ======================================================================================================================
 // hooks: a coconut shell from the last of a cracked coconut; the stringer keeps fish alive in the water; the outdoors
-// system rides in on the first spoil tick (it is how this domain gets the game without a module of its own)
+// system starts with the items module (hooks.js addSystem: this domain has no module of its own)
 // ======================================================================================================================
 
 addEatHook( ( stack, def, k, use ) => {
@@ -365,8 +365,9 @@ addEatHook( ( stack, def, k, use ) => {
 	if ( ( stack.data.left ?? def.food.portions ?? 1 ) <= 1 ) use.give?.( 'coconut_shell', 1 );
 } );
 
+addSystem( attach );
+
 addSpoilHook( ( items, k, dh, game ) => {
-	attach( game );
 	// on a stringer in the sea the fish are still swimming: what you carry doesn't age while you're in the water
 	const inv = game?.player?.inventory;
 	if ( dh > 0 && inv?.count?.( 'fish_stringer' ) > 0 && inv.containers().some( ( c ) => c.items === items ) && water( game ) ) {

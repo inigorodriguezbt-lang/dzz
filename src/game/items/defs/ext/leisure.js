@@ -15,7 +15,7 @@
 import { defineItems } from '../../ItemDB.js';
 import { extendLoot } from '../../Loot.js';
 import { addRecipes, R } from '../../recipes.js';
-import { addCombos, unitsIn, getCombo } from '../../combos.js';
+import { addCombos, unitsIn } from '../../combos.js';
 import { isSpirit, flaskRoom, flaskName, FLASK_SHOTS, VAPE_TANK, vapeJuice } from '../../ext/leisure/logic.js';
 import { smoke } from '../../ext/leisure/verbs.js';
 import '../../ext/leisure/decor.js';
@@ -333,13 +333,6 @@ addCombos( [
 	{ id: 'leis_refill_vape', verb: 'Refill', label: 'Refill vape', a: 'vape_juice', b: { tool: 'vape' }, use: { a: 1, b: 0 }, time: 3, sound: 'pour', check: vapeFull,
 		run: ( c ) => { c.b.data.juice = VAPE_TANK; } },
 ] );
-
-// a metal hip flask is no bottle for a molotov: the base combo takes any strong spirit whole, so flasks are left out
-// of it here (the flask still counts as spirits for a sterile rag or a cut)
-{
-	const m = getCombo( 'molotov_spirit' );
-	if ( m && ! m.b?.flaskFree ) m.b = { any: [ m.b ], not: { tag: 'flask' }, flaskFree: true };
-}
 
 // made at a bench: a board game from a plank and pebbles, dice whittled from bone
 addRecipes( [

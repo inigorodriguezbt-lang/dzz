@@ -24,7 +24,7 @@ const { ItemUse } = await import( '../src/game/items/ItemUse.js' );
 const { Crafting } = await import( '../src/game/Crafting.js' );
 const { Combine } = await import( '../src/game/items/Combine.js' );
 const { Events } = await import( '../src/core/Events.js' );
-const { spoilRate } = await import( '../src/game/items/hooks.js' );
+const { spoilRate, startSystems } = await import( '../src/game/items/hooks.js' );
 const { Placeables } = await import( '../src/game/items/Placeables.js' );
 
 let fails = 0, passes = 0;
@@ -365,10 +365,11 @@ console.log( 'cases' );
 // ---- wet clothes, bags that tear, the suitcase, camouflage --------------------------------------------------------------
 console.log( 'system' );
 {
-	spoilRate( [], 1, 0, game );
+	ok( ! RT.system( game ) && spoilRate( [], 1, 0, game ) === 1 && ! RT.system( game ), 'the spoil hooks are for spoilage only' );
+	startSystems( game );
 	const sys = RT.system( game );
-	ok( sys && game.systems.includes( sys ), 'the gear system rides in on the first spoil tick' );
-	spoilRate( [], 1, 0, game );
+	ok( sys && game.systems.includes( sys ), 'the gear system starts with the items module (addSystem)' );
+	startSystems( game );
 	ok( game.systems.filter( s => s === sys ).length === 1, 'once' );
 	const tick = ( n = 1, dh = 0 ) => { for ( let i = 0; i < n; i ++ ) { game.time.hours += dh; sys.update( 0.6 ); } };
 	// worn clothes are as wet as you are; off you dry a little, the shirt stays wet
@@ -500,6 +501,22 @@ console.log( 'odds and ends' );
 	// the poncho rigs as a rain catcher (the placeables verb)
 	const po = put( 'rain_poncho' );
 	ok( U.actions( po ).some( a => a.verb === 'Rig' ), 'a poncho has Rig' );
+	// rigged, a dyed poncho keeps its dye (placeables draw the stack's look)
+	{
+		const FX = await import( '../src/game/items/placeables/fx.js' );
+		const dyed = makeStack( 'rain_poncho', 1 ); RT.setLook( dyed, 'black' );
+		const p = game.placeables.add( 'collector', dyed, new THREE.Vector3( 3, 0, 3 ), 0, null, 'rain_poncho' );
+		ok( FX.placedDef( p )?.model?.color === L.DYES.black.color && FX.placedDef( p ).id === 'rain_poncho~black', 'a rigged black poncho draws black: ' + FX.placedDef( p )?.id );
+		let mesh = null;
+		try { mesh = game.placeables.buildModel( p ); } catch ( e ) { console.log( e ); }
+		// the tarp's colour is baked into its vertex colours: black (near 0), not the poncho's blue
+		let blue = false, dark = false;
+		mesh?.traverse( ( o ) => { const c = o.geometry?.attributes?.color; if ( c ) for ( let i = 0; i < c.count; i ++ ) { if ( c.getZ( i ) > 0.3 && c.getX( i ) < 0.1 ) blue = true; if ( c.getX( i ) + c.getY( i ) + c.getZ( i ) < 0.05 ) dark = true; } } );
+		ok( !! mesh && dark && ! blue, 'and its model builds black, not blue' );
+		const plain = game.placeables.add( 'collector', makeStack( 'rain_poncho', 1 ), new THREE.Vector3( 6, 0, 3 ), 0, null, 'rain_poncho' );
+		ok( FX.placedDef( plain ) === getItem( 'rain_poncho' ), 'an undyed one draws as itself' );
+		game.placeables.remove( p, { give: false } ); game.placeables.remove( plain, { give: false } );
+	}
 	// a dyed, patched, wet stack survives a save
 	const s = makeStack( 'hoodie', 1 ); RT.setLook( s, 'camo' ); L.addMods( s, L.PATCH.leather ); s.data.patches = 1; s.data.wet = 0.4;
 	const back = JSON.parse( JSON.stringify( s ) );

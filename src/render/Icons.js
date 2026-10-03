@@ -324,11 +324,14 @@ async function render( def, noKeep = false ) {
 	if ( _box.isEmpty() ) _box.set( _v.set( - 0.1, 0, - 0.1 ), new THREE.Vector3( 0.1, 0.1, 0.1 ) );
 	const size = _box.getSize( new THREE.Vector3() ), centre = _box.getCenter( new THREE.Vector3() );
 
-	// view direction by shape: long things in profile, flat things from above, everything else 3/4
+	// view direction by shape: long things in profile, flat things from above, everything else 3/4; a model may say
+	// its own (userData.iconDir [ x, y, z ]: a crutch, long and flat, reads only from above)
 	const thick = Math.max( size.y, size.z, 1e-4 );
 	const long = size.x > 2.2 * thick;
 	const flat = size.y < 0.18 * Math.max( size.x, size.z );
-	if ( long ) _dir.set( 0.18, 0.42, 1 );
+	const own = model.userData.iconDir;
+	if ( own ) _dir.set( own[ 0 ], own[ 1 ], own[ 2 ] );
+	else if ( long ) _dir.set( 0.18, 0.42, 1 );
 	else if ( flat ) _dir.set( 0.45, 1.25, 0.9 );
 	else _dir.set( 0.8, 0.7, 1 );
 	_dir.normalize();

@@ -8,9 +8,8 @@
 import * as THREE from 'three';
 import { addUseActions } from '../../hooks.js';
 import { getItem } from '../../ItemDB.js';
-import { ItemUse } from '../../ItemUse.js';
 import { rollLoot } from '../../Loot.js';
-import { provides } from '../../util.js';
+import { provides, toolNeed, toolWord } from '../../util.js';
 import { KINDS as SITE_KINDS } from '../../sites/kinds.js';
 import { addFishingMod } from '../../Fishing.js';
 import { ensureSound as ensurePlaceSound } from '../../placeables/sounds.js';
@@ -18,8 +17,6 @@ import * as L from './logic.js';
 import { ensureTechSound, playTechSound } from './sounds.js';
 import { chargeTargets, chargeLabel, feed, fuelCan, fuelIn, fuelRoom, takeFuel, putFuel, genFuel } from './power.js';
 
-const TOOL_NAME = { screwdriver: 'a screwdriver', pliers: 'pliers', wrench: 'a wrench', hacksaw: 'a hacksaw', boltcutter: 'bolt cutters', solder: 'a soldering iron',
-	weld: 'a blowtorch', drill: 'a drill', glue: 'glue', cut: 'a blade', pry: 'a crowbar', dig: 'a shovel', hammer: 'a hammer', saw: 'a saw' };
 const _v = new THREE.Vector3(), _w = new THREE.Vector3(), _f = new THREE.Vector3();
 
 // ---- small shared helpers -----------------------------------------------------------------------------------------------
@@ -69,7 +66,7 @@ function qualityFor( inv, def, skip = null ) {
 export function dismantle( g, stack, def ) {
 	const U = g.itemUse, inv = g.player.inventory;
 	const miss = missingTool( inv, def.dismantleTools, stack );
-	if ( miss ) { g.toast( `Need ${TOOL_NAME[ miss ] || miss}`, 'warn' ); return false; }
+	if ( miss ) { g.toast( `Need ${toolNeed( miss )}`, 'warn' ); return false; }
 	if ( stack.data?.items?.length ) { g.toast( 'Empty it first', 'warn' ); return false; }
 	const skill = L.dismantleSkill( def ), lv = g.skills?.level?.( skill ) || 0, q = qualityFor( inv, def, stack );
 	const tools = ( def.dismantleTools || [] ).map( ( k ) => toolFor( inv, k, stack ) ).filter( Boolean );
@@ -87,41 +84,6 @@ export function dismantle( g, stack, def ) {
 }
 
 // ---- cells ------------------------------------------------------------------------------------------------------------------
-
-// the emptiest device you carry that takes a cell size
-function lowestFor( inv, cell ) {
-	const list = inv.findAll( ( s, d ) => L.cellOf( d ) === cell && L.fracOf( s, d ) < 0.95 );
-	list.sort( ( a, b ) => L.fracOf( a ) - L.fracOf( b ) );
-	return list[ 0 ] || null;
-}
-
-// The core's AA verbs (ItemUse: "Replace batteries", a loose AA's "Insert into X") offer AA cells to every battery
-// device, though a D or 9 V device takes none and a phone, power bank, drone or sat phone only charges (combos.js
-// already reads tool.cell). Until ItemUse reads it too, keep those verbs to AA devices: the menu entry is left out,
-// "Insert into" picks the emptiest AA device, and a stray call is refused. Applied once, on the class.
-export function guardCells( IU ) {
-	const P = IU?.prototype;
-	if ( ! P || P._techCells || typeof P._toolActions !== 'function' ) return false;
-	P._techCells = true;
-	const tools = P._toolActions, lowest = P.lowestDevice, replace = P.replaceBatteries;
-	P._toolActions = function ( stack, d, add ) {
-		const aa = L.cellOf( d ) === 'aa';
-		return tools.call( this, stack, d, ( verb, run, notes ) => { if ( verb !== 'Replace batteries' || aa ) add( verb, run, notes ); } );
-	};
-	if ( typeof lowest === 'function' ) P.lowestDevice = function ( rechargeableOnly = false ) {
-		if ( rechargeableOnly ) return lowest.call( this, true );
-		const list = this.inv.findAll( ( s, d ) => L.cellOf( d ) === 'aa' && L.fracOf( s, d ) < 0.95 );
-		list.sort( ( a, b ) => L.fracOf( a ) - L.fracOf( b ) );
-		return list[ 0 ] || null;
-	};
-	if ( typeof replace === 'function' ) P.replaceBatteries = function ( dev ) {
-		const c = L.cellOf( getItem( dev?.id ) );
-		if ( c !== 'aa' ) { this.game.toast( L.CELL_NAME[ c ] ? `Takes ${L.CELL_NAME[ c ]} batteries` : 'Charge it instead', 'warn' ); return; }
-		return replace.call( this, dev );
-	};
-	return true;
-}
-guardCells( ItemUse );
 
 // a fresh cell into a device: full charge, one cell gone
 export function insertCell( g, cellStack, dev ) {
@@ -461,18 +423,15 @@ addUseActions( ( stack, def, ctx ) => {
 	// the junk economy: anything with a parts list comes apart
 	if ( def.dismantle?.length ) {
 		const miss = missingTool( inv, def.dismantleTools, stack );
-		add( 'Dismantle', () => dismantle( g, stack, def ), [ miss ? `need ${TOOL_NAME[ miss ]?.replace( /^an? /, '' ) || miss}` : null ] );
+		add( 'Dismantle', () => dismantle( g, stack, def ), [ miss ? `need ${toolWord( miss )}` : null ] );
 	}
 
-	// cells: a loose D or 9 V into the emptiest device that takes it; fresh ones into a device; the old ones out
+	// cells: fresh ones into a D or 9 V device (a loose cell into a device of your choice is the Combine list's
+	// tech_insert_d / tech_insert_9v, which this verb stands for on the device); the old ones out
 	const cell = L.cellOf( def );
-	if ( t.kind === 'cell' ) {
-		const dev = lowestFor( inv, t.cell );
-		if ( dev ) add( `Insert into ${getItem( dev.id ).name}`, () => insertCell( g, stack, dev ) );
-	}
 	if ( ( cell === 'd' || cell === '9v' ) && L.fracOf( stack, def ) < 0.95 ) {
 		const fresh = inv.find( ( s ) => s.id === L.CELL_ITEM[ cell ] );
-		if ( fresh ) add( `Insert ${L.CELL_NAME[ cell ]} battery`, () => insertCell( g, fresh, stack ) );
+		if ( fresh ) add( `Insert ${L.CELL_NAME[ cell ]} battery`, () => insertCell( g, fresh, stack ), null, [ cell === 'd' ? 'tech_insert_d' : 'tech_insert_9v' ] );
 	}
 	if ( L.cellsOut( def ) && L.fracOf( stack, def ) >= L.CELL_BACK && ! stack.data.on && getItem( L.CELL_ITEM[ cell ] ) ) {
 		add( 'Remove batteries', () => timed( U, 'Removing batteries', 2, 'click', () => {
@@ -522,7 +481,7 @@ addUseActions( ( stack, def, ctx ) => {
 					stack.data.charge = Math.max( 0, L.chargeOf( stack, def ) - used );
 					g.toast( chargeLabel( dev ), 'good' );
 				} );
-			}, [ `${Math.round( L.fracOf( stack, def ) * 100 )}%` ] );
+			}, [ `${Math.round( L.fracOf( stack, def ) * 100 )}%` ], [ { id: 'tech_bank_charge', other: dev } ] );
 			break;
 		}
 		case 'crank': {
@@ -534,7 +493,7 @@ addUseActions( ( stack, def, ctx ) => {
 				U.wear( stack, 0.003 );
 				g.skills?.xp?.( 'electrical', 1 );
 				g.toast( chargeLabel( dev ), 'good' );
-			} ), [ getItem( dev.id ).name ] );
+			} ), [ getItem( dev.id ).name ], [ { id: 'tech_crank_charge', other: dev } ] );
 			break;
 		}
 		case 'inverter': {

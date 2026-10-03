@@ -224,7 +224,8 @@ addUseActions( ( stack, def, ctx ) => {
 	if ( def.ride ) ctx.first( RIDE[ def.ride ].verb, () => ride( g, stack, def ) );
 
 	// vices
-	if ( def.smoke ) ctx.first( 'Smoke', () => smoke( g, stack, def ), [ t?.uses ? `${U.usesLeft( stack )}/${t.uses}` : null ] );
+	// (a lighter dragged onto it is the same smoke: leis_light_up, left out of its Combine list)
+	if ( def.smoke ) ctx.first( 'Smoke', () => smoke( g, stack, def ), [ t?.uses ? `${U.usesLeft( stack )}/${t.uses}` : null ], [ 'leis_light_up' ] );
 	if ( t?.kind === 'vape' ) ctx.first( 'Vape', () => vape( g, stack ), [ `${vapeJuice( stack )}/${VAPE_TANK}` ] );
 	if ( t?.kind === 'chew' ) ctx.first( 'Chew', () => chew( g, stack ), [ `${U.usesLeft( stack )}/${t.uses}` ] );
 	if ( def.unbox ) ctx.first( 'Open', () => U.timed( 'Opening', 2, 'unwrap', () => {

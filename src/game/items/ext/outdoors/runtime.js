@@ -9,8 +9,10 @@
 //   unlitFire( g, r )                 the nearest campfire within r that has fuel but no flame
 //   attach( g )                       once per game: the outdoors system (game.register) — mosquitoes at dusk, the
 //                                     emergency blanket's warmth, a lean-to keeping the rain off, bites after a night
-//                                     out unprotected. The domain has no module of its own, so the first spoil tick
-//                                     (hooks.js) hands us the game; its state is saved in save.world.outdoors.
+//                                     out unprotected. The domain has no module of its own: hooks.js addSystem
+//                                     hands us the game when the items module starts (before the save is loaded);
+//                                     its state is saved in save.world.outdoors. addProtection( fn ) on it: another
+//                                     domain's say that nothing bites you now (a net over the face)
 //   state( g )                        that system's state: { sprayUntil, wrapUntil, harvested: Map, signalAt, … }
 import { getItem } from '../../ItemDB.js';
 import { provides } from '../../util.js';
@@ -147,12 +149,18 @@ export class OutdoorsSystem {
 			harvested: new Map( Object.entries( o.harvested || {} ) ), deerAt: - 99,
 		};
 		this.level = 0;
+		this.guards = [];
 	}
+
+	// another domain's protection: fn() -> true while nothing can bite you (a net over the face: the gear domain).
+	// Counts by day and through the night
+	addProtection( fn ) { if ( typeof fn === 'function' && ! this.guards.includes( fn ) ) this.guards.push( fn ); }
+	_guarded() { for ( const fn of this.guards ) { try { if ( fn() ) return true; } catch ( e ) { console.error( 'outdoors guard', e ); } } return false; }
 
 	// what keeps them off you right now
 	protectedNow( pos ) {
 		const g = this.game, h = g.time.hours;
-		return this.st.sprayUntil > h || smokeNear( g, pos );
+		return this.st.sprayUntil > h || smokeNear( g, pos ) || this._guarded();
 	}
 
 	// mosquito level where you stand (0 when protected, indoors, in a car or in the water)
@@ -214,7 +222,7 @@ export class OutdoorsSystem {
 	_sleepLevel() {
 		const g = this.game, pl = g.player, p = pl.pos;
 		if ( g.mode === 'creative' || g.world?.isIndoors?.( p ) || pl.vehicle ) return 0;
-		if ( pl.inventory.count?.( 'mosquito_net' ) > 0 ) return 0;
+		if ( pl.inventory.count?.( 'mosquito_net' ) > 0 || this._guarded() ) return 0;
 		for ( const q of g.placeables?.near?.( p, 2.5 ) || [] ) if ( q.kind === 'shelter' && getItem( q.item )?.place?.shape === 'tent' ) return 0;
 		if ( smokeNear( g, p ) ) return 0;
 		const s = g.hf?.surfaceAt?.( p.x, p.z, _s4 ) || _s4;

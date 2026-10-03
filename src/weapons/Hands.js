@@ -903,7 +903,9 @@ export class Hands {
 
 	_swing( stack, def, heavy ) {
 		const g = this.game, m = def.melee;
-		if ( this.act || this.equip < 0.85 || g.player.swimming || g.actions.busy ) return;
+		if ( this.act || this.equip < 0.85 || g.actions.busy ) return;
+		// swimming: no swing, but a spear thrusts at the fish (the item's own "Spearfish" verb, outdoors domain)
+		if ( g.player.swimming ) { this._spearfish( stack ); return; }
 		if ( stack.cond <= 0 ) { g.toast( `${def.name} broken`, 'bad' ); return; }
 		const S = g.survival;
 		const cost = m.stamina * ( heavy ? 1.8 : 1 );
@@ -917,6 +919,11 @@ export class Hands {
 			[ 0.3, () => this._sfx( heavy || m.twoHanded ? 'swing_heavy' : 'swing', 0.6, 0.9 + rnd() * 0.2 ) ],
 			[ 0.44, () => this._meleeHit( stack, def, { damage: m.damage * ( heavy ? 1.6 : 1 ) * ( weak ? 0.55 : 1 ), reach: m.reach, cone: m.cone ?? ( m.twoHanded ? 0.75 : 0.55 ), kind: m.kind, heavy, stagger: m.stagger, shove: !! m.push, wear: m.wear * ( heavy ? 1.5 : 1 ), door: m.kind === 'axe' ? 1.6 : m.kind === 'blunt' ? 1 : 0.35 } ) ],
 		] );
+	}
+
+	_spearfish( stack ) {
+		const a = this.game.itemUse?.actions?.( stack )?.find( ( x ) => x.verb === 'Spearfish' );
+		if ( a ) a.run();
 	}
 
 	_quickMelee( held, def, kind ) {

@@ -2,9 +2,14 @@
 // quick-heal, and everything that follows — eating (portions, opening cans with the right tool, cracking coconuts,
 // cooking at a fire), drinking (cans, bottles, canteens of water / seawater / dirty water), medicine and kits,
 // lights with batteries, reading guides, repairing, ripping clothes into rags, flares and chemlights, sleeping.
-//   actions( stack ) -> [ { verb, note, label, run } ]   (the first is the double-click default)
+//   actions( stack ) -> [ { verb, note, label, run, combos } ]   (the first is the double-click default)
 //     verb: the plain menu verb ('Eat'); note: its short state or null ('2/3', 'Rotten', '2/3 · Rotten');
-//     label: verb and note in brackets ('Eat (2/3) (rotten)'), the form the inventory screen parses today
+//     label: verb and note in brackets ('Eat (2/3) (rotten)'), the form the inventory screen parses today;
+//     combos: the item-on-item mixes (combos.js) this verb already does, which the inventory's Combine list leaves out
+//     for this stack so a menu never offers the same thing twice: an id (every partner: a can's Open and "Open Can"),
+//     or { id, other } (that partner only: a power bank's "Charge Smartphone", the other devices still listed)
+//   Mixes with a second item the verb doesn't pick for you (a sewing kit onto a shirt, an AA into a flashlight) are
+//   offered only through Combine, where you choose the other item.
 //   use( stack )                             runs the default action
 //   fillFrom( kind, stack? )                 'sea' | 'tap' | 'rain' (| 'dirty'): fills a water container
 //   toggleLight( stack? )                    the flashlight key when no hands module handles it
@@ -26,7 +31,7 @@ import { POT_COOKED } from './recipes.js';
 import { playItemSound, ensureItemSound } from './sounds.js';
 import { liquidName, worstLiquid, provides, fmtHour, cardinal } from './util.js';
 import { USE_PROVIDERS, EAT_HOOKS, MED_HOOKS, spoilRate } from './hooks.js';
-import { SKILLS } from '../Skills.js';
+import { SKILLS, SKILL_NAMES } from '../Skills.js';
 
 // progress labels for medical verbs
 const GERUND = {
@@ -34,7 +39,8 @@ const GERUND = {
 	'Disinfect': 'Disinfecting', 'Clean wounds': 'Cleaning wounds', 'Inject': 'Injecting', 'Apply': 'Applying', 'Splint leg': 'Splinting',
 	'Start IV': 'Running IV', 'Transfuse': 'Transfusing', 'Purify water': 'Purifying', 'Take': 'Taking',
 };
-const SKILL_NAME = { fishing: 'fishing', survival: 'survival', foraging: 'foraging', first_aid: 'first aid' };
+// what a guide teaches, for the "Learned: …" toast: every skill, and the songbook's songs
+const SKILL_NAME = { ...Object.fromEntries( SKILLS.map( ( k ) => [ k, SKILL_NAMES[ k ].toLowerCase() ] ) ), songs: 'songs' };
 // a mood lift for things you play with that have no `fun` of their own
 const PLAY_FUN = { ukulele: { boredom: - 20, unhappy: - 8, stress: - 5 }, rubber_duck: { boredom: - 3, unhappy: - 1 } };
 // real seconds per game hour of reading (a 2 h book takes 24 s; game time runs fast while you read)
@@ -45,6 +51,12 @@ const MOOD_KEYS = [ 'boredom', 'stress', 'unhappy', 'panic' ];
 const NO_OPTS = {};
 const _fun = { boredom: 0, stress: 0, unhappy: 0, panic: 0 };
 const LIT = ( s, d ) => !! d?.tool?.light && !! s.data?.on;
+// a battery device's cells: 'aa' (loose AA batteries, the default), 'd' or '9v', or built in and only charged
+// ('usb', 'pack'; a phone). Chemlights and torches burn instead (combos.js and ext/tech/logic.js read it the same way)
+const NO_CELLS = new Set( [ 'chemlight', 'torch' ] );
+const cellOf = ( d ) => d?.tool?.battery && ! NO_CELLS.has( d.tool.kind ) ? d.tool.cell ?? ( d.tool.kind === 'phone' ? 'usb' : 'aa' ) : null;
+const CELL_NAME = { d: 'D', '9v': '9 V' };
+const FLARE_LIGHT = { color: 0xff3a2a, intensity: 6, range: 14 };
 const NONE = [];
 
 // clothes that do not rip into rags (synthetics, armour, rubber)
@@ -85,12 +97,13 @@ export class ItemUse {
 		const A = [];
 		// verb + optional state notes ('3/3', 'rotten'): kept apart, and joined in brackets into `label` for the
 		// inventory screen, which splits them back out of the label
-		const entry = ( verb, run, notes ) => {
+		// combos: the mixes this verb stands for (left out of the stack's Combine list)
+		const entry = ( verb, run, notes, combos ) => {
 			const n = ( notes || [] ).filter( Boolean );
-			return { verb, note: n.length ? n.map( x => x[ 0 ].toUpperCase() + x.slice( 1 ) ).join( ' · ' ) : null, label: verb + n.map( x => ` (${x})` ).join( '' ), run };
+			return { verb, note: n.length ? n.map( x => x[ 0 ].toUpperCase() + x.slice( 1 ) ).join( ' · ' ) : null, label: verb + n.map( x => ` (${x})` ).join( '' ), run, combos: combos || null };
 		};
-		const add = ( verb, run, notes = null ) => A.push( entry( verb, run, notes ) );
-		const first = ( verb, run, notes = null ) => A.unshift( entry( verb, run, notes ) );
+		const add = ( verb, run, notes = null, combos = null ) => A.push( entry( verb, run, notes, combos ) );
+		const first = ( verb, run, notes = null, combos = null ) => A.unshift( entry( verb, run, notes, combos ) );
 		const g = this.game, inv = this.inv;
 		const nearFire = !! g.nearFire?.( g.player.pos );
 
@@ -98,8 +111,8 @@ export class ItemUse {
 		if ( d.food ) {
 			const f = d.food;
 			if ( d.unpack ) add( 'Unpack', () => this.unpack( stack ) );
-			if ( d.opensTo ) add( 'Crack open', () => this.crack( stack ) );
-			else if ( f.opener && ! stack.data.open ) add( f.opener === 'cut' ? 'Cut open' : 'Open', () => this.openFood( stack ) );
+			if ( d.opensTo ) add( 'Crack open', () => this.crack( stack ), null, [ 'crack_coconut' ] );
+			else if ( f.opener && ! stack.data.open ) add( f.opener === 'cut' ? 'Cut open' : 'Open', () => this.openFood( stack ), null, [ 'open_can', 'bash_can', 'cut_open' ] );
 			else {
 				const left = stack.data.left ?? f.portions;
 				add( f.raw ? 'Eat raw' : 'Eat', () => this.eat( stack ), [ f.portions > 1 ? `${left}/${f.portions}` : null, f.spoil && freshness( stack ) <= 0 ? 'rotten' : null ] );
@@ -122,11 +135,14 @@ export class ItemUse {
 		// ---- medicine (and rags) ----
 		if ( d.medical ) {
 			const m = d.medical;
+			// (purifying stands for the purify_water mix with the container it picks)
+			const dirty = m.purify ? this.inv.find( ( s, dd ) => dd?.tool?.liquid && s.data.liquid === 'dirty' && s.data.amount > 0.01 ) : null;
+			const pur = dirty ? [ { id: 'purify_water', other: dirty } ] : null;
 			if ( d.unpack ) add( 'Unpack', () => this.unpack( stack ) );
-			else if ( m.purify && ! m.infection && ! m.bleed ) add( 'Purify water', () => this.purify( stack ) );
+			else if ( m.purify && ! m.infection && ! m.bleed ) add( 'Purify water', () => this.purify( stack ), null, pur );
 			else {
 				add( m.verb || 'Use', () => this.medicate( stack ) );
-				if ( m.purify ) add( 'Purify water', () => this.purify( stack ) );
+				if ( m.purify ) add( 'Purify water', () => this.purify( stack ), null, pur );
 			}
 		}
 
@@ -134,7 +150,7 @@ export class ItemUse {
 		if ( d.tool?.liquid ) {
 			const L = stack.data.amount || 0, liq = stack.data.liquid;
 			if ( L > 0.01 && liq && liq !== 'fuel' ) add( `Drink ${liquidName( liq )}`, () => this.drinkFrom( stack ) );
-			if ( L > 0.01 && liq === 'dirty' && this.purifier() ) add( 'Purify', () => this.purify( this.purifier(), stack ) );
+			if ( L > 0.01 && liq === 'dirty' && this.purifier() ) add( 'Purify', () => this.purify( this.purifier(), stack ), null, [ 'purify_water' ] );
 			if ( L < d.tool.liquid - 0.01 && this.canCollectRain() ) add( 'Collect rain', () => this.fillFrom( 'rain', stack ) );
 			if ( L > 0.01 ) add( 'Empty', () => this.emptyContainer( stack ) );
 		}
@@ -156,9 +172,9 @@ export class ItemUse {
 
 		// ---- clothing ----
 		if ( d.cat === 'clothing' || d.cat === 'backpack' ) {
-			if ( stack.cond < 0.95 && this.findKind( 'sewing' ) ) add( 'Repair', () => this.repair( this.findKind( 'sewing' ), stack ) );
-			else if ( stack.cond < 0.8 && this.findKind( 'tape' ) ) add( 'Patch', () => this.repair( this.findKind( 'tape' ), stack ) );
-			if ( this.rippable( d ) ) add( 'Rip into rags', () => this.rip( stack ) );
+			if ( stack.cond < 0.95 && this.findKind( 'sewing' ) ) add( 'Repair', () => this.repair( this.findKind( 'sewing' ), stack ), null, [ 'sew_clothing' ] );
+			else if ( stack.cond < 0.8 && this.findKind( 'tape' ) ) add( 'Patch', () => this.repair( this.findKind( 'tape' ), stack ), null, [ 'tape_clothing' ] );
+			if ( this.rippable( d ) ) add( 'Rip into rags', () => this.rip( stack ), null, [ 'cut_rags' ] );
 		}
 
 		// ---- a fire nearby burns it ----
@@ -188,16 +204,14 @@ export class ItemUse {
 				if ( stack.data.on ) add( 'Drop', () => this.dropLit( stack ) );
 				else { add( 'Snap', () => this.snapChemlight( stack, false ) ); add( 'Snap and drop', () => this.snapChemlight( stack, true ) ); }
 			} else if ( t.kind === 'torch' ) {
-				add( stack.data.on ? 'Put out' : 'Light', () => this.toggleLight( stack ) );
+				add( stack.data.on ? 'Put out' : 'Light', () => this.toggleLight( stack ), null, [ 'light_torch' ] );
 			} else add( stack.data.on ? 'Turn off' : 'Turn on', () => this.toggleLight( stack ) );
 		}
-		if ( t.battery && ! [ 'chemlight', 'torch' ].includes( t.kind ) && ( stack.data.charge ?? 0 ) < t.battery * 0.95 && inv.count( 'batteries' ) > 0 ) add( 'Replace batteries', () => this.replaceBatteries( stack ) );
+		// fresh AAs (D, 9 V and charged devices: the tech domain's verbs and combos)
+		if ( cellOf( d ) === 'aa' && ( stack.data.charge ?? 0 ) < t.battery * 0.95 && inv.count( 'batteries' ) > 0 ) add( 'Replace batteries', () => this.replaceBatteries( stack ), null, [ 'insert_batteries' ] );
+		// (a loose AA into a device, a solar charger, a sewing kit, tape, a cleaning kit, a can opener and a lighter on
+		// something else: the Combine list, which lets you pick what)
 		switch ( t.kind ) {
-			case 'battery': {
-				const dev = this.lowestDevice();
-				if ( dev ) add( `Insert into ${getItem( dev.id ).name}`, () => this.replaceBatteries( dev ) );
-				break;
-			}
 			case 'map': add( 'Open map', () => { g.app?.ui?.closeScreen?.(); g.app?.ui?.map?.open?.(); } ); break;
 			case 'compass': add( 'Check heading', () => { const deg = ( ( - g.player.yaw * 180 / Math.PI ) % 360 + 360 ) % 360; g.toast( `Heading ${Math.round( deg )}° ${cardinal( deg )}`, 'info' ); } ); break;
 			case 'watch': add( 'Check time', () => g.toast( `${fmtHour( g.hour )}, day ${g.day}`, 'info' ) ); break;
@@ -212,12 +226,6 @@ export class ItemUse {
 			case 'whistle': add( 'Blow', () => this.noiseMaker( 'whistle', 110 ) ); break;
 			case 'stove': add( 'Place', () => this.placeStove( stack ) ); break;
 			case 'campfire': add( 'Place', () => this.placeCampfire( stack ) ); break;
-			case 'sewing': { const tg = this.mostDamaged( ( s, dd ) => dd.cat === 'clothing' || dd.cat === 'backpack', 0.95 ); if ( tg ) add( `Repair ${getItem( tg.id ).name}`, () => this.repair( stack, tg ) ); break; }
-			case 'tape': { const tg = this.mostDamaged( ( s, dd ) => dd.cat !== 'firearm' && dd.cat !== 'food', 0.8 ); if ( tg ) add( `Patch ${getItem( tg.id ).name}`, () => this.repair( stack, tg ) ); break; }
-			case 'cleaning': { const tg = this.mostDamaged( ( s, dd ) => dd.cat === 'firearm', 0.98 ); if ( tg ) add( `Clean ${getItem( tg.id ).name}`, () => this.repair( stack, tg ) ); break; }
-			case 'canopener': { const c = inv.find( ( s, dd ) => dd?.food?.opener === true && ! s.data.open ); if ( c ) add( `Open ${getItem( c.id ).name}`, () => this.openFood( c ) ); break; }
-			case 'solar': { const dev = this.lowestDevice( true ); if ( dev ) add( `Charge ${getItem( dev.id ).name}`, () => this.solarCharge( dev ) ); break; }
-			case 'lighter': case 'matches': { const tch = inv.find( ( s, dd ) => dd?.tool?.kind === 'torch' && ! s.data.on ); if ( tch ) add( 'Light torch', () => this.toggleLight( tch ) ); break; }
 		}
 	}
 
@@ -435,10 +443,11 @@ export class ItemUse {
 		} );
 	}
 
+	// a coconut: a blade, an axe or a stone cracks it (as the crack_coconut mix, which this verb stands for)
 	crack( stack ) {
 		const d = getItem( stack.id );
-		const b = this.blade();
-		if ( ! b ) { this.game.toast( 'Need a blade', 'warn' ); return; }
+		const b = this.blade() || this.findKind( 'chop' ) || this.inv.find( ( s ) => s.id === 'stone' );
+		if ( ! b ) { this.game.toast( 'Need a blade or stone', 'warn' ); return; }
 		this.timed( `Opening ${d.name}`, 3.5, 'hit_wood', () => {
 			if ( ! this.exists( stack ) ) return;
 			this.transform( stack, d.opensTo, { age: 0 } );
@@ -684,6 +693,8 @@ export class ItemUse {
 
 	replaceBatteries( dev ) {
 		const g = this.game, d = getItem( dev.id );
+		const cell = cellOf( d );
+		if ( cell !== 'aa' ) { g.toast( CELL_NAME[ cell ] ? `Takes ${CELL_NAME[ cell ]} batteries` : 'Charge it instead', 'warn' ); return; }
 		const bat = this.inv.find( ( s ) => s.id === 'batteries' );
 		if ( ! bat ) { g.toast( 'No batteries', 'warn' ); return; }
 		this.timed( 'Replacing batteries', 3, 'click', () => {
@@ -694,8 +705,9 @@ export class ItemUse {
 		} );
 	}
 
+	// the emptiest AA device you carry (rechargeableOnly: the emptiest a solar charger fills, whatever its cells)
 	lowestDevice( rechargeableOnly = false ) {
-		const list = this.inv.findAll( ( s, d ) => d?.tool?.battery && ! [ 'chemlight', 'torch' ].includes( d.tool.kind ) && ( ! rechargeableOnly || d.tool.rechargeable ) && ( s.data.charge ?? 0 ) < d.tool.battery * 0.95 );
+		const list = this.inv.findAll( ( s, d ) => !! cellOf( d ) && ( rechargeableOnly ? !! d.tool.rechargeable : cellOf( d ) === 'aa' ) && ( s.data.charge ?? 0 ) < d.tool.battery * 0.95 );
 		list.sort( ( a, b ) => ( a.data.charge ?? 0 ) / getItem( a.id ).tool.battery - ( b.data.charge ?? 0 ) / getItem( b.id ).tool.battery );
 		return list[ 0 ] || null;
 	}
@@ -737,13 +749,18 @@ export class ItemUse {
 			this.consumeOne( stack );
 			const eye = new THREE.Vector3( p.pos.x, p.eye - 0.2, p.pos.z );
 			const dir = p.lookDir( new THREE.Vector3() );
-			const f = {
-				pos: eye.clone().addScaledVector( dir, 0.4 ), vel: thrown ? dir.clone().multiplyScalar( 11 ).add( new THREE.Vector3( 0, 3, 0 ) ) : new THREE.Vector3( dir.x, 0.5, dir.z ).multiplyScalar( 1.5 ),
-				burn: d.throwable.burn || 420, flying: true, noiseT: 0, light: d.throwable.light, sprite: null, snd: null, src: null,
-			};
-			this.flares.push( f );
-			this._flareVisual( f );
+			this.addFlare( eye.addScaledVector( dir, 0.4 ), thrown ? dir.clone().multiplyScalar( 11 ).add( new THREE.Vector3( 0, 3, 0 ) ) : new THREE.Vector3( dir.x, 0.5, dir.z ).multiplyScalar( 1.5 ), d );
 		} );
+	}
+
+	// a lit road flare flying from pos at vel (copied): it lands, burns red for def.throwable.burn seconds with a hiss,
+	// and its noise draws the infected. Also the arms domain's quick-thrown flare
+	addFlare( pos, vel, def ) {
+		const T = def?.throwable || {};
+		const f = { pos: pos.clone(), vel: vel.clone(), burn: T.burn || 420, flying: true, noiseT: 0, light: T.light || FLARE_LIGHT, sprite: null, snd: null, src: null };
+		this.flares.push( f );
+		this._flareVisual( f );
+		return f;
 	}
 
 	_glowTexture() {

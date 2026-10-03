@@ -5,7 +5,7 @@
 import { addPlaceable } from './registry.js';
 import { getItem } from '../ItemDB.js';
 import { burnDown } from './logic.js';
-import { glowSprite, flame, itemModel } from './fx.js';
+import { glowSprite, flame, itemModel, placedDef } from './fx.js';
 import * as THREE from 'three';
 
 // what a placed light is: its light, how it burns, where the flame sits
@@ -34,7 +34,7 @@ addPlaceable( 'light', {
 
 	model( p ) {
 		const S = lightSpec( p ), g = new THREE.Group();
-		const m = itemModel( getItem( p.item ) );
+		const m = itemModel( placedDef( p ) );
 		let top = 0.1;
 		if ( S.upright ) {
 			// planted: the item's long axis (+x) stands up, a hand's width in the ground
