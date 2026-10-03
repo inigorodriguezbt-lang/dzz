@@ -14,6 +14,8 @@ import { mergeGeometries, toCreasedNormals } from 'three/examples/jsm/utils/Buff
 import { registerModelBuilder } from '../render/ItemModels.js';
 import { patchMaterial } from '../render/Materials.js';
 import { getItem } from '../game/items/ItemDB.js';
+// the arms items' melee weapons, gun fittings and thrown things, drawn with this file's toolkit (looked up by kind)
+import { ARMS_MAT, ARMS_MELEE, ARMS_ATTACH, ARMS_THROW } from '../game/items/ext/arms/parts.js';
 
 const PI = Math.PI;
 const V3 = ( x = 0, y = 0, z = 0 ) => new THREE.Vector3( x, y, z );
@@ -67,6 +69,7 @@ const MAT = {
 	fiber: { color: 0x331100, emissive: 0xff5a20, emissiveIntensity: 1.2, metalness: 0, roughness: 0.3 },
 	rag: { color: 0xb8a58a, metalness: 0.0, roughness: 0.95 },
 	fuel: { color: 0x9a6a20, metalness: 0.0, roughness: 0.1, transparent: true, opacity: 0.8 },
+	...ARMS_MAT,
 };
 
 let TEX = null;
@@ -2011,6 +2014,7 @@ export function attachmentParts( def ) {
 	const P = new Parts();
 	const k = def.model?.kind;
 	let info = { axisH: 0.03, rearX: - 0.02, lensR: 0.012, eyeRelief: 0.16 };
+	if ( ARMS_ATTACH[ k ] ) return { P, info: ARMS_ATTACH[ k ]( P, ARMS_H ) };
 	if ( k === 'reddot' ) {
 		railClamp( P, - 0.02, 0.02, 0.012 );
 		P.box( 'alu', - 0.018, 0.018, 0.01, 0.018, - 0.01, 0.01, 0.002 );
@@ -2120,6 +2124,8 @@ registerModelBuilder( 'attachment', ( spec, def ) => {
 // info: grip (x of the main hand), grip2 (x of the second hand, two-handed), len, tip (x)
 
 function handle( P, mat, x0, x1, r0, r1 = r0, seg = 10 ) { P.cyl( mat, x0, x1, r0, 0, 0, seg, r1 ); }
+// what the arms parts (game/items/ext/arms/parts.js) get to draw with
+const ARMS_H = { THREE, V3, shape, handle, PI };
 
 function knifeBlade( P, mat, x0, len, h, spineDrop = 0.004, clip = 0 ) {
 	const pts = [ [ x0, - 0.004 ], [ x0 + len * 0.7, - 0.004 - spineDrop * 0.3 ], clip ? [ x0 + len * 0.82, - 0.001 ] : [ x0 + len * 0.85, - 0.003 ], [ x0 + len, h * 0.08, 0.004 ], [ x0 + len * 0.8, h * 0.72, 0.03 ], [ x0 + len * 0.3, h, 0.02 ], [ x0, h * 0.95 ] ];
@@ -2130,6 +2136,7 @@ export function meleeParts( def ) {
 	const P = new Parts();
 	const k = def.model?.kind || def.id;
 	let info = { grip: 0.05, len: 0.3 };
+	if ( ARMS_MELEE[ k ] ) return { P, info: ARMS_MELEE[ k ]( P, ARMS_H ) };
 	switch ( k ) {
 		case 'kitchen_knife':
 			handle( P, 'poly', 0.0, 0.11, 0.011, 0.012 ); P.box( 'poly', 0.0, 0.11, - 0.012, 0.012, - 0.008, 0.008, 0.006 );
@@ -2302,6 +2309,7 @@ registerModelBuilder( 'melee', ( spec, def ) => layDown( instantiate( meleeData(
 export function throwableParts( def ) {
 	const P = new Parts();
 	const k = def.model?.kind;
+	if ( ARMS_THROW[ k ] ) { ARMS_THROW[ k ]( P, ARMS_H ); return { P }; }
 	if ( k === 'frag' ) {
 		P.sphere( 'od', 0, 0, 0, 0.032, 16, [ 1, 1.08, 1 ] );
 		P.cylY( 'od', 0, 0.028, 0.045, 0.012, 0, 10 );
@@ -2344,7 +2352,8 @@ export function throwableData( def ) {
 export function buildThrowableView( def, mode = 'view' ) { return instantiate( throwableData( def ).baked, weaponMaterials( mode ), false ); }
 registerModelBuilder( 'throwable', ( spec, def ) => {
 	const inner = instantiate( throwableData( def ).baked, weaponMaterials(), true );
-	return layDown( inner, spec.kind === 'molotov' ? PI / 2 : 0 );
+	// spec.lay: how a long thrown thing lies (a knife, a string of firecrackers: on its side)
+	return layDown( inner, spec.lay ?? ( spec.kind === 'molotov' ? PI / 2 : 0 ) );
 } );
 
 // ---- ammunition boxes -----------------------------------------------------------------------------------------------------

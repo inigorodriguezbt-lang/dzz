@@ -90,11 +90,22 @@ export function attachmentFits( gunDef, attDef ) {
 	const f = gunDef?.firearm, a = attDef?.attachment;
 	if ( ! f || ! a ) return { ok: false, reason: 'Not an attachment' };
 	const slot = a.slot;
-	if ( ! ( f.rails || [] ).includes( slot ) ) return { ok: false, slot, reason: slot === 'optic' ? 'No optic rail' : slot === 'muzzle' ? 'No threaded muzzle' : 'No light rail' };
+	// rail-free fittings (a sling, a stock wrap, a bayonet, a light taped on): `free` is true or the classes that take
+	// one without a rail; `fits` still says which classes take it at all
+	const free = a.free === true || ( Array.isArray( a.free ) && a.free.includes( f.cls ) );
+	if ( ! free && ! ( f.rails || [] ).includes( slot ) ) return { ok: false, slot, reason: slot === 'optic' ? 'No optic rail' : slot === 'muzzle' ? 'No threaded muzzle' : 'No light rail' };
 	if ( slot === 'muzzle' && ! ( f.muzzles || [] ).includes( attDef.id ) ) return { ok: false, slot, reason: 'Does not fit' };
 	const fits = a.fits || [];
 	if ( fits.length && ! fits.includes( f.cls ) && ! fits.includes( gunDef.id ) ) return { ok: false, slot, reason: 'Does not fit' };
 	return { ok: true, slot };
+}
+
+// what the gun's fittings do to one of its handling numbers (attachment.mods: raise, sway, recoil): a product, 1 bare
+export function attMod( gun, key ) {
+	let k = 1;
+	const att = gun?.data?.att;
+	if ( att ) for ( const s in att ) { const a = att[ s ]; if ( a && a.cond > 0 ) k *= getItem( a.id )?.attachment?.mods?.[ key ] ?? 1; }
+	return k;
 }
 
 // load up to n rounds from an ammo stack into a magazine; returns the number moved

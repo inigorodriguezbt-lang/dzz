@@ -1,10 +1,15 @@
 // Thrown things in flight and after they land: frag grenades (cookable fuse, bounce, blast), smoke grenades
 // (a screen that blocks sight), flashbangs (blind, deafen, stun) and molotovs (shatter into a burning pool).
 //   throwables.launch( def, { origin, vel, cooked, source } )
+// Other kinds (the arms items: firecrackers, throwing knives, slingshot shot, a thrown alarm clock) come from
+// THROW_KINDS[ kind ]: { mesh( def ), launch( o, sys, opts ), hit( o, h, sys ) -> true when handled, rest( o, sys ),
+// update( o, dt, sys ), detonate( o, sys ) }; o.keep holds a finished one in the list (a string still popping).
 import * as THREE from 'three';
 import { buildThrowableView } from './GunModels.js';
 import { hitEntity } from './Ballistics.js';
 import { setDynamic } from '../render/post/Motion.js';
+import { THROW_KINDS } from '../game/items/ext/arms/throw.js';
+import { getItem } from '../game/items/ItemDB.js';
 
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _d = new THREE.Vector3();
 const rnd = Math.random;
@@ -15,12 +20,13 @@ export class Throwables {
 		this.list = [];
 		this.zones = []; // burning molotov pools
 		this.flashT = 0;
+		this.hitEntity = hitEntity; // for the kinds in THROW_KINDS
 	}
 
 	// def: the throwable item def; o: { origin, vel, cooked (s of fuse already burnt), source, lit }
 	launch( def, o ) {
-		const t = def.throwable;
-		const mesh = buildThrowableView( def, 'world' );
+		const t = def.throwable, X = THROW_KINDS[ t.kind ];
+		const mesh = X?.mesh?.( def ) || buildThrowableView( def, 'world' );
 		mesh.traverse( m => { if ( m.isMesh ) { m.castShadow = true; } } );
 		mesh.position.copy( o.origin );
 		this.game.scene.add( setDynamic( mesh ) ); // (motion vectors for the TAA)
@@ -29,6 +35,7 @@ export class Throwables {
 			fuse: Math.max( 0.05, ( t.fuse || 0 ) - ( o.cooked || 0 ) ), armed: t.kind !== 'molotov', rest: false, t: 0, source: o.source ?? null, done: false, bounces: 0, unlit: !! o.unlit,
 		};
 		this.list.push( obj );
+		X?.launch?.( obj, this, o );
 		return obj;
 	}
 
@@ -37,7 +44,9 @@ export class Throwables {
 		for ( let k = this.list.length - 1; k >= 0; k -- ) {
 			const o = this.list[ k ];
 			o.t += dt;
-			if ( ! o.rest ) this._move( o, dt );
+			const X = THROW_KINDS[ o.kind ];
+			if ( ! o.rest ) this._move( o, dt, X );
+			X?.update?.( o, dt, this );
 			// molotov rag trails flame and smoke in flight
 			if ( o.kind === 'molotov' && ! o.done && ! o.unlit && g.fx ) {
 				const top = _v.set( 0, 0.12, 0 ).applyQuaternion( o.mesh.quaternion ).add( o.pos );
@@ -45,7 +54,7 @@ export class Throwables {
 				g.fx.lightNow( top.clone(), _fireCol, 6, 8 );
 			}
 			if ( o.armed && o.t >= o.fuse && ! o.done ) this._detonate( o );
-			if ( o.done && ( o.kind !== 'smoke' || o.t > o.fuse + 32 ) ) {
+			if ( o.done && ! o.keep && ( o.kind !== 'smoke' || o.t > o.fuse + 32 ) ) {
 				o.mesh.parent?.remove( o.mesh );
 				this.list.splice( k, 1 );
 			}
@@ -59,7 +68,7 @@ export class Throwables {
 		}
 	}
 
-	_move( o, dt ) {
+	_move( o, dt, X = null ) {
 		const g = this.game;
 		const steps = Math.ceil( dt / 0.016 );
 		const h = dt / steps;
@@ -77,6 +86,7 @@ export class Throwables {
 			if ( ! hit ) { o.pos.addScaledVector( _d, L ); continue; }
 			const p = hit.point || o.pos.clone().addScaledVector( _d, hit.t );
 			if ( o.kind === 'molotov' && ! o.done ) { this._shatter( o, p, hit.kind === 'water' ); return; }
+			if ( X?.hit && X.hit( o, { point: p, hit, ent, zone: ent ? eh.zone || 'torso' : null, dir: _d.clone() }, this ) ) return;
 			if ( hit.kind === 'water' ) {
 				g.fx?.splash( p, 0.4 );
 				g.audio?.play( 'plop', { pos: p, vol: 0.6 } );
@@ -101,12 +111,14 @@ export class Throwables {
 		}
 		o.mesh.position.copy( o.pos );
 		if ( ! o.rest ) o.mesh.rotation.set( o.mesh.rotation.x + o.spin.x * dt, o.mesh.rotation.y + o.spin.y * dt, o.mesh.rotation.z + o.spin.z * dt );
-		else if ( ! o.settled ) { o.settled = true; o.mesh.rotation.set( Math.PI / 2, rnd() * 6, 0 ); o.mesh.position.y += 0.02; }
+		else if ( ! o.settled ) { o.settled = true; o.mesh.rotation.set( Math.PI / 2, rnd() * 6, 0 ); o.mesh.position.y += 0.02; X?.rest?.( o, this ); }
 	}
 
 	_detonate( o ) {
 		const g = this.game, t = o.def.throwable;
 		o.done = true;
+		const X = THROW_KINDS[ o.kind ];
+		if ( X?.detonate ) { X.detonate( o, this ); return; }
 		const pos = o.pos.clone();
 		if ( o.kind === 'frag' ) {
 			if ( o.wet ) { g.fx?.splash( pos.clone().setY( g.physics.waterLevel( pos.x, pos.z ) ), 2.5 ); g.audio?.play( 'explosion', { pos, vol: 0.6, rate: 0.6, max: 800 } ); }
@@ -148,7 +160,11 @@ export class Throwables {
 		const look = P.lookDir( _v2 );
 		const to = _d.copy( pos ).sub( eye ).normalize();
 		const facing = Math.max( 0, look.dot( to ) );
-		const blind = los ? Math.min( 1, ( 1 - d / ( t.radius * 1.8 ) ) * ( 0.35 + facing * 0.9 ) * 1.4 ) : 0;
+		let blind = los ? Math.min( 1, ( 1 - d / ( t.radius * 1.8 ) ) * ( 0.35 + facing * 0.9 ) * 1.4 ) : 0;
+		// a dark lens over the eyes (clothing.shade: a welder's mask) cuts the white-out
+		const eq = P.inventory?.equip || {};
+		const shade = Math.max( 0, ...[ eq.eyes, eq.face, eq.head ].map( ( s ) => s && s.cond > 0 ? getItem( s.id )?.clothing?.shade || 0 : 0 ) );
+		blind *= 1 - shade;
 		this.flashT = Math.max( this.flashT, blind * 2.6 );
 		// deafened: the world goes quiet under a ring
 		const deaf = Math.max( 0, 1 - d / ( t.radius * 1.4 ) );

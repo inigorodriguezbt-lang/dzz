@@ -92,6 +92,8 @@ const MELEE_HOLD = {
 	one: { at: [ 0.18, - 0.12, - 0.42 ], x: [ - 0.3, 0.45, - 0.85 ], y: [ 1, 0.25, 0.2 ] },
 	two: { at: [ 0.14, - 0.12, - 0.46 ], x: [ 0.45, 0.75, - 0.45 ], y: [ - 0.3, 0.1, - 1 ] },
 	spear: { at: [ 0.14, - 0.17, - 0.32 ], x: [ - 0.1, 0.15, - 1 ], y: [ 0, 1, 0 ] },
+	// a riot shield: the handle upright in the fist, the plate (item +z) square in front, a little left of centre
+	shield: { at: [ 0.06, - 0.2, - 0.36 ], x: [ 0.05, 1, 0.1 ], y: [ 1, - 0.05, 0.25 ] },
 };
 // the bow's drawing hand: three fingers hooked on the string
 const BOW_CURL = [ [ 0.9, 1.1, 0.6 ], [ 0.9, 1.1, 0.6 ], [ 0.9, 1.1, 0.6 ], [ 1.4, 1.5, 1.0 ] ];
@@ -302,13 +304,21 @@ export class ViewModel {
 			it.supp = { def: ad, obj: o.obj };
 			muzzleX += o.info.len || 0.15;
 		}
-		if ( att.light && info.light ) {
+		// a light taped onto a gun without a rail sits along the right of the barrel, halfway out
+		const lightAt = info.light || ( att.light && getItem( att.light.id )?.attachment?.free ? [ info.muzzle[ 0 ] * 0.55, info.muzzle[ 1 ] - 0.006, info.muzzle[ 2 ] ] : null );
+		if ( att.light && lightAt ) {
 			const ad = getItem( att.light.id );
 			const o = buildAttachmentView( ad, 'view' );
-			o.obj.position.set( ...info.light );
+			o.obj.position.set( ...lightAt );
 			if ( info.lightDown ) o.obj.rotation.x = PI / 2;
 			v.obj.add( o.obj );
 			it.light = { def: ad, obj: o.obj, info: o.info };
+		}
+		// a bayonet under the muzzle (its ring round the barrel just behind the muzzle)
+		if ( att.bayonet ) {
+			const o = buildAttachmentView( getItem( att.bayonet.id ), 'view' );
+			o.obj.position.set( info.muzzle[ 0 ] - 0.02, info.muzzle[ 1 ], info.muzzle[ 2 ] );
+			v.obj.add( o.obj );
 		}
 		it.muzzle = [ muzzleX, info.muzzle[ 1 ], info.muzzle[ 2 ] ];
 		// the bow's string is redrawn every frame from the cams to the nock
@@ -383,7 +393,8 @@ export class ViewModel {
 		const two = !! m.twoHanded && info.grip2 != null;
 		// the pose family: small blades held forward, one-handers up at the right, long two-handers across the body
 		const len = info.len || 0.4;
-		const hold = two ? ( m.kind === 'spear' ? 'spear' : 'two' ) : len < 0.34 ? 'knife' : 'one';
+		// (a model may ask for its own: a cleaver chops from the 'one' hold, a shield has 'shield')
+		const hold = MELEE_HOLD[ info.hold ] ? info.hold : two ? ( m.kind === 'spear' ? 'spear' : 'two' ) : len < 0.34 ? 'knife' : 'one';
 		const r = 0.0135;
 		// right-handed on a two-hander: the left hand low by the end, the right hand up the handle
 		const it = {
@@ -803,7 +814,10 @@ export class ViewModel {
 		const t = act.t, v = act.p.variant || 0, two = it.two, kind = it.def.melee.kind;
 		// [ t, x, y, z, rx, ry, rz ] offsets from the hold pose; strokes read left/right as seen by the player
 		let K;
-		if ( kind === 'spear' || act.p.stab ) {
+		if ( act.p.push ) {
+			// a shove: drawn in, then driven straight out
+			K = [ [ 0, 0, 0, 0, 0, 0, 0 ], [ 0.3, 0.01, - 0.01, 0.06, 0.05, 0, 0 ], [ 0.45, - 0.03, 0.02, - 0.24, - 0.08, 0, 0 ], [ 0.6, - 0.03, 0.02, - 0.2, - 0.06, 0, 0 ], [ 1, 0, 0, 0, 0, 0, 0 ] ];
+		} else if ( kind === 'spear' || act.p.stab ) {
 			K = [ [ 0, 0, 0, 0, 0, 0, 0 ], [ 0.3, 0.02, - 0.02, 0.12, - 1.2, 0.1, 0 ], [ 0.45, - 0.06, 0.05, - 0.38, - 1.35, 0.05, 0 ], [ 0.6, - 0.05, 0.04, - 0.32, - 1.3, 0.05, 0 ], [ 1, 0, 0, 0, 0, 0, 0 ] ];
 		} else if ( ( kind === 'axe' || act.p.heavy ) && v % 2 === 0 ) {
 			// overhead chop: the head goes back over the shoulder, then down through the middle of the screen

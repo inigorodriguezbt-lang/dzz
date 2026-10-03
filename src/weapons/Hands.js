@@ -331,7 +331,8 @@ export class Hands {
 				this.zoomIdx = 0;
 			}
 		} else {
-			const raise = kind === 'gun' ? 0.25 + ( 1 - ( this.f?.handling ?? 0.7 ) ) * 0.45 : 0.25;
+			// (a sling brings a long gun up quicker: attachment.mods.raise)
+			const raise = kind === 'gun' ? ( 0.25 + ( 1 - ( this.f?.handling ?? 0.7 ) ) * 0.45 ) * ops.attMod( held, 'raise' ) : 0.25;
 			this.equip = Math.min( 1, this.equip + dt / raise );
 		}
 		// the view item (rebuilt when the magazine / attachments change)
@@ -561,8 +562,9 @@ export class Hands {
 		// recoil: camera kick (climb) + view model springs
 		const stanceK = p.stance === 'prone' ? 0.55 : p.stance === 'crouch' ? 0.8 : 1;
 		const heavyK = f.cls === 'lmg' && p.stance !== 'prone' ? 1.25 : 1;
-		const kickP = f.recoil * 0.0105 * ( 0.8 + rnd() * 0.4 ) * stanceK * heavyK * ( 1 - this.adsT * 0.2 ) * ( suppOk ? 0.92 : 1 );
-		const kickY = ( rnd() - 0.45 ) * f.recoil * 0.0045 * stanceK;
+		const wrapK = ops.attMod( gun, 'recoil' ); // a stock wrap takes some of the kick
+		const kickP = f.recoil * 0.0105 * ( 0.8 + rnd() * 0.4 ) * stanceK * heavyK * ( 1 - this.adsT * 0.2 ) * ( suppOk ? 0.92 : 1 ) * wrapK;
+		const kickY = ( rnd() - 0.45 ) * f.recoil * 0.0045 * stanceK * wrapK;
 		p.recoil.x += kickP; p.recoil.y += kickY;
 		this.recoilDebt += kickP * 0.55 / 0.07;
 		if ( f.recoil > 1.8 ) p.shake = Math.max( p.shake, Math.min( 0.35, ( f.recoil - 1.6 ) * 0.2 ) );
@@ -909,10 +911,11 @@ export class Hands {
 		S?.useStamina( cost );
 		const dur = ( 1 / m.speed ) * ( heavy ? 1.45 : 1 ) * ( weak ? 1.35 : 1 );
 		this.meleeVariant ++;
-		const stab = m.kind === 'spear' || ( m.kind === 'blade' && ! m.twoHanded && def.size <= 1 && this.meleeVariant % 3 === 2 );
-		this._startAct( 'melee', dur, { heavy, variant: this.meleeVariant, stab }, [
+		// melee.stab: every blow a stab (a shiv); melee.push: a straight shove (a riot shield); melee.stagger / cone
+		const stab = m.kind === 'spear' || !! m.stab || ( m.kind === 'blade' && ! m.twoHanded && def.size <= 1 && this.meleeVariant % 3 === 2 );
+		this._startAct( 'melee', dur, { heavy, variant: this.meleeVariant, stab: stab && ! m.push, push: !! m.push }, [
 			[ 0.3, () => this._sfx( heavy || m.twoHanded ? 'swing_heavy' : 'swing', 0.6, 0.9 + rnd() * 0.2 ) ],
-			[ 0.44, () => this._meleeHit( stack, def, { damage: m.damage * ( heavy ? 1.6 : 1 ) * ( weak ? 0.55 : 1 ), reach: m.reach, cone: m.twoHanded ? 0.75 : 0.55, kind: m.kind, heavy, wear: m.wear * ( heavy ? 1.5 : 1 ), door: m.kind === 'axe' ? 1.6 : m.kind === 'blunt' ? 1 : 0.35 } ) ],
+			[ 0.44, () => this._meleeHit( stack, def, { damage: m.damage * ( heavy ? 1.6 : 1 ) * ( weak ? 0.55 : 1 ), reach: m.reach, cone: m.cone ?? ( m.twoHanded ? 0.75 : 0.55 ), kind: m.kind, heavy, stagger: m.stagger, shove: !! m.push, wear: m.wear * ( heavy ? 1.5 : 1 ), door: m.kind === 'axe' ? 1.6 : m.kind === 'blunt' ? 1 : 0.35 } ) ],
 		] );
 	}
 
@@ -923,9 +926,12 @@ export class Hands {
 		if ( kind === 'gun' ) {
 			const f = def.firearm, long = f.cls !== 'pistol';
 			g.survival?.useStamina( 8 );
+			// a bayonet on the barrel (attachment.stab): the bash becomes a stab with the blade, which takes the wear
+			const bay = held.data?.att?.bayonet, bd = bay && bay.cond > 0 ? getItem( bay.id ) : null, B = bd?.attachment;
 			this._startAct( 'bash', 0.62, {}, [
 				[ 0.22, () => this._sfx( 'swing', 0.5, 0.8 ) ],
-				[ 0.4, () => this._meleeHit( held, def, { damage: long ? 22 : 14, reach: long ? 1.7 : 1.3, cone: 0.6, kind: 'blunt', stagger: 1, wear: 0.001, door: 0.4 } ) ],
+				[ 0.4, () => B?.stab ? this._meleeHit( bay, bd, { damage: B.stab, reach: ( long ? 1.7 : 1.3 ) + ( B.reach || 0.4 ), cone: 0.45, kind: 'blade', stagger: 0.5, wear: B.wear ?? 0.004, door: 0.2 } )
+					: this._meleeHit( held, def, { damage: long ? 22 : 14, reach: long ? 1.7 : 1.3, cone: 0.6, kind: 'blunt', stagger: 1, wear: 0.001, door: 0.4 } ) ],
 			] );
 			return;
 		}
@@ -1074,9 +1080,10 @@ export class Hands {
 		T.launched = true;
 		const def = T.def, t = def.throwable;
 		const dir = this._aimDir( _v ).clone();
-		const up = T.under ? 0.28 : 0.14;
+		// (a throwing knife flies faster and flatter: throwable.speed / up)
+		const up = T.under ? 0.28 : t.up ?? 0.14;
 		dir.y += up; dir.normalize();
-		const speed = inHand ? 0 : T.under ? 7.5 : 16.5;
+		const speed = inHand ? 0 : T.under ? 7.5 : t.speed || 16.5;
 		const right = _v2.set( 1, 0, 0 ).applyQuaternion( cam.quaternion );
 		const origin = cam.position.clone().addScaledVector( right, inHand ? 0.1 : 0.2 ).addScaledVector( dir, inHand ? 0.2 : 0.35 );
 		origin.y -= inHand ? 0.4 : 0.05;
@@ -1331,7 +1338,7 @@ export class Hands {
 		const moving = 1 + Math.min( 1, ( p.speedNow || 0 ) / 3 ) * 1.5;
 		const cls = def?.firearm?.cls;
 		// (stress and panic shake it, aiming practice steadies it: Survival.swayMul)
-		s.swayK = ( cls === 'pistol' ? 1.3 : 0.85 + Math.min( 0.6, w / 12 ) ) * stanceK * stam * moving * ( this.drawHeldT > 4 ? 1.8 : 1 ) * ( g.survival?.swayMul?.() ?? 1 );
+		s.swayK = ( cls === 'pistol' ? 1.3 : 0.85 + Math.min( 0.6, w / 12 ) ) * stanceK * stam * moving * ( this.drawHeldT > 4 ? 1.8 : 1 ) * ( g.survival?.swayMul?.() ?? 1 ) * ( cls ? ops.attMod( held, 'sway' ) : 1 );
 		const B = this.breath;
 		s.breath += ( ( B.tired > 0 ? 1.8 : B.holding ? 0.12 : 1 ) - s.breath ) * Math.min( 1, dt * 4 );
 		// the slide locks back / the bow is bare when there's nothing to fire
