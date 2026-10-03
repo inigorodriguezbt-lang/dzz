@@ -93,7 +93,7 @@ const MELEE_HOLD = {
 	two: { at: [ 0.14, - 0.12, - 0.46 ], x: [ 0.45, 0.75, - 0.45 ], y: [ - 0.3, 0.1, - 1 ] },
 	spear: { at: [ 0.14, - 0.17, - 0.32 ], x: [ - 0.1, 0.15, - 1 ], y: [ 0, 1, 0 ] },
 	// a riot shield: the handle upright in the fist, the plate (item +z) square in front, a little left of centre
-	shield: { at: [ 0.06, - 0.2, - 0.36 ], x: [ 0.05, 1, 0.1 ], y: [ 1, - 0.05, 0.25 ] },
+	shield: { at: [ - 0.02, - 0.43, - 0.46 ], x: [ 0.04, 1, 0.15 ], y: [ 1, - 0.04, 0.3 ] },
 };
 // the bow's drawing hand: three fingers hooked on the string
 const BOW_CURL = [ [ 0.9, 1.1, 0.6 ], [ 0.9, 1.1, 0.6 ], [ 0.9, 1.1, 0.6 ], [ 1.4, 1.5, 1.0 ] ];

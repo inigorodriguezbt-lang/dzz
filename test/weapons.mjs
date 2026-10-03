@@ -201,6 +201,25 @@ ok( ! ops.attachmentFits( getItem( 'desert_eagle' ), getItem( 'supp_pistol' ) ).
 ok( ops.attachmentFits( getItem( 'svd' ), getItem( 'optic_pso1' ) ).ok, 'PSO-1 on an SVD' );
 ok( ! ops.attachmentFits( getItem( 'm4a1' ), getItem( 'optic_pso1' ) ).ok, 'no PSO-1 on an M4' );
 
+// rail-free fittings (attachment.free: the arms items' sling, stock wrap, bayonet, taped light) and their handling
+// numbers (attachment.mods, read through ops.attMod by the hands)
+{
+	// the arms domain's fittings (its def file is Node-safe)
+	await import( '../src/game/items/defs/ext/arms.js' );
+	const free = ( id, fits, extra = {} ) => ( { id, attachment: { slot: extra.slot || 'sling', free: extra.free ?? true, fits, ...extra } } );
+	const sling = free( 'test_sling', [ 'rifle', 'shotgun' ], { mods: { raise: 0.8, sway: 0.9 } } );
+	ok( ops.attachmentFits( getItem( 'sks' ), sling ).ok && ops.attachmentFits( getItem( 'double_barrel' ), sling ).ok, 'a free fitting needs no rail' );
+	ok( ! ops.attachmentFits( getItem( 'glock17' ), sling ).ok, 'but only on the classes it fits' );
+	const lamp = free( 'test_lamp', [ 'pistol', 'rifle' ], { slot: 'light', free: [ 'rifle' ] } );
+	ok( ops.attachmentFits( getItem( 'sks' ), lamp ).ok && ops.attachmentFits( getItem( 'glock17' ), lamp ).ok && ! ops.attachmentFits( getItem( 'm1911' ), lamp ).ok, 'free for some classes: the others still need the rail' );
+	const g = makeStack( 'mosin' );
+	ok( ops.attMod( g, 'raise' ) === 1, 'a bare gun: attMod 1' );
+	for ( const id of [ 'rifle_sling', 'stock_wrap', 'bayonet' ] ) if ( getItem( id ) ) { g.data.att[ getItem( id ).attachment.slot ] = makeStack( id ); ok( ops.attachmentFits( getItem( 'mosin' ), getItem( id ) ).ok, `${id} fits a rail-less Mosin` ); }
+	if ( getItem( 'rifle_sling' ) ) ok( ops.attMod( g, 'raise' ) < 1 && ops.attMod( g, 'sway' ) < 1, 'a sling: quicker up, steadier' );
+	if ( getItem( 'stock_wrap' ) ) ok( ops.attMod( g, 'recoil' ) < 1, 'a stock wrap: less kick' );
+	if ( getItem( 'bayonet' ) ) ok( getItem( 'bayonet' ).attachment.stab > 22, 'a bayonet stabs harder than the butt' );
+}
+
 // giving rounds back splits into full stacks
 const inv2 = new PlayerInventory();
 inv2.pockets = [];
@@ -233,6 +252,19 @@ try {
 		} catch ( e ) { console.error( e ); }
 		ok( n > 0 && n < 6000, `${id} model builds (${n | 0} tris)` );
 	}
+	// the arms items' parts drawn with this toolkit (game/items/ext/arms/parts.js), looked up by kind
+	const P = await import( '../src/game/items/ext/arms/parts.js' );
+	let ext = 0;
+	for ( const d of allItems() ) {
+		const k = d.model?.kind || d.id;
+		const o = d.cat === 'melee' && P.ARMS_MELEE[ k ] ? GM.buildMeleeView( d, 'view' ).obj : d.cat === 'attachment' && P.ARMS_ATTACH[ k ] ? GM.buildAttachmentView( d, 'view' ).obj : d.cat === 'throwable' && P.ARMS_THROW[ k ] ? GM.buildThrowableView( d, 'view' ) : null;
+		if ( ! o ) continue;
+		ext ++;
+		const n = GM.countTris( o );
+		ok( n > 0 && n < 6000, `${d.id} (arms part) builds (${n | 0} tris)` );
+	}
+	ok( ext >= 25, `the arms parts build through the weapons toolkit (${ext})` );
+	for ( const k of Object.keys( P.ARMS_MAT ) ) ok( !! GM.weaponMaterials( 'world' )[ k ], `arms material ${k} in the palette` );
 } catch ( e ) {
 	console.log( 'model checks skipped:', e.message );
 }

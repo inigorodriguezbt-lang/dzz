@@ -45,7 +45,7 @@ function batR( x ) {
 }
 
 // tape wound round a pole and whatever is laid along it (z from z0 to z1), as a band from x to x + w
-function tapeBand( P, x, w, y0, y1, z0, z1 ) { P.box( 'tape', x, x + w, y0, y1, z0, z1, Math.min( 0.008, ( y1 - y0 ) * 0.45 ) ); }
+function tapeBand( P, x, w, y0, y1, z0, z1 ) { P.box( 'tape', x, x + w, y0, y1, z0, z1, Math.min( 0.012, ( y1 - y0 ) * 0.48, ( z1 - z0 ) * 0.4 ) ); }
 
 // a ring of small triangles (shark teeth, barbs) along a polyline, pointing out to one side
 function teethAlong( P, mat, pts, side, step, size, H ) {
@@ -129,7 +129,7 @@ export const ARMS_MELEE = {
 		H.handle( P, 'walnut', 0.0, 1.5, 0.016, 0.0145, 10 );
 		P.box( 'poly', 1.36, 1.5, - 0.016, 0.014, 0.0145, 0.0365, 0.008 );
 		P.extS( 'blade', [ [ 1.5, - 0.012 ], [ 1.895, - 0.004 ], [ 1.96, 0.012, 0.01 ], [ 1.945, 0.05, 0.02 ], [ 1.825, 0.058, 0.03 ], [ 1.515, 0.04 ], [ 1.5, 0.03 ] ], 0.0014, 0.0012, 0.0255, [], 4 );
-		for ( const x of [ 1.375, 1.425, 1.475 ] ) tapeBand( P, x, 0.032, - 0.021, 0.019, - 0.0205, 0.041 );
+		for ( const x of [ 1.37, 1.41, 1.45, 1.485 ] ) tapeBand( P, x, 0.022, - 0.0195, 0.0175, - 0.0185, 0.0395 );
 		return { grip: 0.45, grip2: 0.95, len: 1.96, tip: 1.95, head: 1.8, spear: 1 };
 	},
 

@@ -27,7 +27,7 @@ import { addCombos } from '../../combos.js';
 import { addUseActions, addSpoilHook } from '../../hooks.js';
 import { provides } from '../../util.js';
 import * as L from '../../ext/arms/logic.js';
-import { attach, shoot, slingCount, throwThing, horn, tapeOn, untape, guardsOn, guardsOff, takeApart } from '../../ext/arms/runtime.js';
+import { attach, shoot, slingCount, throwThing, horn, tapeOn, untape, useTape, guardsOn, guardsOff, takeApart } from '../../ext/arms/runtime.js';
 import '../../ext/arms/kinds.js';
 // the outdoor sites' tables (site_<kind>) are defined there; imported first so they can be extended here
 import '../../sites/tables.js';
@@ -56,7 +56,8 @@ const tool = ( id, name, kind, o ) => ( { ...base( id, name, 'tool', { ...o, tag
 const mat = ( id, name, o ) => base( id, name, 'material', { ...o, tags: [ 'material', ...( o.tags || [] ) ] } );
 const misc = ( id, name, o ) => base( id, name, 'misc', { ...o, tags: [ 'misc', ...( o.tags || [] ) ] } );
 function wear( id, name, slot, o ) {
-	return { ...base( id, name, 'clothing', { ...o, tags: [ 'clothing', ...( o.tags || [] ) ] } ),
+	// (no 'clothing' tag: the wardrobes' and clothes shops' tag picks are for clothes, not a mail glove)
+	return { ...base( id, name, 'clothing', o ),
 		clothing: { slot, capacity: 0, insulation: o.ins ?? 0.05, armor: { bite: o.bite ?? 0, bullet: 0 }, waterproof: o.wp ?? 0, visibility: o.vis ?? 0.5, color: o.color, ...( o.shade ? { shade: o.shade } : {} ) } };
 }
 const throwable = ( id, name, o ) => ( { ...base( id, name, 'throwable', o ), throwable: o.throwable } );
@@ -74,7 +75,7 @@ defineItems( [
 		{ w: 1.8, size: 5, rarity: 'uncommon', tags: [ ...CRAFTED, 'wood', 'improvised' ] } ),
 	melee( 'barbed_bat', 'Barbed-wire bat', 'Two-handed. Blunt, barbed.', [ 60, 1.0, 2.0, 11, 'blunt', true, 0.01 ],
 		{ w: 1.25, size: 4, rarity: 'uncommon', tags: [ ...CRAFTED, 'wood', 'improvised' ] } ),
-	melee( 'machete_spear', 'Machete spear', 'Two-handed. Long reach. Take apart for the machete.', [ 56, 0.95, 2.7, 11, 'spear', true, 0.007, [ 'cut' ] ],
+	melee( 'machete_spear', 'Machete spear', 'Two-handed. Long reach. Comes apart.', [ 56, 0.95, 2.7, 11, 'spear', true, 0.007, [ 'cut' ] ],
 		{ w: 1.5, size: 6, rarity: 'uncommon', tags: [ ...CRAFTED, 'improvised' ] } ),
 	melee( 'knife_spear', 'Knife spear', 'Two-handed. Long reach. Spears fish.', [ 44, 1.05, 2.6, 9, 'spear', true, 0.012, [ 'fish' ] ],
 		{ w: 0.9, size: 5, rarity: 'common', tags: [ ...CRAFTED, 'improvised' ] } ),
@@ -241,7 +242,7 @@ put( 'site_campsite', [ [ 'whetstone', 0.3 ], [ 'slingshot', 0.1 ], [ 'steel_sho
 put( 'site_roadside', [ [ 'party_horn', 0.1 ], [ 'firecracker_string', 0.1 ], [ 'hockey_stick', 0.05 ] ] );
 put( 'site_heli_crash', [ [ 'rifle_sling', 0.4 ], [ 'bayonet', 0.2 ], [ 'gun_oil', 0.4 ], [ 'parts_rifle', 0.3 ], [ 'cleaning_rod', 0.3 ] ] );
 put( 'site_fema_camp', [ [ 'air_horn', 0.15 ], [ 'riot_shield', 0.05 ], [ 'kevlar_sleeves', 0.05 ] ] );
-put( 'site_farm_stand', [ [ 'sickle', 0.3 ], [ 'bolo_knife', 0.2 ], [ 'whetstone', 0.15 ] ] );
+put( 'site_farm_stand', [ [ 'sickle', 0.14 ], [ 'bolo_knife', 0.1 ], [ 'whetstone', 0.05 ] ] );
 put( 'site_fishing_spot', [ [ 'air_horn', 0.25 ], [ 'flare_gun', 0.08 ], [ 'ammo_flare', 0.15 ], [ 'whetstone', 0.15 ] ] );
 put( 'site_beach_camp', [ [ 'firecracker_string', 0.12 ], [ 'party_horn', 0.12 ] ] );
 put( 'site_picnic', [ [ 'party_horn', 0.3 ], [ 'firecracker_string', 0.15 ] ] );
@@ -290,10 +291,10 @@ addCombos( [
 		} },
 	{ id: 'arms_machete_spear', verb: 'Lash', label: 'Make machete spear', a: 'machete', b: 'long_stick', use: { a: 1, b: 1 }, tools: [ 'tape' ],
 		out: [ 'machete_spear', 1 ], time: 10, sound: 'tear', skill: 'carpentry',
-		run: ( c ) => { if ( c.made[ 0 ] ) c.made[ 0 ].cond = c.a.cond; } },
+		run: ( c ) => { if ( c.made[ 0 ] ) c.made[ 0 ].cond = c.a.cond; useTape( c ); } },
 	{ id: 'arms_knife_spear', verb: 'Lash', label: 'Make knife spear', a: { fn: ( s, d ) => L.smallBlade( d ) }, b: 'long_stick', use: { a: 1, b: 1 }, tools: [ 'tape' ],
 		out: [ 'knife_spear', 1 ], time: 9, sound: 'tear', skill: 'carpentry',
-		run: ( c ) => { const s = c.made[ 0 ]; if ( s ) { s.cond = c.a.cond; s.data.knife = c.a.id; } } },
+		run: ( c ) => { const s = c.made[ 0 ]; if ( s ) { s.cond = c.a.cond; s.data.knife = c.a.id; } useTape( c ); } },
 	{ id: 'arms_shiv', verb: 'Grind', label: 'Grind into a shiv', a: sharpener, b: 'screwdriver', use: { a: 0, b: 0 }, wear: { a: 0.03 },
 		time: stoneSlow( 9 ), sound: 'hit_metal', skill: 'maintenance', run: ( c ) => c.replace( c.b, 'screwdriver_shiv', {} ) },
 	{ id: 'arms_sharpen_shovel', verb: 'Sharpen', label: 'Sharpen shovel', a: sharpener, b: 'shovel', use: { a: 0, b: 0 }, wear: { a: 0.03 },
@@ -332,7 +333,7 @@ addCombos( [
 	// ---- distractions ----
 	{ id: 'arms_can_tripwire', verb: 'String', label: 'Make can tripwire', a: 'empty_can', b: { any: [ 'wire', 'fishing_line', 'barbed_wire' ] }, use: { a: 4, b: 1 },
 		out: [ 'can_tripwire', 1 ], time: 10, sound: 'craft', skill: 'survival' },
-	{ id: 'arms_horn_tripwire', verb: 'Rig', label: 'Rig horn to tripwire', a: 'air_horn', b: { id: 'can_tripwire', fn: ( s ) => ! s.data?.horn }, use: { a: 1, b: 0 },
+	{ id: 'arms_horn_tripwire', verb: 'Rig', label: 'Rig horn to tripwire', a: 'air_horn', b: { id: 'can_tripwire', fn: ( s ) => ! s.data?.horn }, use: { a: { qty: 1 }, b: 0 },
 		time: 6, sound: 'craft', skill: 'electrical', run: ( c ) => { c.b.data.horn = true; c.b.data.name = 'Horn tripwire'; } },
 ] );
 

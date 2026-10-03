@@ -64,10 +64,11 @@ function stripeTex() {
 // ---- pieces shared by the tripwire kit and its placed look ------------------------------------------------------------------
 
 // an empty tin can, open at the top, a scrap of faded label; on its side (lying) or hanging from a loop
-function can( g, x, y, z, lying = false, rot = 0 ) {
+const LABELS = [ 0xc8382a, 0x2a62a8, 0xe0aa22, 0x3a7a34, 0xb88a4a ];
+function can( g, x, y, z, lying = false, rot = 0, label = 4 ) {
 	const c = group();
 	add( c, C( 0.033, 0.033, 0.1, 16, true ), tin(), [ 0, 0.05, 0 ] );
-	add( c, C( 0.0332, 0.0332, 0.045, 16, true ), M( 0xb88a4a, { rough: 0.8 } ), [ 0, 0.05, 0 ] );
+	add( c, C( 0.0332, 0.0332, 0.06, 16, true ), M( LABELS[ label % LABELS.length ], { rough: 0.75 } ), [ 0, 0.05, 0 ] );
 	add( c, C( 0.033, 0.033, 0.002, 16 ), tin(), [ 0, 0.001, 0 ] );
 	add( c, new THREE.TorusGeometry( 0.033, 0.0018, 4, 16 ).rotateX( PI / 2 ), tin(), [ 0, 0.1, 0 ] );
 	c.position.set( x, y, z );
@@ -100,22 +101,22 @@ function tripLook( p ) {
 		add( g, B( 0.028, 0.36, 0.028 ), stakeM, [ s * L / 2, 0.13, 0 ], [ 0.05 * s, 0, 0.04 * s ] );
 		add( g, new THREE.ConeGeometry( 0.02, 0.06, 4 ).rotateX( PI ), stakeM, [ s * L / 2, - 0.06, 0 ] );
 	}
-	const n = 5, sag = 0.03, hy = 0.13;
+	const n = 5, sag = 0.03, hy = 0.19;
 	if ( set ) {
 		const pts = [];
 		for ( let i = 0; i <= 12; i ++ ) { const t = i / 12; pts.push( [ ( t - 0.5 ) * L, hy - Math.sin( t * PI ) * sag, 0 ] ); }
-		add( g, tube( pts, 0.0015, 24, 4 ), wire );
+		add( g, tube( pts, 0.0022, 24, 4 ), wire );
 		for ( let i = 0; i < n; i ++ ) {
 			const t = ( i + 1 ) / ( n + 1 ), x = ( t - 0.5 ) * L, y = hy - Math.sin( t * PI ) * sag;
 			add( g, tube( [ [ x, y, 0 ], [ x + 0.004, y - 0.02, 0.003 ], [ x, y - 0.035, 0 ] ], 0.0012, 6, 3 ), wire );
-			const c = can( g, x, y - 0.135, 0, false, i * 1.3 );
+			const c = can( g, x, y - 0.135, 0, false, i * 1.3, i );
 			c.rotation.z = ( i % 2 ? 0.08 : - 0.06 );
 		}
 	} else {
 		const pts = [];
 		for ( let i = 0; i <= 12; i ++ ) { const t = i / 12; pts.push( [ ( t - 0.5 ) * L, 0.012 + ( t < 0.08 || t > 0.92 ? 0.1 : 0 ), Math.sin( t * PI * 2 ) * 0.08 ] ); }
-		add( g, tube( pts, 0.0015, 24, 4 ), wire );
-		for ( let i = 0; i < n; i ++ ) can( g, ( ( i + 1 ) / ( n + 1 ) - 0.5 ) * L + ( i % 2 ? 0.08 : - 0.1 ), 0.033, ( i % 2 ? 0.12 : - 0.1 ), true, i * 1.9 );
+		add( g, tube( pts, 0.0022, 24, 4 ), wire );
+		for ( let i = 0; i < n; i ++ ) can( g, ( ( i + 1 ) / ( n + 1 ) - 0.5 ) * L + ( i % 2 ? 0.08 : - 0.1 ), 0.033, ( i % 2 ? 0.12 : - 0.1 ), true, i * 1.9, i );
 	}
 	if ( p.data?.horn || p.stack?.data?.horn ) {
 		airHorn( g, L / 2 + 0.05, 0.02, 0.06, 0.9 );
@@ -176,7 +177,8 @@ export function register( reg ) {
 	} );
 
 	// ---- an air horn ----
-	reg( 'arms_airhorn', () => { const g = group(); airHorn( g, 0, 0, 0 ); return ground( g ); } );
+	// lying along x (the can in the fist, the trumpet forward)
+	reg( 'arms_airhorn', () => { const g = group(); airHorn( g, - 0.06, 0.03, 0, 1 ).rotation.z = - PI / 2; return ground( g ); } );
 
 	// ---- a party horn: a mouthpiece, foil fringe, the paper blowout rolled into its coil ----
 	reg( 'arms_partyhorn', () => {
@@ -187,7 +189,7 @@ export function register( reg ) {
 		const coil = tube( pts, 0.0062, 90, 8 ); coil.scale( 1, 0.55, 1 );
 		const tex = stripeTex().clone(); tex.repeat.set( 12, 1 ); tex.needsUpdate = true;
 		add( g, coil, M( 0xffffff, { map: tex, rough: 0.6 } ), [ 0, 0.003, 0 ] );
-		add( g, G.cylX( 0.0055, 0.04, 10, 0.0045 ), plastic( 0xf2f2ee, 0.35 ), [ - 0.022, y, 0 ] );
+		add( g, G.cylX( 0.0055, 0.06, 10, 0.0045 ), plastic( 0xf2f2ee, 0.35 ), [ - 0.032, y, 0 ] );
 		for ( let i = 0; i < 6; i ++ ) add( g, B( 0.022, 0.0008, 0.0035 ), M( i % 2 ? 0xf2c230 : 0xd8282a, { rough: 0.25, metal: 0.6 } ), [ - 0.0, y + 0.004, ( i - 2.5 ) * 0.0045 ], [ 0, ( i - 2.5 ) * 0.25, 0 ] );
 		return ground( g );
 	} );
@@ -197,10 +199,10 @@ export function register( reg ) {
 		const g = group();
 		const coil = new THREE.TorusGeometry( 0.06, 0.004, 5, 24 ).rotateX( PI / 2 );
 		for ( let i = 0; i < 3; i ++ ) add( g, coil.clone(), steel(), [ 0, 0.004 + i * 0.006, 0 ], [ 0, i * 0.4, 0 ] );
-		can( g, 0.1, 0.033, 0.04, true, 0.5 );
-		can( g, 0.1, 0.033, - 0.045, true, - 0.3 );
-		can( g, - 0.1, 0.033, 0.03, true, 2.6 );
-		can( g, - 0.07, 0.033, - 0.07, true, 1.9 );
+		can( g, 0.1, 0.033, 0.04, true, 0.5, 0 );
+		can( g, 0.1, 0.033, - 0.045, true, - 0.3, 1 );
+		can( g, - 0.1, 0.033, 0.03, true, 2.6, 2 );
+		can( g, - 0.07, 0.033, - 0.07, true, 1.9, 3 );
 		for ( const z of [ 0.09, 0.115 ] ) add( g, B( 0.3, 0.022, 0.022 ), wood( 0x7a5a3a ), [ 0, 0.011, z ] );
 		void def;
 		return ground( g );

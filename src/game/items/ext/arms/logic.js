@@ -48,6 +48,9 @@ export function popTimes( spec, rnd = Math.random ) {
 		for ( let i = 0; i < burst && out.length < spec.pops && t < spec.dur; i ++ ) { out.push( t ); t += 0.03 + rnd() * 0.07; }
 		t += 0.05 + rnd() * 0.3;
 	}
+	// spread over the string's whole burn (a long string pops on for its length)
+	const last = out[ out.length - 1 ] || 0;
+	if ( last > 0 && last < spec.dur * 0.85 ) { const k = spec.dur * ( 0.88 + rnd() * 0.1 ) / last; for ( let i = 0; i < out.length; i ++ ) out[ i ] *= k; }
 	return out;
 }
 
