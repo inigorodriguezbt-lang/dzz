@@ -21,6 +21,11 @@ export class MB {
 		if ( t.m ) g.applyMatrix4( t.m );
 		if ( ! g.attributes.normal ) g.computeVertexNormals();
 		const P = g.attributes.position.array, N = g.attributes.normal.array;
+		// flip: the inside of a thin shell (a visor, a hood), so a single-sided material shows both faces
+		if ( t.flip ) {
+			for ( let i = 0; i < P.length; i += 9 ) for ( let c = 0; c < 3; c ++ ) { const a = P[ i + 3 + c ]; P[ i + 3 + c ] = P[ i + 6 + c ]; P[ i + 6 + c ] = a; const n = N[ i + 3 + c ]; N[ i + 3 + c ] = N[ i + 6 + c ]; N[ i + 6 + c ] = n; }
+			for ( let i = 0; i < N.length; i ++ ) N[ i ] = - N[ i ];
+		}
 		_c.setHex( hex );
 		const n = P.length / 3;
 		for ( let i = 0; i < n; i ++ ) {
@@ -45,6 +50,24 @@ export class MB {
 	sphere( r, ws, hs, hex, tag, t = {} ) { return this.add( new THREE.SphereGeometry( r, ws, hs ), hex, tag, t ); }
 	cone( r, h, seg, hex, tag, t = {} ) { return this.add( new THREE.ConeGeometry( r, h, seg ), hex, tag, t ); }
 	torus( r, tube, rs, ts, hex, tag, t = {} ) { return this.add( new THREE.TorusGeometry( r, tube, rs, ts ), hex, tag, t ); }
+	// a surface of revolution about y: profile [ [ radius, y ] ... ] from the bottom up (faces outward)
+	lathe( prof, seg, hex, tag, t = {} ) {
+		const g = new THREE.LatheGeometry( prof.map( ( [ r, y ] ) => new THREE.Vector2( r, y ) ), seg );
+		if ( t.axis === 'x' ) g.rotateZ( - Math.PI / 2 );
+		else if ( t.axis === 'z' ) g.rotateX( Math.PI / 2 );
+		return this.add( g, hex, tag, t );
+	}
+	// a box whose top is a different size from its bottom (bins, booths), base on y = 0
+	taper( w0, d0, w1, d1, h, hex, tag, t = {} ) {
+		const g = new THREE.BoxGeometry( 1, 1, 1 );
+		const p = g.attributes.position;
+		for ( let i = 0; i < p.count; i ++ ) {
+			const top = p.getY( i ) > 0;
+			p.setXYZ( i, p.getX( i ) * ( top ? w1 : w0 ), ( p.getY( i ) + 0.5 ) * h, p.getZ( i ) * ( top ? d1 : d0 ) );
+		}
+		g.computeVertexNormals();
+		return this.add( g, hex, tag, t );
+	}
 	// a thin box between two points (rails, braces, wires)
 	beam( a, b, w, h, hex, tag ) {
 		const dx = b[ 0 ] - a[ 0 ], dy = b[ 1 ] - a[ 1 ], dz = b[ 2 ] - a[ 2 ];
@@ -116,10 +139,14 @@ export class MB {
 	}
 }
 
-// common surface tags ( roughness, metalness, flag )
+// common surface tags ( roughness, metalness, flag ). The flag's whole part is the material class the prop shader
+// weathers (0 plain, 1 lamp bulb, 2 timber, 3 concrete, 4 bare / galvanised metal, 5 painted metal, 6 plastic,
+// 7 rubber, 8 fabric, 9 retroreflective sheeting, 10 diagonal hazard stripes, 11 HESCO mesh); + 0.5 takes the
+// instance tint
 export const T = {
-	paint: [ 0.55, 0.15, 0 ], tint: [ 0.55, 0.1, 0.5 ], tintMatte: [ 0.85, 0, 0.5 ], galv: [ 0.45, 0.75, 0 ], steel: [ 0.4, 0.85, 0 ],
-	iron: [ 0.7, 0.6, 0 ], wood: [ 0.9, 0, 0 ], concrete: [ 0.92, 0, 0 ], plastic: [ 0.55, 0, 0 ], rubber: [ 0.9, 0, 0 ],
-	glass: [ 0.06, 0.1, 0 ], lens: [ 0.15, 0.05, 0 ], bulb: [ 0.2, 0, 1 ], fabric: [ 0.95, 0, 0 ], shiny: [ 0.3, 0, 0 ], sand: [ 1, 0, 0 ],
-	tintShiny: [ 0.3, 0, 0.5 ],
+	paint: [ 0.55, 0.15, 5 ], tint: [ 0.55, 0.1, 5.5 ], tintMatte: [ 0.85, 0, 6.5 ], galv: [ 0.45, 0.75, 4 ], steel: [ 0.4, 0.85, 4 ],
+	iron: [ 0.7, 0.6, 5 ], wood: [ 0.9, 0, 2 ], concrete: [ 0.92, 0, 3 ], plastic: [ 0.55, 0, 6 ], rubber: [ 0.9, 0, 7 ],
+	glass: [ 0.06, 0.1, 0 ], lens: [ 0.15, 0.05, 0 ], bulb: [ 0.2, 0, 1 ], fabric: [ 0.95, 0, 8 ], shiny: [ 0.3, 0, 9 ], sand: [ 1, 0, 0 ],
+	tintShiny: [ 0.3, 0, 6.5 ], porcelain: [ 0.25, 0, 0 ], stripes: [ 0.35, 0, 10 ], hesco: [ 0.95, 0, 11 ], tintPlastic: [ 0.6, 0, 6.5 ],
+	alu: [ 0.35, 0.8, 4 ],
 };

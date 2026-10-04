@@ -9,7 +9,8 @@
 import * as THREE from 'three';
 import { G, COMMON_GLSL, SHARED_PARS, patchMaterial, tex } from '../../render/Materials.js';
 import { noiseTexture, crackTexture, signAtlas, decalAtlas, ATLAS_H } from './textures.js';
-import { ATLAS_SIZE } from './kinds.js';
+import { ATLAS_SIZE, CAR_DIMS } from './kinds.js';
+import { carLook } from './cars.js';
 
 // Coarse terrain LODs rise above the road beds by up to ~0.1 m at 250 m, ~0.4 m at 500 m and ~1.4 m at 1 km (99th
 // percentile over every highway, measured against the terrain's triangle grids), so far vertices are also lifted by
@@ -764,22 +765,58 @@ export function decalGeometry() {
 // ---- wrecked cars ----------------------------------------------------------------------------------------------------
 // attribute cpart = ( part, roughness, metalness ); instance iCar = ( colour index, rust, burn, flags ), iCar2 = ( seed, - )
 // Per body type uniforms: uArch = ( half width, front axle z, rear axle z, wheel radius ), uDoors = front / rear door z
-// ranges, uDoorY = ( door bottom, door top, belt, roof ), uLids = trunk / hood z ranges, uLidY = ( trunk min y, hood min y )
+// ranges, uDoorY = ( door bottom, door top, belt, roof ), uLids = trunk / hood z ranges, uLidY = ( trunk min y, hood min y ),
+// and what the shader paints on the shell (cars.js carLook): lamps, grille, plates, wheel layout and rim style. The lamps,
+// grille, panel gaps, handles, plates and rim patterns are painted here in car-local space, so all three LODs share them.
 
 const PALETTE = [
 	0xe8e8e4, 0xa8acaf, 0x5b5f63, 0x16171a, 0x8e1b1b, 0x1f2f55, 0x5d7fa3, 0x2f5a3c, 0xb8a888, 0x5a3d2a, 0xc9a227, 0x2a6b6b,
 	0x4e1a22, 0xcbbf9e, 0xb5561d, 0x1e3326, 0x4b5320, 0x9c8a5e, 0x6b6b60, 0x3a3a3a, 0xeceeee, 0xd8d8d8, 0x222222, 0x777777,
 ];
 
+// the body type of a material's arch data (every type has its own axle layout)
+function carTypeOf( u ) {
+	if ( u.type !== undefined ) return u.type;
+	if ( ! u.arch ) return - 1;
+	return CAR_DIMS.findIndex( D => Math.abs( D.zf - u.arch[ 1 ] ) < 1e-4 && Math.abs( D.zr - u.arch[ 2 ] ) < 1e-4 && Math.abs( D.r - u.arch[ 3 ] ) < 1e-4 );
+}
+
+const CAR_VERT_PARS = /* glsl */`
+	attribute vec3 cpart; attribute vec4 iCar; attribute vec4 iCar2;
+	varying vec3 vPart; varying vec4 vCar; varying vec4 vCar2; varying vec3 vLoc; varying vec3 vLocN; varying float vMir;
+	uniform vec4 uArch; uniform vec4 uWheel; uniform float uPanel;
+`;
+const CAR_VERT = /* glsl */`
+	vPart = cpart; vCar = iCar; vCar2 = iCar2; vLoc = position; vLocN = normal;
+	// a mirrored instance (the left doors) flips the winding: the fragment stage needs it to tell outside from inside
+	vMir = 1.0;
+	#ifdef USE_INSTANCING
+		vMir = determinant( mat3( instanceMatrix ) ) < 0.0 ? - 1.0 : 1.0;
+	#endif
+	// a flat tyre sags onto the ground and bulges (the placement sank the car by 0.3 r at that corner)
+	if ( uPanel < 0.5 && cpart.x > 2.5 && cpart.x < 3.5 && uArch.w > 0.0 ) {
+		int fl = int( iCar.w + 0.5 );
+		bool front = position.z < ( uArch.y + uArch.z ) * 0.5;
+		int bit = front ? ( position.x < 0.0 ? 256 : 512 ) : ( position.x < 0.0 ? 1024 : 2048 );
+		if ( ( fl & bit ) != 0 ) {
+			float g = uArch.w * 0.3;
+			float sq = max( 0.0, g - transformed.y );
+			float low = max( 0.0, uArch.w - transformed.y ) / uArch.w;
+			transformed.y += sq;
+			transformed.x += sign( normal.x ) * ( sq * 0.7 + low * low * 0.035 ) * abs( normal.x );
+		}
+	}
+`;
+
 export function makeCarMaterial( u ) {
 	const mat = new THREE.MeshStandardMaterial( { color: 0xffffff, roughness: 0.4, metalness: 0.2, vertexColors: true, side: THREE.DoubleSide } );
+	const type = u.panel ? - 1 : carTypeOf( u );
+	const L = type >= 0 ? carLook( type ) : null;
+	const v4 = ( a ) => ( { value: new THREE.Vector4( ...( a || [ 0, 0, 0, 0 ] ) ) } );
 	const U = {
 		uPal: { value: PALETTE.map( h => new THREE.Color( h ) ) },
-		uArch: { value: new THREE.Vector4( ...( u.arch || [ 0, 0, 0, 0 ] ) ) },
-		uDoors: { value: new THREE.Vector4( ...( u.doors || [ 0, 0, 0, 0 ] ) ) },
-		uDoorY: { value: new THREE.Vector4( ...( u.doorY || [ 0, 0, 0, 0 ] ) ) },
-		uLids: { value: new THREE.Vector4( ...( u.lids || [ 0, 0, 0, 0 ] ) ) },
-		uLidY: { value: new THREE.Vector4( ...( u.lidY || [ 0, 0, 0, 0 ] ) ) },
+		uArch: v4( u.arch ), uDoors: v4( u.doors ), uDoorY: v4( u.doorY ), uLids: v4( u.lids ), uLidY: v4( u.lidY ),
+		uHead: v4( L?.head ), uTail: v4( L?.tail ), uGrille: v4( L?.grille ), uEnds: v4( L?.ends ), uWheel: v4( L?.wheel ), uMisc: v4( L?.misc ),
 		uPanel: { value: u.panel ? 1 : 0 },
 		tNoise: { value: noiseTexture() }, tRust: { value: tex( 'rust_d' ) },
 	};
@@ -787,15 +824,43 @@ export function makeCarMaterial( u ) {
 		Object.assign( sh.uniforms, U );
 		pull( sh );
 		sh.vertexShader = sh.vertexShader
-			.replace( '#include <common>', '#include <common>\nattribute vec3 cpart; attribute vec4 iCar; attribute vec4 iCar2; varying vec3 vPart; varying vec4 vCar; varying vec4 vCar2; varying vec3 vLoc;' )
-			.replace( '#include <begin_vertex>', '#include <begin_vertex>\nvPart = cpart; vCar = iCar; vCar2 = iCar2; vLoc = position;' );
+			.replace( '#include <common>', '#include <common>\n' + CAR_VERT_PARS )
+			.replace( '#include <begin_vertex>', '#include <begin_vertex>\n' + CAR_VERT );
 		sh.fragmentShader = beforeMain( sh.fragmentShader, /* glsl */`
 			uniform vec3 uPal[ 24 ];
-			uniform vec4 uArch, uDoors, uDoorY, uLids, uLidY;
+			uniform vec4 uArch, uDoors, uDoorY, uLids, uLidY, uHead, uTail, uGrille, uEnds, uWheel, uMisc;
 			uniform float uPanel;
 			uniform sampler2D tNoise, tRust;
-			varying vec3 vPart; varying vec4 vCar; varying vec4 vCar2; varying vec3 vLoc;
+			varying vec3 vPart; varying vec4 vCar; varying vec4 vCar2; varying vec3 vLoc; varying vec3 vLocN; varying float vMir;
 			${LINES_GLSL}
+			float hashC( vec2 p ) { return fract( sin( dot( p, vec2( 12.9898, 78.233 ) ) ) * 43758.5453 ); }
+			// a rectangle's coverage with antialiased edges, and its outline
+			float rectAA( vec2 p, vec2 a, vec2 b ) { return boxAA( p.x, a.x, b.x ) * boxAA( p.y, a.y, b.y ); }
+			// Hawaii's rainbow plate: white, a rainbow arch over three letters and three digits, HAWAII on top
+			vec3 plateColor( vec2 uv, float seed ) {
+				vec3 c = vec3( 0.8, 0.8, 0.77 );
+				float d = length( vec2( uv.x * 0.92, uv.y + 1.45 ) );
+				float t = ( d - 1.3 ) / 0.42;
+				if ( t > 0.0 && t < 1.0 && uv.y > - 0.35 ) {
+					vec3 rb = t < 0.2 ? vec3( 0.75, 0.16, 0.12 ) : t < 0.4 ? vec3( 0.85, 0.5, 0.12 ) : t < 0.6 ? vec3( 0.85, 0.78, 0.25 ) : t < 0.8 ? vec3( 0.3, 0.6, 0.3 ) : vec3( 0.3, 0.4, 0.75 );
+					c = mix( c, rb, 0.55 );
+				}
+				// characters: blocky 3 x 5 glyphs
+				if ( abs( uv.x ) < 0.82 && uv.y > - 0.62 && uv.y < 0.3 ) {
+					float cell = floor( ( uv.x + 0.82 ) / 0.2343 );
+					vec2 g = vec2( fract( ( uv.x + 0.82 ) / 0.2343 ), ( uv.y + 0.62 ) / 0.92 );
+					vec2 gi = floor( vec2( ( g.x - 0.15 ) / 0.7 * 3.0, g.y * 5.0 ) );
+					bool inG = g.x > 0.15 && g.x < 0.85 && cell != 3.0;
+					float on = step( 0.42, hashC( gi + cell * 7.3 + seed * 91.0 ) );
+					// a stroke down the left and along the top of most glyphs reads as letters from afar
+					if ( gi.x < 0.5 || gi.y > 3.5 ) on = max( on, step( 0.3, hashC( vec2( cell, seed ) ) ) );
+					if ( inG ) c = mix( c, vec3( 0.03, 0.04, 0.08 ), on );
+				}
+				if ( uv.y > 0.48 && uv.y < 0.78 && abs( uv.x ) < 0.36 ) c = mix( c, vec3( 0.1, 0.1, 0.18 ), step( 0.35, fract( uv.x * 8.5 ) ) * 0.8 );
+				// the stamped rim
+				c *= 1.0 - 0.5 * ( 1.0 - boxAA( uv.x, - 0.95, 0.95 ) * boxAA( uv.y, - 0.9, 0.9 ) );
+				return c;
+			}
 		` );
 		sh.fragmentShader = sh.fragmentShader
 			.replace( '#include <color_fragment>', /* glsl */`#include <color_fragment>
@@ -805,10 +870,14 @@ export function makeCarMaterial( u ) {
 					int fl = int( vCar.w + 0.5 );
 					float rust = vCar.y, burn = vCar.z;
 					vec3 lp = vLoc;
+					vec3 ln = normalize( vLocN );
+					bool outside = gl_FrontFacing == ( vMir > 0.0 );
 					vec4 n1 = texture2D( tNoise, lp.xz * 0.35 + lp.y * 0.2 + vCar2.x * 13.0 );
 					vec4 n2 = texture2D( tNoise, lp.zy * 1.3 + lp.x * 0.7 + vCar2.x * 7.0 );
 					vec3 col = diffuseColor.rgb;
 					bool glassPart = part == 5 || part == 6;
+					bool body = uPanel < 0.5 && uArch.x > 0.0;
+					float lens = 0.0; // lamp lens / plate coverage: no rust or dirt film on it
 					if ( part == 0 ) {
 						int ci = int( vCar.x + 0.5 );
 						col = uPal[ ci ];
@@ -818,34 +887,201 @@ export function makeCarMaterial( u ) {
 						col = mix( col, vec3( dot( col, vec3( 0.3, 0.59, 0.11 ) ) ) * 1.08 + 0.015, fade * 0.3 );
 						cRough = mix( 0.28, 0.6, n1.r * fade );
 					}
-					// wheel wells behind the tyres
-					if ( uArch.x > 0.0 && abs( lp.x ) > uArch.x * 0.78 && part <= 1 ) {
-						float dA = min( length( vec2( lp.z - uArch.y, lp.y - uArch.w ) ), length( vec2( lp.z - uArch.z, lp.y - uArch.w ) ) );
-						if ( dA < uArch.w + 0.08 ) { col = vec3( 0.012 ); cRough = 1.0; cMetal = 0.0; }
+					// ---- what is painted on the shell: lamps, grille, panel gaps, handles, fuel door ----
+					if ( body && part <= 1 && outside ) {
+						float ax = abs( lp.x );
+						float fz = lp.z - uEnds.x, rz = uEnds.y - lp.z;
+						if ( fz < 0.22 ) {
+							// grille (style: 0 slats, 1 mesh, 2 chrome frame and bars, 3 military slots)
+							float g = boxAA( ax, - 1.0, uGrille.z ) * boxAA( lp.y, uGrille.x, uGrille.y ) * ( 1.0 - smoothstep( 0.05, 0.09, fz ) );
+							if ( g > 0.0 ) {
+								float st = uGrille.w;
+								vec3 gc = vec3( 0.012 );
+								if ( st < 0.5 ) gc = mix( gc, vec3( 0.07 ), stripeAA( lp.y, 0.035, 0.0, 0.007 ) );
+								else if ( st < 1.5 ) gc = mix( gc, vec3( 0.06 ), stripeAA( lp.y, 0.03, 0.0, 0.005 ) * stripeAA( lp.x + floor( lp.y / 0.03 ) * 0.015, 0.03, 0.0, 0.01 ) );
+								else if ( st < 2.5 ) {
+									float inner = boxAA( ax, - 1.0, uGrille.z - 0.04 ) * boxAA( lp.y, uGrille.x + 0.04, uGrille.y - 0.04 );
+									gc = mix( vec3( 0.42, 0.43, 0.45 ), mix( vec3( 0.015 ), vec3( 0.3 ), stripeAA( lp.x, 0.11, 0.0, 0.012 ) ), inner );
+									cMetal = mix( cMetal, 0.9, g * ( 1.0 - inner ) );
+								} else gc = mix( col, vec3( 0.01 ), stripeAA( lp.x, 0.075, 0.0375, 0.016 ) * boxAA( lp.y, uGrille.x + 0.03, uGrille.y - 0.03 ) );
+								col = mix( col, gc, g );
+								cRough = mix( cRough, 0.5, g );
+								lens = max( lens, g );
+							}
+							// headlamps: a chrome reflector behind clear glass, a projector ring, amber corner markers
+							float hh = boxAA( ax, uHead.z, uHead.w + 0.04 ) * boxAA( lp.y, uHead.x - uHead.y, uHead.x + uHead.y ) * ( 1.0 - smoothstep( 0.12, 0.2, fz ) );
+							if ( hh > 0.0 ) {
+								float u = ( ax - uHead.z ) / max( uHead.w - uHead.z, 0.01 );
+								float v = ( lp.y - uHead.x ) / max( uHead.y, 0.01 );
+								vec3 hc = vec3( 0.5, 0.52, 0.54 ) * ( 0.75 + 0.25 * v );
+								float ring = 1.0 - smoothstep( 0.45, 0.55, length( vec2( ( u - 0.32 ) * ( uHead.w - uHead.z ) / max( uHead.y, 0.01 ), v ) ) );
+								hc = mix( hc, vec3( 0.12, 0.125, 0.13 ), ring * 0.8 );
+								hc = mix( hc, vec3( 0.72, 0.32, 0.04 ), step( 0.9, u ) * step( 1.0, u + ( fz > 0.04 ? 1.0 : 0.0 ) ) );
+								// the housing's dark edge
+								hc *= 0.35 + 0.65 * boxAA( ax, uHead.z + 0.012, uHead.w - 0.006 ) * boxAA( lp.y, uHead.x - uHead.y + 0.01, uHead.x + uHead.y - 0.01 );
+								// some are smashed
+								if ( fract( vCar2.x * 17.3 + ( lp.x > 0.0 ? 0.5 : 0.0 ) ) < 0.18 ) hc = mix( hc * 0.3, vec3( 0.04 ), step( 0.5, n2.r ) );
+								col = mix( col, hc, hh );
+								cRough = mix( cRough, 0.06, hh ); cMetal = mix( cMetal, 0.85, hh );
+								lens = max( lens, hh );
+							}
+						}
+						if ( rz < 0.22 ) {
+							// tail lamps: red lens with a white reverse light inboard and a dark housing edge
+							float th = boxAA( ax, uTail.z, uTail.w + 0.04 ) * boxAA( lp.y, uTail.x - uTail.y, uTail.x + uTail.y ) * ( 1.0 - smoothstep( 0.12, 0.2, rz ) );
+							if ( th > 0.0 ) {
+								float u = ( ax - uTail.z ) / max( uTail.w - uTail.z, 0.01 );
+								vec3 tc = mix( vec3( 0.4, 0.015, 0.012 ), vec3( 0.25, 0.008, 0.008 ), stripeAA( lp.y, 0.025, 0.0, 0.004 ) * 0.6 );
+								tc = mix( tc, vec3( 0.55, 0.55, 0.53 ), step( u, 0.22 ) * step( lp.y, uTail.x ) );
+								tc *= 0.35 + 0.65 * boxAA( ax, uTail.z + 0.01, uTail.w - 0.005 ) * boxAA( lp.y, uTail.x - uTail.y + 0.01, uTail.x + uTail.y - 0.01 );
+								col = mix( col, tc, th );
+								cRough = mix( cRough, 0.12, th ); cMetal = mix( cMetal, 0.1, th );
+								lens = max( lens, th );
+							}
+						}
+						// side panel gaps, door handles and the fuel door (on the sides only)
+						if ( abs( ln.x ) > 0.55 && lp.y > uDoorY.x - 0.04 && lp.y < uDoorY.z + 0.02 ) {
+							float gap = 0.0;
+							float yIn = boxAA( lp.y, uDoorY.x, uDoorY.z + 0.03 );
+							if ( uDoors.x < 90.0 ) {
+								gap += ( lineAA( lp.z - uDoors.x, 0.003 ) + lineAA( lp.z - uDoors.y, 0.003 ) ) * yIn;
+								gap += lineAA( lp.y - uDoorY.x, 0.003 ) * boxAA( lp.z, uDoors.x, uDoors.y );
+							}
+							if ( uDoors.z < 90.0 ) {
+								gap += ( lineAA( lp.z - uDoors.z, 0.003 ) + lineAA( lp.z - uDoors.w, 0.003 ) ) * yIn;
+								gap += lineAA( lp.y - uDoorY.x, 0.003 ) * boxAA( lp.z, uDoors.z, uDoors.w );
+							}
+							col *= 1.0 - 0.75 * clamp( gap, 0.0, 1.0 );
+							float hy = uDoorY.z - 0.1;
+							float hdl = 0.0;
+							if ( uDoors.x < 90.0 ) hdl += rectAA( vec2( lp.z, lp.y ), vec2( uDoors.y - 0.24, hy - 0.022 ), vec2( uDoors.y - 0.1, hy + 0.022 ) );
+							if ( uDoors.z < 90.0 ) hdl += rectAA( vec2( lp.z, lp.y ), vec2( uDoors.w - 0.24, hy - 0.022 ), vec2( uDoors.w - 0.1, hy + 0.022 ) );
+							col = mix( col, uMisc.y > 0.5 ? vec3( 0.03 ) : mix( vec3( 0.02 ), vec3( 0.3 ), step( 0.4, fract( vCar2.x * 5.1 ) ) ), clamp( hdl, 0.0, 1.0 ) );
+							// the fuel door on the rear quarter
+							float fd = 0.0;
+							if ( ( lp.x > 0.0 ) == ( fract( vCar2.x * 3.7 ) < 0.5 ) && uDoors.x < 90.0 ) {
+								vec2 c = vec2( max( uDoors.y, uDoors.z < 90.0 ? uDoors.w : uDoors.y ) + 0.3, uDoorY.z - 0.13 );
+								vec2 d = abs( vec2( lp.z, lp.y ) - c );
+								fd = lineAA( max( d.x, d.y ) - 0.075, 0.003 );
+							}
+							col *= 1.0 - 0.6 * fd;
+						}
+						// hood and trunk lid gaps on top
+						if ( ln.y > 0.35 ) {
+							float hg = 0.0;
+							if ( uLids.z < 90.0 ) hg += ( lineAA( lp.z - uLids.w, 0.003 ) * step( ax, uArch.x * 0.9 ) + lineAA( ax - uArch.x * 0.88, 0.003 ) * boxAA( lp.z, uLids.z, uLids.w ) ) * step( uLidY.y, lp.y );
+							if ( uLids.x < 90.0 ) hg += ( lineAA( lp.z - uLids.x, 0.003 ) * step( ax, uArch.x * 0.88 ) + lineAA( ax - uArch.x * 0.86, 0.003 ) * boxAA( lp.z, uLids.x, uLids.y ) ) * step( uLidY.x, lp.y );
+							col *= 1.0 - 0.7 * clamp( hg, 0.0, 1.0 );
+						}
+					}
+					// door panels: the handle and the gap round the skin (unit coordinates)
+					if ( uPanel > 0.5 && part == 0 && ln.x > 0.5 ) col = mix( col, vec3( 0.03 ), rectAA( vec2( lp.z, lp.y ), vec2( 0.76, 0.42 ), vec2( 0.9, 0.46 ) ) );
+					// licence plates
+					if ( part == 12 ) {
+						vec2 uv = vec2( lp.x / 0.15 * ( lp.z < 0.0 ? - 1.0 : 1.0 ), ( lp.y - ( lp.z < 0.0 ? uEnds.z : uEnds.w ) ) / 0.075 );
+						col = plateColor( uv, fract( vCar2.x * 3.1 ) );
+						cRough = 0.45; cMetal = 0.25;
+						lens = 1.0;
+					}
+					// tyres and rims: the nearest axle's wheel frame
+					if ( part == 3 || part == 4 ) {
+						float za = uArch.y;
+						if ( abs( lp.z - uArch.z ) < abs( lp.z - za ) ) za = uArch.z;
+						if ( abs( lp.z - uWheel.z ) < abs( lp.z - za ) ) za = uWheel.z;
+						vec2 w = vec2( lp.z - za, lp.y - uArch.w );
+						float rho = length( w ) / uArch.w, ang = atan( w.y, w.x );
+						float lat = abs( lp.x ) - uWheel.x;
+						if ( part == 3 ) {
+							col = vec3( 0.022 );
+							if ( abs( ln.x ) > 0.6 ) {
+								// sidewall: a band of raised lettering, sun-greyed rubber
+								float letters = boxAA( rho, 0.8, 0.9 ) * step( 0.55, fract( ang * 9.5 ) ) * step( 0.3, n2.g );
+								col = mix( col, vec3( 0.05 ), letters * 0.7 );
+								cRough = 0.75;
+							} else {
+								// tread: two grooves round the tyre and the sipes across it
+								float tg = lineAA( abs( lat ) - uWheel.y * 0.3, 0.008 );
+								float sip = stripeAA( ang * uArch.w, 0.045, 0.0, 0.006 ) * step( uWheel.y * 0.3, abs( lat ) );
+								col *= 1.0 - 0.6 * clamp( tg + sip, 0.0, 1.0 );
+								cRough = 0.95;
+							}
+							col = mix( col, vec3( 0.075, 0.068, 0.06 ), ( 0.25 + 0.4 * n2.g ) * 0.6 );
+						} else {
+							float rr = rho / 0.64;
+							float st = uWheel.w;
+							float hole = 0.0, nut = 0.0;
+							float N = st < 1.5 ? uMisc.w : st < 2.5 ? 8.0 : 6.0;
+							float sec = fract( ang / 6.2832 * N );
+							vec3 rc = col;
+							if ( st < 0.5 ) {
+								// steel wheel under a ribbed hubcap
+								rc *= mix( 1.0, 0.85 + 0.15 * cos( ang * 16.0 ), boxAA( rr, 0.35, 0.86 ) );
+								rc *= 1.0 - 0.6 * lineAA( rr - 0.88, 0.02 );
+								rc = mix( rc, vec3( 0.06 ), 1.0 - smoothstep( 0.1, 0.13, rr ) );
+							} else if ( st < 1.5 ) {
+								// alloy spokes: windows between them show the dark brake behind
+								hole = boxAA( rr, 0.34, 0.86 ) * boxAA( sec, 0.16 + 0.12 * ( 1.0 - rr ), 0.84 - 0.12 * ( 1.0 - rr ) );
+								float la = ang - floor( ang / 1.2566 + 0.5 ) * 1.2566;
+								nut = 1.0 - smoothstep( 0.035, 0.05, length( vec2( rr * cos( la ) - 0.22, rr * sin( la ) ) ) );
+							} else if ( st < 2.5 ) {
+								// military steel: bolt circles of the split rim and the hub
+								float bolts = 1.0 - smoothstep( 0.03, 0.045, length( vec2( rr - 0.78, ( fract( ang / 6.2832 * 12.0 ) - 0.5 ) * 0.4 ) ) );
+								nut = max( bolts, 1.0 - smoothstep( 0.035, 0.05, length( vec2( rr - 0.3, ( sec - 0.5 ) * 0.25 ) ) ) );
+							} else if ( st < 3.5 ) {
+								// truck steel: round hand holes, lug nuts
+								hole = 1.0 - smoothstep( 0.1, 0.12, length( vec2( rr - 0.6, ( fract( ang / 6.2832 * 6.0 ) - 0.5 ) * 6.2832 / 6.0 * 0.6 ) ) );
+								nut = 1.0 - smoothstep( 0.03, 0.045, length( vec2( rr - 0.3, ( fract( ang / 6.2832 * 8.0 ) - 0.5 ) * 0.24 ) ) );
+							} else {
+								// police black steelies: slots and a small chrome cap
+								hole = boxAA( rr, 0.5, 0.7 ) * boxAA( sec, 0.3, 0.7 );
+								rc = mix( rc, vec3( 0.5, 0.52, 0.55 ), 1.0 - smoothstep( 0.2, 0.23, rr ) );
+							}
+							rc = mix( rc, vec3( 0.07, 0.055, 0.045 ), hole );
+							rc = mix( rc, vec3( 0.35, 0.35, 0.33 ), nut );
+							// brake dust
+							rc = mix( rc, vec3( 0.12, 0.09, 0.06 ), ( 0.2 + 0.3 * n2.r ) * smoothstep( 0.3, 0.9, rr ) );
+							col = rc;
+							cRough = mix( cRough, 0.9, hole );
+							cMetal = mix( cMetal, 0.1, hole );
+						}
 					}
 					// rust: only old beaters have it (a week of apocalypse doesn't rust a car), in spots growing from the
 					// sills, the wheel arches and panel edges
 					float ra = rust * rust;
 					// (the loose door / lid panels are in unit coordinates: no sills there)
 					float low = uPanel > 0.5 ? 0.0 : 1.0 - smoothstep( 0.2, 0.75, lp.y - uArch.w * 0.5 );
-					// (the flat tops only speckle on the very worst)
-					float rm = smoothstep( 1.0 - ra * 0.55, 1.04 - ra * 0.55, n1.b * 0.55 + n2.r * 0.45 + low * 0.45 * sqrt( ra ) );
+					float rm = smoothstep( 1.0 - ra * 0.55, 1.04 - ra * 0.55, n1.b * 0.55 + n2.r * 0.45 + low * 0.45 * sqrt( ra ) ) * ( 1.0 - lens );
 					if ( part <= 2 || part == 4 ) {
 						// the rust texture is a light, yellowish scan: keep its detail, give it iron oxide's dark red-brown
 						float rl = min( 1.5, dot( texture2D( tRust, lp.zy * 0.8 + lp.x ).rgb, vec3( 0.3, 0.59, 0.11 ) ) / 0.3 );
-						vec3 rc = vec3( 0.105, 0.036, 0.014 ) * rl;
+						vec3 rc = mix( vec3( 0.07, 0.025, 0.01 ), vec3( 0.2, 0.07, 0.02 ), smoothstep( 0.5, 1.3, rl ) ) * ( 0.6 + 0.4 * rl );
 						col = mix( col, rc, rm );
 						cRough = mix( cRough, 0.92, rm ); cMetal = mix( cMetal, 0.05, rm );
+						// and it bleeds down the paint below the spots
+						if ( part == 0 && ra > 0.05 ) {
+							float run = smoothstep( 0.55, 0.9, texture2D( tNoise, vec2( lp.z * 2.3 + lp.x, lp.y * 0.12 ) ).b ) * smoothstep( 0.6, 0.85, n1.b );
+							col = mix( col, vec3( 0.16, 0.07, 0.03 ), run * ra * 0.5 );
+						}
 					}
-					// road dust and dried mud low on the body
-					if ( ! glassPart ) col = mix( col, vec3( 0.27, 0.23, 0.18 ), ( 1.0 - smoothstep( 0.1, 0.8, lp.y ) ) * 0.45 * ( 0.4 + n2.g ) );
+					if ( ! glassPart && lens < 0.5 ) {
+						// road dust and dried mud low on the body
+						col = mix( col, vec3( 0.27, 0.23, 0.18 ), ( 1.0 - smoothstep( 0.1, 0.8, lp.y ) ) * 0.45 * ( 0.4 + n2.g ) * ( uPanel > 0.5 ? 0.3 : 1.0 ) );
+						// a week of dust, pollen and ash settled on what faces up, rain-streaked grime on the sides
+						float up = smoothstep( 0.5, 0.92, ln.y ) * ( 0.25 + 0.45 * n1.g ) * ( uPanel > 0.5 ? 0.5 : 1.0 );
+						col = mix( col, vec3( 0.3, 0.28, 0.24 ), up * 0.45 );
+						cRough = mix( cRough, 0.75, up );
+						if ( part == 0 && abs( ln.x ) > 0.6 ) col *= 1.0 - 0.16 * smoothstep( 0.55, 0.85, texture2D( tNoise, vec2( lp.z * 3.1, lp.y * 0.07 ) ).r ) * smoothstep( uDoorY.z + 0.05, uDoorY.z - 0.3, lp.y );
+					}
 					// fire
 					if ( burn > 0.01 ) {
 						vec3 ch = mix( vec3( 0.014 ), vec3( 0.17, 0.075, 0.03 ), smoothstep( 0.4, 0.8, n1.r ) );
 						ch = mix( ch, vec3( 0.32, 0.3, 0.28 ), smoothstep( 0.72, 0.95, n2.b ) * 0.55 );
+						// white ash on top, rust bloom low down
+						ch = mix( ch, vec3( 0.38, 0.37, 0.35 ), smoothstep( 0.6, 0.95, ln.y ) * smoothstep( 0.35, 0.7, n2.g ) * 0.7 );
+						ch = mix( ch, vec3( 0.14, 0.05, 0.02 ), smoothstep( 0.45, 0.8, n1.b ) * 0.6 * smoothstep( 1.2, 0.3, lp.y ) );
 						col = mix( col, ch, burn );
 						cRough = mix( cRough, 0.95, burn ); cMetal = mix( cMetal, 0.0, burn );
-						if ( burn > 0.5 && ( part == 3 || glassPart || part == 7 || part == 8 || part == 13 ) ) discard;
+						if ( burn > 0.5 && ( part == 3 || glassPart || part == 7 || part == 8 || part == 12 || part == 13 ) ) discard;
 					}
 					if ( part == 3 && ( fl & 4096 ) != 0 ) discard;
 					// broken glass: tempered side / rear windows shatter and fall out (a few shards stay in the frame),
@@ -880,23 +1116,38 @@ export function makeCarMaterial( u ) {
 							col = mix( col, vec3( 0.36, 0.38, 0.39 ), web * 0.6 );
 							cRough = mix( cRough, 0.55, web );
 						}
+						// a film of dust on the glass, heaviest on what faces up
+						float film = ( 0.12 + 0.3 * smoothstep( 0.2, 0.8, ln.y ) ) * ( 0.5 + 0.7 * n1.g );
+						col = mix( col, vec3( 0.2, 0.19, 0.17 ), film * 0.4 );
+						cRough = mix( cRough, 0.35, film );
 					}
-					// open doors / trunk / hood: the body panel is gone from its opening
-					if ( uPanel < 0.5 && uArch.x > 0.0 ) {
-						bool side = abs( lp.x ) > uArch.x * 0.8;
+					// open doors / trunk / hood: the body panel is gone from its opening (the door took its skin, window
+					// frame and trim card with it; the wheel arch stays)
+					if ( body ) {
+						bool side = abs( lp.x ) > uArch.x * 0.78;
 						bool inY = lp.y > uDoorY.x && lp.y < uDoorY.y;
 						bool left = lp.x < 0.0;
 						bool hole = false;
-						if ( side && inY ) {
+						float dA = min( length( vec2( lp.z - uArch.y, lp.y - uArch.w ) ), length( vec2( lp.z - uArch.z, lp.y - uArch.w ) ) );
+						if ( side && inY && part != 3 && part != 4 && dA > uArch.w + 0.14 ) {
 							if ( lp.z > uDoors.x && lp.z < uDoors.y - 0.05 ) hole = ( fl & ( left ? 1 : 2 ) ) != 0;
 							else if ( lp.z > uDoors.z + 0.05 && lp.z < uDoors.w ) hole = ( fl & ( left ? 4 : 8 ) ) != 0;
 						}
-						if ( ( fl & 16 ) != 0 && lp.z > uLids.x && lp.z < uLids.y && lp.y > uLidY.x && abs( lp.x ) < uArch.x * 0.92 && part != 3 && part != 4 ) hole = true;
-						if ( hole && part != 9 ) discard;
-						if ( ( fl & 32 ) != 0 && lp.z > uLids.z && lp.z < uLids.w && lp.y > uLidY.y && abs( lp.x ) < uArch.x * 0.9 && part != 3 && part != 4 ) { col = vec3( 0.03, 0.028, 0.026 ); cRough = 1.0; cMetal = 0.2; }
+						if ( ( fl & 16 ) != 0 && lp.z > uLids.x && lp.z < uLids.y && lp.y > uLidY.x && abs( lp.x ) < uArch.x * 0.92 && part != 3 && part != 4 && part != 9 ) hole = true;
+						if ( hole ) discard;
+						// an open hood shows the engine bay: the block, the battery, hoses and caps
+						if ( ( fl & 32 ) != 0 && lp.z > uLids.z && lp.z < uLids.w && lp.y > uLidY.y && abs( lp.x ) < uArch.x * 0.9 && part != 3 && part != 4 ) {
+							vec2 e = vec2( lp.x / uArch.x, ( lp.z - uLids.z ) / max( uLids.w - uLids.z, 0.1 ) );
+							float blk = boxAA( abs( e.x ), - 1.0, 0.42 ) * boxAA( e.y, 0.25, 0.85 );
+							col = mix( vec3( 0.018, 0.017, 0.016 ), vec3( 0.07, 0.07, 0.072 ) * ( 0.7 + 0.5 * n2.g ), blk );
+							col = mix( col, vec3( 0.025, 0.025, 0.03 ), rectAA( e, vec2( 0.52, 0.55 ), vec2( 0.8, 0.85 ) ) );
+							col = mix( col, vec3( 0.5, 0.42, 0.08 ), ( 1.0 - smoothstep( 0.03, 0.05, length( ( e - vec2( - 0.6, 0.4 ) ) * vec2( uArch.x, uLids.w - uLids.z ) ) ) ) );
+							col = mix( col, vec3( 0.012 ), lineAA( e.y - 0.22 - 0.05 * sin( e.x * 9.0 ), 0.02 ) );
+							cRough = 0.7; cMetal = 0.5 * blk;
+						}
 					}
 					// the inside of the shell (seen through the holes) is dark; an open door or lid shows its trim panel
-					if ( ! gl_FrontFacing ) { col = uPanel > 0.5 ? vec3( 0.07, 0.066, 0.06 ) * ( 0.8 + 0.4 * n2.g ) : vec3( 0.018 ); cRough = 0.9; cMetal = 0.0; }
+					if ( ! outside ) { col = uPanel > 0.5 ? vec3( 0.07, 0.066, 0.06 ) * ( 0.8 + 0.4 * n2.g ) : vec3( 0.018 ); cRough = 0.9; cMetal = 0.0; }
 					if ( part == 7 ) { cRough = 0.08; }
 					// the sky IBL is dim next to the sun: let glass and clear coat mirror a bit more of it so windows don't read
 					// as black holes and the paint doesn't look like plastic
