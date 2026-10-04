@@ -16,8 +16,7 @@
 //   gear_small    { style: dogtags | lanyard | marker | pouch | feathers | kapa | needle | denim, color, color2 }
 import * as THREE from 'three';
 import { M, MAT, G, PI, add, group, ground, canvasTex, labelTex, fabric, shade, css } from '../lib.js';
-import { cloth, panel, conform, band, seam, softBox, grid, roundRect, curveLoop, line, uvOf, smoothNormals } from '../garment.js';
-// (garment.js's smooth and lerp match this file's own)
+import { cloth, panel, conform, band, softBox, grid, roundRect, uvOf } from '../garment.js';
 import { vestModel, zipLine, sloganMat, pouchOn, thread } from '../clothing.js';
 import { patchMaterial } from '../../../../render/Materials.js';
 
@@ -468,7 +467,7 @@ export function register( reg ) {
 				const yAt = ( x, z ) => 0.01 + 0.13 * 0.72 * Math.sqrt( Math.max( 0, 1 - ( x / ( 0.13 * 1.18 * ( x < 0 ? 1.4 : 1 ) ) ) ** 2 - ( z / ( 0.13 * 0.92 ) ) ** 2 ) );
 				for ( const z of [ - 0.06, - 0.03, 0, 0.03, 0.06 ] ) for ( let i = 0; i < 3; i ++ ) {
 					const x = 0.07 - i * 0.065 + Math.abs( z ) * 0.3;
-					add( g, G.rbox( 0.045, 0.02, 0.012, 0.005 ), black, [ x, yAt( x, z ) - 0.016, z ], [ z * 4, 0, 0 ] );
+					add( g, G.rbox( 0.045, 0.02, 0.012, 0.005, 1 ), black, [ x, yAt( x, z ) - 0.016, z ], [ z * 4, 0, 0 ] );
 				}
 				add( g, G.rbox( 0.05, 0.006, 0.17, 0.003 ), acc, [ 0.15, 0.04, 0 ], [ 0, 0, 0.35 ] ); // the peak
 				add( g, G.cyl( 0.13, 0.14, 0.012, 24, true ).scale( 1.2, 1, 0.9 ), black, [ - 0.01, 0.004, 0 ] );
@@ -699,9 +698,9 @@ export function register( reg ) {
 			case 'pistol': {
 				const pl = M( c, { rough: 0.5 } );
 				add( g, G.rbox( 0.33, 0.085, 0.25, 0.015, 2 ), pl );
-				for ( let i = 0; i < 6; i ++ ) add( g, G.rbox( 0.28, 0.006, 0.012, 0.003 ), pl, [ 0, 0.085, - 0.09 + i * 0.036 ] );
-				for ( const x of [ - 0.1, 0.1 ] ) add( g, G.rbox( 0.035, 0.03, 0.012, 0.004 ), M( s.color2 ?? 0x8a8e94, { rough: 0.35, metal: 0.7 } ), [ x, 0.03, 0.128 ] );
-				add( g, G.rbox( 0.1, 0.022, 0.02, 0.008 ), pl, [ 0, 0.04, 0.135 ] );
+				for ( let i = 0; i < 6; i ++ ) add( g, G.rbox( 0.28, 0.006, 0.012, 0.003, 1 ), pl, [ 0, 0.085, - 0.09 + i * 0.036 ] );
+				for ( const x of [ - 0.1, 0.1 ] ) add( g, G.rbox( 0.035, 0.03, 0.012, 0.004, 1 ), M( s.color2 ?? 0x8a8e94, { rough: 0.35, metal: 0.7 } ), [ x, 0.03, 0.128 ] );
+				add( g, G.rbox( 0.1, 0.022, 0.02, 0.008, 1 ), pl, [ 0, 0.04, 0.135 ] );
 				add( g, G.box( 0.335, 0.004, 0.252 ), M( 0x0c0c0c ), [ 0, 0.042, 0 ] );
 				return ground( g );
 			}
@@ -738,7 +737,7 @@ export function register( reg ) {
 		const g = group(), style = s.style || 'sling', c = s.color ?? 0x3a3e46;
 		const text = String( s.print || '' ).startsWith( 'text:' ) ? s.print.slice( 5 ) : null;
 		const cl = cloth( c, { print: text ? null : s.print, color2: s.color2 ?? 0xffffff, rep: s.rep ?? 1.4, weave: style === 'messenger' ? 'canvas' : style === 'drawstring' ? 'nylon' : 'canvas', rough: style === 'messenger' ? 0.7 : undefined } );
-		const acc = M( s.color2 ?? shade( c, - 0.35 ), { rough: 0.7 } ), strap = webbing(), stitch = thread( c );
+		const acc = M( s.color2 ?? shade( c, - 0.35 ), { rough: 0.7 } ), strap = webbing();
 		switch ( style ) {
 			case 'grocery': {
 				// a thin white bag with the handles knotted, MAHALO printed on the front
@@ -967,10 +966,10 @@ export function register( reg ) {
 				// a hat band of tight-packed feathers, red with yellow bands
 				const red = M( s.color ?? 0xd83a2a, { rough: 0.8 } ), yel = M( s.color2 ?? 0xf2c230, { rough: 0.8 } );
 				const rr = rng( 17 );
-				for ( let i = 0; i < 90; i ++ ) {
-					const a = i / 90 * PI * 2 + rr() * 0.05, k = i % 3;
+				for ( let i = 0; i < 78; i ++ ) {
+					const a = i / 78 * PI * 2 + rr() * 0.05, k = i % 3;
 					const rad = 0.082 + ( k - 1 ) * 0.008;
-					add( g, G.sph( 0.014, 7, 4 ).scale( 1.9, 0.45, 0.6 ), ( Math.floor( i / 6 ) % 4 ) === 0 ? yel : red, [ Math.cos( a ) * rad, 0.008 + k * 0.004, Math.sin( a ) * rad ], [ ( rr() - 0.5 ) * 0.6, - a + PI / 2 + ( rr() - 0.5 ) * 0.5, 0.3 ] );
+					add( g, G.sph( 0.0145, 6, 4 ).scale( 1.9, 0.45, 0.6 ), ( Math.floor( i / 6 ) % 4 ) === 0 ? yel : red, [ Math.cos( a ) * rad, 0.008 + k * 0.004, Math.sin( a ) * rad ], [ ( rr() - 0.5 ) * 0.6, - a + PI / 2 + ( rr() - 0.5 ) * 0.5, 0.3 ] );
 				}
 				add( g, G.torus( 0.085, 0.003, 4, 30 ), M( 0x2a1a10 ), [ 0, 0.004, 0 ], [ PI / 2, 0, 0 ] );
 				break;

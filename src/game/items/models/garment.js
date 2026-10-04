@@ -225,7 +225,7 @@ export function panel( outline, o = {} ) {
 	const r = rng( 9 );
 	// rings just inside the edge round it off
 	const n = P.length;
-	const rings = ( R > cell * 2.5 ? [ 0.14, 0.4, 0.75 ] : R > cell * 0.6 ? [ 0.18, 0.55 ] : [ 0.4 ] ).map( k => k * R );
+	const rings = ( R > cell * 3.5 ? [ 0.14, 0.4, 0.75 ] : R > cell * 0.6 ? [ 0.18, 0.55 ] : [ 0.4 ] ).map( k => k * R );
 	for ( const dd of rings ) {
 		const step = Math.max( 1, Math.round( cell * 0.6 / Math.max( dd, cell * 0.6 ) ) );
 		for ( let i = 0; i < n; i += step ) {

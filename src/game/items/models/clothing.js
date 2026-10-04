@@ -4,9 +4,9 @@
 // Folded tops lie with the neck away from the viewer (towards -z), the chest print reading the right way up in the
 // inventory icon; trousers lie along x with the waistband at +x.
 import * as THREE from 'three';
-import { M, MAT, G, PI, add, group, ground, fabric, shade, canvasTex, css } from './lib.js';
+import { M, MAT, G, PI, add, group, ground, shade, canvasTex, css } from './lib.js';
 import { patchMaterial } from '../../../render/Materials.js';
-import { cloth, panel, conform, band, seam, buttonGeo, curveLoop, roundRect, line, arc, smooth, lerp, softBox, grid, smoothNormals, uvOf } from './garment.js';
+import { cloth, panel, conform, band, seam, buttonGeo, curveLoop, roundRect, line, smooth, lerp, softBox, grid, smoothNormals, uvOf } from './garment.js';
 
 // ---- shared bits ---------------------------------------------------------------------------------------------------
 
@@ -100,7 +100,7 @@ function foldedTop( s ) {
 	const open = !! neck && ! [ 'stand', 'tall', 'band' ].includes( collar ) ? 1 : neck ? 0.6 : 0;
 	const quilt = !! s.quilt;
 	const base = panel( topOutline( W, L, sleeves, style === 'dress' ? 0.022 : 0 ), {
-		T, R: T * 1.15, cell: quilt ? 0.014 : 0.022, uv: [ 0, - 0.03 ],
+		T, R: T * 0.8, cell: quilt ? 0.016 : W > 0.28 ? 0.026 : 0.022, uv: [ 0, - 0.03 ],
 		disp: ( px, pz ) => {
 			let h = sleeves === 'long' ? 0 : T * 0.22 * smooth( x - 0.05, x - 0.032, Math.abs( px ) ); // the sleeves folded in under the sides
 			h += T * 0.14 * ( 1 - ( px / x ) ** 2 ) * ( 1 - ( pz / z ) ** 2 ); // a soft rise in the middle
@@ -245,7 +245,7 @@ function foldedTop( s ) {
 		const stop = ( px, pz ) => top( px, pz ) + sl.top( px, pz ) + 0.0004;
 		add( g, seam( [ [ x1 + k * 0.004, - z + 0.03 ], [ k * ( x - 0.03 ), - z + 0.024 ], [ k * ( x - 0.004 ), - z + 0.03 ] ], stop ), stitch );
 		const knit = style === 'hoodie' || style === 'wetsuit' || ( style === 'jacket' && collar === 'stand' );
-		const cf = panel( roundRect( sw - 0.008, 0.036, 0.008, k * ( x - sw / 2 ), z - 0.034, 3 ), { T: T * 0.34, R: T * 0.22, cell: 0.02, bottom: false, uv: [ 0, - 0.03 ] } );
+		const cf = panel( roundRect( sw - 0.008, 0.036, 0.008, k * ( x - sw / 2 ), z - 0.034, 3 ), { T: T * 0.26, R: T * 0.2, cell: 0.02, bottom: false, uv: [ 0, - 0.03 ] } );
 		add( g, conform( cf.geo, top, 0.0004 ), knit ? rib : body );
 		const ctop = ( px, pz ) => top( px, pz ) + cf.top( px, pz ) + 0.0004;
 		if ( ! knit ) {
@@ -343,7 +343,7 @@ function foldedPants( s ) {
 	const seatP = curveLoop( short
 		? [ [ x, - z + 0.004 ], [ x + 0.002, 0 ], [ x, z - 0.006 ], [ x - 0.05, z + 0.01 ], [ x - 0.11, z + 0.024 ], [ - x + 0.03, z + 0.018 ], [ - x, z - 0.004 ], [ - x - 0.002, 0 ], [ - x, - z + 0.004 ], [ 0, - z - 0.002 ] ]
 		: [ [ x, - z + 0.004 ], [ x + 0.002, 0 ], [ x, z - 0.006 ], [ x - 0.06, z + 0.01 ], [ x - 0.12, z + 0.016 ], [ x - 0.17, z + 0.002 ], [ - x + 0.05, z - 0.004 ], [ - x, z - 0.02 ], [ - x - 0.002, 0 ], [ - x, - z + 0.012 ], [ - x + 0.05, - z ], [ 0, - z - 0.002 ] ], 80 );
-	const seat = panel( seatP, { T, R: T * 1.3, cell: 0.022, uv: [ 0, 0 ],
+	const seat = panel( seatP, { T, R: T * 0.9, cell: 0.022, uv: [ 0, 0 ],
 		disp: ( px, pz ) => {
 			let h = T * 0.12 * ( 1 - ( px / x ) ** 2 );
 			// creases fanning out from the crotch (jeans' whiskers)
@@ -358,7 +358,7 @@ function foldedPants( s ) {
 	if ( ! short ) {
 		// the lower legs folded back over the seat: rounded at the knee fold (-x), the hem at xh
 		const legP = curveLoop( [ [ - x - 0.004, - z + 0.012 ], [ 0, - z + 0.002 ], [ xh, - z + 0.006 ], [ xh + 0.002, 0 ], [ xh, z - 0.016 ], [ 0, z - 0.012 ], [ - x - 0.004, z - 0.02 ], [ - x - 0.008, 0 ] ], 64 );
-		const leg = panel( legP, { T: T * 0.95, R: T * 1.1, cell: 0.022, uv: [ 0.01, 0.004 ], disp: ( px, pz ) => ( s.crease ? T * 0.12 * Math.exp( - ( ( ( pz + 0.01 ) / 0.01 ) ** 2 ) ) : 0 ) - T * 0.08 * Math.exp( - ( ( ( px + 0.02 - pz * 0.3 ) / 0.012 ) ** 2 ) ) } );
+		const leg = panel( legP, { T: T * 0.95, R: T * 0.8, cell: 0.022, uv: [ 0.01, 0.004 ], disp: ( px, pz ) => ( s.crease ? T * 0.12 * Math.exp( - ( ( ( pz + 0.01 ) / 0.01 ) ** 2 ) ) : 0 ) - T * 0.08 * Math.exp( - ( ( ( px + 0.02 - pz * 0.3 ) / 0.012 ) ** 2 ) ) } );
 		add( g, conform( leg.geo, seat.top, 0.0004 ), body );
 		const ltop = ( px, pz ) => seat.top( px, pz ) + leg.top( px, pz ) + 0.0004;
 		// the hem: turned up and double stitched, the outer seam down the side
@@ -376,9 +376,10 @@ function foldedPants( s ) {
 		}
 		if ( s.stripes ) {
 			// a stripe down the outer seam; turnout pants also have reflective bands round the shin
-			lay( panel( roundRect( xh + x - 0.01, 0.012, 0.003, ( xh - x ) / 2, - z + 0.012, 2 ), { T: 0.001, R: 0.001, cell: 0.05, bottom: false } ).geo, M( s.stripes, { rough: 0.4, emissive: s.stripes, emissiveIntensity: 0.1 } ), 0.0006, ltop );
+			const tape = M( s.stripes, { rough: 0.35, metal: 0.2, emissive: s.stripes, emissiveIntensity: 0.12 } );
+			lay( panel( roundRect( xh + x - 0.01, 0.012, 0.003, ( xh - x ) / 2, - z + 0.012, 2 ), { T: 0.001, R: 0.001, cell: 0.05, bottom: false } ).geo, s.reflect ? tape : M( s.stripes, { rough: 0.4 } ), 0.0006, ltop );
 			if ( s.reflect ) for ( const px of [ - 0.07, - 0.03 ] ) {
-				lay( panel( roundRect( 0.022, W - 0.03, 0.003, px, 0, 2 ), { T: 0.0012, R: 0.001, cell: 0.05, bottom: false } ).geo, M( s.stripes, { rough: 0.35, metal: 0.2, emissive: s.stripes, emissiveIntensity: 0.12 } ), 0.0009, ltop );
+				lay( panel( roundRect( 0.022, W - 0.03, 0.003, px, 0, 2 ), { T: 0.0012, R: 0.001, cell: 0.05, bottom: false } ).geo, tape, 0.0009, ltop );
 				lay( panel( roundRect( 0.007, W - 0.032, 0.002, px, 0, 2 ), { T: 0.0012, R: 0.001, cell: 0.05, bottom: false } ).geo, M( 0xd4d8dc, { rough: 0.22, metal: 0.65 } ), 0.0018, ltop );
 			}
 		}
@@ -435,7 +436,7 @@ function foldedPants( s ) {
 	}
 	if ( short ) sew( line( [ x - 0.04, - z + 0.012 ], [ - x + 0.03, - z + 0.012 ], 6 ) ); // the outer seam
 	if ( s.stripes && short ) lay( panel( roundRect( L - 0.04, 0.012, 0.003, - 0.01, - z + 0.012, 2 ), { T: 0.001, R: 0.001, cell: 0.05, bottom: false } ).geo, M( s.stripes, { rough: 0.4 } ), 0.0006 );
-	if ( s.stripes && ! short ) lay( panel( roundRect( x - xh - 0.036, 0.012, 0.003, ( xh + x - 0.034 ) / 2, - z + 0.012, 2 ), { T: 0.001, R: 0.001, cell: 0.05, bottom: false } ).geo, M( s.stripes, { rough: 0.4 } ), 0.0006 );
+	if ( s.stripes && ! short ) lay( panel( roundRect( x - xh - 0.036, 0.012, 0.003, ( xh + x - 0.034 ) / 2, - z + 0.012, 2 ), { T: 0.001, R: 0.001, cell: 0.05, bottom: false } ).geo, s.reflect ? M( s.stripes, { rough: 0.35, metal: 0.2, emissive: s.stripes, emissiveIntensity: 0.12 } ) : M( s.stripes, { rough: 0.4 } ), 0.0006 );
 	if ( s.suspenders ) for ( const pz of [ - 0.04, 0.05 ] ) add( g, buttonGeo( 0.006, 0.0025 ).translate( x - 0.016, wtop( x - 0.016, pz ), pz ), M( 0x2a2a2a, { rough: 0.4 } ) );
 	return g;
 }
@@ -455,7 +456,7 @@ const SHOE = {
 	firefighter: { L: 0.31, sole: 0.03, hc: 0.08, hi: 0.09, ht: 0.054, shaft: 0.3, wide: 1.18, gloss: true, lug: true },
 	tabi: { L: 0.27, sole: 0.016, hc: 0.06, hi: 0.066, ht: 0.03, shaft: 0.1, split: true, weave: 'canvas' },
 	reef: { L: 0.27, sole: 0.016, hc: 0.05, hi: 0.06, ht: 0.03, open: [ 0.03, 0.42 ], weave: 'neoprene', tipped: true },
-	dress: { L: 0.29, sole: 0.01, heel: 0.022, hc: 0.05, hi: 0.06, ht: 0.028, open: [ 0.05, 0.44 ], laces: 3, weave: 'leather', rough: 0.28, tipped: true, pointy: true },
+	dress: { L: 0.29, sole: 0.01, heel: 0.022, hc: 0.052, hi: 0.066, ht: 0.03, open: [ 0.05, 0.36 ], laces: 3, weave: 'leather', rough: 0.28, tipped: true, pointy: true },
 };
 // a box from a to b (laces, straps)
 function strut( a, b, w, h ) {
@@ -560,7 +561,7 @@ function shoeOne( s, F, side ) {
 	const over = ( t0, t1, a0, a1, m, nu = 5, nv = 6, off = 0.0012 ) => add( g, flip( surf( t0, t1, a0, a1, nu, nv, off ) ), m );
 	if ( F.cap ) over( 0.8, 1, 0, 1, style( s ) === 'sneakers' ? soleM : acc, 4, 8 );
 	if ( F.rand ) { over( 0.04, 1, 0, 0.14, acc, 10, 1 ); over( 0.04, 1, 0.86, 1, acc, 10, 1 ); over( 0.84, 1, 0.12, 0.88, acc, 3, 6 ); }
-	if ( ! F.gloss && ! hs ) over( 0, 0.15, 0.06, 0.94, acc, 3, 6 );
+	if ( ! F.gloss && ! hs ) { over( 0, 0.15, 0.04, 0.3, acc, 3, 3 ); over( 0, 0.15, 0.7, 0.96, acc, 3, 3 ); } // the heel counter, outside the opening
 	if ( style( s ) === 'sneakers' ) {
 		// a stripe swept back along the outer side
 		const fl = grid( 1, 6, ( u, v ) => { const t = lerp( 0.3, 0.72, v ), a0 = lerp( 0.84, 0.7, v ) + u * 0.07, a = side > 0 ? a0 : 1 - a0; const p = up( t, a ), n = normalAt( t, a ); return [ p[ 0 ] + n[ 0 ] * 0.0016, p[ 1 ] + n[ 1 ] * 0.0016, p[ 2 ] + n[ 2 ] * 0.0016 ]; } );
@@ -578,12 +579,12 @@ function shoeOne( s, F, side ) {
 		for ( let i = 0; i <= 4; i ++ ) rim.push( up( lerp( op[ 1 ] - 0.02, op[ 0 ] + 0.03, i / 4 ), aR ) );
 		rim.push( up( op[ 0 ] - 0.004, 0.5 ) );
 		for ( let i = 4; i >= 0; i -- ) rim.push( up( lerp( op[ 1 ] - 0.02, op[ 0 ] + 0.03, i / 4 ), 1 - aR ) );
-		add( g, G.tube( rim.map( p => [ p[ 0 ], p[ 1 ] + 0.002, p[ 2 ] ] ), F.gloss ? 0.004 : 0.0055, 16, 5 ), F.gloss ? acc : acc );
-		if ( F.laces && ! hs ) {
-			// the tongue rises out of the throat
-			const tp = [ up( 0.6, 0.5 ), up( op[ 1 ] + 0.02, 0.5 ), up( op[ 1 ] - 0.06, 0.5 ) ];
-			tp[ 1 ][ 1 ] += 0.006; tp[ 2 ][ 1 ] = tp[ 1 ][ 1 ] + 0.012; tp[ 2 ][ 0 ] -= 0.01;
-			add( g, band( tp.map( p => [ p[ 0 ], p[ 1 ] + 0.002, p[ 2 ] ] ), 0.04, 0.007, { round: true, seg: 6 } ), acc );
+		add( g, G.tube( rim.map( p => [ p[ 0 ], p[ 1 ] + 0.002, p[ 2 ] ] ), F.gloss ? 0.004 : F.pointy ? 0.003 : 0.0055, 16, 5 ), hs ? acc : upperM );
+		if ( F.laces && ! hs && ! F.pointy ) {
+			// the padded tongue, a little proud of the throat under the laces
+			const tp = [ up( 0.6, 0.5 ), up( op[ 1 ] + 0.03, 0.5 ), up( op[ 1 ] - 0.03, 0.5 ) ];
+			tp[ 1 ][ 1 ] += 0.003; tp[ 2 ][ 1 ] = tp[ 1 ][ 1 ] + 0.004;
+			add( g, band( tp.map( p => [ p[ 0 ], p[ 1 ] + 0.001, p[ 2 ] ] ), 0.036, 0.006, { round: true, seg: 6 } ), upperM );
 		}
 	}
 	// ---- laces: criss-crossed between eyelets either side of the vamp (up the front of a boot's shaft), a bow ----
@@ -636,9 +637,10 @@ function shoeOne( s, F, side ) {
 		for ( let i = 0; i < 4; i ++ ) add( g, G.box( 0.004, 0.003, 0.01 ), MAT.gold(), [ X( 0 ) - 0.002, soleTop( 0 ) + 0.02 + i * 0.022, side * 0.004 ] );
 	}
 	// a pull tab at the heel
-	if ( ! F.gloss && ! F.split ) add( g, G.rbox( 0.004, 0.024, 0.014, 0.002, 1 ), acc, [ X( 0 ) - 0.002, soleTop( 0 ) + H( 0.02 ) - 0.016, 0 ] );
+	if ( ! F.gloss && ! F.split && ! F.pointy ) add( g, G.rbox( 0.004, hs ? 0.026 : 0.016, 0.012, 0.002, 1 ), acc, [ X( 0 ) - 0.002, soleTop( 0 ) + H( 0.02 ) - ( hs ? 0.016 : 0.01 ), 0 ] );
 	g.userData.tread = ( m ) => {
 		// lugs under the sole (only the tipped shoe shows them)
+		if ( heel ) return; // a smooth leather sole
 		const lug = F.lug ? 0.004 : 0.0022;
 		for ( let i = 0; i < 7; i ++ ) {
 			const t = 0.07 + i / 6 * 0.86;
@@ -698,14 +700,14 @@ function slippers( s ) {
 function fins( s ) {
 	// two fins stacked: a foot pocket and a long ribbed blade
 	const g = group(), blade = M( s.color ?? 0x2a7ad6, { rough: 0.35 } ), pocket = M( s.color2 ?? 0x1a1a1a, { rough: 0.7 } );
-	for ( const [ k, y, rz ] of [ [ 0, 0, 0 ], [ 1, 0.016, 0.06 ] ] ) {
+	for ( const [ k, y, rz ] of [ [ - 1, 0, - 0.2 ], [ 1, 0.0, 0.2 ] ] ) {
 		const one = group();
 		const P = curveLoop( [ [ - 0.16, - 0.045 ], [ 0.02, - 0.05 ], [ 0.24, - 0.1 ], [ 0.33, - 0.095 ], [ 0.34, 0 ], [ 0.33, 0.095 ], [ 0.24, 0.1 ], [ 0.02, 0.05 ], [ - 0.16, 0.045 ], [ - 0.2, 0 ] ], 48 );
 		add( one, panel( P, { T: 0.008, R: 0.004, cell: 0.03, disp: ( x, z ) => - 0.003 * Math.abs( Math.sin( z / 0.1 * PI ) ) * smooth( 0.05, 0.25, x ) } ).geo, blade );
 		for ( const z of [ - 1, 1 ] ) add( one, strut( [ - 0.02, 0.008, z * 0.045 ], [ 0.31, 0.008, z * 0.088 ], 0.008, 0.006 ), pocket );
 		add( one, softBox( 0.17, 0.05, 0.095, 0.022, { seg: 3 } ), pocket, [ - 0.1, 0.002, 0 ] );
 		add( one, G.cyl( 0.03, 0.03, 0.004, 12 ).scale( 1.3, 1, 1 ), M( 0x0c0c0c ), [ - 0.12, 0.051, 0 ] );
-		one.position.set( k * 0.03, y, k * 0.03 ); one.rotation.set( 0, rz, 0 );
+		one.position.set( 0, y, k * 0.085 ); one.rotation.set( 0, rz, 0 );
 		g.add( one );
 	}
 	return ground( g );
@@ -1211,7 +1213,7 @@ export function molle( g, top, x0, x1, z0, rows, m, tack ) {
 	for ( let r = 0; r < rows; r ++ ) {
 		const z = z0 + r * 0.034;
 		add( g, conform( panel( roundRect( x1 - x0, 0.024, 0.002, ( x0 + x1 ) / 2, z, 2 ), { T: 0.0022, R: 0.001, cell: 0.06, bottom: false } ).geo, top, 0.0004 ), m );
-		for ( let x = x0 + 0.004; x <= x1 - 0.003; x += 0.038 ) add( g, G.box( 0.003, 0.0012, 0.024 ).translate( x, top( x, z ) + 0.0026, z ), tack );
+		for ( let x = x0 + 0.004; x <= x1 - 0.003; x += 0.05 ) add( g, G.box( 0.003, 0.0012, 0.024 ).translate( x, top( x, z ) + 0.0026, z ), tack );
 	}
 }
 // a pouch standing up off a surface: a soft box, its flap, a bungee or snap
@@ -1487,8 +1489,12 @@ function packModel( s ) {
 				if ( style === 'rucksack' ) add( g, softBox( 0.06, H * 0.42, D * 0.7, 0.02, { seg: 3 } ), body, [ sx + k * 0.026, H * 0.06, 0 ] );
 				else if ( style !== 'medic' ) add( g, softBox( 0.03, H * 0.3, D * 0.75, 0.012, { seg: 2 } ), style === 'assault' ? body : mesh, [ sx + k * 0.012, 0.012, 0 ] );
 				for ( const y of style === 'school' || style === 'medic' ? [] : [ H * 0.48, H * 0.72 ] ) {
-					add( g, G.box( 0.006, 0.02, D * 0.95 ), web, [ k * ( W / 2 * ( 1 - tp * y / H ) + ( style === 'rucksack' ? 0.058 : 0.004 ) ), y, 0.006 ] );
-					add( g, G.rbox( 0.008, 0.026, 0.03, 0.003, 1 ), buckle, [ k * ( W / 2 * ( 1 - tp * y / H ) + ( style === 'rucksack' ? 0.062 : 0.008 ) ), y - 0.003, D * 0.3 ] );
+					// a compression strap round the side (over the side pouch on a rucksack), its ladder lock at the front
+					const R = 0.07 * big, hx = W / 2 * ( 1 - tp * y / H ) + ( style === 'rucksack' ? 0.054 : 0.0025 );
+					const sideX = ( z ) => { const zz = Math.abs( z ) - ( D / 2 - R ); return zz > 0 ? hx - R + Math.sqrt( Math.max( 0, R * R - zz * zz ) ) : hx; };
+					const P = []; for ( let i = 0; i <= 8; i ++ ) { const z = lerp( - D * 0.42, D * 0.44, i / 8 ); P.push( [ k * sideX( z ), y, z ] ); }
+					add( g, band( P, 0.02, 0.0025, { seg: 10, up: [ k, 0, 0 ] } ), web );
+					add( g, G.rbox( 0.008, 0.026, 0.026, 0.003, 1 ), buckle, [ k * ( sideX( D * 0.3 ) + 0.003 ), y - 0.013, D * 0.3 ] );
 				}
 			}
 			// a lid over the top with straps down to buckles (hiking, rucksack)
