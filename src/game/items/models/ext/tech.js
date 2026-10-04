@@ -86,7 +86,7 @@ function wrapTex( key, spec ) {
 	return canvasTex( 'tech:wrap:' + key, 256, 128, ( ctx, W, H ) => {
 		ctx.fillStyle = css( spec.bg ); ctx.fillRect( 0, 0, W, H );
 		if ( spec.band ) { ctx.fillStyle = css( spec.band ); ctx.fillRect( 0, H * 0.68, W, H * 0.32 ); }
-		// the label is printed twice round the cylinder: each copy fits its half ("MAPP GAS" overran into the other)
+		// the label is printed twice round the cylinder: each copy fits its half ("MAP-PLUS" overran into the other)
 		const fit = ( text, px, weight ) => { ctx.font = `${weight} ${px}px Arial`; const k = Math.min( 1, W * 0.44 / Math.max( 1, ctx.measureText( text ).width ) ); if ( k < 1 ) ctx.font = `${weight} ${Math.floor( px * k )}px Arial`; };
 		ctx.fillStyle = css( spec.fg ); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
 		fit( spec.text, Math.round( H * 0.34 ), 900 );
@@ -224,7 +224,7 @@ export function register( reg ) {
 
 	reg( 'tech_blowtorch', () => {
 		const g = group(), can = M( 0xf2c21a, { rough: 0.3, metal: 0.45 } );
-		add( g, C( 0.033, 0.033, 0.19, 18 ), M( 0xffffff, { map: wrapTex( 'mapp', { bg: 0xf2c21a, fg: 0x1a1a1a, text: 'MAPP GAS', sub: 'KAPENA · 14 oz', band: 0x1a1a1a, subColor: 0xf2c21a } ), rough: 0.3, metal: 0.4 } ), [ 0, 0.095, 0 ] );
+		add( g, C( 0.033, 0.033, 0.19, 18 ), M( 0xffffff, { map: wrapTex( 'mapp', { bg: 0xf2c21a, fg: 0x1a1a1a, text: 'MAP-PLUS', sub: 'KAPENA · 14 oz', band: 0x1a1a1a, subColor: 0xf2c21a } ), rough: 0.3, metal: 0.4 } ), [ 0, 0.095, 0 ] );
 		add( g, G.lathe( [ [ 0.033, 0 ], [ 0.024, 0.025 ], [ 0.01, 0.035 ] ], 18 ), can, [ 0, 0.19, 0 ] );
 		add( g, C( 0.016, 0.018, 0.035, 12 ), brass(), [ 0, 0.24, 0 ] );
 		add( g, C( 0.011, 0.011, 0.012, 12 ).rotateX( PI / 2 ), M( 0x1a1a1a ), [ 0, 0.245, 0.02 ] );

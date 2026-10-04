@@ -161,7 +161,7 @@ defineItems( [
 	misc( 'skate_pads', 'Knee and elbow pads', { w: 0.5, size: 2, tags: [ 'sports', 'school', 'surf' ],
 		model: { type: 'gear_pads', style: 'skate', color: 0x1a1a1a, color2: 0xe8301a }, desc: 'Strap onto trousers.' } ),
 	cl( 'sport_sunglasses', 'Sport sunglasses', 'eyes', { color: 0xd8302a, vis: 0.55, w: 0.03, size: 1, tags: [ 'sports', 'surf', 'casual' ],
-		model: { type: 'glasses', style: 'sun', color: 0xd8302a, lens: 0x2a6ad6 }, desc: 'Wraparound shades.' } ),
+		model: { type: 'glasses', style: 'sport', color: 0xd8302a, lens: 0x2a6ad6 }, desc: 'Wraparound shades.' } ),
 
 	// ---------------- carrying ----------------
 	bp( 'rolling_suitcase', 'Rolling suitcase', { cap: 36, w: 4.2, size: 20, color: 0x2a4a7a, wp: 0.5, vis: 0.6, rarity: 'uncommon', tags: [ 'tourist', 'hotel' ],

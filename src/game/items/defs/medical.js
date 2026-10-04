@@ -43,7 +43,7 @@ defineItems( [
 		model: { type: 'bottle', style: 'syrup', h: 0.09, r: 0.018, glass: 0x4a1a0a, cap: 0x1a1a1a, label: { bg: 0xf2f2ee, fg: 0x5a1a0a, text: 'IODINE', sub: '2% tincture', style: 'plain', size: 0.34 }, labelY: 0.12, labelH: 0.4 },
 		desc: 'Disinfects wounds or water.' } ),
 	med( 'purification_tablets', 'Water purification tablets', { w: 0.02, stack: 10, size: 0.5, use: 2, purify: 1, verb: 'Purify water', rarity: 'uncommon', tags: [ 'outdoor', 'military', 'pharmacy', 'sports' ],
-		model: { type: 'pillbottle', r: 0.015, h: 0.05, color: 0x6a5a3a, cap: 0x2a2a2a, label: { bg: 0xf2f2ee, fg: 0x1a1a1a, text: 'AQUA TABS', sub: 'Purifies 1 L', style: 'plain', size: 0.3 } },
+		model: { type: 'pillbottle', r: 0.015, h: 0.05, color: 0x6a5a3a, cap: 0x2a2a2a, label: { bg: 0xf2f2ee, fg: 0x1a1a1a, text: 'WAI-PURE', sub: 'Purifies 1 L', style: 'plain', size: 0.3 } },
 		desc: 'Purifies 1 L. Not seawater.' } ),
 	med( 'antibiotics', 'Amoxicillin', { w: 0.03, stack: 6, size: 0.5, use: 2, infection: 0.4, sick: 0.1, verb: 'Take', sound: 'pills', rarity: 'uncommon', tags: [ 'pharmacy', 'hospital', 'clinic', 'medicine_cabinet' ],
 		model: pills( 0xd8782a, 0xf2f2f2, 'AMOXICILLIN', '500 mg · Rx only', 0xd8782a ) } ),

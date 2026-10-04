@@ -138,7 +138,7 @@ defineItems( [
 	// ---- vests ----
 	cl( 'police_vest', 'Police plate carrier', 'vest', { color: 0x1c2230, cap: 4, ins: 0.15, bite: 0.45, bullet: 0.45, vis: 0.4, w: 5.5, size: 10, rarity: 'rare', tags: [ 'police' ], model: { type: 'vest', style: 'plate', color: 0x1c2230, patch: 0xf2f2f2 } } ),
 	cl( 'plate_carrier', 'Military plate carrier', 'vest', { color: 0x8b7a52, cap: 6, ins: 0.2, bite: 0.5, bullet: 0.6, vis: 0.25, w: 8, size: 12, rarity: 'epic', tags: [ 'military' ], model: { type: 'vest', style: 'plate', color: 0xa89a70, print: 'multicam', color2: 0x6b6a45 } } ),
-	cl( 'stab_vest', 'Security stab vest', 'vest', { color: 0x1a1a1a, cap: 2, ins: 0.12, bite: 0.5, bullet: 0.1, vis: 0.4, w: 2.5, size: 8, rarity: 'uncommon', tags: [ 'security', 'police', 'bank' ], model: { type: 'vest', style: 'rig', color: 0x1a1a1a } } ),
+	cl( 'stab_vest', 'Security stab vest', 'vest', { color: 0x1a1a1a, cap: 2, ins: 0.12, bite: 0.5, bullet: 0.1, vis: 0.4, w: 2.5, size: 8, rarity: 'uncommon', tags: [ 'security', 'police', 'bank' ], model: { type: 'vest', style: 'stab', color: 0x1a1a1a } } ),
 	cl( 'chest_rig', 'Chest rig', 'vest', { color: 0x6b6a45, cap: 10, ins: 0.05, vis: 0.25, w: 1.4, size: 6, rarity: 'uncommon', tags: [ 'military' ], model: { type: 'vest', style: 'rig', color: 0x6b6a45, color2: 0x4a4a30 } } ),
 	cl( 'hunting_vest', 'Hunting vest', 'vest', { color: 0xe8601a, cap: 6, ins: 0.08, vis: 0.95, w: 0.5, size: 4, tags: [ 'hunting', 'outdoor' ], model: { type: 'vest', style: 'hunting', color: 0xe8601a, color2: 0xc04a10 } } ),
 	cl( 'fishing_vest', 'Fishing vest', 'vest', { color: 0xa8a07a, cap: 10, ins: 0.06, vis: 0.4, w: 0.5, size: 4, tags: [ 'fishing', 'outdoor' ], model: { type: 'vest', style: 'fishing', color: 0xa8a07a, color2: 0x8a8260 } } ),
@@ -146,12 +146,12 @@ defineItems( [
 	cl( 'life_jacket', 'Life jacket', 'vest', { color: 0xf26a1a, cap: 1, ins: 0.3, vis: 0.9, w: 0.8, size: 6, tags: [ 'boat', 'fishing' ], model: { type: 'vest', style: 'life', color: 0xf26a1a } } ),
 
 	// ---- hands ----
-	cl( 'work_gloves', 'Work gloves', 'hands', { color: 0xa8804a, ins: 0.08, bite: 0.15, vis: 0.5, w: 0.2, size: 1, tags: [ 'work', 'hardware', 'garage', 'farm' ], model: { type: 'gloves', color: 0xa8804a, color2: 0x2a5aa8 } } ),
-	cl( 'tactical_gloves', 'Tactical gloves', 'hands', { color: 0x2a2a28, ins: 0.08, bite: 0.18, vis: 0.3, w: 0.15, size: 1, rarity: 'uncommon', tags: [ 'military', 'police' ], model: { type: 'gloves', color: 0x2a2a28, color2: 0x6b6a45 } } ),
+	cl( 'work_gloves', 'Work gloves', 'hands', { color: 0xa8804a, ins: 0.08, bite: 0.15, vis: 0.5, w: 0.2, size: 1, tags: [ 'work', 'hardware', 'garage', 'farm' ], model: { type: 'gloves', style: 'work', color: 0xa8804a, color2: 0x2a5aa8 } } ),
+	cl( 'tactical_gloves', 'Tactical gloves', 'hands', { color: 0x2a2a28, ins: 0.08, bite: 0.18, vis: 0.3, w: 0.15, size: 1, rarity: 'uncommon', tags: [ 'military', 'police' ], model: { type: 'gloves', style: 'tactical', color: 0x2a2a28, color2: 0x6b6a45 } } ),
 	cl( 'latex_gloves', 'Nitrile gloves', 'hands', { color: 0x4a8ad6, ins: 0.01, vis: 0.5, w: 0.02, size: 1, tags: [ 'medical', 'pharmacy', 'kitchen' ], model: { type: 'gloves', style: 'latex', color: 0x4a8ad6, color2: 0x4a8ad6 } } ),
 	cl( 'fingerless_gloves', 'Fingerless gloves', 'hands', { color: 0x1c1c1c, ins: 0.05, bite: 0.08, vis: 0.35, w: 0.08, size: 1, tags: [ 'casual', 'sports' ], model: { type: 'gloves', style: 'fingerless', color: 0x1c1c1c } } ),
-	cl( 'firefighter_gloves', 'Firefighter gloves', 'hands', { color: 0x8a6a3a, ins: 0.2, bite: 0.3, vis: 0.5, w: 0.4, size: 2, rarity: 'uncommon', tags: [ 'fire' ], model: { type: 'gloves', color: 0x8a6a3a, color2: 0xd8c020 } } ),
-	cl( 'dive_gloves', 'Dive gloves', 'hands', { color: 0x141414, ins: 0.15, bite: 0.1, wp: 0.8, vis: 0.3, w: 0.15, size: 1, tags: [ 'dive', 'fishing' ], model: { type: 'gloves', color: 0x141414, color2: 0x2a8ad6 } } ),
+	cl( 'firefighter_gloves', 'Firefighter gloves', 'hands', { color: 0x8a6a3a, ins: 0.2, bite: 0.3, vis: 0.5, w: 0.4, size: 2, rarity: 'uncommon', tags: [ 'fire' ], model: { type: 'gloves', style: 'fire', color: 0x8a6a3a, color2: 0xd8c020 } } ),
+	cl( 'dive_gloves', 'Dive gloves', 'hands', { color: 0x141414, ins: 0.15, bite: 0.1, wp: 0.8, vis: 0.3, w: 0.15, size: 1, tags: [ 'dive', 'fishing' ], model: { type: 'gloves', style: 'dive', color: 0x141414, color2: 0x2a8ad6 } } ),
 
 	// ---- belts ----
 	cl( 'belt', 'Leather belt', 'belt', { color: 0x3a2616, cap: 0, ins: 0, vis: 0.4, w: 0.25, size: 1, tags: [ 'casual' ], model: { type: 'belt', color: 0x3a2616 } } ),

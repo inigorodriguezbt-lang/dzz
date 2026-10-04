@@ -1,198 +1,313 @@
 // Food and drink models: printed cans and tins, bottles (lathe profiles), cartons, jars, snack bags and bars,
 // cup noodles, printed boxes, Hawaiian fruit, plate lunches, meat and fish.
+// Packaging prints come from pack.js (front / facts / back panels, barcodes, net contents from the def's weight).
 import * as THREE from 'three';
-import { M, MAT, G, PI, add, group, ground, labelTex, labelUV, gradientTex, canvasTex, css, shade, hashStr, facet } from './lib.js';
+import { M, MAT, G, PI, add, group, ground, labelTex, gradientTex, canvasTex, css, shade, hashStr, facet } from './lib.js';
+import { packInfo, wrapTex, panelTex, stripTex, boxAtlas, boxUV, ridged, crown, pillow, tinWall, roundRectPlate } from './pack.js';
 
-// a wrap-around label texture repeated `rep` times around a can
-const wraps = new Map();
-function wrapLabel( spec, rep = 2, w = 384, h = 256 ) {
-	const key = JSON.stringify( spec ) + rep + w + h;
-	let t = wraps.get( key );
-	if ( t ) return t;
-	t = labelTex( { w, h, ...spec } ).clone();
-	t.wrapS = THREE.RepeatWrapping;
-	t.repeat.set( rep, 1 );
-	t.needsUpdate = true;
-	wraps.set( key, t );
-	return t;
-}
-const labelMat = ( spec, rep, w, h, o = {} ) => M( 0xffffff, { map: wrapLabel( spec || { text: '?' }, rep, w, h ), rough: o.rough ?? 0.5, metal: o.metal ?? 0.1 } );
 const flatLabel = ( spec, o = {} ) => M( 0xffffff, { map: labelTex( spec ), rough: o.rough ?? 0.6, metal: o.metal ?? 0 } );
+const printed = ( map, o = {} ) => M( 0xffffff, { map, rough: o.rough ?? 0.55, metal: o.metal ?? 0, side: o.side } );
+// an open cylinder band (a label) between y0 and y1, its seam at the back
+const band = ( r, y0, y1, seg = 28, ts = 0, tl = PI * 2 ) => new THREE.CylinderGeometry( r, r, y1 - y0, seg, 1, true, ts, tl ).translate( 0, ( y0 + y1 ) / 2, 0 );
+// a front label arc of `frac` of the circumference, centred towards the icon camera (u = 0.1 of a turn)
+const arcBand = ( r, y0, y1, frac, seg = 20 ) => band( r, y0, y1, seg, 0.1 * PI * 2 - frac * PI, frac * PI * 2 );
+
+// the ring pull of an easy-open lid: the teardrop ring, its rivet and the score line round the rim
+function ringPull( g, x, y, z, s, tin, yaw = 0 ) {
+	const ring = new THREE.TorusGeometry( 0.0075 * s, 0.0016 * s, 4, 14 ).scale( 1.25, 1, 1 ).rotateX( PI / 2 );
+	const k = group();
+	add( k, ring, tin, [ 0.006 * s, 0.0012, 0 ] );
+	add( k, G.box( 0.008 * s, 0.0008, 0.006 * s ), tin, [ - 0.004 * s, 0.0006, 0 ] );
+	add( k, G.cyl( 0.0022 * s, 0.0025 * s, 0.0012, 8 ), tin, [ - 0.006 * s, 0, 0 ] );
+	k.position.set( x, y, z ); k.rotation.y = yaw;
+	g.add( k );
+}
 
 export function registerFoodModels( reg ) {
-	// ---- round cans: { r, h, label, style: 'food'|'soda'|'squat', tab, rep } ----
-	reg( 'can', ( s ) => {
-		const r = s.r ?? 0.037, h = s.h ?? 0.11, g = group();
-		const tin = s.metal ? M( s.metal, { rough: 0.3, metal: 0.9 } ) : MAT.tin();
-		const lab = labelMat( s.label, s.rep ?? 2, 384, 256, { rough: 0.4, metal: s.style === 'soda' ? 0.5 : 0.1 } );
-		if ( s.style === 'soda' ) {
-			add( g, G.lathe( [ [ 0, 0.006 ], [ r * 0.72, 0 ], [ r * 0.92, 0.003 ], [ r, h * 0.08 ] ], 22 ), tin );
-			add( g, G.cyl( r, r, h * 0.8, 22, true ), lab, [ 0, h * 0.08, 0 ] );
-			add( g, G.lathe( [ [ r, h * 0.88 ], [ r * 0.82, h * 0.97 ], [ r * 0.8, h ], [ r * 0.74, h * 0.985 ], [ 0, h * 0.985 ] ], 22 ), tin );
-			add( g, G.torus( r * 0.18, 0.0018, 4, 12 ), tin, [ r * 0.3, h * 0.99, 0 ], [ PI / 2, 0, 0 ] );
+	// ---- round cans: { r, h, label, style: 'food'|'soda', tab, metal, cap (a plastic overcap) } ----
+	reg( 'can', ( s, def ) => {
+		const r = s.r ?? 0.037, h = s.h ?? 0.11, g = group(), seg = 28;
+		const soda = s.style === 'soda';
+		const tin = s.metal ? M( s.metal, { rough: 0.3, metal: 0.9 } ) : soda ? M( 0xd6d9dd, { rough: 0.22, metal: 1 } ) : MAT.tin();
+		const info = packInfo( s.label || {}, def, soda ? 'drink' : null );
+		if ( soda ) {
+			// a drawn aluminium can: the domed base on its stand ring, the necked shoulder, the rolled rim, the lid
+			const y1 = h * 0.86;
+			add( g, G.lathe( [ [ 0, 0.008 ], [ r * 0.5, 0.0065 ], [ r * 0.7, 0.002 ], [ r * 0.78, 0 ], [ r * 0.86, 0.0012 ], [ r * 0.95, 0.005 ], [ r, 0.011 ] ], seg ), tin );
+			add( g, band( r, 0.011, y1, seg ), printed( wrapTex( s.label || { text: '?' }, info, 2 * PI * r, y1 - 0.011 ), { rough: 0.3, metal: 0.55 } ) );
+			add( g, G.lathe( [ [ r, y1 ], [ r * 0.985, h * 0.885 ], [ r * 0.93, h * 0.925 ], [ r * 0.86, h * 0.958 ], [ r * 0.825, h * 0.976 ], [ r * 0.835, h * 0.99 ], [ r * 0.83, h ], [ r * 0.8, h * 0.998 ], [ r * 0.785, h * 0.982 ], [ r * 0.76, h * 0.978 ], [ 0, h * 0.978 ] ], seg ), tin );
+			// the stay-on tab over its scored opening
+			add( g, new THREE.TorusGeometry( r * 0.24, 0.0007, 3, 16 ).scale( 1, 1.35, 1 ).rotateX( PI / 2 ), M( 0x9a9ea4, { rough: 0.4, metal: 0.9 } ), [ r * 0.42, h * 0.979, 0 ] );
+			const tab = new THREE.Shape();
+			tab.absarc( 0, 0, 0.0055, PI * 0.5, PI * 1.5, false ); tab.lineTo( 0.016, - 0.0055 ); tab.absarc( 0.016, 0, 0.0055, - PI * 0.5, PI * 0.5, false ); tab.lineTo( 0, 0.0055 );
+			const hole = new THREE.Path(); hole.absarc( - 0.0005, 0, 0.0034, 0, PI * 2, true ); tab.holes.push( hole );
+			add( g, new THREE.ExtrudeGeometry( tab, { depth: 0.0007, bevelEnabled: false, curveSegments: 5 } ).rotateX( - PI / 2 ), M( 0xc4c8cc, { rough: 0.25, metal: 1 } ), [ - r * 0.32, h * 0.981, 0 ] );
+			add( g, G.cyl( 0.0022, 0.0022, 0.0012, 8 ), tin, [ 0, h * 0.979, 0 ] );
 			return g;
 		}
-		add( g, G.cyl( r * 0.985, r * 0.985, h * 0.05, 22 ), tin );
-		add( g, G.cyl( r, r, h * 0.88, 22, true ), lab, [ 0, h * 0.06, 0 ] );
-		add( g, G.cyl( r * 0.985, r * 0.985, h * 0.06, 22 ), tin, [ 0, h * 0.94, 0 ] );
-		add( g, G.torus( r * 0.97, 0.0022, 4, 24 ), tin, [ 0, h, 0 ], [ PI / 2, 0, 0 ] );
-		for ( let k = 1; k <= 2; k ++ ) add( g, G.torus( r * ( 0.3 + k * 0.2 ), 0.0012, 3, 20 ), tin, [ 0, h + 0.0005, 0 ], [ PI / 2, 0, 0 ] );
-		if ( s.tab !== false ) add( g, G.torus( r * 0.22, 0.0022, 4, 12 ), tin, [ r * 0.35, h + 0.002, 0 ], [ PI / 2, 0, 0 ] );
+		// a three-piece food can: double seams top and bottom, a paper label, a countersunk lid with its rings
+		const sh = Math.min( 0.007, h * 0.12 );
+		add( g, G.lathe( [ [ 0, 0.0035 ], [ r * 0.9, 0.003 ], [ r * 0.95, 0.001 ], [ r * 0.98, 0 ], [ r * 1.014, 0.0012 ], [ r * 1.02, sh * 0.6 ], [ r * 1.008, sh * 0.9 ], [ r * 0.996, sh ] ], seg ), tin );
+		add( g, band( r * 1.002, sh, h - sh, seg ), printed( wrapTex( s.label || { text: '?' }, info, 2 * PI * r, h - sh * 2 ), { rough: 0.5 } ) );
+		const top = [ [ r * 0.996, h - sh ], [ r * 1.008, h - sh * 0.9 ], [ r * 1.02, h - sh * 0.45 ], [ r * 1.016, h - 0.0002 ], [ r * 0.985, h + 0.0006 ], [ r * 0.955, h ], [ r * 0.94, h - 0.0025 ] ];
+		for ( const [ a, b ] of [ [ 0.9, 0.84 ], [ 0.72, 0.66 ], [ 0.5, 0.44 ] ] ) top.push( [ r * a, h - 0.0035 ], [ r * ( a + b ) / 2, h - 0.0023 ], [ r * b, h - 0.0035 ] );
+		top.push( [ 0, h - 0.0035 ] );
+		add( g, G.lathe( top, seg ), tin );
+		if ( s.cap != null ) {
+			// a clear-ish plastic overcap (coffee, nuts)
+			add( g, G.lathe( [ [ r * 1.035, h - 0.006 ], [ r * 1.04, h + 0.004 ], [ r * 1.0, h + 0.0085 ], [ 0, h + 0.0085 ] ], seg ), M( s.cap, { rough: 0.35 } ) );
+		} else if ( s.tab !== false ) {
+			add( g, new THREE.TorusGeometry( r * 0.86, 0.0006, 3, 24 ).rotateX( PI / 2 ), M( 0x9ea2a8, { rough: 0.35, metal: 0.9 } ), [ 0, h - 0.0022, 0 ] );
+			ringPull( g, r * 0.62, h - 0.0034, 0, Math.min( 1.2, r / 0.037 ), tin, PI );
+		}
 		return g;
 	} );
 
-	// ---- rectangular tins (Spam, corned beef, sardines): { size: [x, y, z], label, taper, key } ----
-	reg( 'tin', ( s ) => {
+	// ---- rectangular tins (luncheon meat, corned beef, sardines): { size: [x, y, z], label, taper, key } ----
+	reg( 'tin', ( s, def ) => {
 		const [ w, h, d ] = s.size || [ 0.095, 0.075, 0.055 ], g = group();
-		const tin = MAT.tin();
+		const tin = MAT.tin(), rim = M( 0xb4b8be, { rough: 0.3, metal: 0.95 } );
+		const info = packInfo( s.label || {}, def );
 		const taper = s.taper ?? 1;
 		if ( h < 0.45 * Math.min( w, d ) ) {
-			// flat tins (sardines) carry the print on the lid
-			const geo = G.rbox( w, h, d, h * 0.3, 2 );
-			labelUV( geo, 'y', 0.85 );
-			add( g, geo, M( 0xffffff, { map: labelTex( { split: 0.85, h: 256, ...( s.label || {} ) } ), rough: 0.4, metal: 0.25 } ) );
-			add( g, G.torus( Math.min( w, d ) * 0.12, 0.002, 4, 12 ), tin, [ w * 0.36, h + 0.001, 0 ], [ PI / 2, 0, 0 ] );
+			// flat tins (sardines): a drawn body with a printed lid and a ring pull at one end
+			const cr = Math.min( w, d ) * 0.32;
+			add( g, roundRectPlate( w, d, cr, h * 0.85 ), tin );
+			add( g, roundRectPlate( w * 1.012, d * 1.012, cr * 1.01, 0.002 ), rim, [ 0, h * 0.85, 0 ] );
+			const lid = roundRectPlate( w * 0.94, d * 0.92, cr * 0.9, 0.0008 );
+			add( g, lid, printed( panelTex( s.label || {}, info, w * 0.94, d * 0.92, 'front' ), { rough: 0.35, metal: 0.35 } ), [ 0, h * 0.85 + 0.0015, 0 ] );
+			ringPull( g, w * 0.37, h * 0.85 + 0.0023, 0, 1, tin, 0 );
 			return g;
 		}
-		// one full label per side (the texture repeats four times around), sized to the face so the print is not squashed
-		const faceH = h * 0.84, aspect = Math.max( 1, Math.min( 3, w / faceH ) );
-		const lab = labelMat( s.label, 4, Math.round( 256 * aspect / 16 ) * 16, 256, { rough: 0.45, metal: 0.15 } );
-		add( g, G.rbox( w * 0.99, h * 0.08, d * 0.99, 0.006 ), tin );
-		add( g, G.rectWrap( w, faceH, d, taper ), lab, [ 0, h * 0.08, 0 ] );
-		add( g, G.rbox( w * taper * 0.99, h * 0.08, d * taper * 0.99, 0.006 ), tin, [ 0, h * 0.92, 0 ] );
-		if ( s.key ) add( g, G.box( w * 0.5, 0.003, 0.006 ), tin, [ - w * 0.1, h * 0.3, d / 2 + 0.003 ] );
-		else add( g, G.torus( Math.min( w, d ) * 0.14, 0.002, 4, 12 ), tin, [ w * 0.3, h + 0.001, 0 ], [ PI / 2, 0, 0 ] ); // pull tab
+		// a drawn tin with a rolled seam top and bottom, its label round all four sides
+		const cr = Math.min( w, d ) * 0.2, sh = Math.min( 0.006, h * 0.08 );
+		add( g, roundRectPlate( w * 1.01, d * 1.01, cr, sh ), rim );
+		const wall = tinWall( w, h - sh * 2, d, cr, taper, 4 );
+		const f = wall.faces;
+		const tex = stripTex( s.label || { text: '?' }, info, wall.len, h - sh * 2, [
+			{ kind: 'facts', u0: f.px[ 0 ], u1: f.px[ 1 ] }, { kind: 'back', u0: f.nz[ 0 ], u1: f.nz[ 1 ] }, { kind: 'side', u0: f.nx[ 0 ], u1: f.nx[ 1 ] }, { kind: 'front', u0: f.pz[ 0 ], u1: f.pz[ 1 ] } ] );
+		add( g, wall.geo, printed( tex, { rough: 0.4, metal: 0.25 } ), [ 0, sh, 0 ] );
+		const tw = w * taper, td = d * taper;
+		add( g, roundRectPlate( tw * 1.012, td * 1.012, cr * taper, sh ), rim, [ 0, h - sh, 0 ] );
+		add( g, roundRectPlate( tw * 0.9, td * 0.86, cr * 0.8, 0.0012 ), tin, [ 0, h - 0.0004, 0 ] );
+		if ( s.key ) {
+			// the key-opened tin: a scored strip round the top, the key soldered to one end
+			const kk = 1 + ( taper - 1 ) * ( h * 0.72 - sh ) / ( h - sh * 2 );
+			add( g, roundRectPlate( w * kk * 1.01, d * kk * 1.01, cr * kk, 0.003 ), rim, [ 0, h * 0.72, 0 ] );
+			add( g, G.cylX( 0.0016, w * 0.55, 6 ), tin, [ 0, h + 0.0022, - d * 0.15 ] );
+			add( g, new THREE.TorusGeometry( 0.006, 0.0015, 4, 10 ), tin, [ w * 0.3 + 0.007, h + 0.0022, - d * 0.15 ], [ PI / 2, 0, 0 ] );
+		} else ringPull( g, tw * 0.3, h + 0.0008, 0, 1.1, tin, 0 );
 		return g;
 	} );
 
-	// ---- bottles: { style, h, r, glass, clear, liquid, fill, cap, label, labelY, labelH, squash } ----
+	// ---- bottles: { style, h, r, glass, clear, liquid, fill, cap, capMetal, capH, label, labelY, labelH, squash, mat } ----
+	// profiles: [ radius, height ] fractions of r and h, bottom to the lip
 	const PROFILES = {
-		water: [ [ 0, 0 ], [ 0.85, 0 ], [ 1, 0.04 ], [ 1, 0.5 ], [ 0.93, 0.54 ], [ 1, 0.58 ], [ 1, 0.7 ], [ 0.75, 0.82 ], [ 0.4, 0.9 ], [ 0.38, 0.94 ] ],
-		soda: [ [ 0, 0 ], [ 0.7, 0.01 ], [ 1, 0.06 ], [ 1, 0.62 ], [ 0.8, 0.76 ], [ 0.42, 0.88 ], [ 0.38, 0.94 ] ],
-		beer: [ [ 0, 0 ], [ 0.95, 0 ], [ 1, 0.03 ], [ 1, 0.56 ], [ 0.92, 0.63 ], [ 0.46, 0.75 ], [ 0.36, 0.8 ], [ 0.36, 0.96 ], [ 0.42, 0.98 ] ],
-		wine: [ [ 0, 0 ], [ 1, 0 ], [ 1, 0.62 ], [ 0.7, 0.72 ], [ 0.34, 0.78 ], [ 0.3, 0.95 ], [ 0.34, 0.97 ] ],
-		liquor: [ [ 0, 0 ], [ 1, 0 ], [ 1, 0.66 ], [ 0.9, 0.72 ], [ 0.36, 0.78 ], [ 0.33, 0.95 ] ],
-		jug: [ [ 0, 0 ], [ 0.96, 0 ], [ 1, 0.03 ], [ 1, 0.72 ], [ 0.6, 0.86 ], [ 0.3, 0.9 ], [ 0.3, 0.96 ] ],
-		sports: [ [ 0, 0 ], [ 0.95, 0 ], [ 1, 0.05 ], [ 0.86, 0.35 ], [ 1, 0.55 ], [ 1, 0.72 ], [ 0.56, 0.86 ], [ 0.5, 0.92 ] ],
-		milk: [ [ 0, 0 ], [ 1, 0 ], [ 1, 0.74 ], [ 0.55, 0.86 ], [ 0.4, 0.92 ] ],
-		syrup: [ [ 0, 0 ], [ 1, 0 ], [ 1, 0.6 ], [ 0.5, 0.75 ], [ 0.3, 0.8 ], [ 0.3, 0.92 ] ],
+		water: [ [ 0, 0.01 ], [ 0.7, 0 ], [ 0.95, 0.012 ], [ 1, 0.05 ], [ 1, 0.24 ], [ 0.95, 0.265 ], [ 1, 0.29 ], [ 1, 0.5 ], [ 0.94, 0.525 ], [ 1, 0.55 ], [ 1, 0.68 ], [ 0.92, 0.75 ], [ 0.7, 0.82 ], [ 0.46, 0.875 ], [ 0.4, 0.895 ], [ 0.4, 0.935 ], [ 0.46, 0.94 ], [ 0.38, 0.945 ] ],
+		soda: [ [ 0, 0.02 ], [ 0.4, 0.004 ], [ 0.6, 0 ], [ 0.8, 0.02 ], [ 1, 0.07 ], [ 1, 0.6 ], [ 0.94, 0.68 ], [ 0.7, 0.78 ], [ 0.46, 0.87 ], [ 0.4, 0.9 ], [ 0.4, 0.935 ], [ 0.46, 0.94 ], [ 0.38, 0.945 ] ],
+		beer: [ [ 0, 0.012 ], [ 0.88, 0 ], [ 0.98, 0.015 ], [ 1, 0.04 ], [ 1, 0.54 ], [ 0.97, 0.6 ], [ 0.86, 0.66 ], [ 0.6, 0.73 ], [ 0.42, 0.79 ], [ 0.37, 0.85 ], [ 0.36, 0.95 ], [ 0.42, 0.96 ], [ 0.42, 0.985 ], [ 0.36, 0.99 ] ],
+		wine: [ [ 0, 0.03 ], [ 0.6, 0.01 ], [ 0.95, 0 ], [ 1, 0.02 ], [ 1, 0.6 ], [ 0.94, 0.68 ], [ 0.66, 0.75 ], [ 0.38, 0.8 ], [ 0.31, 0.86 ], [ 0.3, 0.96 ], [ 0.35, 0.965 ], [ 0.35, 0.99 ], [ 0.29, 0.995 ] ],
+		liquor: [ [ 0, 0.015 ], [ 0.9, 0 ], [ 1, 0.02 ], [ 1, 0.65 ], [ 0.97, 0.69 ], [ 0.75, 0.73 ], [ 0.42, 0.765 ], [ 0.35, 0.8 ], [ 0.34, 0.94 ], [ 0.39, 0.945 ], [ 0.39, 0.97 ], [ 0.32, 0.975 ] ],
+		jug: [ [ 0, 0.01 ], [ 0.9, 0 ], [ 1, 0.03 ], [ 1, 0.7 ], [ 0.9, 0.78 ], [ 0.6, 0.85 ], [ 0.32, 0.88 ], [ 0.3, 0.9 ], [ 0.3, 0.955 ], [ 0.34, 0.96 ], [ 0.27, 0.965 ] ],
+		sports: [ [ 0, 0.01 ], [ 0.8, 0 ], [ 0.97, 0.02 ], [ 1, 0.07 ], [ 0.92, 0.25 ], [ 0.86, 0.36 ], [ 0.94, 0.47 ], [ 1, 0.56 ], [ 1, 0.7 ], [ 0.86, 0.79 ], [ 0.6, 0.86 ], [ 0.52, 0.89 ], [ 0.52, 0.93 ] ],
+		milk: [ [ 0, 0.01 ], [ 0.9, 0 ], [ 1, 0.03 ], [ 1, 0.74 ], [ 0.75, 0.83 ], [ 0.44, 0.9 ], [ 0.4, 0.94 ] ],
+		syrup: [ [ 0, 0.012 ], [ 0.9, 0 ], [ 1, 0.025 ], [ 1, 0.6 ], [ 0.92, 0.67 ], [ 0.62, 0.74 ], [ 0.38, 0.79 ], [ 0.31, 0.83 ], [ 0.3, 0.92 ] ],
 	};
-	reg( 'bottle', ( s ) => {
-		const H = s.h ?? 0.24, R = s.r ?? 0.034, g = group();
-		const prof = ( PROFILES[ s.style ] || PROFILES.water ).map( ( [ a, b ] ) => [ a * R, b * H ] );
-		const top = prof[ prof.length - 1 ][ 1 ];
-		const shell = s.clear ? M( s.glass ?? 0xd8eef5, { rough: 0.05, transparent: true, opacity: s.opacity ?? 0.3, metal: 0.1 } )
-			: M( s.glass ?? 0x5a3515, { rough: 0.08, metal: 0.25 } );
-		const bottle = G.lathe( prof.concat( [ [ 0, top ] ] ), 18 );
-		if ( s.squash ) bottle.scale( 1, 1, s.squash );
-		add( g, bottle, shell );
-		// liquid visible through clear plastic / glass
-		if ( s.clear && s.liquid != null && ( s.fill ?? 0.8 ) > 0 ) {
-			const fillY = top * ( s.fill ?? 0.8 );
-			const inner = [];
-			for ( const [ a, b ] of prof ) { if ( b >= fillY ) break; inner.push( [ a * 0.9, Math.max( 0.002, b ) ] ); }
+	const GLASS = new Set( [ 'beer', 'wine', 'liquor' ] );
+	reg( 'bottle', ( s, def ) => {
+		const H = s.h ?? 0.24, R = s.r ?? 0.034, g = group(), style = s.style || 'water', seg = 22;
+		const prof = ( PROFILES[ style ] || PROFILES.water ).map( ( [ a, b ] ) => [ a * R, b * H ] );
+		const top = prof[ prof.length - 1 ][ 1 ], neckR = prof[ prof.length - 1 ][ 0 ];
+		const glassy = s.mat ? s.mat === 'glass' : GLASS.has( style ) || ( style === 'syrup' && ! s.clear && lum3( s.glass ) < 0.35 );
+		const sq = ( geo ) => { if ( s.squash ) geo.scale( 1, 1, s.squash ); return geo; };
+		const info = packInfo( s.label || {}, def );
+		// the shell: clear plastic / glass shows what is inside; tinted glass too (darker); opaque plastic doesn't
+		let shell;
+		if ( s.clear ) shell = M( s.glass ?? 0xd8eef5, { rough: 0.04, transparent: true, opacity: s.opacity ?? ( glassy ? 0.38 : 0.3 ), metal: 0.1 } );
+		else if ( glassy ) shell = M( s.glass ?? 0x5a3515, { rough: 0.05, transparent: true, opacity: 0.86, metal: 0.15 } );
+		else shell = M( s.glass ?? 0xeeeeea, { rough: 0.32, metal: 0.02 } );
+		add( g, sq( G.lathe( prof.concat( [ [ 0, top ] ] ), seg ) ), shell );
+		// what is inside: the liquid up to its fill line (tinted glass always looks full, dark)
+		const fillK = s.clear ? ( s.liquid != null ? s.fill ?? 0.8 : 0 ) : glassy ? s.fill ?? 0.82 : 0;
+		if ( fillK > 0 ) {
+			const fillY = top * fillK, inner = [ [ 0, 0.004 ] ];
+			for ( const [ a, b ] of prof ) { if ( b >= fillY ) break; if ( b > 0.003 ) inner.push( [ a * 0.9, b ] ); }
 			const last = inner[ inner.length - 1 ];
+			const lr = profR( prof, fillY ) * 0.9;
+			inner.push( [ lr, fillY ], [ 0, fillY ] );
 			if ( last ) {
-				inner.push( [ last[ 0 ], fillY ], [ 0, fillY ] );
-				const lg = G.lathe( inner, 16 );
-				if ( s.squash ) lg.scale( 1, 1, s.squash );
-				const lm = s.liquidClear ? M( s.liquid, { rough: 0.1, transparent: true, opacity: 0.45 } ) : M( s.liquid, { rough: 0.15 } );
-				add( g, lg, lm );
+				const lc = s.clear ? s.liquid : shade( s.glass ?? 0x5a3515, - 0.55 );
+				const lm = s.clear && s.liquidClear ? M( lc, { rough: 0.08, transparent: true, opacity: 0.5 } ) : M( lc, { rough: 0.12 } );
+				add( g, sq( G.lathe( inner, 16 ) ), lm );
 			}
 		}
-		// cap
-		const capR = prof[ prof.length - 1 ][ 0 ] * 1.08;
-		if ( s.cap !== null ) add( g, G.cyl( capR, capR, H * ( s.capH ?? 0.06 ), 14 ), M( s.cap ?? 0x2266cc, { rough: s.capMetal ? 0.3 : 0.5, metal: s.capMetal ? 0.8 : 0 } ), [ 0, top - 0.002, 0 ] );
-		// label band
+		// the closure
+		const capC = s.cap ?? 0x2266cc, capH = H * ( s.capH ?? 0.06 );
+		if ( s.cap !== null ) {
+			if ( style === 'beer' && s.capMetal ) add( g, crown( neckR * 1.12, 0.004, 21 ), M( capC, { rough: 0.3, metal: 0.85 } ), [ 0, top - 0.002, 0 ] );
+			else if ( ( style === 'wine' || style === 'liquor' ) && s.capMetal ) {
+				// a foil capsule down the neck
+				add( g, G.lathe( [ [ neckR * 1.04, top - H * 0.13 ], [ neckR * 1.06, top - H * 0.02 ], [ neckR * 0.9, top + 0.002 ], [ 0, top + 0.002 ] ], 18 ), M( capC, { rough: 0.25, metal: 0.8 } ) );
+			} else if ( style === 'sports' ) {
+				add( g, ridged( neckR * 1.15, capH * 0.6, 14, 0.05 ), M( capC, { rough: 0.4 } ), [ 0, top - 0.002, 0 ] );
+				add( g, G.cyl( neckR * 0.55, neckR * 0.7, capH * 0.55, 14 ), M( capC, { rough: 0.35 } ), [ 0, top - 0.002 + capH * 0.6, 0 ] );
+			} else {
+				add( g, ridged( neckR * 1.12, capH, 16, 0.045 ), M( capC, { rough: s.capMetal ? 0.28 : 0.45, metal: s.capMetal ? 0.85 : 0 } ), [ 0, top - capH * 0.35, 0 ] );
+			}
+		}
+		// the label: a full wrap on plastic, a front label (and a neck band on beer and wine) on glass
 		if ( s.label ) {
-			const y0 = H * ( s.labelY ?? 0.18 ), lh = H * ( s.labelH ?? 0.3 );
-			// radius at the band (bottles are straight there)
-			const lg = G.cyl( R * 1.006, R * 1.006, lh, 20, true );
-			if ( s.squash ) lg.scale( 1, 1, s.squash );
-			add( g, lg, labelMat( s.label, s.labelRep ?? 1, 512, 256, { rough: 0.5 } ), [ 0, y0, 0 ] );
+			const y0 = H * ( s.labelY ?? 0.18 ), lh = H * ( s.labelH ?? 0.3 ), lr = profR( prof, y0 + lh / 2 ) * 1.006;
+			if ( glassy ) {
+				const frac = s.labelArc ?? 0.42;
+				add( g, sq( arcBand( lr, y0, y0 + lh, frac ) ), printed( panelTex( s.label, info, lr * PI * 2 * frac, lh, 'front' ), { rough: 0.6 } ) );
+				// a smaller back label
+				add( g, sq( band( lr, y0 + lh * 0.12, y0 + lh * 0.82, 10, 0.1 * PI * 2 + PI - PI * 0.22, PI * 0.44 ) ), printed( panelTex( s.label, info, lr * PI * 0.44, lh * 0.7, 'back' ), { rough: 0.6 } ) );
+				if ( style === 'beer' || style === 'wine' ) {
+					const ny = top - H * ( style === 'beer' ? 0.2 : 0.22 ), nr = profR( prof, ny + H * 0.03 ) * 1.02;
+					add( g, band( nr, ny, ny + H * 0.06, 16 ), M( s.label.band ?? s.label.bg ?? 0xd8b84a, { rough: 0.35, metal: style === 'wine' ? 0.6 : 0.1 } ) );
+				}
+			} else add( g, sq( band( lr, y0, y0 + lh, 28 ) ), printed( wrapTex( s.label, info, 2 * PI * lr, lh ), { rough: 0.45 } ) );
 		}
-		if ( s.style === 'jug' ) add( g, G.torus( H * 0.1, R * 0.12, 6, 12, PI ), shell, [ R * 0.7, H * 0.72, 0 ], [ 0, 0, - PI / 2 - 0.3 ] );
+		if ( style === 'jug' ) {
+			// the moulded handle, hollow behind
+			add( g, G.tube( [ [ R * 0.5, H * 0.86, 0 ], [ R * 0.95, H * 0.84, 0 ], [ R * 1.1, H * 0.68, 0 ], [ R * 0.98, H * 0.52, 0 ] ], R * 0.11, 12, 6 ), shell );
+		}
 		return g;
 	} );
+	const lum3 = ( c ) => { if ( c == null ) return 1; const k = new THREE.Color( c ); return 0.2126 * k.r + 0.7152 * k.g + 0.0722 * k.b; };
+	// the profile's radius at a height
+	function profR( prof, y ) {
+		for ( let i = 1; i < prof.length; i ++ ) if ( prof[ i ][ 1 ] >= y ) { const [ a0, b0 ] = prof[ i - 1 ], [ a1, b1 ] = prof[ i ]; return a0 + ( a1 - a0 ) * ( ( y - b0 ) / Math.max( 1e-6, b1 - b0 ) ); }
+		return prof[ prof.length - 1 ][ 0 ];
+	}
 
-	// ---- gable-top cartons and juice boxes: { size, label, gable } ----
-	reg( 'carton', ( s ) => {
+	// ---- gable-top cartons and juice boxes: { size, label, gable, cap } ----
+	reg( 'carton', ( s, def ) => {
 		const [ w, h, d ] = s.size || [ 0.07, 0.2, 0.07 ], g = group();
-		const lab = labelMat( s.label, 2, 384, 384, { rough: 0.7 } );
-		const bodyH = s.gable === false ? h : h * 0.82;
-		add( g, G.rectWrap( w, bodyH, d ), lab );
-		const white = M( s.label?.bg ?? 0xf2f2ee, { rough: 0.75 } );
+		const info = packInfo( { ...( s.label || {} ), pack: 'carton' }, def );
+		info.deposit = false;
+		const spec = s.label || { text: '?' };
+		const board = M( spec.bg ?? 0xf2f2ee, { rough: 0.7 } );
 		if ( s.gable === false ) {
-			add( g, G.box( w, 0.002, d ), white, [ 0, bodyH, 0 ] );
-			// straw
-			add( g, G.cyl( 0.0025, 0.0025, 0.06, 6 ), M( 0xf0d060 ), [ w * 0.25, bodyH, 0 ], [ 0, 0, - 0.3 ] );
-		} else {
-			add( g, G.box( w, 0.001, d ), white, [ 0, bodyH - 0.0005, 0 ] );
-			add( g, G.prismX( d, h * 0.14, w ), white, [ 0, bodyH, 0 ] );
-			add( g, G.box( w, h * 0.05, 0.004 ), white, [ 0, bodyH + h * 0.12, 0 ] );
-			add( g, G.cyl( 0.009, 0.009, 0.01, 10 ), M( s.cap ?? 0x2a6fd6 ), [ w * 0.22, bodyH + h * 0.06, d * 0.2 ], [ 0.6, 0, 0 ] );
+			// a juice box: printed all round, the straw in its wrapper on the back, the foil spot on top
+			const geo = G.rbox( w, h, d, 0.0025, 1 );
+			const { tex, rects } = boxAtlas( spec, info, w, h, d, 'z', { max: 512 } );
+			add( g, boxUV( geo, rects ), printed( tex, { rough: 0.6 } ) );
+			add( g, G.cyl( 0.0035, 0.0035, 0.0008, 10 ), M( 0xd8dce0, { rough: 0.3, metal: 0.8 } ), [ w * 0.25, h, 0 ] );
+			add( g, G.box( 0.007, h * 0.8, 0.004 ), MAT.glass( 0xffffff, 0.35 ), [ w * 0.15, h * 0.08, - d / 2 - 0.002 ], [ 0, 0, 0.12 ] );
+			add( g, G.cyl( 0.0022, 0.0022, h * 0.76, 6 ), M( spec.band ?? 0xf0d060, { rough: 0.4 } ), [ w * 0.15, h * 0.1, - d / 2 - 0.002 ], [ 0, 0, 0.12 ] );
+			return g;
 		}
+		// the gable top: the printed body, two roof panels, the sealed fin, a screw spout
+		const bodyH = h * 0.8;
+		const geo = G.box( w, bodyH, d );
+		const { tex, rects } = boxAtlas( spec, info, w, bodyH, d, 'z', { max: 768 } );
+		add( g, boxUV( geo, rects ), printed( tex, { rough: 0.62 } ) );
+		const roofH = h * 0.14, slope = Math.hypot( d / 2, roofH ), ang = Math.atan2( roofH, d / 2 );
+		for ( const sz of [ - 1, 1 ] ) add( g, G.box( w * 0.998, 0.0015, slope ).translate( 0, 0, - slope / 2 ), board, [ 0, bodyH, sz * d / 2 ], [ sz * ang, sz > 0 ? 0 : PI, 0 ] );
+		// the gable ends: triangles
+		const tri = new THREE.Shape( [ new THREE.Vector2( - d / 2, 0 ), new THREE.Vector2( d / 2, 0 ), new THREE.Vector2( 0, roofH ) ] );
+		for ( const sx of [ - 1, 1 ] ) add( g, new THREE.ShapeGeometry( tri ).rotateY( sx * PI / 2 ), M( shade( spec.bg ?? 0xf2f2ee, - 0.08 ), { rough: 0.7, side: THREE.DoubleSide } ), [ sx * w * 0.47, bodyH, 0 ] );
+		add( g, G.box( w * 0.99, h * 0.06, 0.004 ), board, [ 0, bodyH + roofH - 0.002, 0 ] );
+		add( g, ridged( 0.011, 0.012, 12, 0.06 ), M( s.cap ?? 0x2a6fd6, { rough: 0.4 } ), [ w * 0.12, bodyH + roofH * 0.42, d * 0.22 ], [ ang, 0, 0 ] );
 		return g;
 	} );
 
-	// ---- jars: { r, h, content, lid, label, clear } ----
-	reg( 'jar', ( s ) => {
-		const r = s.r ?? 0.045, h = s.h ?? 0.12, g = group();
-		const content = M( s.content ?? 0xa0673a, { rough: 0.6 } );
+	// ---- jars: { r, h, content, lid, lidMetal, label, clear, body } ----
+	reg( 'jar', ( s, def ) => {
+		const r = s.r ?? 0.045, h = s.h ?? 0.12, g = group(), seg = 24;
+		const info = packInfo( s.label || {}, def );
+		const lidH = h * 0.13, bodyTop = h - lidH * 0.85;
+		const prof = [ [ 0, 0.004 ], [ r * 0.85, 0 ], [ r * 0.98, h * 0.03 ], [ r, h * 0.08 ], [ r, h * 0.72 ], [ r * 0.95, h * 0.79 ], [ r * 0.86, h * 0.83 ], [ r * 0.85, bodyTop + 0.002 ] ];
 		if ( s.clear ) {
-			add( g, G.cyl( r * 0.93, r * 0.93, h * 0.84, 18 ), content, [ 0, 0.003, 0 ] );
-			add( g, G.cyl( r, r, h * 0.88, 18 ), MAT.glass(), [ 0, 0, 0 ] );
-		} else add( g, G.cyl( r, r, h * 0.88, 18 ), M( s.body ?? s.content ?? 0xdddddd, { rough: 0.4 } ) );
-		add( g, G.cyl( r * 1.02, r * 1.02, h * 0.12, 18 ), M( s.lid ?? 0xcc2222, { rough: 0.35, metal: s.lidMetal ? 0.8 : 0 } ), [ 0, h * 0.88, 0 ] );
-		if ( s.label ) add( g, G.cyl( r * 1.008, r * 1.008, h * 0.5, 20, true ), labelMat( s.label, 2, 384, 256 ), [ 0, h * 0.18, 0 ] );
-		return g;
-	} );
-
-	// ---- snack bags / rice sacks: { size, label, flat, crimp } ----
-	reg( 'bag', ( s ) => {
-		const [ w, h, d ] = s.size || [ 0.2, 0.28, 0.07 ], g = group();
-		const flat = !! s.flat;
-		const geo = G.rbox( w, h, d, ( flat ? h : d ) * 0.45, 3 );
-		labelUV( geo, flat ? 'y' : 'z', 0.85 );
-		const spec = { split: 0.85, ...( s.label || { text: '?' } ) };
-		add( g, geo, M( 0xffffff, { map: labelTex( spec ), rough: s.matte ? 0.9 : 0.35, metal: s.matte ? 0 : 0.35 } ) );
-		if ( s.crimp !== false ) {
-			const cm = M( s.label?.band ?? s.label?.bg ?? 0x999999, { rough: 0.4, metal: 0.3 } );
-			if ( flat ) { add( g, G.box( 0.012, h * 0.3, d * 0.96 ), cm, [ w / 2 - 0.004, h * 0.35, 0 ] ); add( g, G.box( 0.012, h * 0.3, d * 0.96 ), cm, [ - w / 2 + 0.004, h * 0.35, 0 ] ); }
-			else { add( g, G.box( w * 0.97, 0.014, d * 0.3 ), cm, [ 0, h - 0.008, 0 ] ); add( g, G.box( w * 0.97, 0.012, d * 0.35 ), cm, [ 0, 0, 0 ] ); }
+			add( g, G.lathe( prof.concat( [ [ 0, bodyTop + 0.002 ] ] ), seg ), MAT.glass( 0xe8f2f2, 0.28 ) );
+			add( g, G.lathe( [ [ 0, 0.004 ], [ r * 0.88, 0.004 ], [ r * 0.94, h * 0.08 ], [ r * 0.94, h * 0.7 ], [ r * 0.9, h * 0.74 ], [ 0, h * 0.745 ] ], 18 ), M( s.content ?? 0xa0673a, { rough: 0.55 } ) );
+		} else add( g, G.lathe( prof.concat( [ [ 0, bodyTop + 0.002 ] ] ), seg ), M( s.body ?? s.content ?? 0xdddddd, { rough: 0.35 } ) );
+		// the lid: knurled plastic or a smooth metal cap with a rolled edge, its top printed
+		const lidM = M( s.lid ?? 0xcc2222, { rough: s.lidMetal ? 0.28 : 0.4, metal: s.lidMetal ? 0.85 : 0 } );
+		if ( s.lidMetal ) add( g, G.lathe( [ [ r * 0.86, bodyTop - lidH * 0.1 ], [ r * 0.9, bodyTop - lidH * 0.1 ], [ r * 0.91, bodyTop + lidH * 0.8 ], [ r * 0.88, bodyTop + lidH ], [ 0, bodyTop + lidH ] ], seg ), lidM );
+		else if ( s.clear ) add( g, ridged( r * 0.9, lidH, 24, 0.035 ), lidM, [ 0, bodyTop - lidH * 0.1, 0 ] );
+		// a tub's snap-on lid, its lip over the rim
+		else add( g, G.lathe( [ [ r * 0.95, bodyTop - lidH * 0.2 ], [ r * 1.0, bodyTop - lidH * 0.1 ], [ r * 1.0, bodyTop + lidH * 0.55 ], [ r * 0.96, bodyTop + lidH * 0.7 ], [ r * 0.9, bodyTop + lidH * 0.72 ], [ r * 0.86, bodyTop + lidH * 0.9 ], [ 0, bodyTop + lidH * 0.9 ] ], seg ), lidM );
+		if ( s.label ) {
+			add( g, new THREE.CircleGeometry( r * 0.72, 22 ).rotateX( - PI / 2 ), printed( panelTex( { ...s.label, sub: '', glyph: null, style: 'plain', bg: s.lid ?? s.label.bg, band: s.lid ?? s.label.band }, info, r * 1.44, r * 1.44, 'top', { max: 256 } ), { rough: 0.4, metal: s.lidMetal ? 0.6 : 0 } ), [ 0, bodyTop + lidH * ( s.lidMetal ? 1 : 0.9 ) + 0.0004, 0 ] );
+			add( g, band( r * 1.006, h * 0.12, h * 0.68, 28 ), printed( wrapTex( s.label, info, 2 * PI * r, h * 0.56 ), { rough: 0.6 } ) );
 		}
 		return g;
 	} );
 
-	// ---- wrapped bars (granola, candy, MRE pouch): { size, label } ----
-	reg( 'bar', ( s ) => {
-		const [ w, h, d ] = s.size || [ 0.13, 0.014, 0.035 ], g = group();
-		const geo = G.rbox( w * 0.9, h, d, h * 0.45, 2 );
-		labelUV( geo, 'y', 0.85 );
-		add( g, geo, M( 0xffffff, { map: labelTex( { split: 0.85, h: 128, ...( s.label || {} ) } ), rough: s.matte ? 0.85 : 0.35, metal: s.matte ? 0 : 0.4 } ) );
-		const cm = M( s.label?.bg ?? 0x999999, { rough: 0.4, metal: s.matte ? 0 : 0.35 } );
-		add( g, G.box( w * 0.06, h * 0.25, d * 0.95 ), cm, [ w * 0.47, h * 0.35, 0 ] );
-		add( g, G.box( w * 0.06, h * 0.25, d * 0.95 ), cm, [ - w * 0.47, h * 0.35, 0 ] );
+	// ---- snack bags / rice sacks: { size, label, flat, crimp, matte } ----
+	reg( 'bag', ( s, def ) => {
+		const [ w, h, d ] = s.size || [ 0.2, 0.28, 0.07 ], g = group();
+		const flat = !! s.flat, spec = s.label || { text: '?' };
+		// lying flat: the bag's "height" runs along z, its thickness is y
+		const bw = w, bh = flat ? d : h, bd = flat ? h : d;
+		const info = packInfo( spec, def );
+		const crimp = s.crimp === false ? 0.025 : 0.075;
+		const { tex, rects } = boxAtlas( spec, info, bw, bh, bd, 'z', { max: 768, inset: [ 0.07, crimp + 0.015 ] } );
+		const geo = pillow( bw, bh, bd, rects, { crimp, pow: s.crimp === false ? 0.3 : 0.5, seed: hashStr( spec.text || '' ) } );
+		const mat = printed( tex, { rough: s.matte ? 0.85 : 0.3, metal: s.matte ? 0 : 0.35, side: THREE.DoubleSide } );
+		const m = add( g, geo, mat );
+		if ( s.crimp !== false ) {
+			// the heat-sealed ends: pleated strips
+			const cm = M( shade( spec.band ?? spec.bg ?? 0x999999, 0.05 ), { rough: 0.35, metal: s.matte ? 0 : 0.4 } );
+			for ( const y of [ 0, bh * ( 1 - crimp * 0.9 ) ] ) add( g, G.box( bw * 0.995, bh * crimp * 0.9, 0.0024 ), cm, [ 0, y, 0 ] );
+			for ( let i = 0; i < 2; i ++ ) for ( let k = 0; k < 14; k ++ ) add( g, G.box( 0.0012, bh * crimp * 0.8, 0.003 ), M( shade( spec.band ?? spec.bg ?? 0x999999, - 0.25 ), { rough: 0.5 } ), [ ( k / 13 - 0.5 ) * bw * 0.94, i ? bh * ( 1 - crimp * 0.85 ) : bh * 0.005, 0 ] );
+		}
+		if ( flat ) {
+			const inner = group(); while ( g.children.length ) inner.add( g.children[ 0 ] );
+			inner.rotation.x = - PI / 2; inner.position.z = bh / 2;
+			g.add( inner );
+			return ground( g );
+		}
+		void m;
 		return g;
+	} );
+
+	// ---- wrapped bars (granola, candy, MRE pouch): { size, label, matte } ----
+	reg( 'bar', ( s, def ) => {
+		const [ w, h, d ] = s.size || [ 0.13, 0.014, 0.035 ], g = group();
+		const spec = s.label || { text: '?' }, info = packInfo( spec, def );
+		const { tex, rects } = boxAtlas( spec, info, w, d, h, 'z', { max: 512, inset: [ 0.07, 0.05 ] } );
+		const geo = pillow( w, d, h, rects, { ends: 'x', crimp: 0.06, pow: 0.35, nx: 14, ny: 6, seed: hashStr( spec.text || '' ) } );
+		const inner = group();
+		add( inner, geo, printed( tex, { rough: s.matte ? 0.85 : 0.28, metal: s.matte ? 0 : 0.45, side: THREE.DoubleSide } ) );
+		// the crimped ends
+		const cm = M( shade( spec.bg ?? 0x999999, - 0.1 ), { rough: 0.4, metal: s.matte ? 0 : 0.35 } );
+		for ( const sx of [ - 1, 1 ] ) {
+			add( inner, G.box( w * 0.05, d * 0.995, 0.0018 ), cm, [ sx * w * 0.475, 0, 0 ] );
+			for ( let k = 0; k < 8; k ++ ) add( inner, G.box( 0.001, d * 0.95, 0.0024 ), M( shade( spec.bg ?? 0x999999, - 0.35 ) ), [ sx * w * ( 0.46 + ( k % 4 ) * 0.008 ), d * 0.02, 0 ], [ 0, 0, 0 ] );
+		}
+		inner.rotation.x = - PI / 2; inner.position.z = d / 2;
+		g.add( inner );
+		return ground( g );
 	} );
 
 	// ---- cup noodles: { r, h, label } ----
-	reg( 'cup', ( s ) => {
+	reg( 'cup', ( s, def ) => {
 		const r = s.r ?? 0.047, h = s.h ?? 0.1, g = group();
-		add( g, G.cyl( r, r * 0.72, h, 20, true ), labelMat( s.label, 2, 384, 256, { rough: 0.8 } ) );
-		add( g, G.cyl( r * 0.72, r * 0.72, 0.003, 18 ), M( 0xeeeeee ) );
-		add( g, G.cyl( r * 1.03, r * 1.03, 0.004, 20 ), M( 0xe0e0e0, { rough: 0.3, metal: 0.8 } ), [ 0, h, 0 ] );
-		add( g, G.box( 0.03, 0.001, 0.025 ), M( 0xe0e0e0, { rough: 0.3, metal: 0.8 } ), [ r * 1.1, h + 0.002, 0 ] );
+		const spec = s.label || { text: '?' }, info = packInfo( spec, def );
+		// the foam cup tapers to its foot; the print wraps it, the foil lid carries the brand
+		const cup = new THREE.CylinderGeometry( r, r * 0.72, h * 0.94, 28, 1, true ).translate( 0, h * 0.47, 0 );
+		add( g, cup, printed( wrapTex( spec, info, PI * ( r + r * 0.72 ), h * 0.94 ), { rough: 0.75 } ) );
+		add( g, G.lathe( [ [ 0, 0.004 ], [ r * 0.7, 0.004 ], [ r * 0.72, 0 ] ], 20 ), M( 0xf2f0ea, { rough: 0.9 } ) );
+		add( g, G.lathe( [ [ r * 0.99, h * 0.94 ], [ r * 1.05, h * 0.95 ], [ r * 1.05, h * 0.985 ], [ r * 1.0, h * 0.99 ] ], 28 ), M( 0xf6f4ee, { rough: 0.8 } ) );
+		const foil = M( 0xffffff, { map: panelTex( { ...spec, style: 'plain', sub: spec.sub, glyph: null }, info, r * 2, r * 2, 'front', { max: 256 } ), rough: 0.3, metal: 0.55 } );
+		add( g, new THREE.CircleGeometry( r * 1.05, 28 ).rotateX( - PI / 2 ), foil, [ 0, h * 0.992, 0 ] );
+		add( g, G.box( 0.024, 0.0006, 0.02 ), M( 0xd8dce0, { rough: 0.3, metal: 0.8 } ), [ r * 1.12, h * 0.99, 0 ], [ 0, 0, - 0.12 ] );
 		return g;
 	} );
 
 	// ---- printed boxes (cereal, crackers, MRE case, matches…): { size, label, labelAxis, color, round } ----
-	reg( 'box', ( s ) => {
+	reg( 'box', ( s, def ) => {
 		const [ w, h, d ] = s.size || [ 0.2, 0.1, 0.12 ], g = group();
 		if ( s.label ) {
-			const geo = s.round ? G.rbox( w, h, d, s.round, 2 ) : G.box( w, h, d );
-			labelUV( geo, s.labelAxis || 'z', 0.8 );
-			add( g, geo, M( 0xffffff, { map: labelTex( { split: 0.8, ...s.label } ), rough: s.rough ?? 0.75, metal: s.metal ?? 0 } ) );
+			const info = packInfo( s.label, def );
+			const axis = s.labelAxis === 'y' ? 'y' : 'z';
+			const geo = G.rbox( w, h, d, s.round ?? Math.min( 0.0016, Math.min( w, h, d ) * 0.06 ), 1 );
+			const { tex, rects } = boxAtlas( s.label, info, w, h, d, axis, { max: Math.max( w, h, d ) > 0.15 ? 1024 : 512 } );
+			add( g, boxUV( geo, rects ), printed( tex, { rough: s.rough ?? 0.7, metal: s.metal ?? 0 } ) );
 		} else add( g, G.rbox( w, h, d, s.round ?? 0.004 ), M( s.color ?? 0x8a8f96, { rough: s.rough ?? 0.7, metal: s.metal ?? 0 } ) );
 		return g;
 	} );
