@@ -7,6 +7,8 @@
 // Set SWIFTSHADER=1 to force the old path.
 import { chromium } from 'playwright';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 const ICD = '/usr/share/vulkan/icd.d/lvp_icd.json';
 export const LVP_SHELL = process.env.LVP_SHELL || '/tmp/deadtide-hs-lvp/headless_shell';
@@ -59,7 +61,8 @@ export async function launch( extraArgs = [] ) {
 // One test browser at a time on this machine (a game page takes 3-5 GB of a shared ~15 GB): launch() waits for a
 // lock directory held by another process's browser, and takes over a lock whose process is gone. BROWSER_LOCK=0
 // skips it.
-const LOCK = '/tmp/deadtide-browser.lock';
+// (/tmp on Linux whatever TMPDIR says, so every process agrees; Windows has no /tmp)
+const LOCK = process.platform === 'win32' ? path.join( os.tmpdir(), 'deadtide-browser.lock' ) : '/tmp/deadtide-browser.lock';
 let held = false;
 function alive( pid ) { try { process.kill( pid, 0 ); return true; } catch ( e ) { return e.code === 'EPERM'; } }
 async function takeBrowserLock() {
@@ -101,6 +104,11 @@ async function launchRaw( extraArgs ) {
 			args: [ '--use-gl=angle', '--use-angle=vulkan', '--enable-features=Vulkan', '--use-vulkan=native', '--disable-gpu-sandbox', '--ignore-gpu-blocklist', '--js-flags=--expose-gc', '--disable-angle-features=warmUpPipelineCacheAtLink', ...extraArgs ],
 			env: { ...process.env, VK_ICD_FILENAMES: ICD },
 		} );
+	}
+	// a desktop with a real GPU (Windows, macOS): ANGLE on the native API. SWIFTSHADER=1 forces the CPU path below.
+	const native = { win32: 'd3d11', darwin: 'metal' }[ process.platform ];
+	if ( native && process.env.SWIFTSHADER !== '1' ) {
+		return chromium.launch( { args: [ '--use-gl=angle', `--use-angle=${native}`, '--enable-gpu', '--ignore-gpu-blocklist', '--js-flags=--expose-gc', ...extraArgs ] } );
 	}
 	return chromium.launch( { args: [ '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--js-flags=--expose-gc', ...extraArgs ] } );
 }

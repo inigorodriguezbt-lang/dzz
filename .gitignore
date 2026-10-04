@@ -3,3 +3,5 @@ dist/
 .tile-cache/
 *.log
 .DS_Store
+test/.tmp_*
+test/preview/.tmp_*
