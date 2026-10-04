@@ -1,61 +1,449 @@
-// Clothing and bags: folded shirts and pants (with printed fabrics), shoes in pairs, hats and helmets,
-// masks, eyewear, vests and plate carriers, gloves, belts and backpacks.
+// Clothing and bags: folded tops and trousers (soft cloth panels with collars, plackets, pockets, seams and prints that
+// run on across the folds), shoes in pairs, hats and helmets, masks, eyewear, vests and plate carriers, gloves, belts
+// and backpacks. The cloth panels, straps and weave materials come from garment.js.
+// Folded tops lie with the neck away from the viewer (towards -z), the chest print reading the right way up in the
+// inventory icon; trousers lie along x with the waistband at +x.
 import * as THREE from 'three';
-import { M, MAT, G, PI, add, group, ground, fabric, shade } from './lib.js';
+import { M, MAT, G, PI, add, group, ground, fabric, shade, canvasTex, css } from './lib.js';
+import { patchMaterial } from '../../../render/Materials.js';
+import { cloth, panel, conform, band, seam, buttonGeo, curveLoop, roundRect, line, arc, smooth, lerp, softBox, grid, smoothNormals, uvOf } from './garment.js';
+
+// ---- shared bits ---------------------------------------------------------------------------------------------------
+
+const lum = ( c ) => ( ( c >> 16 & 255 ) * 0.3 + ( c >> 8 & 255 ) * 0.59 + ( c & 255 ) * 0.11 ) / 255;
+// sewing thread: a shade darker than the cloth (lighter on near-black cloth)
+const thread = ( c ) => M( lum( c ) < 0.13 ? shade( c, 0.25 ) : shade( c, - 0.3 ), { rough: 0.85 } );
+// the weave a print or a style implies (a spec's own `weave` wins)
+function weaveOf( s, fallback ) {
+	if ( s.weave ) return s.weave;
+	switch ( String( s.print || '' ).split( ':' )[ 0 ] ) {
+		case 'denim': case 'plaid': return 'twill';
+		case 'leather': return 'leather';
+		case 'canvas': return 'canvas';
+		case 'multicam': case 'marpat': case 'woodland': case 'desert': return 'ripstop';
+		case 'knit': return 'knit';
+	}
+	return fallback;
+}
+// add a detail laid onto a surface top( x, z )
+const on = ( g, geo, mat, top, lift = 0.0006 ) => add( g, conform( geo, top, lift ), mat );
+const mirror = ( P ) => P.map( p => [ - p[ 0 ], p[ 1 ] ] ).reverse();
+const pathLen2 = ( P ) => { let l = 0; for ( let i = 1; i < P.length; i ++ ) l += Math.hypot( P[ i ][ 0 ] - P[ i - 1 ][ 0 ], P[ i ][ 1 ] - P[ i - 1 ][ 1 ] ); return l; };
+// screen-printed lettering (a cutout over the cloth, a little worn)
+const slogans = new Map();
+export function sloganMat( text, color ) {
+	const k = text + ':' + color;
+	let m = slogans.get( k );
+	if ( m ) return m;
+	const t = canvasTex( 'slogan:' + k, 256, 256, ( ctx, w, h ) => {
+		ctx.clearRect( 0, 0, w, h );
+		ctx.fillStyle = css( color ); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+		let fs = 120; ctx.font = `900 ${fs}px Arial, Helvetica, sans-serif`;
+		while ( fs > 20 && ctx.measureText( text ).width > w * 0.92 ) { fs -= 6; ctx.font = `900 ${fs}px Arial, Helvetica, sans-serif`; }
+		ctx.fillText( text, w / 2, h / 2 );
+		ctx.globalCompositeOperation = 'destination-out';
+		let r = 5; const rnd = () => ( r = ( r * 16807 ) % 2147483647 ) / 2147483647;
+		for ( let i = 0; i < 260; i ++ ) ctx.fillRect( rnd() * w, rnd() * h, 1 + rnd() * 3, 1 + rnd() * 2 );
+		ctx.globalCompositeOperation = 'source-over';
+	} );
+	m = new THREE.MeshStandardMaterial( { map: t, alphaTest: 0.5, roughness: 0.75, metalness: 0 } );
+	patchMaterial( m, 'item' );
+	slogans.set( k, m );
+	return m;
+}
+
+// ---- folded tops ---------------------------------------------------------------------------------------------------
+// { style: tee|tank|polo|aloha|dress|hoodie|jacket|coat|suit|wetsuit, color, color2, print, color3, rep, weave, trim,
+//   button, zip, collar, closure, pockets, sleeves (short|long|none), stripes, badge, patch, quilt, hood, ghillie, rough }
+
+const TOPS = {
+	tee: { W: 0.25, L: 0.3, T: 0.026, weave: 'knit', sleeves: 'short', collar: 'crew' },
+	tank: { W: 0.24, L: 0.3, T: 0.022, weave: 'knit', sleeves: 'none', collar: 'tank' },
+	polo: { W: 0.25, L: 0.3, T: 0.028, weave: 'knit', sleeves: 'short', collar: 'polo', closure: 'polo' },
+	aloha: { W: 0.25, L: 0.31, T: 0.026, weave: 'plain', sleeves: 'short', collar: 'camp', closure: 'buttons', pockets: 1 },
+	dress: { W: 0.26, L: 0.32, T: 0.03, weave: 'plain', sleeves: 'short', collar: 'scoop' },
+	hoodie: { W: 0.27, L: 0.31, T: 0.04, weave: 'fleece', sleeves: 'long', collar: 'hood', pockets: 'kangaroo' },
+	jacket: { W: 0.28, L: 0.32, T: 0.04, weave: 'nylon', sleeves: 'long', collar: 'stand', closure: 'zip', pockets: 'slant' },
+	coat: { W: 0.29, L: 0.34, T: 0.05, weave: 'twill', sleeves: 'long', collar: 'point', closure: 'zip', pockets: 'flap4' },
+	suit: { W: 0.3, L: 0.34, T: 0.062, weave: 'plain', sleeves: 'long', collar: 'hood', closure: 'zip', hood: 'visor' },
+	wetsuit: { W: 0.25, L: 0.32, T: 0.034, weave: 'neoprene', sleeves: 'long', collar: 'band', closure: 'chestzip' },
+};
+const NECK = { crew: [ 0.045, 0.03 ], vneck: [ 0.045, 0.072 ], scoop: [ 0.06, 0.06 ], stand: [ 0.045, 0.03 ], tall: [ 0.048, 0.03 ], band: [ 0.042, 0.026 ] };
+
+// the folded body's outline (right half from the back of the neck round to the bottom, mirrored)
+function topOutline( W, L, sleeves, flare = 0 ) {
+	const x = W / 2, z = L / 2;
+	const half = sleeves === 'none'
+		? [ [ 0, - z + 0.052 ], [ 0.034, - z + 0.03 ], [ 0.048, - z + 0.003 ], [ 0.074, - z ], [ 0.086, - z + 0.012 ], [ x - 0.016, - z + 0.062 ], [ x, - z + 0.1 ] ]
+		: [ [ 0, - z ], [ 0.06, - z - 0.001 ], [ x - 0.028, - z + 0.003 ],
+			...( sleeves === 'short' ? [ [ x + 0.008, - z + 0.01 ], [ x + 0.024, - z + 0.04 ], [ x + 0.02, - z + 0.078 ], [ x + 0.001, - z + 0.094 ] ] : [ [ x - 0.004, - z + 0.03 ] ] ) ];
+	half.push( [ x, 0 ], [ x + flare * 0.6 - 0.001, z - 0.04 ], [ x + flare - 0.02, z - 0.001 ], [ 0.06, z + 0.001 ], [ 0, z ] );
+	return curveLoop( [ ...half, ...mirror( half.slice( 1, - 1 ) ) ], 96 );
+}
+
+function foldedTop( s ) {
+	const g = group(), style = TOPS[ s.style ] ? s.style : 'tee', F = TOPS[ style ], c = s.color ?? 0x888888;
+	const W = F.W, L = F.L, T = F.T, x = W / 2, z = L / 2;
+	const sleeves = s.sleeves ?? F.sleeves, collar = s.collar ?? F.collar, closure = s.closure ?? F.closure ?? 'none';
+	const pockets = s.pockets ?? F.pockets ?? 0;
+	// (a text print is a slogan on the chest, not a pattern all over)
+	const text = String( s.print || '' ).startsWith( 'text:' ) ? s.print.slice( 5 ) : null;
+	const body = cloth( c, { print: text ? null : s.print, color2: s.color2 ?? 0xffffff, color3: s.color3, rep: s.rep ?? 1.4, weave: weaveOf( s, F.weave ), rough: s.rough } );
+	const trimC = s.trim ?? shade( c, - 0.1 );
+	const rib = cloth( trimC, { weave: style === 'wetsuit' ? 'neoprene' : 'rib', rough: s.rough } );
+	const stitch = thread( s.print ? trimC : c ), lining = M( shade( lum( c ) < 0.1 ? 0x404040 : c, - 0.55 ), { rough: 0.95 } );
+	const metal = M( s.button ?? 0xb8bcc2, { rough: 0.3, metal: 0.9 } );
+	const neck = NECK[ collar ];
+	const nW = neck?.[ 0 ] ?? 0.045, nD = neck?.[ 1 ] ?? 0.03;
+	// the front of the neck opening at x (crew / scoop: round, vneck: a V)
+	const neckZ = ( px ) => { const t = Math.min( 1, Math.abs( px ) / nW ); return - z + 0.004 + nD * ( collar === 'vneck' ? 1 - t : Math.sqrt( 1 - t * t ) ); };
+	const open = !! neck && ! [ 'stand', 'tall', 'band' ].includes( collar ) ? 1 : neck ? 0.6 : 0;
+	const quilt = !! s.quilt;
+	const base = panel( topOutline( W, L, sleeves, style === 'dress' ? 0.022 : 0 ), {
+		T, R: T * 1.35, cell: quilt ? 0.014 : 0.022, uv: [ 0, - 0.03 ],
+		disp: ( px, pz ) => {
+			let h = sleeves === 'long' ? 0 : T * 0.22 * smooth( x - 0.05, x - 0.032, Math.abs( px ) ); // the sleeves folded in under the sides
+			h += T * 0.14 * ( 1 - ( px / x ) ** 2 ) * ( 1 - ( pz / z ) ** 2 ); // a soft rise in the middle
+			h -= T * 0.1 * Math.exp( - ( ( ( pz - 0.05 - px * 0.18 ) / 0.012 ) ** 2 ) ) * smooth( x, x * 0.3, Math.abs( px ) ); // a crease
+			if ( open && Math.abs( px ) < nW + 0.006 ) h -= T * 0.42 * open * smooth( 0.004, - 0.006, pz - neckZ( px ) ) * smooth( nW + 0.006, nW - 0.008, Math.abs( px ) );
+			if ( quilt ) h += T * 0.2 * ( Math.pow( Math.abs( Math.sin( ( pz + z ) / 0.042 * PI ) ), 0.6 ) - 0.7 );
+			return h;
+		},
+	} );
+	add( g, base.geo, body );
+	const top = base.top, lay = ( geo, m, lift ) => on( g, geo, m, top, lift );
+	const sew = ( pts, m = stitch ) => add( g, seam( pts, top ), m );
+	const btn = ( px, pz, r = 0.0058, m = metal ) => lay( buttonGeo( r, r * 0.4 ).translate( px, 0, pz ), m, 0.0004 );
+	const zip = ( pts, w = 0.009, pull = true ) => {
+		const tape = M( s.zip ?? shade( c, - 0.45 ), { rough: 0.5, metal: s.zip ? 0.3 : 0 } );
+		const n = Math.max( 2, Math.ceil( pathLen2( pts ) / 0.025 ) );
+		add( g, band( pts.map( p => [ p[ 0 ], top( p[ 0 ], p[ 1 ] ) + 0.0008, p[ 1 ] ] ), w, 0.0012, { seg: n } ), tape );
+		add( g, band( pts.map( p => [ p[ 0 ], top( p[ 0 ], p[ 1 ] ) + 0.0017, p[ 1 ] ] ), w * 0.38, 0.0012, { seg: n } ), M( s.zip ?? 0x2a2a2a, { rough: 0.35, metal: 0.6 } ) );
+		if ( pull ) {
+			const [ px, pz ] = pts[ 0 ], dx = pts[ 1 ][ 0 ] - px, dz = pts[ 1 ][ 1 ] - pz, a = Math.atan2( dx, dz );
+			const tab = new THREE.Group(); tab.position.set( px + dx * 0.15, top( px, pz ) + 0.003, pz + dz * 0.15 ); tab.rotation.y = a;
+			add( tab, G.box( 0.008, 0.003, 0.012 ), M( s.zip ?? 0x2a2a2a, { rough: 0.3, metal: 0.8 } ) );
+			add( tab, G.box( 0.006, 0.0016, 0.016 ), M( 0x1a1a1a, { rough: 0.5 } ), [ 0, 0.001, 0.014 ] );
+			g.add( tab );
+		}
+	};
+	// a patch pocket, maybe with a flap and a button
+	const pocket = ( px, pz, w, h, o = {} ) => {
+		const m = o.mat ?? body;
+		lay( panel( roundRect( w, h, [ 0.002, 0.002, h * 0.25, h * 0.25 ], px, pz, 3 ), { T: 0.0035, R: 0.0025, cell: 0.02, bottom: false, uv: [ 0, - 0.03 ] } ).geo, m, 0.0002 );
+		sew( [ [ px - w / 2 + 0.003, pz - h / 2 + 0.006 ], [ px + w / 2 - 0.003, pz - h / 2 + 0.006 ] ] );
+		if ( o.flap ) {
+			const fh = h * 0.36, F2 = [ [ px - w / 2 - 0.002, pz - h / 2 - 0.004 ], [ px + w / 2 + 0.002, pz - h / 2 - 0.004 ], [ px + w / 2 + 0.002, pz - h / 2 + fh * 0.7 ], [ px, pz - h / 2 + fh ], [ px - w / 2 - 0.002, pz - h / 2 + fh * 0.7 ] ];
+			lay( panel( F2, { T: 0.0045, R: 0.002, cell: 0.02, bottom: false, uv: [ 0, - 0.03 ] } ).geo, m, 0.0035 );
+			if ( o.button !== false ) btn( px, pz - h / 2 + fh * 0.72, 0.005, o.btnMat ?? metal );
+		}
+	};
+
+	// ---- the neck ----
+	if ( neck && collar !== 'tank' ) {
+		const front = [];
+		for ( let i = 0; i <= 12; i ++ ) { const px = - nW + 2 * nW * i / 12; front.push( [ px, neckZ( px ) ] ); }
+		// the inside of the back, seen through the opening, and a woven label
+		lay( panel( [ ...front, [ nW, - z + 0.002 ], [ - nW, - z + 0.002 ] ], { T: 0.001, R: 0.001, cell: 0.012, bottom: false } ).geo, lining, 0.0003 );
+		lay( G.box( 0.022, 0.0008, 0.012 ).translate( 0, 0, - z + 0.013 ), M( 0xeeeee8, { rough: 0.7 } ), 0.0012 );
+		if ( collar === 'stand' || collar === 'tall' || collar === 'band' ) {
+			// a collar standing up round the opening
+			const hgt = collar === 'tall' ? 0.034 : collar === 'band' ? 0.012 : 0.022;
+			const loop = [ ...front.filter( ( p, i ) => i % 2 === 0 ), [ nW * 0.6, - z + 0.006 ], [ - nW * 0.6, - z + 0.006 ] ];
+			add( g, band( loop.map( p => [ p[ 0 ], top( p[ 0 ], p[ 1 ] ) + hgt * 0.42, p[ 1 ] ] ), hgt, 0.006, { closed: true, round: true, seg: 30, up: ( P, Tn ) => [ - Tn.z, 0, Tn.x ] } ), collar === 'band' ? rib : body );
+			if ( collar === 'tall' ) { // a throat strap across the front
+				add( g, G.box( 0.05, 0.004, 0.016 ), M( s.trim ?? 0x2a2a2a, { rough: 0.8 } ), [ 0.012, top( 0, neckZ( 0 ) ) + hgt * 0.75, neckZ( 0 ) + 0.004 ], [ 0.35, 0.15, 0 ] );
+			}
+		} else {
+			// a ribbed band round the opening: down the front, back along the fold
+			const loop = [ ...front.filter( ( p, i ) => i % 2 === 0 ), [ nW * 0.55, - z + 0.006 ], [ - nW * 0.55, - z + 0.006 ] ];
+			add( g, band( loop.map( p => [ p[ 0 ], top( p[ 0 ], p[ 1 ] ) + 0.002, p[ 1 ] ] ), collar === 'scoop' ? 0.008 : 0.011, 0.0045, { closed: true, round: true, seg: 30 } ), collar === 'scoop' ? M( s.trim ?? 0xf4f0e6, { rough: 0.85 } ) : rib );
+		}
+	}
+	if ( collar === 'tank' ) {
+		// the back shows through the scoop; bound edges round the neck and the armholes
+		add( g, panel( roundRect( 0.16, 0.07, 0.01, 0, - z + 0.035 ), { T: T * 0.55, R: T * 0.5, cell: 0.016 } ).geo, body );
+		const bind = ( P ) => add( g, band( P.map( p => [ p[ 0 ], top( p[ 0 ], p[ 1 ] ) + 0.0015, p[ 1 ] ] ), 0.007, 0.004, { round: true, seg: 20 } ), rib );
+		bind( [ [ - 0.05, - z + 0.006 ], [ - 0.036, - z + 0.03 ], [ 0, - z + 0.05 ], [ 0.036, - z + 0.03 ], [ 0.05, - z + 0.006 ] ] );
+		for ( const k of [ - 1, 1 ] ) bind( [ [ k * 0.084, - z + 0.012 ], [ k * ( x - 0.03 ), - z + 0.05 ], [ k * ( x - 0.004 ), - z + 0.094 ] ] );
+	}
+	const wings = { point: [ [ 0.005, - z + 0.003 ], [ 0.058, - z + 0.002 ], [ 0.066, - z + 0.022 ], [ 0.032, - z + 0.072 ], [ 0.008, - z + 0.032 ] ],
+		cord: [ [ 0.005, - z + 0.003 ], [ 0.06, - z + 0.002 ], [ 0.07, - z + 0.026 ], [ 0.036, - z + 0.078 ], [ 0.008, - z + 0.034 ] ],
+		camp: [ [ 0.005, - z + 0.003 ], [ 0.06, - z + 0.002 ], [ 0.084, - z + 0.03 ], [ 0.068, - z + 0.09 ], [ 0.012, - z + 0.05 ] ],
+		polo: [ [ 0.005, - z + 0.003 ], [ 0.056, - z + 0.002 ], [ 0.064, - z + 0.02 ], [ 0.036, - z + 0.066 ], [ 0.02, - z + 0.064 ], [ 0.008, - z + 0.03 ] ],
+		notch: [ [ 0.005, - z + 0.003 ], [ 0.058, - z + 0.002 ], [ 0.07, - z + 0.03 ], [ 0.058, - z + 0.044 ], [ 0.076, - z + 0.05 ], [ 0.016, - z + 0.17 ], [ 0.006, - z + 0.06 ] ],
+		biker: [ [ 0.005, - z + 0.003 ], [ 0.062, - z + 0.002 ], [ 0.1, - z + 0.06 ], [ 0.072, - z + 0.11 ], [ 0.02, - z + 0.05 ] ] }[ collar ];
+	if ( wings ) {
+		const wm = collar === 'polo' ? rib : collar === 'cord' ? cloth( s.trim ?? shade( c, - 0.35 ), { weave: 'cord' } ) : body;
+		// the gap between the wings, the stand behind them, the two wings
+		lay( panel( [ [ - 0.03, - z + 0.003 ], [ 0.03, - z + 0.003 ], [ 0, - z + 0.05 ] ], { T: 0.001, R: 0.001, cell: 0.012, bottom: false } ).geo, lining, 0.0003 );
+		add( g, band( [ [ - 0.064, 0, - z + 0.008 ], [ 0, 0, - z + 0.006 ], [ 0.064, 0, - z + 0.008 ] ].map( p => [ p[ 0 ], top( p[ 0 ], p[ 2 ] ) + 0.004, p[ 2 ] ] ), 0.012, 0.006, { round: true, seg: 12 } ), wm );
+		for ( const P of [ wings, mirror( wings ) ] ) {
+			const wg = panel( curveLoop( P, 24 ), { T: 0.0045, R: 0.003, cell: 0.02, bottom: false, uv: [ 0, - 0.03 ] } );
+			lay( wg.geo, wm, 0.0012 );
+		}
+	}
+
+	// ---- how it closes ----
+	const cz0 = wings ? - z + ( collar === 'notch' ? 0.17 : collar === 'camp' ? 0.05 : 0.035 ) : neck ? neckZ( 0 ) + 0.004 : - z + 0.1;
+	if ( closure === 'buttons' || closure === 'snaps' || closure === 'polo' ) {
+		const end = closure === 'polo' ? - z + 0.085 : z - 0.008;
+		add( g, band( [ [ 0, 0, cz0 ], [ 0, 0, ( cz0 + end ) / 2 ], [ 0, 0, end ] ].map( p => [ 0, top( 0, p[ 2 ] ) + 0.0012, p[ 2 ] ] ), 0.022, 0.0025, { seg: 16 } ), collar === 'polo' ? rib : body );
+		for ( const k of [ - 1, 1 ] ) sew( line( [ k * 0.0105, cz0 + 0.004 ], [ k * 0.0105, end ], 8 ) );
+		const bm = closure === 'snaps' ? M( s.button ?? 0x9a8a6a, { rough: 0.3, metal: 0.85 } ) : M( s.button ?? 0xf0e8d0, { rough: 0.35 } );
+		const n = closure === 'polo' ? 2 : Math.floor( ( end - cz0 - 0.02 ) / 0.052 ) + 1;
+		for ( let i = 0; i < n; i ++ ) btn( 0, cz0 + 0.016 + i * ( closure === 'polo' ? 0.026 : 0.052 ), 0.0055, bm );
+		if ( closure === 'polo' && s.patch ) lay( panel( curveLoop( [ [ 0.06, - z + 0.07 ], [ 0.074, - z + 0.066 ], [ 0.078, - z + 0.08 ], [ 0.066, - z + 0.086 ], [ 0.058, - z + 0.078 ] ], 16 ), { T: 0.0015, R: 0.001, cell: 0.01, bottom: false } ).geo, M( s.patch, { rough: 0.7 } ), 0.0004 );
+	}
+	if ( closure === 'double' ) {
+		// a double-breasted front: the flap's edge, two rows of buttons
+		sew( [ [ - 0.012, cz0 ], [ 0.03, - z + 0.06 ], [ 0.052, z - 0.01 ] ] );
+		for ( let i = 0; i < 4; i ++ ) for ( const k of [ - 1, 1 ] ) btn( k * 0.034, - z + 0.07 + i * 0.05, 0.0062, M( s.button ?? 0x1a1a1a, { rough: 0.4 } ) );
+	}
+	if ( closure === 'zip' ) zip( [ [ 0, cz0 ], [ 0, ( cz0 + z ) / 2 ], [ 0, z - 0.006 ] ] );
+	if ( closure === 'asym' ) zip( [ [ - 0.03, cz0 + 0.01 ], [ 0.02, 0.0 ], [ 0.04, z - 0.006 ] ] );
+	if ( closure === 'chestzip' ) zip( [ [ - 0.07, - z + 0.06 ], [ 0, - z + 0.085 ], [ 0.07, - z + 0.06 ] ] );
+	if ( closure === 'clips' ) {
+		// the storm flap and its clips
+		sew( line( [ 0.018, cz0 ], [ 0.018, z - 0.008 ], 8 ) );
+		for ( let i = 0; i < 4; i ++ ) {
+			const pz = - z + 0.07 + i * 0.06;
+			lay( G.box( 0.026, 0.004, 0.012 ).translate( 0.01, 0, pz ), MAT.darkMetal(), 0.0005 );
+			lay( G.torus( 0.006, 0.0016, 4, 10, PI ).rotateX( PI / 2 ).translate( - 0.006, 0, pz ), M( 0xb8bcc2, { rough: 0.3, metal: 0.9 } ), 0.002 );
+		}
+	}
+
+	// ---- pockets ----
+	if ( pockets === 1 ) pocket( 0.062, - z + 0.1, 0.052, 0.058 );
+	if ( pockets === 2 || pockets === 'flap2' || pockets === 'flap4' ) for ( const k of [ - 1, 1 ] ) pocket( k * 0.064, - z + ( collar === 'notch' ? 0.2 : 0.105 ), 0.058, 0.064, { flap: pockets !== 2 || !! s.flaps } );
+	if ( pockets === 'flap4' || pockets === 'flap2low' ) for ( const k of [ - 1, 1 ] ) pocket( k * 0.07, 0.085, 0.07, 0.075, { flap: true } );
+	if ( pockets === 'lab' ) { pocket( 0.062, - z + 0.12, 0.05, 0.055 ); for ( const k of [ - 1, 1 ] ) pocket( k * 0.075, 0.09, 0.07, 0.07 ); lay( G.cylX( 0.0035, 0.06, 8 ).rotateY( PI / 2 ).translate( 0.07, 0.003, - z + 0.105 ), M( 0x1a3a8a, { rough: 0.4 } ), 0.0005 ); }
+	if ( pockets === 'slant' ) for ( const k of [ - 1, 1 ] ) {
+		const P = [ [ k * 0.06, 0.05 ], [ k * 0.09, 0.115 ] ];
+		sew( P, M( shade( c, - 0.45 ), { rough: 0.8 } ) );
+		if ( style === 'jacket' && ! s.print ) zip( P, 0.006, true );
+	}
+	if ( pockets === 'kangaroo' ) {
+		const K = [ [ - 0.07, 0.03 ], [ 0.07, 0.03 ], [ 0.094, 0.07 ], [ 0.102, 0.128 ], [ - 0.102, 0.128 ], [ - 0.094, 0.07 ] ];
+		lay( panel( K, { T: 0.005, R: 0.004, cell: 0.016, bottom: false, uv: [ 0, - 0.03 ] } ).geo, body, 0.0002 );
+		sew( line( [ - 0.068, 0.035 ], [ 0.068, 0.035 ], 6 ) );
+		for ( const k of [ - 1, 1 ] ) sew( [ [ k * 0.072, 0.034 ], [ k * 0.094, 0.072 ], [ k * 0.1, 0.124 ] ], M( shade( c, - 0.45 ) ) );
+	}
+
+	// ---- sleeves: short ones show their hems at the shoulders, long ones their cuffs under the bottom fold ----
+	if ( sleeves === 'short' ) for ( const k of [ - 1, 1 ] ) {
+		sew( [ [ k * ( x + 0.012 ), - z + 0.012 ], [ k * ( x + 0.019 ), - z + 0.045 ], [ k * ( x + 0.014 ), - z + 0.08 ] ] );
+		sew( [ [ k * ( x - 0.03 ), - z + 0.006 ], [ k * ( x - 0.034 ), - z + 0.05 ], [ k * ( x - 0.024 ), - z + 0.092 ] ] );
+	}
+	if ( sleeves === 'long' ) for ( const k of [ - 1, 1 ] ) {
+		// folded straight down the front, along the sides, the cuff just short of the bottom fold
+		const sw = 0.056, x0 = k * ( x + 0.001 ), x1 = k * ( x - sw ), zb = z - 0.05;
+		const S = curveLoop( [ [ x1, - z + 0.012 ], [ k * ( x - 0.02 ), - z + 0.002 ], [ x0, - z + 0.02 ], [ k * ( x - 0.004 ), zb ], [ k * ( x - sw * 0.5 ), zb + 0.004 ], [ k * ( x - sw + 0.006 ), zb ] ], 40 );
+		const sl = panel( S, { T: T * 0.36, R: T * 0.3, cell: 0.022, bottom: false, uv: [ 0, - 0.03 ], disp: ( px, pz ) => - T * 0.06 * Math.exp( - ( ( ( pz - 0.02 ) / 0.01 ) ** 2 ) ) } );
+		const slg = conform( sl.geo, top, 0.0004 );
+		add( g, slg, body );
+		const stop = ( px, pz ) => top( px, pz ) + sl.top( px, pz ) + 0.0004;
+		add( g, seam( [ [ x1 + k * 0.004, - z + 0.03 ], [ k * ( x - 0.03 ), - z + 0.024 ], [ k * ( x - 0.004 ), - z + 0.03 ] ], stop ), stitch );
+		const knit = style === 'hoodie' || style === 'wetsuit' || ( style === 'jacket' && collar === 'stand' );
+		const cf = panel( roundRect( sw - 0.008, 0.036, 0.008, k * ( x - sw / 2 ), z - 0.034, 3 ), { T: T * 0.34, R: T * 0.22, cell: 0.02, bottom: false, uv: [ 0, - 0.03 ] } );
+		add( g, conform( cf.geo, top, 0.0004 ), knit ? rib : body );
+		const ctop = ( px, pz ) => top( px, pz ) + cf.top( px, pz ) + 0.0004;
+		if ( ! knit ) {
+			add( g, seam( line( [ k * ( x - sw + 0.006 ), z - 0.05 ], [ k * ( x - 0.006 ), z - 0.05 ], 4 ), ctop ), stitch );
+			add( g, buttonGeo( 0.0045, 0.0018 ).translate( k * ( x - sw / 2 ), ctop( k * ( x - sw / 2 ), z - 0.03 ), z - 0.03 ), M( s.button ?? 0xf0e8d0, { rough: 0.4 } ) );
+		}
+		if ( style === 'wetsuit' ) add( g, conform( panel( roundRect( 0.012, zb + z - 0.03, 0.004, k * ( x - sw * 0.45 ), ( zb - z ) / 2 + 0.006 ), { T: 0.0012, R: 0.001, cell: 0.016, bottom: false } ).geo, stop, 0.0004 ), M( s.trim ?? 0x2a8ad6, { rough: 0.5 } ) );
+	}
+	if ( style === 'hoodie' ) // a ribbed waistband along the bottom fold
+		lay( panel( roundRect( W - 0.012, 0.03, 0.008, 0, z - 0.017 ), { T: 0.003, R: 0.002, cell: 0.014, bottom: false } ).geo, rib, 0.0003 );
+
+	// ---- hoods: a hoodie's laid down over the chest, a protective suit's with its window ----
+	if ( collar === 'hood' ) {
+		const hz = style === 'suit' ? 0.03 : - 0.05;
+		const H = curveLoop( [ [ - 0.105, - z + 0.004 ], [ 0, - z + 0.0 ], [ 0.105, - z + 0.004 ], [ 0.112, ( - z + hz ) / 2 ], [ 0.08, hz - 0.004 ], [ 0, hz + 0.01 ], [ - 0.08, hz - 0.004 ], [ - 0.112, ( - z + hz ) / 2 ] ], 56 );
+		const hood = panel( H, { T: 0.016, R: 0.012, cell: 0.024, uv: [ 0, - 0.03 ], disp: ( px, pz ) => 0.004 * ( 1 - ( px / 0.11 ) ** 2 ) } );
+		const hg = conform( hood.geo, top, 0.0005 );
+		add( g, hg, body );
+		const htop = ( px, pz ) => top( px, pz ) + hood.top( px, pz ) + 0.0005;
+		// the opening's edge: a turned hem along the hood's front
+		const rim = [ [ - 0.1, ( - z + hz ) / 2 + 0.01 ], [ - 0.07, hz - 0.012 ], [ 0, hz ], [ 0.07, hz - 0.012 ], [ 0.1, ( - z + hz ) / 2 + 0.01 ] ];
+		add( g, band( rim.map( p => [ p[ 0 ], htop( p[ 0 ], p[ 1 ] ) + 0.001, p[ 1 ] ] ), 0.012, 0.004, { round: true, seg: 30 } ), style === 'suit' ? body : rib );
+		add( g, seam( line( [ 0, - z + 0.012 ], [ 0, hz - 0.008 ], 8 ), htop ), stitch );
+		if ( style === 'suit' ) {
+			// the face window: a clear visor (hazmat) or a dark mesh veil (beekeeper), taped round
+			const veil = s.hood === 'veil';
+			const win = panel( curveLoop( [ [ - 0.06, - 0.075 ], [ 0, - 0.088 ], [ 0.06, - 0.075 ], [ 0.07, - 0.04 ], [ 0, - 0.02 ], [ - 0.07, - 0.04 ] ], 32 ), { T: 0.003, R: 0.002, cell: 0.025, bottom: false } );
+			add( g, conform( win.geo, htop, 0.0006 ), veil ? cloth( 0x1c1c1c, { weave: 'ripstop', wrep: 3, rough: 0.9 } ) : M( 0xb8d0d8, { rough: 0.06, metal: 0.2, transparent: true, opacity: 0.55 } ) );
+			add( g, band( curveLoop( [ [ - 0.06, - 0.075 ], [ 0, - 0.088 ], [ 0.06, - 0.075 ], [ 0.07, - 0.04 ], [ 0, - 0.02 ], [ - 0.07, - 0.04 ] ], 32 ).map( p => [ p[ 0 ], htop( p[ 0 ], p[ 1 ] ) + 0.002, p[ 1 ] ] ), 0.006, 0.0025, { closed: true, seg: 24 } ), M( s.trim ?? 0x2a2a2a, { rough: 0.7 } ) );
+		} else for ( const k of [ - 1, 1 ] ) {
+			// drawstrings out of the hem, down over the chest, metal aglets
+			const cord = [ [ k * 0.014, htop( k * 0.014, hz - 0.002 ) + 0.002, hz - 0.002 ], [ k * 0.02, top( k * 0.02, hz + 0.03 ) + 0.002, hz + 0.03 ], [ k * ( 0.012 + 0.012 * k ), top( 0, hz + 0.08 ) + 0.002, hz + 0.08 ] ];
+			add( g, G.tube( cord, 0.0024, 12, 5 ), M( s.trim ?? 0xf0f0ea, { rough: 0.8 } ) );
+			add( g, G.cyl( 0.0028, 0.0028, 0.012, 6 ).rotateX( PI / 2 ).translate( cord[ 2 ][ 0 ], cord[ 2 ][ 1 ], cord[ 2 ][ 2 ] + 0.006 ), M( 0xb8bcc2, { rough: 0.3, metal: 0.9 } ) );
+			add( g, G.torus( 0.004, 0.0012, 4, 10 ).rotateX( PI / 2 ).translate( k * 0.014, htop( k * 0.014, hz - 0.006 ) + 0.0015, hz - 0.006 ), M( 0xb8bcc2, { rough: 0.3, metal: 0.9 } ) );
+		}
+	}
+
+	// ---- a slogan printed on the chest ----
+	if ( text ) {
+		const tw = Math.min( 0.17, W - 0.11 ), th = tw * 0.42, tz = style === 'hoodie' ? - 0.012 : - z + 0.11;
+		const d = panel( roundRect( tw, th, 0.004, 0, tz ), { T: 0.0006, R: 0.0005, cell: 0.03, bottom: false } );
+		uvOf( d.geo, 0, tz, tw );
+		lay( d.geo, sloganMat( text, s.color2 ?? 0xffffff ), 0.0007 );
+	}
+
+	// ---- trims ----
+	if ( s.stripes ) {
+		// reflective tape: two bands across, a silver line down each
+		const tape = M( s.stripes, { rough: 0.35, metal: 0.2, emissive: s.stripes, emissiveIntensity: 0.12 } ), silver = M( 0xd4d8dc, { rough: 0.22, metal: 0.65 } );
+		for ( const pz of [ 0.0, 0.1 ] ) {
+			lay( panel( roundRect( W - 0.008, 0.026, 0.004, 0, pz, 2 ), { T: 0.0015, R: 0.001, cell: 0.04, bottom: false } ).geo, tape, 0.0006 );
+			lay( panel( roundRect( W - 0.01, 0.008, 0.002, 0, pz, 2 ), { T: 0.0015, R: 0.001, cell: 0.04, bottom: false } ).geo, silver, 0.0014 );
+		}
+	}
+	if ( s.badge ) {
+		const B = curveLoop( [ [ 0.05, - z + 0.06 ], [ 0.064, - z + 0.054 ], [ 0.078, - z + 0.06 ], [ 0.076, - z + 0.078 ], [ 0.064, - z + 0.09 ], [ 0.052, - z + 0.078 ] ], 24 );
+		lay( panel( B, { T: 0.003, R: 0.0015, cell: 0.008, bottom: false } ).geo, M( s.badge, { rough: 0.28, metal: 0.92 } ), pockets ? 0.006 : 0.0008 );
+	}
+	if ( s.patch && closure !== 'polo' ) {
+		// a shoulder patch on a short sleeve, a name tape on a jacket's chest
+		const P = sleeves === 'short' ? [ - x - 0.01, - z + 0.048, 0.026, 0.032 ] : [ - 0.064, - z + ( pockets ? 0.062 : 0.09 ), 0.05, 0.016 ];
+		lay( panel( roundRect( P[ 2 ], P[ 3 ], Math.min( P[ 2 ], P[ 3 ] ) * 0.4, P[ 0 ], P[ 1 ] ), { T: 0.0015, R: 0.001, cell: 0.01, bottom: false } ).geo, M( s.patch, { rough: 0.7 } ), 0.0006 );
+	}
+	if ( quilt ) for ( let i = 1; i < 8; i ++ ) { const pz = - z + i * 0.042; if ( pz > z - 0.01 ) break; sew( line( [ - x + 0.004, pz ], [ x - 0.004, pz ], 10 ) ); }
+	if ( s.ghillie ) {
+		// jute strands tied on in tufts
+		const cols = [ 0x4a5530, 0x5e6a3a, 0x3a3525, 0x6d6a45 ].map( v => M( v, { rough: 0.95 } ) );
+		let r = 7; const rnd = () => ( r = ( r * 16807 ) % 2147483647 ) / 2147483647;
+		for ( let i = 0; i < 46; i ++ ) {
+			const px = ( rnd() - 0.5 ) * W * 0.9, pz = ( rnd() - 0.5 ) * L * 0.9, len = 0.05 + rnd() * 0.06, a = rnd() * PI * 2;
+			add( g, G.box( 0.004, 0.0016, len ).translate( 0, 0, len * 0.4 ), cols[ i % 4 ], [ px, top( px, pz ) + 0.002 + rnd() * 0.004, pz ], [ ( rnd() - 0.5 ) * 0.3, a, 0 ] );
+		}
+	}
+	return g;
+}
+
+// ---- folded trousers -------------------------------------------------------------------------------------------------
+// { style: long|shorts, color, print, color2, color3, rep, weave, cargo, belt, drawstring, stripes, band, button, crease,
+//   lace (a lace-up fly), fray (cut-off hems), cuffs (ribbed ankles) }
+// Long ones are folded in half lengthwise, then the lower legs back over the seat: the hem lies just short of the
+// waistband, which shows beyond it with its loops, button and pockets. Shorts are folded once, the leg hems at -x.
+function foldedPants( s ) {
+	const g = group(), short = s.style === 'shorts', c = s.color ?? 0x3a4a6a;
+	const L = short ? 0.25 : 0.34, W = 0.2, T = short ? 0.03 : 0.022, x = L / 2, z = W / 2;
+	const jeans = s.print === 'denim', sweat = !! s.drawstring && ! short && s.button === false;
+	const weave = weaveOf( s, sweat ? 'fleece' : short && s.drawstring ? 'nylon' : s.button === false ? 'nylon' : 'twill' );
+	const body = cloth( c, { print: s.print, color2: s.color2 ?? 0xffffff, color3: s.color3, rep: s.rep ?? 1.3, weave, rough: s.rough } );
+	const stitch = jeans ? M( 0xc8923a, { rough: 0.8 } ) : thread( s.print ? s.color3 ?? c : c );
+	const dark = M( shade( c, - 0.5 ), { rough: 0.9 } );
+	const metal = M( s.button ?? ( jeans ? 0xb87333 : 0x9a9ea4 ), { rough: 0.3, metal: 0.9 } );
+	const elastic = !! s.drawstring || s.button === false;
+	const rib = cloth( s.band ?? shade( c, - 0.08 ), { weave: 'rib', rough: 0.95 } );
+	// the seat: waist at +x, the crotch curving out on the +z side, the outer seam along -z
+	const seatP = curveLoop( short
+		? [ [ x, - z + 0.004 ], [ x + 0.002, 0 ], [ x, z - 0.006 ], [ x - 0.05, z + 0.01 ], [ x - 0.11, z + 0.024 ], [ - x + 0.03, z + 0.018 ], [ - x, z - 0.004 ], [ - x - 0.002, 0 ], [ - x, - z + 0.004 ], [ 0, - z - 0.002 ] ]
+		: [ [ x, - z + 0.004 ], [ x + 0.002, 0 ], [ x, z - 0.006 ], [ x - 0.06, z + 0.01 ], [ x - 0.12, z + 0.016 ], [ x - 0.17, z + 0.002 ], [ - x + 0.05, z - 0.004 ], [ - x, z - 0.02 ], [ - x - 0.002, 0 ], [ - x, - z + 0.012 ], [ - x + 0.05, - z ], [ 0, - z - 0.002 ] ], 80 );
+	const seat = panel( seatP, { T, R: T * 1.3, cell: 0.022, uv: [ 0, 0 ],
+		disp: ( px, pz ) => {
+			let h = T * 0.12 * ( 1 - ( px / x ) ** 2 );
+			// creases fanning out from the crotch (jeans' whiskers)
+			if ( short || jeans ) for ( let i = 0; i < 3; i ++ ) h -= T * 0.16 * Math.exp( - ( ( ( pz - ( z - 0.03 - i * 0.022 ) + ( px - x + 0.12 ) * ( 0.35 + i * 0.15 ) ) / 0.005 ) ** 2 ) ) * smooth( x - 0.06, x - 0.13, px ) * smooth( - x * 0.2, x * 0.3, px );
+			return h;
+		} } );
+	add( g, seat.geo, body );
+	let top = seat.top;
+	const sew = ( pts, m = stitch, t = top ) => add( g, seam( pts, t ), m );
+	const lay = ( geo, m, lift, t = top ) => on( g, geo, m, t, lift );
+	const xh = short ? - x : x - 0.075; // where the visible seat starts (the hem of the folded-over legs)
+	if ( ! short ) {
+		// the lower legs folded back over the seat: rounded at the knee fold (-x), the hem at xh
+		const legP = curveLoop( [ [ - x - 0.004, - z + 0.012 ], [ 0, - z + 0.002 ], [ xh, - z + 0.006 ], [ xh + 0.002, 0 ], [ xh, z - 0.016 ], [ 0, z - 0.012 ], [ - x - 0.004, z - 0.02 ], [ - x - 0.008, 0 ] ], 64 );
+		const leg = panel( legP, { T: T * 0.95, R: T * 1.1, cell: 0.022, uv: [ 0.01, 0.004 ], disp: ( px, pz ) => ( s.crease ? T * 0.12 * Math.exp( - ( ( ( pz + 0.01 ) / 0.01 ) ** 2 ) ) : 0 ) - T * 0.08 * Math.exp( - ( ( ( px + 0.02 - pz * 0.3 ) / 0.012 ) ** 2 ) ) } );
+		add( g, conform( leg.geo, seat.top, 0.0004 ), body );
+		const ltop = ( px, pz ) => seat.top( px, pz ) + leg.top( px, pz ) + 0.0004;
+		// the hem: turned up and double stitched, the outer seam down the side
+		sew( line( [ xh - 0.007, - z + 0.01 ], [ xh - 0.007, z - 0.02 ], 6 ), stitch, ltop );
+		if ( jeans ) sew( line( [ xh - 0.012, - z + 0.01 ], [ xh - 0.012, z - 0.02 ], 6 ), stitch, ltop );
+		sew( line( [ - x + 0.01, - z + 0.012 ], [ xh - 0.016, - z + 0.012 ], 8 ), stitch, ltop );
+		if ( s.crease ) sew( line( [ - x + 0.02, - 0.01 ], [ xh - 0.02, - 0.01 ], 8 ), M( shade( c, - 0.22 ) ), ltop );
+		if ( s.cuffs ) lay( panel( roundRect( 0.034, W - 0.032, 0.008, xh - 0.018, - 0.005, 3 ), { T: 0.003, R: 0.002, cell: 0.03, bottom: false } ).geo, rib, 0.0004, ltop );
+		if ( s.cargo ) {
+			// a calf pocket with a flap on the folded leg
+			const cx0 = - 0.03, cz0 = - z + 0.055;
+			lay( panel( roundRect( 0.075, 0.07, 0.006, cx0, cz0, 3 ), { T: 0.006, R: 0.004, cell: 0.03, bottom: false, uv: [ 0.01, 0.004 ] } ).geo, body, 0.0004, ltop );
+			lay( panel( roundRect( 0.03, 0.074, 0.006, cx0 + 0.03, cz0, 3 ), { T: 0.005, R: 0.003, cell: 0.03, bottom: false, uv: [ 0.01, 0.004 ] } ).geo, body, 0.0065, ltop );
+			add( g, buttonGeo( 0.005, 0.002 ).translate( cx0 + 0.035, ltop( cx0 + 0.035, cz0 ) + 0.011, cz0 ), metal );
+		}
+		if ( s.stripes ) {
+			// a stripe down the outer seam; turnout pants also have reflective bands round the shin
+			lay( panel( roundRect( xh + x - 0.01, 0.012, 0.003, ( xh - x ) / 2, - z + 0.012, 2 ), { T: 0.001, R: 0.001, cell: 0.05, bottom: false } ).geo, M( s.stripes, { rough: 0.4, emissive: s.stripes, emissiveIntensity: 0.1 } ), 0.0006, ltop );
+			if ( s.reflect ) for ( const px of [ - 0.07, - 0.03 ] ) {
+				lay( panel( roundRect( 0.022, W - 0.03, 0.003, px, 0, 2 ), { T: 0.0012, R: 0.001, cell: 0.05, bottom: false } ).geo, M( s.stripes, { rough: 0.35, metal: 0.2, emissive: s.stripes, emissiveIntensity: 0.12 } ), 0.0009, ltop );
+				lay( panel( roundRect( 0.007, W - 0.032, 0.002, px, 0, 2 ), { T: 0.0012, R: 0.001, cell: 0.05, bottom: false } ).geo, M( 0xd4d8dc, { rough: 0.22, metal: 0.65 } ), 0.0018, ltop );
+			}
+		}
+	} else {
+		// the leg openings' hem at -x: stitched, cuffed, frayed or split
+		if ( s.fray ) {
+			const fr = M( shade( s.color2 ?? c, 0.35 ), { rough: 0.95 } );
+			let r = 3; const rnd = () => ( r = ( r * 16807 ) % 2147483647 ) / 2147483647;
+			for ( let i = 0; i < 34; i ++ ) { const pz = - z + 0.01 + i / 33 * ( W - 0.02 ), len = 0.008 + rnd() * 0.01; add( g, G.box( len, 0.0012, 0.0016 ), fr, [ - x - len * 0.25 + rnd() * 0.004, 0.001 + rnd() * 0.004, pz ], [ 0, ( rnd() - 0.5 ) * 0.8, 0 ] ); }
+			sew( line( [ - x + 0.012, - z + 0.01 ], [ - x + 0.012, z - 0.006 ], 6 ), M( shade( c, 0.25 ) ) );
+		} else if ( s.cargo ) {
+			lay( panel( roundRect( 0.03, W - 0.01, 0.01, - x + 0.016, 0, 3 ), { T: 0.006, R: 0.004, cell: 0.03, bottom: false } ).geo, body, 0.0003 );
+			sew( line( [ - x + 0.032, - z + 0.008 ], [ - x + 0.032, z ], 6 ) );
+		} else {
+			sew( line( [ - x + 0.012, - z + 0.008 ], [ - x + 0.012, z - 0.004 ], 6 ) );
+			if ( s.lace ) sew( line( [ - x + 0.004, - z + 0.03 ], [ - x + 0.03, - z + 0.034 ], 3 ), M( shade( c, - 0.45 ) ) ); // the side vent
+		}
+		if ( s.cargo ) {
+			// a bellows pocket on the thigh, its flap snapped down
+			const cx0 = - 0.01, cz0 = - z + 0.05;
+			lay( panel( roundRect( 0.08, 0.075, 0.008, cx0, cz0, 3 ), { T: 0.008, R: 0.005, cell: 0.03, bottom: false, uv: [ 0, 0 ] } ).geo, body, 0.0003 );
+			lay( panel( roundRect( 0.032, 0.08, 0.008, cx0 + 0.03, cz0, 3 ), { T: 0.006, R: 0.004, cell: 0.03, bottom: false, uv: [ 0, 0 ] } ).geo, body, 0.0085 );
+			add( g, buttonGeo( 0.0055, 0.002 ).translate( cx0 + 0.036, top( cx0 + 0.036, cz0 ) + 0.0145, cz0 ), metal );
+		}
+	}
+
+	// ---- the waistband end ----
+	const wb = panel( roundRect( 0.032, W - 0.004, [ 0.004, 0.012, 0.012, 0.004 ], x - 0.017, 0, 3 ), { T: 0.007, R: 0.004, cell: 0.03, bottom: false, uv: [ 0, 0 ],
+		disp: elastic ? ( px, pz ) => 0.0015 * Math.sin( pz / 0.006 * PI ) : null } );
+	const wbm = elastic ? rib : s.band ? cloth( s.band, { weave: 'twill' } ) : body;
+	add( g, conform( wb.geo, top, 0.0003 ), wbm );
+	const wtop = ( px, pz ) => top( px, pz ) + wb.top( px, pz ) + 0.0003;
+	if ( ! elastic ) {
+		sew( line( [ x - 0.034, - z + 0.004 ], [ x - 0.034, z - 0.006 ], 6 ) );
+		// belt loops, the button and a rivet; the fly's J stitch and the front pocket's curve
+		for ( const pz of [ - 0.062, 0.03 ] ) lay( panel( roundRect( 0.04, 0.009, 0.002, x - 0.016, pz, 2 ), { T: 0.003, R: 0.0015, cell: 0.03, bottom: false } ).geo, wbm, 0.0004, wtop );
+		add( g, buttonGeo( jeans ? 0.0068 : 0.006, 0.003 ).translate( x - 0.016, wtop( x - 0.016, z - 0.016 ), z - 0.016 ), metal );
+		sew( [ [ x - 0.034, z - 0.032 ], [ x - 0.07, z - 0.032 ], [ x - 0.082, z - 0.022 ], [ x - 0.086, z - 0.008 ] ].filter( p => short || p[ 0 ] > xh + 0.004 ) );
+		const pk = [ [ x - 0.034, - 0.018 ], [ x - 0.05, - 0.048 ], [ x - 0.064, - z + 0.022 ], [ x - 0.07, - z + 0.004 ] ].filter( p => short || p[ 0 ] > xh + 0.004 );
+		if ( pk.length > 1 ) { sew( pk, dark ); sew( pk.map( p => [ p[ 0 ] - 0.004, p[ 1 ] - 0.003 ] ) ); }
+		if ( jeans ) {
+			add( g, G.cyl( 0.0025, 0.0025, 0.0015, 6 ).translate( x - 0.037, top( x - 0.037, - 0.016 ) + 0.0005, - 0.016 ), metal );
+			sew( [ [ x - 0.034, - 0.03 ], [ x - 0.054, - 0.03 ], [ x - 0.054, - 0.058 ] ].filter( p => short || p[ 0 ] > xh + 0.004 ) ); // the coin pocket
+		}
+	} else {
+		// a drawstring out of the front, tied off
+		const cord = M( typeof s.lace === 'number' ? s.lace : 0xf2f2ee, { rough: 0.8 } ), dz = z - 0.03;
+		for ( const k of [ - 1, 1 ] ) {
+			const pts = [ [ x - 0.012, wtop( x - 0.012, dz + k * 0.006 ) + 0.002, dz + k * 0.006 ], [ x - 0.03, top( x - 0.03, dz + k * 0.012 ) + 0.004, dz + k * 0.014 ], [ x - 0.07 - k * 0.01, top( x - 0.07, dz + k * 0.02 ) + 0.003, dz - 0.004 + k * 0.026 ] ];
+			add( g, G.tube( pts, 0.0022, 10, 5 ), cord );
+			add( g, G.cyl( 0.0026, 0.0026, 0.012, 6 ).rotateZ( PI / 2 ).translate( pts[ 2 ][ 0 ] - 0.005, pts[ 2 ][ 1 ], pts[ 2 ][ 2 ] ), M( 0xb8bcc2, { rough: 0.3, metal: 0.9 } ) );
+		}
+		if ( s.lace ) for ( let i = 0; i < 3; i ++ ) add( g, G.box( 0.0024, 0.0014, 0.02 ).translate( x - 0.044 - i * 0.012, top( x - 0.044 - i * 0.012, z - 0.02 ) + 0.0015, z - 0.02 ), cord, null, [ 0, ( i % 2 ? 0.5 : - 0.5 ), 0 ] );
+	}
+	if ( short ) sew( line( [ x - 0.04, - z + 0.012 ], [ - x + 0.03, - z + 0.012 ], 6 ) ); // the outer seam
+	if ( s.stripes && short ) lay( panel( roundRect( L - 0.04, 0.012, 0.003, - 0.01, - z + 0.012, 2 ), { T: 0.001, R: 0.001, cell: 0.05, bottom: false } ).geo, M( s.stripes, { rough: 0.4 } ), 0.0006 );
+	if ( s.stripes && ! short ) lay( panel( roundRect( x - xh - 0.036, 0.012, 0.003, ( xh + x - 0.034 ) / 2, - z + 0.012, 2 ), { T: 0.001, R: 0.001, cell: 0.05, bottom: false } ).geo, M( s.stripes, { rough: 0.4 } ), 0.0006 );
+	if ( s.suspenders ) for ( const pz of [ - 0.04, 0.05 ] ) add( g, buttonGeo( 0.006, 0.0025 ).translate( x - 0.016, wtop( x - 0.016, pz ), pz ), M( 0x2a2a2a, { rough: 0.4 } ) );
+	return g;
+}
 
 export function registerClothingModels( reg ) {
-	// ---- folded tops: { style: tee|aloha|tank|hoodie|jacket|coat|dress|suit|wetsuit, color, color2, print, color3, rep } ----
-	reg( 'shirt', ( s ) => {
-		const g = group(), c = s.color ?? 0x888888;
-		const cloth = fabric( c, s.print, s.color2 ?? 0xffffff, { rep: s.rep ?? 1.4, color3: s.color3, rough: s.rough } );
-		const plainTrim = M( s.trim ?? shade( c, - 0.25 ), { rough: 0.9 } );
-		const style = s.style || 'tee';
-		const thick = { tee: 0.035, aloha: 0.035, tank: 0.025, hoodie: 0.06, jacket: 0.065, coat: 0.075, dress: 0.04, suit: 0.09, wetsuit: 0.05, polo: 0.035 }[ style ] ?? 0.04;
-		const W = style === 'suit' ? 0.36 : 0.32, D = style === 'suit' ? 0.28 : 0.25;
-		add( g, G.rbox( W, thick, D, Math.min( 0.012, thick * 0.4 ), 2 ), cloth );
-		// sleeves folded behind show as ridges on both sides
-		if ( style !== 'tank' ) for ( const z of [ - 1, 1 ] ) add( g, G.rbox( W * 0.86, thick * 0.35, 0.03, 0.006 ), cloth, [ 0, thick * 0.9, z * ( D / 2 - 0.02 ) ] );
-		// collar at the top edge (+x is the neck side)
-		if ( style === 'tee' || style === 'polo' || style === 'dress' ) add( g, G.torus( 0.05, 0.007, 5, 16, PI ), plainTrim, [ W / 2 - 0.02, thick + 0.002, 0 ], [ PI / 2, 0, PI / 2 ] );
-		if ( style === 'aloha' || style === 'polo' || style === 'jacket' || style === 'coat' || style === 'suit' ) {
-			const collar = style === 'aloha' ? cloth : plainTrim;
-			add( g, G.box( 0.06, 0.008, 0.07 ), collar, [ W / 2 - 0.035, thick + 0.002, - 0.04 ], [ 0, 0.5, 0 ] );
-			add( g, G.box( 0.06, 0.008, 0.07 ), collar, [ W / 2 - 0.035, thick + 0.002, 0.04 ], [ 0, - 0.5, 0 ] );
-		}
-		// buttons / zipper down the middle
-		if ( style === 'aloha' || style === 'polo' ) for ( let i = 0; i < ( style === 'polo' ? 2 : 5 ); i ++ ) add( g, G.cyl( 0.005, 0.005, 0.002, 8 ), M( s.button ?? 0xf0e8d0, { rough: 0.4 } ), [ W / 2 - 0.08 - i * 0.05, thick, 0 ] );
-		if ( style === 'jacket' || style === 'coat' || style === 'hoodie' || style === 'wetsuit' ) add( g, G.box( W * 0.85, 0.003, 0.006 ), M( s.zip ?? 0x2a2a2a, { rough: 0.4, metal: 0.6 } ), [ - 0.01, thick, 0 ] );
-		if ( style === 'hoodie' ) {
-			const hood = G.sph( 0.08, 12, 6, 0, PI * 2, 0, PI / 2 ); hood.scale( 0.8, 0.35, 1.1 );
-			add( g, hood, cloth, [ W / 2 - 0.06, thick * 0.8, 0 ] );
-			add( g, G.box( 0.1, 0.004, 0.2 ), plainTrim, [ - 0.02, thick, 0 ] ); // kangaroo pocket
-		}
-		if ( style === 'tank' ) for ( const z of [ - 0.06, 0.06 ] ) add( g, G.box( 0.05, 0.004, 0.025 ), cloth, [ W / 2 + 0.01, thick * 0.6, z ] );
-		if ( style === 'coat' || style === 'jacket' || style === 'suit' ) for ( const z of [ - 0.07, 0.07 ] ) add( g, G.box( 0.07, 0.004, 0.06 ), plainTrim, [ - W * 0.2, thick + 0.001, z ] );
-		if ( s.stripes ) for ( const x of [ - 0.06, 0.06 ] ) add( g, G.box( 0.018, 0.003, D * 0.98 ), M( s.stripes, { rough: 0.3, metal: 0.3, emissive: s.stripes, emissiveIntensity: 0.15 } ), [ x, thick + 0.001, 0 ] );
-		if ( s.badge ) add( g, G.cyl( 0.018, 0.018, 0.003, 10 ), M( s.badge, { rough: 0.3, metal: 0.9 } ), [ W / 2 - 0.08, thick, - 0.06 ] );
-		if ( s.patch ) add( g, G.box( 0.05, 0.003, 0.035 ), M( s.patch, { rough: 0.8 } ), [ W / 2 - 0.08, thick, 0.07 ] );
-		if ( style === 'suit' ) add( g, G.dome( 0.07, 12, 5 ).scale( 1, 0.5, 1 ), M( s.color2 ?? 0x333333, { rough: 0.2, transparent: true, opacity: 0.55 } ), [ W / 2 - 0.07, thick, 0 ] );
-		return g;
-	} );
+	reg( 'shirt', foldedTop );
 
-	// ---- folded pants: { style: long|shorts, color, print, color2, cargo, belt } ----
-	reg( 'pants', ( s ) => {
-		const g = group(), c = s.color ?? 0x3a4a6a;
-		const cloth = fabric( c, s.print, s.color2 ?? 0xffffff, { rep: s.rep ?? 1.3, color3: s.color3 } );
-		const short = s.style === 'shorts';
-		const L = short ? 0.26 : 0.36, W = 0.22, T = short ? 0.035 : 0.05;
-		add( g, G.rbox( L, T, W, 0.012, 2 ), cloth );
-		// the fold between the legs
-		add( g, G.box( L * 0.8, 0.003, 0.004 ), M( shade( c, - 0.35 ) ), [ - 0.02, T + 0.0005, 0 ] );
-		// waistband and belt loops at +x
-		add( g, G.rbox( 0.035, T + 0.006, W + 0.004, 0.006 ), M( s.band ?? shade( c, - 0.15 ), { rough: 0.9 } ), [ L / 2 - 0.018, 0, 0 ] );
-		if ( s.drawstring ) for ( const z of [ - 0.015, 0.015 ] ) add( g, G.box( 0.07, 0.004, 0.005 ), M( 0xf0f0f0 ), [ L / 2 - 0.05, T + 0.004, z ], [ 0, z * 20, 0 ] );
-		if ( s.cargo ) for ( const z of [ - 0.055, 0.055 ] ) add( g, G.rbox( 0.08, 0.012, 0.07, 0.004 ), cloth, [ - 0.02, T - 0.004, z ] );
-		if ( s.stripes ) add( g, G.box( L * 0.9, 0.003, 0.012 ), M( s.stripes, { rough: 0.3, emissive: s.stripes, emissiveIntensity: 0.15 } ), [ - 0.02, T + 0.001, W * 0.4 ] );
-		if ( s.button !== false && ! short ) add( g, G.cyl( 0.006, 0.006, 0.003, 8 ), M( 0xb89a50, { rough: 0.3, metal: 0.9 } ), [ L / 2 - 0.018, T + 0.006, 0 ] );
-		return g;
-	} );
+	reg( 'pants', foldedPants );
 
 	// ---- a pair of shoes: { style: slippers|sneakers|boots|combat|rain|reef|work|dress|tabi|fins, color, color2, sole } ----
 	reg( 'shoes', ( s ) => {
