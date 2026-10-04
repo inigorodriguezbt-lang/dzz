@@ -268,6 +268,29 @@ export class ViewModel {
 		return it;
 	}
 
+	// a movement mode's hands (player.mode.view, the mobility items): grips in view space the mode moves every frame (on a
+	// rope, a cart's handle, the brake toggles), and an object of its own (a paddle) drawn with them; it takes the place
+	// of the held item while set. null hands the view back.
+	setMode( v ) {
+		if ( v === this._modeV ) return;
+		this._modeV = v;
+		if ( this.modeIt ) { this.holder.remove( this.modeIt.obj ); this.modeIt = null; }
+		if ( this.item ) this.item.obj.visible = ! v;
+		if ( ! v ) return;
+		const obj = new THREE.Group();
+		if ( v.obj ) {
+			v.obj.traverse( m => {
+				if ( ! m.isMesh ) return;
+				m.material = Array.isArray( m.material ) ? m.material.map( viewCopy ) : viewCopy( m.material );
+				m.castShadow = false; m.receiveShadow = false; m.frustumCulled = false;
+				m.layers.set( 0 );
+			} );
+			obj.add( v.obj );
+		}
+		this.modeIt = { kind: 'mode', obj, grips: v.grips, def: null, view: v, hipP: V(), hipQ: new THREE.Quaternion() };
+		this.holder.add( obj );
+	}
+
 	_buildGun( stack, def ) {
 		const f = def.firearm;
 		const v = buildGunView( def, 'view' );
@@ -445,6 +468,15 @@ export class ViewModel {
 		// y = 0.013 of the model
 		const rod = def.tool?.kind === 'fishingrod';
 		const ry = 0.013 - info.centre.y;
+		// a model's own hold (userData.view: an open umbrella over the head, a ladder on the shoulder, a board under the
+		// arm): its grip (hold.p, radius hold.r) at `at`, its axis (hold.a) along `axis`, its front (hold.f) towards `front`, in view space
+		const vh = buildItemModel( def ).userData.view;
+		if ( vh?.at && hold?.a ) {
+			const a = V( ...hold.a ).normalize(), f = V( ...( hold.f || [ 0, 0, 1 ] ) );
+			f.addScaledVector( a, - f.dot( a ) ).normalize();
+			return { kind, def, obj: g, size: sz.clone(), long, viewHold: { at: vh.at, axis: vh.axis, front: vh.front, a, f },
+				grips: { R: grip( V( ...hold.p ).sub( info.centre ), a, f.clone().cross( a ), hold.r ?? clamp( Math.min( sz.y, sz.z ) * 0.5, 0.012, 0.03 ) ) } };
+		}
 		// a crutch: the hand round its grip, the back of the hand out to the side (front x long axis)
 		const crutch = !! def.crutch && !! hold;
 		if ( crutch ) {
@@ -560,7 +592,8 @@ export class ViewModel {
 
 	update( dt, cam = null ) {
 		this.t += dt;
-		const s = this.s, it = this.item;
+		const s = this.s, it = this.modeIt || this.item;
+		if ( this.item ) this.item.obj.visible = ! this.modeIt;
 		if ( cam ) { this.aspect = cam.aspect; this.viewFovV = cam.fov; }
 		this._updateCasings( dt );
 		this.cycleT = ( this.cycleT ?? 1 ) + dt;
@@ -651,6 +684,15 @@ export class ViewModel {
 		else if ( it.rod ) {
 			basisQ( V( ...ROD_HOLD.x ), V( ...ROD_HOLD.y ), hipQ );
 			hipP.set( ...ROD_HOLD.at ).sub( _v.copy( it.grips.R.p ).applyQuaternion( hipQ ) );
+		} else if ( it.viewHold ) {
+			// the item's axis and front onto the hold's (as the crutch below, for any axis)
+			const H = it.viewHold;
+			const X = V( ...H.axis ).normalize(), F = V( ...H.front );
+			F.addScaledVector( X, - F.dot( X ) ).normalize();
+			_m.makeBasis( X, F, X.clone().cross( F ) );
+			_m2.makeBasis( H.a, H.f, _v2.copy( H.a ).cross( H.f ) ).transpose();
+			hipQ.setFromRotationMatrix( _m.multiply( _m2 ) );
+			hipP.set( ...H.at ).sub( _v.copy( it.grips.R.p ).applyQuaternion( hipQ ) );
 		} else if ( it.crutch ) {
 			// the item's x and front onto the hold's (its third axis follows): a turn from one basis to the other
 			const X = V( ...CRUTCH_HOLD.x ).normalize(), F = V( ...CRUTCH_HOLD.f );
@@ -673,6 +715,7 @@ export class ViewModel {
 	// hip / aim / sprint / lowered / equip / action blend -> holder pose (P, Q)
 	_basePose( it, P, Q ) {
 		const s = this.s, act = s.act;
+		if ( it.kind === 'mode' ) { P.set( 0, 0, 0 ); Q.identity(); return; }
 		const gun = it.kind === 'gun';
 		const cls = it.cls;
 		// the hold (static per item: worked out once)
@@ -1053,7 +1096,8 @@ export class ViewModel {
 		// melee two-handers and the throw arm
 		if ( it.kind === 'melee' && it.two && gL ) { toView( gL, - 1, this.handL ); showL = true; curlL = curlFor( gL.r ); thumbL = THUMB_POSE.wrap; }
 		if ( it.kind === 'throw' ) { curlR = curlFor( it.grips.R.r, 1.1 ); thumbR = THUMB_POSE.pinch; }
-		if ( it.kind === 'tool' || it.kind === 'item' ) { curlR = curlFor( it.grips.R.r, 1 ); thumbR = it.crutch ? THUMB_POSE.wrap : it.long ? THUMB_POSE.along : THUMB_POSE.pinch; }
+		if ( it.kind === 'tool' || it.kind === 'item' ) { curlR = curlFor( it.grips.R.r, 1 ); thumbR = it.crutch || it.viewHold ? THUMB_POSE.wrap : it.long ? THUMB_POSE.along : THUMB_POSE.pinch; }
+		if ( it.kind === 'mode' ) { curlR = curlFor( gR?.r ?? 0.015, 1 ); curlL = curlFor( gL?.r ?? 0.015, 1 ); thumbR = thumbL = THUMB_POSE.wrap; }
 		// hide the arms when the scope fills the screen
 		if ( s.overlay ) showL = showR = false;
 		R.visible = showR; Lh.visible = showL;

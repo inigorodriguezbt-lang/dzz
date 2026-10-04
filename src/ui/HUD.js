@@ -70,7 +70,7 @@ const TIERS = [ 4, 15, 45 ];
 export const COND_ICON = { blood: 'blood', tired: 'energy' }; // condition id -> icon when they differ
 
 // badges: most urgent first; the blood and energy notifiers already say 'Low blood' and 'Exhausted'
-const BADGE_ORDER = [ 'bleed', 'frac', 'inf', 'cut', 'lepto', 'sting', 'centipede', 'sick', 'hot', 'cold', 'wet', 'burn', 'sunburn',
+const BADGE_ORDER = [ 'bleed', 'frac', 'inf', 'cut', 'lepto', 'vog', 'bends', 'sting', 'centipede', 'sick', 'hot', 'cold', 'wet', 'burn', 'sunburn',
 	'cough', 'sprain', 'eye', 'wound', 'dressing', 'drunk', 'drowsy', 'heavy', 'stress', 'unhappy', 'bored', 'caf', 'pk', 'sunscreen', 'steady' ];
 const BADGE_RANK = new Map( BADGE_ORDER.map( ( id, i ) => [ id, i ] ) );
 const NO_BADGE = new Set( [ 'blood', 'tired' ] );
@@ -86,6 +86,9 @@ const MOOD_GLYPHS = {
 	bored: '<circle cx="12" cy="12" r="8.5"/><path d="M7.75 10.25h3M13.25 10.25h3M9.5 15.5h5"/>',
 };
 for ( const [ k, v ] of Object.entries( MOOD_GLYPHS ) ) PATHS[ k ] ??= v;
+// the senses domain's hazards (Survival AIL_LABEL vog, bends): a cloud trailing off a vent; bubbles at a joint
+PATHS.vog ??= '<path d="M4 20l3-5 2 2 3-6M6.5 9.5a3 3 0 0 1 5-2.2A3.5 3.5 0 0 1 18 9a2.5 2.5 0 0 1 .5 5H13"/><path d="M15 17h5M14 20h4"/>';
+PATHS.bends ??= '<path d="M5 20l5-6 4 3 5-9"/><circle cx="10" cy="14" r="1.6"/><circle cx="14" cy="17" r="1.6"/><circle cx="16" cy="5.5" r="1.4"/><circle cx="19.5" cy="9" r="1"/><circle cx="13" cy="8.5" r="1"/>';
 
 // prompts name the target above the action: 'Take Canned tuna ×2' -> CANNED TUNA ×2 over [F] Take. Only verbs whose
 // object is the target split; anything else ('Cut lock', 'Drink' at a tap) is the action as given
@@ -348,6 +351,8 @@ export class HUD {
 
 	// key hint set from UI (5.11): { keys: [ [ actions[], verb, suffix? ] ] } or null
 	setHint( hint ) {
+		// a movement mode's keys (riding a board, gliding, climbing) win over the tutorial's
+		hint = this.game?.player?.mode?.hint || hint;
 		// called every frame: rebuild only for a new hint, or twice a second in case a key was rebound
 		if ( hint === this._hintObj && this.app.frame % 30 !== 0 ) { fade( this.keyhints, !! hint ); return; }
 		this._hintObj = hint;
@@ -443,8 +448,10 @@ export class HUD {
 		flag( this.hotbar, 'gone', ! this.shown( 'hotbar', false ) );
 
 		if ( frame % 4 === 0 ) this._weapon( g, held, heldDef, set );
-		show( this.vehicle, !! vh );
-		if ( vh && frame % 3 === 0 ) this._vehicle( vh );
+		// a movement mode's readout in the same panel (a paraglider's height and climb, a board's speed)
+		const mh = ! vh && ! p.vehicle ? p.mode?.hud?.() || null : null;
+		show( this.vehicle, !! vh || !! mh );
+		if ( ( vh || mh ) && frame % 3 === 0 ) this._vehicle( vh || mh );
 
 		if ( this.toasts.length ) this._expire( this.toasts );
 		if ( this.picks.length ) this._expire( this.picks );
@@ -800,12 +807,13 @@ export class HUD {
 		text( this.vSpd, Math.round( boat ? kmh / 1.852 : kmh ) );
 		text( this.vUnit, boat ? 'kn' : 'km/h' );
 		const fu = v.fuel || 0, hp = v.health || 0;
+		show( this.vFuelRow, v.fuel !== undefined ); show( this.vHpRow, v.health != null );
 		fill( this.vFuel, fu ); text( this.vFuelPc, Math.round( fu * 100 ) + '%' );
 		flag( this.vFuelRow, 'warn', fu < 0.25 && fu >= 0.1 ); flag( this.vFuelRow, 'crit', fu < 0.1 );
 		fill( this.vHp, hp ); text( this.vHpPc, Math.round( hp * 100 ) + '%' );
 		flag( this.vHpRow, 'warn', hp < 0.5 && hp >= 0.3 ); flag( this.vHpRow, 'crit', hp < 0.3 );
 		show( this.vAltRow, v.altitude != null );
-		if ( v.altitude != null ) text( this.vAlt, Math.round( v.altitude ) + ' m' );
+		if ( v.altitude != null ) text( this.vAlt, Math.round( v.altitude ) + ' m' + ( v.climb != null ? `  ${v.climb >= 0 ? '+' : '−'}${Math.abs( v.climb ).toFixed( 1 )} m/s` : '' ) );
 	}
 
 	// ---- prompt, timed action, damage (5.9, 5.10, 5.12) ----------------------------------------------------------

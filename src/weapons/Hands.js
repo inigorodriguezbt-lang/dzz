@@ -343,9 +343,11 @@ export class Hands {
 			this.vm.setItem( this.shown, vmKind );
 			this._dressArms();
 		}
+		// a movement mode's hands (the mobility items: on the brakes, a rope, a cart's handle, a paddle) take the view
+		this.vm.setMode( p.mode?.view || null );
 		const ready = held === this.shown && this.equip > 0.9;
-		// input
-		if ( g.inputActive ) this._input( dt, held, def, kind, ready );
+		// input (not while those hands are busy)
+		if ( g.inputActive && ! p.mode?.busyHands ) this._input( dt, held, def, kind, ready );
 		else {
 			if ( this.trigger ) this._release( held, def, kind );
 			this.trigger = false;
@@ -1148,7 +1150,7 @@ export class Hands {
 		// sprinting lowers the weapon and stops a reload that hasn't committed yet
 		const sprint = p.sprinting && ! p.swimming;
 		this.sprintT = clamp( this.sprintT + ( sprint ? dt / 0.22 : - dt / 0.18 ), 0, 1 );
-		const busy = g.actions.busy || p.swimming;
+		const busy = g.actions.busy || p.swimming || !! p.mode?.busyHands;
 		this.lowerT = clamp( this.lowerT + ( busy ? dt / 0.25 : - dt / 0.25 ), 0, 1 );
 		if ( sprint && this.act && ( this.act.p?.loop || this.act.type === 'inspect' ) ) { this.act.p.stop = true; if ( this.act.type === 'inspect' ) this._cancelAct(); }
 		// aim

@@ -42,6 +42,10 @@ export class Player {
 		this.distance = 0;
 		this.camQuat = new THREE.Quaternion();
 		this.freeLook = { yaw: 0, pitch: 0 };
+		// a movement mode from the mobility items (gliding, climbing, riding, paddling, pushing a cart, a zipline:
+		// src/game/items/ext/mobility/modes.js): while set it moves the body; roll tilts the view (a banked wing)
+		this.mode = null;
+		this.roll = 0;
 	}
 
 	get eye() { return this.pos.y + this.stanceH; }
@@ -103,7 +107,7 @@ export class Player {
 			if ( input.pressed( 'autorun' ) ) this.autorun = ! this.autorun;
 		}
 		this.lean += ( this.leanT - this.lean ) * Math.min( 1, dt * 9 );
-		const targetEye = this.swimming ? 1.5 : STANCE[ this.stance ].eye;
+		const targetEye = this.mode?.eye ?? ( this.swimming ? 1.5 : STANCE[ this.stance ].eye );
 		this.stanceH += ( targetEye - this.stanceH ) * Math.min( 1, dt * 8 );
 
 		// ---- movement intent ----
@@ -133,6 +137,11 @@ export class Player {
 		const sy = Math.sin( this.yaw ), cy = Math.cos( this.yaw );
 		// world move direction: forward is -z in the view frame
 		const wx = fx * cy + fz * sy, wz = - fx * sy + fz * cy;
+
+		// ---- a movement mode owns the body this frame (false gives the frame back to walking: a wagon pulled behind)
+		if ( this.mode && ! this.flying ) {
+			if ( this.mode.update( this, dt, { fx, fz, wx, wz, input, mods, active: g.inputActive } ) !== false ) { this._camera( dt ); return; }
+		}
 
 		// ---- flight (creative) ----
 		if ( this.flying ) {
@@ -210,7 +219,7 @@ export class Player {
 		// steep terrain: slide back instead of climbing cliffs
 		const n = g.hf.normalAt( this.pos.x, this.pos.z, _n, 0.8 );
 		const gr = P.ground( this.pos.x, this.pos.z, this.pos.y, 0.45, R );
-		if ( ! gr.box && n.y < 0.62 && this.pos.y <= gr.y + 0.05 ) {
+		if ( ! gr.box && n.y < ( mods.slope ?? 0.62 ) && this.pos.y <= gr.y + 0.05 ) {
 			const uphill = ( this.pos.x - oldX ) * - n.x + ( this.pos.z - oldZ ) * - n.z;
 			if ( uphill > 0 ) { this.pos.x = oldX + n.x * 0.02; this.pos.z = oldZ + n.z * 0.02; }
 		}
@@ -314,7 +323,7 @@ export class Player {
 		const g = this.game, cam = g.camera;
 		// head bob scaled by speed
 		const bobOn = g.settings.get( 'headBob' );
-		const sp = this.onGround ? Math.min( 1.4, this.speedNow / 4.3 ) : 0;
+		const sp = this.onGround && ! this.mode ? Math.min( 1.4, this.speedNow / 4.3 ) : 0;
 		this.bobAmt += ( sp - this.bobAmt ) * Math.min( 1, dt * 6 );
 		this.bob += dt * ( this.sprinting ? 12.5 : 9 ) * ( 0.4 + this.bobAmt * 0.6 );
 		const bobY = Math.abs( Math.sin( this.bob ) ) * 0.045 * this.bobAmt * bobOn;
@@ -336,7 +345,7 @@ export class Player {
 		}
 		cam.position.set( ex, this.pos.y + this.stanceH + bobY, ez );
 		const yaw = this.yaw + this.freeLook.yaw + shx, pitch = this.pitch + this.freeLook.pitch + shy;
-		cam.rotation.set( pitch, yaw, - this.lean * 0.14, 'YXZ' );
+		cam.rotation.set( pitch, yaw, - this.lean * 0.14 + this.roll, 'YXZ' );
 		// field of view: sprint widens, aiming narrows
 		const base = g.settings.get( 'fov' );
 		this.fovKick += ( ( this.sprinting ? 6 : 0 ) - this.fovKick ) * Math.min( 1, dt * 5 );
