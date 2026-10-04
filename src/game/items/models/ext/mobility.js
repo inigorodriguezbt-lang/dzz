@@ -14,6 +14,7 @@ import { ghostify, itemModel } from '../../placeables/fx.js';
 import { getItem } from '../../ItemDB.js';
 import { setDynamic } from '../../../../render/post/Motion.js';
 import { itemsOf } from '../../../Inventory.js';
+import { modelInfo } from '../../../../render/ItemModels.js';
 
 const V = ( x = 0, y = 0, z = 0 ) => new THREE.Vector3( x, y, z );
 const UP = V( 0, 1, 0 );
@@ -849,12 +850,12 @@ function deckModel( s ) {
 	g.userData.iconDir = [ 0.55, 0.75, 1 ];
 	// carried by the front truck's hanger between the wheels, nose up, the graphic towards you
 	g.userData.hold = { p: [ tx0, Rw + 0.006, 0 ], a: [ 0, 0, 1 ], f: [ 0, 1, 0 ], r: 0.016 };
-	g.userData.view = { at: [ 0.3, - 0.25, - 0.42 ], axis: [ - 1, 0.05, 0.3 ], front: [ 0.3, - 0.2, - 1 ] };
+	g.userData.view = { at: [ 0.27, - 0.21, - 0.5 ], axis: [ - 0.9, 0.42, 0.15 ], front: [ 0.1, - 0.1, - 1 ] };
 	return g;
 }
 // carried at the side by a handle (a hand truck, a folded wagon, a wing's pack): the handle runs forward, the load
 // hangs below the fist
-const BYHANDLE = { at: [ 0.25, - 0.22, - 0.38 ], axis: [ 0.12, 0, - 1 ], front: [ 1, 0, 0.1 ] };
+const BYHANDLE = { at: [ 0.26, - 0.15, - 0.46 ], axis: [ 0.12, 0, - 1 ], front: [ 1, 0, 0.1 ] };
 
 function skate( g, z, s, rot ) {
 	const c = s.color ?? 0x2a2a30, c2 = s.color2 ?? 0x3ad8a8;
@@ -1467,12 +1468,18 @@ function haulerLook( p ) {
 		const ld = getItem( p.data.load.it );
 		if ( ld ) { const m = itemModel( ld ); m.position.set( 0.16, 0.02, 0 ); m.rotation.y = PI / 2; g.add( m ); }
 	} else if ( items.length && id !== 'hand_truck' ) {
-		const floor = id === 'shopping_cart' ? 0.43 : id === 'wheelbarrow' ? 0.34 : 0.29;
-		items.slice( 0, 5 ).forEach( ( s, i ) => {
-			const m = itemModel( getItem( s.id ) );
-			m.position.set( ( i % 3 - 1 ) * 0.2 + 0.05, floor, ( Math.floor( i / 3 ) - 0.5 ) * 0.18 );
-			m.rotation.y = i * 1.3;
-			m.scale.setScalar( 0.9 );
+		// a 3 x 2 grid on the floor; each thing turned along the basket and shrunk to its cell if it's bigger (a cooler
+		// mustn't poke through the wires)
+		const floor = id === 'shopping_cart' ? 0.43 : id === 'wheelbarrow' ? 0.4 : 0.29;
+		const cx = id === 'wheelbarrow' ? 0.2 : 0.28, cz = id === 'wheelbarrow' ? 0.2 : 0.23, top = id === 'wheelbarrow' ? 0.3 : 0.45;
+		items.slice( 0, 6 ).forEach( ( s, i ) => {
+			const d = getItem( s.id );
+			if ( ! d ) return;
+			const m = itemModel( d ), sz = modelInfo( d ).size;
+			const k = Math.min( 1, cx / Math.max( 0.01, sz.x ), cz / Math.max( 0.01, sz.z ), top / Math.max( 0.01, sz.y ) );
+			m.position.set( ( i % 3 - 1 ) * cx + ( id === 'shopping_cart' ? 0.02 : 0 ), floor, ( Math.floor( i / 3 ) - 0.5 ) * cz );
+			m.rotation.y = ( i % 2 ) * 0.25 - 0.1;
+			m.scale.setScalar( k * 0.95 );
 			g.add( m );
 		} );
 	}

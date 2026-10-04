@@ -457,7 +457,10 @@ console.log( 'paddling' );
 	game.weather.sea = 1;
 	sys.mode.v = 0; p.pos.x = 8;
 	let t = 0;
+	// (the dice fixed low: a knock comes on the first roll the sea allows)
+	const rk = Math.random; Math.random = () => 0.004;
 	step( 60, () => { t += sys.mode ? DT : 0; } );
+	Math.random = rk;
 	ok( ! sys.mode && toasts.includes( 'Knocked off' ), `the sea threw you off (after ${t.toFixed( 0 )} s)` );
 	const fb = recs( 'mob_board' )[ 0 ];
 	ok( fb && fb.data.leash && ! inv.findUid( sup.uid ), 'the board afloat on its leash' );
@@ -676,7 +679,28 @@ console.log( 'climbing' );
 	sys.takeDown( hr, 'yank' ); finish();
 	Math.random = r2;
 	ok( ! PL.list.has( hr.id ) && inv.findUid( hook.uid )?.data.rope === 'rope', 'yanked down, still rigged' );
+	// an awning over the shop front: no ladder up through it, and a hook's rope would hang onto it out of reach
+	const awn = box( 9.3, 3.2, 0, 0.7, 0.08, 3 );
+	reset( 8, 0, 0, - Math.PI / 2 );
+	const la = LEDGE.ladderSpot( game, new THREE.Vector3( 8, 1.66, 0 ), new THREE.Vector3( 1, 0.2, 0 ).normalize(), L.LADDERS.extension_ladder );
+	reset( 5, 0, 0, - Math.PI / 2 );
+	const hk = LEDGE.hookSpot( game, new THREE.Vector3( 5, 1.66, 0 ), new THREE.Vector3( 5, 3.3, 0 ).normalize(), 9 );
+	ok( la.reason === 'Something in the way' && hk.reason === 'Out of reach', `under an awning: ladder ${la.reason}, hook ${hk.reason}` );
+	P.remove( awn );
 	P.remove( bld );
+	// a roof behind a parapet a metre high: the ladder's head on the parapet, a step down onto the roof
+	const low = box( 15, 2.5, 0, 5, 2.5, 8 ), par = box( 10.12, 5.5, 0, 0.12, 0.5, 8 );
+	reset( 8, 0, 0, - Math.PI / 2 );
+	const ps = LEDGE.ladderSpot( game, new THREE.Vector3( 8, 1.66, 0 ), new THREE.Vector3( 1, 0.2, 0 ).normalize(), L.LADDERS.extension_ladder );
+	ok( ps.ok && Math.abs( ps.top.y - 6 ) < 0.1 && ps.ledge && Math.abs( ps.ledge.y - 5 ) < 0.05, `over a parapet: head at ${ps.top?.y.toFixed( 2 )}, roof at ${ps.ledge?.y.toFixed( 2 )}` );
+	const pl2 = PL.add( 'mob_ladder', makeStack( 'extension_ladder', 1 ), { x: ps.bot.x, y: ps.bot.y, z: ps.bot.z }, ps.face, { top: [ ps.top.x, ps.top.y, ps.top.z ], bot: [ ps.bot.x, ps.bot.y, ps.bot.z ], face: ps.face, ledge: [ ps.ledge.x, ps.ledge.y, ps.ledge.z ] }, 'extension_ladder' );
+	p.pos.set( ps.bot.x - 0.6, 0, 0 );
+	sys.climb( pl2, false );
+	let peak = 0;
+	keys.add( 'forward' ); step( 12, () => { peak = Math.max( peak, p.pos.y ); if ( ! sys.mode ) keys.clear(); } ); keys.clear();
+	ok( ! sys.mode && Math.abs( p.pos.y - 5 ) < 0.1 && p.pos.x > 10.3 && peak > 6, `over the parapet onto the roof (${p.pos.x.toFixed( 2 )}, ${p.pos.y.toFixed( 2 )}, feet up to ${peak.toFixed( 2 )})` );
+	PL.remove( pl2, { give: false } );
+	P.remove( low ); P.remove( par );
 	for ( const r of recs( 'mob_ladder' ) ) PL.remove( r, { give: false } );
 }
 
@@ -749,6 +773,7 @@ console.log( 'held and worn' );
 	// an umbrella: open in the rain, you stay dry
 	hf.f = () => 0;
 	const um = put( 'umbrella' );
+	ok( getItem( 'umbrella' ).tool.jab?.damage > 3 && ! getItem( 'umbrella_open' ).tool.jab, 'furled, it jabs (a little harder than a shove); open, it does not' );
 	verb( um, 'Open' ).run();
 	ok( um.id === 'umbrella_open' && verb( um, 'Close' ), 'opened' );
 	inv.hands = um.uid;

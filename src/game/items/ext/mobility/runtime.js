@@ -710,6 +710,8 @@ export class Mobility {
 		const to = ok ? spot.top.clone() : spot.bot.clone().setY( spot.top.y - 0.4 );
 		const T = 0.35 + from.distanceTo( to ) * 0.035;
 		this.thrown = { stack, spot, ok, from, to, t: 0, T, obj: MOB.visual.hook?.( rope ) || null, fall: 0 };
+		// it's in the air, not in your hand
+		if ( p.inventory.hands === stack.uid ) { if ( g.hands?.holster ) g.hands.holster(); else p.inventory.hands = null; }
 		if ( this.thrown.obj ) { this._group().add( this.thrown.obj ); this.thrown.obj.userData.update?.( from, from, 0 ); }
 		g.skills?.xp?.( 'survival', 2 );
 	}
@@ -983,8 +985,9 @@ export class Mobility {
 			o.position.set( p.pos.x, wl - 0.06, p.pos.z );
 			o.rotation.set( Math.sin( t * 1.1 ) * 0.03, mode.heading + Math.PI / 2, Math.sin( t * 0.8 ) * 0.025, 'YXZ' );
 		} else if ( mode.kind === 'zip' ) {
-			const c = zipShape( mode.a, mode.b, mode.s, mode.sag, {} );
-			o.position.set( c.x, c.y, c.z );
+			// the pulleys' grooves on the cable (the model's origin is under its handlebar)
+			const c = zipShape( mode.a, mode.b, Math.min( 1, mode.s + ZIP.lead / mode.L ), mode.sag, {} );
+			o.position.set( c.x, c.y - 0.21, c.z );
 			o.rotation.set( 0, Math.atan2( mode.dir.x, mode.dir.z ) + Math.PI / 2, - Math.atan( ( mode.b.y - mode.a.y ) / Math.max( 1, Math.hypot( mode.b.x - mode.a.x, mode.b.z - mode.a.z ) ) ), 'YXZ' );
 		}
 		o.updateMatrixWorld( true );
@@ -1013,6 +1016,12 @@ export class Mobility {
 			_v.copy( w ).applyMatrix4( inv );
 			// past the edge of the view the hand comes in no further than the frame
 			_v.x *= k; _v.y *= k;
+			if ( mode.kind === 'climb' ) {
+				// a rope a hand's breadth from your face: the hands go out along their line of sight, and the one above
+				// the frame slides down the line into it (else the arms fill the view)
+				if ( - _v.z < 0.46 ) _v.multiplyScalar( 0.46 / Math.max( 0.08, - _v.z ) );
+				_v.y = Math.min( _v.y, - _v.z * 0.42 );
+			}
 			gr[ i ].p.copy( _v );
 		}
 		// the axis the hands close round (vertical for a rope or a ladder's rail, across for a handle or a bar)

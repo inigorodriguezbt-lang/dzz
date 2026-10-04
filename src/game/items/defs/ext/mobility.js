@@ -12,7 +12,8 @@
 //   hauling: a shopping cart, a wheelbarrow, a folding beach wagon and a hand truck (push or pull them, open what they
 //     carry, they stay where you leave them; hop on a cart rolling downhill; a hand truck moves placed gear);
 //   a zipline kit and a trolley (string a cable between two trees or posts up to 80 m apart, ride it down);
-//   trekking poles (steep slopes, less effort), an umbrella (dry in the rain; a squall turns it inside out).
+//   trekking poles (steep slopes, less effort), an umbrella (dry in the rain; a squall turns it inside out; furled, a
+//     weak jab: tool.jab, Hands.js).
 // Runtime: ../../ext/mobility/*.js (modes, the system, placed kinds, ledges, numbers, sounds).
 import { defineItems, getItem } from '../../ItemDB.js';
 import { extendLoot } from '../../Loot.js';
@@ -119,8 +120,8 @@ defineItems( [
 	// ================= on foot =================
 	tool( 'trekking_poles', 'Trekking poles', 'poles', { w: 0.55, size: 3, tags: [ 'sports', 'outdoor', 'metal' ],
 		model: P( 'poles', { color: 0x3a5ad8 } ), desc: 'Hold for steep slopes. Less effort.' } ),
-	tool( 'umbrella', 'Umbrella', 'umbrella', { w: 0.45, size: 2, tags: [ 'house', 'hotel', 'office', 'tourist' ],
-		model: P( 'umbrella', { color: 0x1e3a6a, open: false } ), desc: 'Hold it open to stay dry.' } ),
+	tool( 'umbrella', 'Umbrella', 'umbrella', { w: 0.45, size: 2, tags: [ 'house', 'hotel', 'office', 'tourist' ], tool: { jab: { damage: 8, reach: 1.75 } },
+		model: P( 'umbrella', { color: 0x1e3a6a, open: false } ), desc: 'Open it to stay dry. Jabs, weakly.' } ),
 	tool( 'umbrella_open', 'Umbrella (open)', 'umbrella', { w: 0.45, size: 8, tags: [ 'house' ],
 		model: P( 'umbrella', { color: 0x1e3a6a, open: true } ), desc: 'Keeps the rain off. Close to pack.' } ),
 ] );

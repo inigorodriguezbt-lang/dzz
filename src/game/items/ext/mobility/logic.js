@@ -229,7 +229,7 @@ export function waveKnock( mode, sea, depth, wind = 0, speed = 0 ) {
 	const P = PADDLE[ mode ] || PADDLE.stand;
 	let c = 0;
 	if ( depth < 2.6 ) c += Math.max( 0, sea - 0.35 ) * 0.16 * clamp( ( 2.6 - depth ) / 1.6, 0, 1 );
-	c += Math.max( 0, sea - 0.55 ) * 0.05;
+	c += Math.max( 0, sea - 0.55 ) * 0.2;
 	c += Math.max( 0, wind - 0.8 ) * 0.12;
 	// moving keeps a board steady
 	c *= 1 - clamp( speed / 3, 0, 0.4 );
@@ -262,6 +262,7 @@ export const ZIP = {
 	max: 82, min: 8, // m of cable between the anchors
 	minDrop: 0.035, // the far end must be at least this much lower per metre to ride
 	sag: 0.02, // m of sag at the middle per metre of span (loaded)
+	lead: 0.3, // m the trolley runs ahead of the rider's head
 	mu: 0.035, // trolley rolling friction (fraction of g)
 	drag: 0.0035, // air: ½ρCdA/m
 	brake: 3.2, // m/s² with the brake held (a glove on the cable)

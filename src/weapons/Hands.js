@@ -944,11 +944,13 @@ export class Hands {
 			] );
 			return;
 		}
-		// empty hands, or holding a tool / item: a shove
+		// empty hands, or holding a tool / item: a shove (a tool with tool.jab, an umbrella's ferrule, lands a little harder
+		// and further off)
+		const jab = def?.tool?.jab;
 		g.survival?.useStamina( 6 );
 		this._startAct( 'shove', 0.55, {}, [
 			[ 0.2, () => this._sfx( 'shove', 0.6 ) ],
-			[ 0.3, () => this._meleeHit( null, null, { damage: 3, reach: 1.4, cone: 0.9, kind: 'fist', stagger: 1.4, shove: true } ) ],
+			[ 0.3, () => this._meleeHit( null, null, { damage: jab?.damage ?? 3, reach: jab?.reach ?? 1.4, cone: 0.9, kind: jab ? 'blunt' : 'fist', stagger: 1.4, shove: true } ) ],
 		] );
 	}
 

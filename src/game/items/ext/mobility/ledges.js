@@ -12,13 +12,13 @@ import { GRAPPLE, ZIP } from './logic.js';
 
 const _d = new THREE.Vector3(), _o = new THREE.Vector3(), _near = [];
 
-// a box (or the terrain) fills the point
+// a box (or the terrain) fills the point (a window's glass counts: it's part of the wall a ladder leans on)
 export function solidAt( g, x, y, z ) {
 	const P = g.physics;
 	if ( y < g.hf.heightAt( x, z ) - 0.05 ) return true;
 	for ( const b of P.near( x, z, 0.02, _near ) ) {
 		if ( y < b.minY || y > b.maxY ) continue;
-		if ( b.kind === 'glass' || b.mat === 'foliage' ) continue;
+		if ( b.mat === 'foliage' ) continue;
 		if ( inside( b, x, z ) ) return true;
 	}
 	return false;
@@ -27,6 +27,17 @@ function inside( b, x, z ) {
 	const dx = x - b.x, dz = z - b.z;
 	const u = dx * b.c - dz * b.s, v = dx * b.s + dz * b.c;
 	return Math.abs( u ) <= b.hx && Math.abs( v ) <= b.hz;
+}
+
+// nothing solid along a straight line (an awning, a balcony, a branch) between two points, ends left out; sampled
+// every 8 cm (an awning is thin)
+export function lineClear( g, a, b ) {
+	const n = Math.ceil( a.distanceTo( b ) / 0.08 );
+	for ( let i = 1; i < n; i ++ ) {
+		const k = i / n;
+		if ( solidAt( g, a.x + ( b.x - a.x ) * k, a.y + ( b.y - a.y ) * k, a.z + ( b.z - a.z ) * k ) ) return false;
+	}
+	return true;
 }
 
 // the ground you'd stand on at x, z, no higher than y + step
@@ -51,11 +62,11 @@ export function wallTop( g, hit, maxH, fromY = null ) {
 	let lo = top - 0.08, hi = top;
 	for ( let i = 0; i < 4; i ++ ) { const m = ( lo + hi ) / 2; if ( solidAt( g, ix, m, iz ) ) lo = m; else hi = m; }
 	top = hi;
-	// standing room behind it
+	// standing room behind it (a flat roof, or one a step down behind a parapet)
 	const sx = hit.point.x - out.x * 0.55, sz = hit.point.z - out.z * 0.55;
 	const sy = standY( g, sx, sz, top + 0.25, 0.5 );
 	const ceil = g.physics.ceiling( sx, sz, sy + 0.1, 0.2 );
-	const ledge = Math.abs( sy - top ) < 0.4 && ceil - sy > 1.15 ? new THREE.Vector3( sx, sy, sz ) : null;
+	const ledge = sy > top - 1.3 && sy < top + 0.4 && ceil - sy > 1.15 ? new THREE.Vector3( sx, sy, sz ) : null;
 	return { top, ledge, out, foot: new THREE.Vector3( hit.point.x + out.x * 0.4, footY, hit.point.z + out.z * 0.4 ) };
 }
 
@@ -90,6 +101,8 @@ export function ladderSpot( g, eye, dir, spec ) {
 	// the foot must stand clear (no fence, no furniture), on land
 	if ( P.waterLevel( bot.x, bot.z ) > bot.y + 0.2 ) return { ok: false, reason: 'In water' };
 	if ( solidAt( g, bot.x, bot.y + 0.5, bot.z ) || solidAt( g, bot.x, bot.y + 1.2, bot.z ) ) return { ok: false, reason: 'Blocked' };
+	// and the rungs must clear an awning or a sill on the way up
+	if ( ! lineClear( g, _o.copy( bot ).setY( bot.y + 0.4 ), top.clone().addScaledVector( out, 0.12 ).setY( top.y - 0.2 ) ) ) return { ok: false, reason: 'Something in the way' };
 	if ( W.top !== null && ! ledge && W.top - gy <= spec.reach * cl ) return { ok: true, bot, top, face, ledge: null, len, note: 'No room on top' };
 	return { ok: true, bot, top, face, ledge, len, note: ledge ? null : 'Does not reach the top' };
 }
@@ -167,6 +180,9 @@ export function hookSpot( g, eye, dir, reach ) {
 	const gy = standY( g, bx, bz, top.y - 0.6, 0 );
 	if ( top.y - gy > reach + 0.05 ) return { ok: false, reason: 'Rope too short' };
 	const bot = new THREE.Vector3( bx, gy, bz );
+	// the rope would hang onto an awning or a balcony, out of reach: no use from down here
+	if ( ! lineClear( g, _d.set( bx, gy + 0.3, bz ), _o.set( bx, top.y - 0.3, bz ) ) ) return { ok: false, reason: 'Something in the way' };
+	if ( gy > pl.pos.y + 1.5 ) return { ok: false, reason: 'Out of reach' };
 	return { ok: true, top, bot, out, face: faceOf( out ), ledge, dist, edge: top.clone() };
 }
 

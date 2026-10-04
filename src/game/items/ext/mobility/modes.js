@@ -223,7 +223,7 @@ export class ClimbMode extends Mode {
 			m.t += dt / 0.75;
 			const t = smooth( m.t );
 			p.pos.lerpVectors( m.from, m.to, t );
-			p.pos.y += Math.sin( Math.min( 1, m.t ) * Math.PI ) * 0.35;
+			p.pos.y += Math.sin( Math.min( 1, m.t ) * Math.PI ) * ( m.arc ?? 0.35 );
 			if ( m.t >= 1 ) { p.pos.copy( m.to ); p.onGround = true; this.end( 'top' ); }
 			return true;
 		}
@@ -242,7 +242,9 @@ export class ClimbMode extends Mode {
 		this.u = clamp( this.u + du * dt, 0, this.L );
 		// the top: over the edge onto the roof or the cliff
 		if ( this.u >= this.L - 0.05 && k.fwd && path.ledge ) {
-			this.mantle = { from: p.pos.clone(), to: path.ledge.clone(), t: 0 };
+			// (feet over the lip on the way: a parapet's roof can be a metre lower than its top)
+			const mid = ( p.pos.y + path.ledge.y ) / 2;
+			this.mantle = { from: p.pos.clone(), to: path.ledge.clone(), t: 0, arc: Math.max( 0.35, path.top.y + 0.08 - mid ) };
 			this.sys.sound( 'mob_scuff', p.pos, 0.6 );
 			this.sys.useStamina( 6 );
 			return true;
@@ -277,8 +279,8 @@ export class ClimbMode extends Mode {
 		const side = this.path.kind === 'ladder' ? ( this.path.w || 0.42 ) * 0.5 : 0.04;
 		for ( let i = 0; i < 2; i ++ ) {
 			const s = i === 0 ? 1 : - 1;
-			// on the line, a little above the eye or at chest height
-			this.at( Math.min( this.L + 0.2, this.u + 1.25 + lift( i ) ), w[ i ] );
+			// on the line about the chin and the chest (higher, the arms would fill the view)
+			this.at( Math.min( this.L + 0.2, this.u + 0.95 + lift( i ) ), w[ i ] );
 			w[ i ].addScaledVector( this.out, - ( this.path.off ?? 0.3 ) );
 			w[ i ].x += Math.cos( this.path.face ) * side * s; w[ i ].z -= Math.sin( this.path.face ) * side * s;
 		}
@@ -742,7 +744,7 @@ export class ZipMode extends Mode {
 		}
 		this.s = clamp( this.s + dv * dt / this.L, 0, 1 );
 		const c = zipShape( this.a, this.b, this.s, this.sag, _c );
-		p.pos.set( c.x, c.y - ZIP.hang - 0.2, c.z );
+		p.pos.set( c.x, c.y - ZIP.hang, c.z );
 		p.vel.set( this.dir.x * dv, 0, this.dir.z * dv );
 		p.speedNow = Math.abs( dv ); p.moving = Math.abs( dv ) > 0.1; p.onGround = false; p.fallStart = null; p.sprinting = false; p.swimming = false;
 		p.distance += Math.abs( dv ) * dt;
@@ -760,14 +762,15 @@ export class ZipMode extends Mode {
 			this.noiseT -= dt;
 			if ( this.noiseT <= 0 && this.v > 2 ) { this.noiseT = 0.5; this.sys.noise( p.pos, 10 + this.v * 1.5, 'zip' ); }
 		}
-		// the hands on the trolley's bar overhead (or hand over hand on the cable)
+		// the hands on the trolley's bar just over your head, a little ahead (the lanyard trails back), or hand over hand
+		// on the cable
 		const w = this._w;
 		for ( let i = 0; i < 2; i ++ ) {
 			const sgn = i === 0 ? 1 : - 1;
-			const ds = this.trolley ? 0 : ( 0.22 * sgn + 0.12 * Math.sin( this.hand + i * Math.PI ) ) / this.L;
+			const ds = this.trolley ? ZIP.lead / this.L : ( 0.22 * sgn + 0.12 * Math.sin( this.hand + i * Math.PI ) ) / this.L;
 			const cc = zipShape( this.a, this.b, clamp( this.s + ds, 0, 1 ), this.sag, _c2 );
 			const px = - this.dir.z, pz = this.dir.x;
-			w[ i ].set( cc.x + ( this.trolley ? px * 0.2 * sgn : 0 ), cc.y - ( this.trolley ? 0.32 : 0.02 ), cc.z + ( this.trolley ? pz * 0.2 * sgn : 0 ) );
+			w[ i ].set( cc.x + ( this.trolley ? px * 0.16 * sgn : 0 ), cc.y - ( this.trolley ? 0.19 : 0.02 ), cc.z + ( this.trolley ? pz * 0.16 * sgn : 0 ) );
 		}
 		this.view.world = w;
 		this.sys.zipSound( this, this.trolley ? this.v : 0 );
