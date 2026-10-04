@@ -254,16 +254,26 @@ export function register( reg ) {
 				return ground( g );
 			}
 			case 'garlic': {
-				// a bulb: lobed papery cloves round a neck, a tuft of roots underneath
-				const geo = G.lathe( [ [ 0, 0.004 ], [ 0.012, 0 ], [ 0.026, 0.012 ], [ 0.03, 0.026 ], [ 0.024, 0.042 ], [ 0.01, 0.054 ], [ 0.004, 0.07 ], [ 0, 0.072 ] ], 16 );
-				const p = geo.attributes.position;
-				for ( let i = 0; i < p.count; i ++ ) { const x = p.getX( i ), z = p.getZ( i ), a = Math.atan2( z, x ), f = 1 + Math.abs( Math.sin( a * 4 ) ) * 0.08; p.setXYZ( i, x * f, p.getY( i ), z * f ); }
-				geo.computeVertexNormals();
-				add( g, geo, M( 0xffffff, { map: gradientTex( [ [ 0, 0xd8c8c8 ], [ 0.4, 0xf2ece4 ], [ 1, 0xe8dcd0 ] ], 60, '#a07a8a', 23 ), rough: 0.8 } ) );
-				for ( let i = 0; i < 7; i ++ ) add( g, G.cyl( 0.0008, 0.0008, 0.008, 3 ), M( 0xc8b89a ), [ Math.cos( i ) * 0.004, - 0.004, Math.sin( i * 2 ) * 0.004 ], [ Math.sin( i ) * 0.6, 0, Math.cos( i ) * 0.6 ] );
-				// a second bulb beside it
-				const g2 = group(); add( g2, geo, M( 0xffffff, { map: gradientTex( [ [ 0, 0xd8c8c8 ], [ 0.4, 0xf2ece4 ], [ 1, 0xe8dcd0 ] ], 60, '#a07a8a', 23 ), rough: 0.8 } ) );
-				g2.position.set( 0.05, 0, 0.01 ); g2.rotation.set( 0, 0, - 1.2 ); g2.scale.setScalar( 0.9 ); g.add( g2 );
+				// a bulb: eight plump cloves bulging under papery skin streaked purple, the dry neck, a tuft of roots
+				const skinT = canvasTex( 'k:garlic2', 128, 128, ( ctx, w, h ) => {
+					const gr = ctx.createLinearGradient( 0, 0, 0, h ); gr.addColorStop( 0, '#efe6dc' ); gr.addColorStop( 0.6, '#f6f0e8' ); gr.addColorStop( 1, '#d8c4c0' );
+					ctx.fillStyle = gr; ctx.fillRect( 0, 0, w, h );
+					const R = rng( 23 );
+					for ( let i = 0; i < 40; i ++ ) { ctx.strokeStyle = R() < 0.35 ? 'rgba(150,80,120,0.35)' : 'rgba(170,150,130,0.3)'; ctx.lineWidth = 0.6 + R(); const x = R() * w; ctx.beginPath(); ctx.moveTo( x, h ); ctx.quadraticCurveTo( x + ( R() - 0.5 ) * 10, h * 0.5, x + ( R() - 0.5 ) * 6, 0 ); ctx.stroke(); }
+				} );
+				const skinM = M( 0xffffff, { map: skinT, rough: 0.75 } );
+				const bulb = ( sc ) => {
+					const geo = G.lathe( [ [ 0, 0.003 ], [ 0.012, 0 ], [ 0.024, 0.008 ], [ 0.03, 0.022 ], [ 0.027, 0.038 ], [ 0.016, 0.052 ], [ 0.006, 0.06 ], [ 0.003, 0.074 ], [ 0, 0.075 ] ].map( ( [ a, b ] ) => [ a * sc, b * sc ] ), 32 );
+					const p = geo.attributes.position;
+					for ( let i = 0; i < p.count; i ++ ) { const x = p.getX( i ), z = p.getZ( i ), y = p.getY( i ), a = Math.atan2( z, x ), lobes = Math.pow( Math.abs( Math.cos( a * 4 ) ), 0.6 ), k = 1 + lobes * 0.09 * Math.min( 1, y / ( 0.05 * sc ) ) - 0.04; p.setXYZ( i, x * k, y, z * k ); }
+					geo.computeVertexNormals();
+					return geo;
+				};
+				add( g, bulb( 1 ), skinM );
+				for ( let i = 0; i < 9; i ++ ) add( g, G.cyl( 0.0007, 0.0005, 0.009, 3 ), M( 0xc8b89a ), [ Math.cos( i * 0.7 ) * 0.005, - 0.005, Math.sin( i * 0.7 ) * 0.005 ], [ Math.sin( i ) * 0.7, 0, Math.cos( i ) * 0.7 ] );
+				// a second bulb beside it, on its side
+				const g2 = group(); add( g2, bulb( 0.9 ), skinM );
+				g2.position.set( 0.055, 0.026, 0.01 ); g2.rotation.set( 0.3, 0, - 1.35 ); g.add( g2 );
 				return ground( g );
 			}
 			case 'green_onion': {
@@ -327,12 +337,22 @@ export function register( reg ) {
 				return ground( g );
 			}
 			case 'cabbage': {
-				// a head: overlapping leaf caps over a pale core, a cut stalk underneath
-				const pale = M( 0xffffff, { map: leafTex( 'heart', 0xa8d080, 0xc8e4a0, 0xe8f4d0 ), rough: 0.55 } );
-				add( g, G.sph( 0.075, 18, 14 ), M( 0xc8e0a0, { rough: 0.6 } ), [ 0, 0.07, 0 ], null, [ 1, 0.92, 1 ] );
-				for ( let i = 0; i < 6; i ++ ) {
-					const a = i / 6 * PI * 2;
-					add( g, G.sph( 0.082, 14, 8, a - 0.9, 1.9, 0.5, 1.6 ), pale, [ 0, 0.07, 0 ], [ 0, 0, 0 ], [ 1.02 + ( i % 2 ) * 0.03, 0.96, 1.02 + ( i % 2 ) * 0.03 ] );
+				// a head: a pale heart under overlapping outer leaves, their veins running from the base, a cut stalk
+				const veins = canvasTex( 'k:cabbage-leaf', 128, 128, ( ctx, w, h ) => {
+					const gr = ctx.createLinearGradient( 0, h, 0, 0 ); gr.addColorStop( 0, '#e8f2c8' ); gr.addColorStop( 1, '#9cc870' );
+					ctx.fillStyle = gr; ctx.fillRect( 0, 0, w, h );
+					ctx.strokeStyle = 'rgba(240,250,225,0.85)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo( w / 2, h ); ctx.lineTo( w / 2, 0 ); ctx.stroke();
+					ctx.lineWidth = 1.2; for ( let i = 1; i < 7; i ++ ) for ( const sx of [ - 1, 1 ] ) { ctx.beginPath(); ctx.moveTo( w / 2, h - i * 18 ); ctx.quadraticCurveTo( w / 2 + sx * 20, h - i * 18 - 14, w / 2 + sx * 60, h - i * 18 - 40 ); ctx.stroke(); }
+				} );
+				const leafM = M( 0xffffff, { map: veins, rough: 0.5, side: THREE.DoubleSide } );
+				add( g, G.sph( 0.072, 22, 16 ), M( 0xd8ecb0, { rough: 0.55 } ), [ 0, 0.07, 0 ], null, [ 1, 0.92, 1 ] );
+				for ( let i = 0; i < 7; i ++ ) {
+					const a = i / 7 * PI * 2 + ( i % 2 ) * 0.3;
+					const leafG = G.sph( 0.079 + ( i % 3 ) * 0.003, 12, 10, a - 0.85, 1.7, 0.35 + ( i % 2 ) * 0.15, 1.9 );
+					// open the leaf tips outwards a little
+					const p = leafG.attributes.position; for ( let k = 0; k < p.count; k ++ ) { const y = p.getY( k ); if ( y > 0.02 ) { const f = 1 + ( y - 0.02 ) * 2.2; p.setX( k, p.getX( k ) * f ); p.setZ( k, p.getZ( k ) * f ); } }
+					leafG.computeVertexNormals();
+					add( g, leafG, leafM, [ 0, 0.07, 0 ], [ 0, 0, 0 ], [ 1.02, 0.95, 1.02 ] );
 				}
 				add( g, G.cyl( 0.016, 0.018, 0.012, 10 ), M( 0xe8e4c0 ), [ 0, - 0.002, 0 ] );
 				return ground( g );

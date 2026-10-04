@@ -188,7 +188,7 @@ function smallFish( c = 0x3a6a9a ) {
 function spiral( r0, r1, turns, thick, y, phase = 0, n = 140 ) {
 	const pts = [];
 	for ( let i = 0; i <= n; i ++ ) { const t = i / n, a = t * turns * PI * 2 + phase, r = r0 + t * ( r1 - r0 ); pts.push( [ Math.cos( a ) * r, y, Math.sin( a ) * r ] ); }
-	return tube( pts, thick, n * 2, 5 );
+	return tube( pts, thick, n, 4 );
 }
 
 // a palm frond: a curving midrib with two rows of drooping leaflets
@@ -774,12 +774,25 @@ export function register( reg ) {
 	} );
 
 	reg( 'out_flake', () => {
-		const g = group(), m = M( 0x262628, { rough: 0.3 } );
-		for ( let i = 0; i < 2; i ++ ) {
-			const geo = new THREE.IcosahedronGeometry( 0.035, 0 );
-			const p = geo.attributes.position;
-			for ( let k = 0; k < p.count; k ++ ) { const j = 0.8 + ( ( Math.sin( p.getX( k ) * 97 + i * 13 + p.getZ( k ) * 51 ) * 43758.5 ) % 1 + 1 ) % 1 * 0.4; p.setXYZ( k, p.getX( k ) * j * 1.5, p.getY( k ) * 0.22, p.getZ( k ) * j * 0.9 ); }
-			add( g, facet( geo ), m, [ i * 0.07, 0, i * 0.03 ], [ 0, i * 1.2, 0 ] );
+		// two struck basalt flakes: thin, sharp-edged, the ripples of the blow running out from the striking platform
+		const g = group();
+		const tex = canvasTex( 'out:basalt', 128, 128, ( ctx, w, h ) => {
+			ctx.fillStyle = '#2a2a2c'; ctx.fillRect( 0, 0, w, h );
+			for ( let i = 0; i < 9; i ++ ) { ctx.strokeStyle = i % 2 ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.12)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc( 0, h / 2, 14 + i * 13, - 1.2, 1.2 ); ctx.stroke(); }
+			let s2 = 5; const R = () => ( s2 = ( s2 * 16807 ) % 2147483647 ) / 2147483647;
+			for ( let i = 0; i < 300; i ++ ) { ctx.fillStyle = R() < 0.5 ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.2)'; ctx.fillRect( R() * w, R() * h, 1, 1 ); }
+		} );
+		const m = M( 0xffffff, { map: tex, rough: 0.32, metal: 0.05 } );
+		for ( const [ x, z, a, sc ] of [ [ 0, 0, 0.2, 1 ], [ 0.075, 0.035, 1.9, 0.75 ] ] ) {
+			const sh = new THREE.Shape();
+			const pts = [ [ 0, - 0.012 ], [ 0.03, - 0.026 ], [ 0.07, - 0.024 ], [ 0.095, - 0.006 ], [ 0.09, 0.016 ], [ 0.06, 0.03 ], [ 0.025, 0.024 ], [ 0, 0.012 ] ];
+			pts.forEach( ( [ px, py ], i ) => i ? sh.lineTo( px * sc, py * sc ) : sh.moveTo( px * sc, py * sc ) );
+			const geo = new THREE.ExtrudeGeometry( sh, { depth: 0.004, bevelEnabled: true, bevelThickness: 0.004, bevelSize: 0.0015, bevelSegments: 1, curveSegments: 2 } ).rotateX( - PI / 2 );
+			const p = geo.attributes.position, uv = geo.attributes.uv;
+			// thick at the platform (x = 0), feathering to a sharp edge
+			for ( let i = 0; i < p.count; i ++ ) { const px = p.getX( i ), t = Math.min( 1, px / ( 0.095 * sc ) ); p.setY( i, ( p.getY( i ) + 0.004 ) * ( 1 - t * 0.8 ) + Math.sin( px * 260 ) * 0.0006 ); uv.setXY( i, px / ( 0.1 * sc ), 0.5 + p.getZ( i ) / ( 0.06 * sc ) ); }
+			geo.computeVertexNormals();
+			add( g, facet( geo ), m, [ x, 0, z ], [ 0, a, 0 ] );
 		}
 		return ground( g );
 	} );

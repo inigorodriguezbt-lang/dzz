@@ -814,7 +814,7 @@ function deckModel( s ) {
 		: ( t ) => { const x = Math.abs( t - 0.5 ) * L, e = L / 2 - W / 2; return x <= e ? W / 2 : W / 2 * Math.sqrt( Math.max( 0, 1 - ( ( x - e ) / ( W / 2 ) ) ** 2 ) ); };
 	const kick = ( t ) => { if ( long ) return - 0.004 * Math.sin( t * PI ); const x = Math.abs( t - 0.5 ) * L; return x > 0.235 ? ( ( x - 0.235 ) / ( L / 2 - 0.235 ) ) ** 1.8 * 0.058 : 0; };
 	const yf = ( t, s2 ) => deckY + kick( t ) + ( long ? 0.002 : 0.006 ) * s2 * s2;
-	const S = pslab( L, hw, yf, T, { N: 56, M: 10, K: 3, rr: T * 0.45 } );
+	const S = pslab( L, hw, yf, T, { N: 44, M: 8, K: 3, rr: T * 0.45 } );
 	const art = deckArt( s.art || 'shaka', s.color ?? 0xe8d84a );
 	add( g, S.top, long ? M( 0xffffff, { map: art, rough: 0.55 } ) : M( 0xffffff, { map: gripTex(), rough: 0.95 } ) );
 	add( g, S.bottom, long ? M( 0xffffff, { map: deckArt( 'shaka', s.color2 ?? 0x2a8a6a ), rough: 0.5 } ) : M( 0xffffff, { map: art, rough: 0.45 } ) );

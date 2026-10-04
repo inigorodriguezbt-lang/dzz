@@ -18,7 +18,7 @@ const book = ( id, name, o ) => item( id, name, 'book', { w: 0.3, size: 1, ...o,
 
 defineItems( [
 	// ================= materials =================
-	mat( 'rags', 'Rags', { w: 0.04, size: 1, stack: 8, tags: [ 'crafted', 'house', 'garage', 'trash' ], model: { type: 'folded', size: [ 0.16, 0.03, 0.12 ], color: 0xd8cfc0, print: 'canvas', color2: 0xb8ae9a },
+	mat( 'rags', 'Rags', { w: 0.04, size: 1, stack: 8, tags: [ 'crafted', 'house', 'garage', 'trash' ], model: { type: 'folded', style: 'rags', size: [ 0.16, 0.03, 0.12 ], color: 0xd8cfc0, print: 'canvas', color2: 0xb8ae9a },
 		medical: { use: 7, bleed: 1, verb: 'Bandage', sound: 'bandage' },
 		desc: 'Crafting and bandages.' } ),
 	mat( 'stick', 'Sticks', { w: 0.25, size: 3, stack: 10, tags: [ 'wild' ], model: { type: 'stick', len: 0.6, n: 3 },

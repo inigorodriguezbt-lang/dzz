@@ -510,13 +510,13 @@ export function register( reg ) {
 		const g = group();
 		for ( const [ c, off ] of [ [ 0xc8201a, 0 ], [ 0x1a1a1a, 0.006 ] ] ) {
 			const m = plastic( c, 0.5 );
-			for ( let i = 0; i < 3; i ++ ) add( g, new THREE.TorusGeometry( 0.12 - i * 0.004 - off, 0.006, 6, 30 ).rotateX( PI / 2 ), m, [ off, 0.006 + i * 0.012 + off * 2, off ] );
+			for ( let i = 0; i < 3; i ++ ) add( g, new THREE.TorusGeometry( 0.12 - i * 0.004 - off, 0.006, 5, 26 ).rotateX( PI / 2 ), m, [ off, 0.006 + i * 0.012 + off * 2, off ] );
 		}
 		// four clamps resting on the coil
 		const clamp = ( c, x, z, yaw ) => {
 			const k = group(), m = plastic( c, 0.4 ), cu = M( 0xb87333, { rough: 0.3, metal: 0.9 } );
 			for ( const s of [ - 1, 1 ] ) {
-				add( k, RB( 0.075, 0.012, 0.016, 0.005 ), m, [ - 0.01, 0.006 + ( s > 0 ? 0.013 : 0 ), 0 ], [ 0, 0, s * 0.12 ] );
+				add( k, G.rbox( 0.075, 0.012, 0.016, 0.005, 1 ).translate( 0, - 0.006, 0 ), m, [ - 0.01, 0.006 + ( s > 0 ? 0.013 : 0 ), 0 ], [ 0, 0, s * 0.12 ] );
 				add( k, B( 0.03, 0.006, 0.014 ), cu, [ 0.04, 0.007 + ( s > 0 ? 0.008 : 0 ), 0 ], [ 0, 0, - s * 0.08 ] );
 			}
 			add( k, helix( 0.006, 0.014, 3, 0.0012, 18, 4 ).rotateY( PI / 2 ), steel(), [ 0.015, 0.012, 0 ] );
@@ -632,7 +632,7 @@ export function register( reg ) {
 		const g = group(), body = plastic( 0x1e1f22, 0.55 ), y = 0.016;
 		add( g, RB( 0.135, 0.032, 0.066, 0.01 ), body, [ 0, y, 0 ] );
 		add( g, B( 0.04, 0.001, 0.05 ), M( 0xffffff, { map: lcdTex( 'scan', '154.80', '#a8c890', '#16241a' ), rough: 0.2, emissive: 0x2a3a20, emissiveIntensity: 0.5 } ), [ 0.03, 0.0325, 0 ] );
-		for ( let i = 0; i < 4; i ++ ) for ( let j = 0; j < 3; j ++ ) add( g, RB( 0.008, 0.003, 0.012, 0.002 ), plastic( i === 3 && j === 2 ? 0xd02a2a : 0x4a4d52, 0.4 ), [ - 0.045 + i * 0.013, 0.0335, - 0.017 + j * 0.017 ] );
+		for ( let i = 0; i < 4; i ++ ) for ( let j = 0; j < 3; j ++ ) add( g, G.rbox( 0.008, 0.003, 0.012, 0.0015, 1 ).translate( 0, - 0.0015, 0 ), plastic( i === 3 && j === 2 ? 0xd02a2a : 0x4a4d52, 0.4 ), [ - 0.045 + i * 0.013, 0.0335, - 0.017 + j * 0.017 ] );
 		for ( let i = 0; i < 5; i ++ ) add( g, B( 0.012, 0.0006, 0.002 ), M( 0x0a0a0a ), [ 0.058, 0.0322, - 0.01 + i * 0.005 ] );
 		add( g, C( 0.005, 0.0028, 0.13, 8 ).rotateZ( - PI / 2 ), rubber(), [ 0.13, 0.02, - 0.018 ] );
 		add( g, C( 0.008, 0.008, 0.012, 10 ).rotateZ( - PI / 2 ), dark(), [ 0.072, 0.02, - 0.018 ] );
@@ -671,7 +671,7 @@ export function register( reg ) {
 		mic.position.set( mx, 0, mz ); mic.rotation.y = 0.25;
 		g.add( mic );
 		// the coiled cord from the socket to the mic
-		add( g, helix( 0.0055, 0.05, 11, 0.0013 ).rotateY( - PI / 2 ), plastic( 0x141416 ), [ - 0.012, 0.012, fz + 0.03 ], [ 0, - 0.35, 0 ] );
+		add( g, helix( 0.0055, 0.05, 11, 0.0013, 66, 4 ).rotateY( - PI / 2 ), plastic( 0x141416 ), [ - 0.012, 0.012, fz + 0.03 ], [ 0, - 0.35, 0 ] );
 		return ground( g );
 	} );
 
@@ -689,7 +689,7 @@ export function register( reg ) {
 		add( g, B( 0.05, 0.001, 0.04 ), M( 0xffffff, { map: lcdTex( 'det', 'IRON', '#a8c0a0', '#1a2a1a' ), rough: 0.2 } ), [ - 0.17, y + 0.098, 0 ] );
 		add( g, new THREE.CapsuleGeometry( 0.016, 0.08, 4, 10 ).rotateZ( PI / 2 ), rubber(), [ - 0.25, y + 0.04, 0 ] );
 		add( g, CP( 0.04, 0.06, PI * 0.15, PI * 1.2 ).rotateZ( - PI / 2 ), M( 0x2a2c30, { rough: 0.5, side: THREE.DoubleSide } ), [ - 0.36, y + 0.07, 0 ] );
-		add( g, helix( 0.012, 0.3, 9, 0.0015 ), plastic( 0x141414 ), [ 0.15, y + 0.04, 0 ], [ 0, 0, - 0.07 ] );
+		add( g, helix( 0.012, 0.3, 9, 0.0015, 72, 4 ), plastic( 0x141414 ), [ 0.15, y + 0.04, 0 ], [ 0, 0, - 0.07 ] );
 		return ground( g );
 	} );
 
@@ -776,7 +776,7 @@ export function register( reg ) {
 		const g = group(), body = plastic( 0x3a3d42, 0.5 ), y = 0.014;
 		add( g, RB( 0.14, 0.028, 0.058, 0.01 ), body, [ 0, y, 0 ] );
 		add( g, B( 0.035, 0.001, 0.042 ), M( 0xffffff, { map: lcdTex( 'sat', 'SAT ▮▮▮', '#c8d8e0', '#1a2a3a' ), rough: 0.2, emissive: 0x2a3a4a, emissiveIntensity: 0.4 } ), [ 0.03, 0.0285, 0 ] );
-		for ( let i = 0; i < 4; i ++ ) for ( let j = 0; j < 3; j ++ ) add( g, RB( 0.008, 0.003, 0.012, 0.002 ), plastic( 0x1e1f22, 0.4 ), [ - 0.04 + i * 0.012, 0.0295, - 0.016 + j * 0.016 ] );
+		for ( let i = 0; i < 4; i ++ ) for ( let j = 0; j < 3; j ++ ) add( g, G.rbox( 0.008, 0.003, 0.012, 0.0015, 1 ).translate( 0, - 0.0015, 0 ), plastic( 0x1e1f22, 0.4 ), [ - 0.04 + i * 0.012, 0.0295, - 0.016 + j * 0.016 ] );
 		add( g, C( 0.009, 0.007, 0.13, 10 ).rotateZ( - PI / 2 ), plastic( 0x1e1f22, 0.6 ), [ 0.13, y + 0.004, - 0.012 ] );
 		add( g, C( 0.011, 0.011, 0.02, 10 ).rotateZ( - PI / 2 ), plastic( 0x1e1f22 ), [ 0.07, y + 0.004, - 0.012 ] );
 		add( g, B( 0.02, 0.008, 0.012 ), M( 0xd02a2a ), [ 0.05, 0.03, 0.02 ] );

@@ -407,7 +407,7 @@ function paintSide( ctx, x, y, w, h, s, P, info ) {
 	const col = css( readable( P.bg, s.textColor, P.fg ) );
 	if ( w < h * 0.5 ) {
 		ctx.save(); ctx.translate( x + w / 2, y + h / 2 ); ctx.rotate( - PI / 2 );
-		text( ctx, s.text || '', 0, 0, h * 0.86, w * 0.55, { weight: '900', family: HEAVY, color: col } );
+		text( ctx, s.text || '', 0, 0, h * 0.7, w * 0.55, { weight: '900', family: HEAVY, color: col } );
 		ctx.restore();
 	} else {
 		text( ctx, s.text || '', x + w / 2, y + h * 0.4, w * 0.7, Math.min( h * 0.2, w * 0.2 ), { weight: '900', family: HEAVY, color: col } );
@@ -438,9 +438,9 @@ function pxFor( wm, hm, max = 1024, min = 96 ) {
 // A label wrapped round a cylinder once: a strip of physical size circ × h (m). The front faces u = `front`
 // (0.1: towards the icon camera); the facts panel sits to its left, the back panel to its right.
 export function wrapTex( spec, info, circ, h, o = {} ) {
-	const max = o.max ?? 768;
+	const max = o.max ?? 640;
 	let W = max, H = Math.round( max * h / circ );
-	if ( H > 384 ) { H = 384; W = Math.round( 384 * circ / h ); }
+	if ( H > 320 ) { H = 320; W = Math.round( 320 * circ / h ); }
 	if ( H < 64 ) { H = 64; }
 	const front = o.front ?? 0.1;
 	const key = 'pack:wrap:' + JSON.stringify( spec ) + info.kind + info.net + info.brand + W + 'x' + H + ( o.panels || '' );
@@ -479,7 +479,7 @@ export function panelTex( spec, info, wm, hm, kind = 'front', o = {} ) {
 
 // panels laid along a strip in u (a tin's four sides: [ { kind, u0, u1 } ], u in 0..1 of physical length L × h)
 export function stripTex( spec, info, L, h, panels, o = {} ) {
-	const [ W, H ] = pxFor( L, h, o.max ?? 1024, 64 );
+	const [ W, H ] = pxFor( L, h, o.max ?? 768, 64 );
 	const key = 'pack:strip:' + JSON.stringify( spec ) + JSON.stringify( panels ) + info.kind + info.net + info.brand + W + 'x' + H;
 	return canvasTex( key, W, H, ( ctx ) => {
 		const P = palette( spec );
@@ -514,7 +514,7 @@ export function boxAtlas( spec, info, w, h, d, axis = 'z', o = {} ) {
 	const rowB = Object.keys( F ).filter( k => ! rowA.includes( k ) );
 	const wA = F[ rowA[ 0 ] ][ 0 ] * 2, hA = F[ rowA[ 0 ] ][ 1 ];
 	const wB = rowB.reduce( ( a, k ) => a + F[ k ][ 0 ], 0 ), hB = Math.max( ...rowB.map( k => F[ k ][ 1 ] ) );
-	const MAX = o.max ?? 1024, gap = 2;
+	const MAX = Math.min( 768, o.max ?? 768 ), gap = 2;
 	const k = Math.min( ( MAX - gap * 4 ) / Math.max( wA, wB ), ( MAX - gap * 3 ) / ( hA + hB ) );
 	const CW = Math.ceil( Math.max( wA, wB ) * k ) + gap * 5, CH = Math.ceil( ( hA + hB ) * k ) + gap * 3;
 	const rects = {};
@@ -703,4 +703,17 @@ export function tubeUV( geo ) {
 	}
 	uv.needsUpdate = true;
 	return geo;
+}
+
+// How a printed upright container sits in the first-person hand (render ViewModel reads userData.hold / view): the
+// hand round its body, upright, the front of the label (u = 0.1 of a turn, as wrapTex prints it) turned to the eye.
+// The hold's own front is a quarter turn round from the label's, so the fingers close on the side, not across it.
+const rotY = ( [ x, y, z ], t ) => [ x * Math.cos( t ) + z * Math.sin( t ), y, - x * Math.sin( t ) + z * Math.cos( t ) ];
+export function holdUpright( g, h, r, o = {} ) {
+	const turn = o.turn ?? - PI / 2;
+	g.userData.hold = { p: [ 0, h * ( o.at ?? 0.42 ), 0 ], a: [ 0, 1, 0 ], f: rotY( o.front ?? [ Math.sin( 0.2 * PI ), 0, Math.cos( 0.2 * PI ) ], turn ), r: Math.min( 0.04, r ) };
+	// bigger things sit further out and lower, so a cereal box doesn't fill the screen
+	const k = Math.max( 0, h - 0.12 );
+	g.userData.view = { at: o.view ?? [ 0.15 + k * 0.3, - 0.15 - k * 0.5, - 0.36 - k * 2.2 ], axis: [ 0.1, 1, 0.12 ], front: rotY( [ - 0.3, 0.05, 1 ], turn ) };
+	return g;
 }

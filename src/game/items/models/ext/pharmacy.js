@@ -6,7 +6,7 @@
 // a crutch, an arm sling, a used bandage, cotton balls, the mortar and pestle, and the Hawaiian herbs: roots (ʻōlena,
 // ʻawa, ʻuhaloa), noni, kukui nuts, pōpolo berries, māmaki and aloe leaves, poultices in a ti leaf, a ti-leaf wrap.
 import * as THREE from 'three';
-import { M, MAT, G, PI, add, group, ground, labelTex, canvasTex, facet } from '../lib.js';
+import { M, MAT, G, PI, add, group, ground, labelTex, canvasTex, facet, css, shade } from '../lib.js';
 
 // ---- small helpers ------------------------------------------------------------------------------------------------
 
@@ -245,14 +245,23 @@ export function register( reg ) {
 
 	// a triangular arm sling folded flat, its strap looped over it
 	reg( 'pharm_sling', ( s ) => {
+		// an arm sling lying flat: the padded fabric pouch, its open top edge piped and gaping a little, the closed
+		// elbow end, the long neck strap with its shoulder pad and buckle
 		const g = group(), c = s.color ?? 0x2a4a8a;
-		const sh = new THREE.Shape(); sh.moveTo( - 0.09, - 0.06 ); sh.lineTo( 0.09, - 0.06 ); sh.lineTo( - 0.03, 0.065 ); sh.closePath();
-		const geo = new THREE.ExtrudeGeometry( sh, { depth: 0.018, bevelEnabled: true, bevelSize: 0.006, bevelThickness: 0.005, bevelSegments: 2 } ).rotateX( - PI / 2 );
-		add( g, geo, M( c, { rough: 0.95 } ), [ 0, 0.005, 0 ] );
-		const strap = M( 0x1a1a1a, { rough: 0.8 } );
-		add( g, G.tube( [ [ - 0.1, 0.006, 0.04 ], [ - 0.02, 0.03, 0.02 ], [ 0.07, 0.03, - 0.01 ], [ 0.13, 0.006, - 0.03 ] ], 0.0035, 16, 4 ), strap );
-		add( g, G.box( 0.018, 0.006, 0.026 ), M( 0x3a3a3a, { rough: 0.4, metal: 0.4 } ), [ 0.03, 0.028, 0.008 ] );
-		return g;
+		const cloth = M( 0xffffff, { map: canvasTex( 'pharm:sling2:' + c, 64, 64, ( ctx, w, h ) => { ctx.fillStyle = css( c ); ctx.fillRect( 0, 0, w, h ); ctx.strokeStyle = 'rgba(255,255,255,0.07)'; for ( let i = 0; i < w; i += 3 ) { ctx.beginPath(); ctx.moveTo( i, 0 ); ctx.lineTo( i, h ); ctx.stroke(); } ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.setLineDash( [ 3, 3 ] ); ctx.strokeRect( 4, 4, w - 8, h - 8 ); }, { repeat: true } ), rough: 0.92 } );
+		const pouch = G.rbox( 0.26, 0.03, 0.15, 0.014, 3 );
+		const p = pouch.attributes.position;
+		for ( let i = 0; i < p.count; i ++ ) { const x = p.getX( i ) / 0.13, z = p.getZ( i ) / 0.075; p.setY( i, p.getY( i ) * ( 1 - 0.35 * x * x ) * ( 1 - 0.2 * z * z ) ); if ( x < - 0.6 ) p.setZ( i, p.getZ( i ) * ( 1 - ( - x - 0.6 ) * 0.5 ) ); }
+		pouch.computeVertexNormals();
+		add( g, pouch, cloth, [ 0, 0.015, 0 ] );
+		const edge = M( shade( c, - 0.45 ), { rough: 0.8 } );
+		add( g, G.tube( [ [ - 0.1, 0.022, 0.074 ], [ 0.0, 0.028, 0.078 ], [ 0.13, 0.024, 0.07 ] ], 0.003, 12, 4 ), edge );
+		add( g, G.box( 0.2, 0.002, 0.012 ), M( shade( c, - 0.6 ), { rough: 0.9 } ), [ 0.02, 0.027, 0.066 ] );
+		const strap = M( 0x1a1a1c, { rough: 0.85 } );
+		add( g, G.tube( [ [ 0.12, 0.02, 0.05 ], [ 0.17, 0.012, 0.09 ], [ 0.12, 0.004, 0.14 ], [ - 0.02, 0.004, 0.135 ], [ - 0.12, 0.006, 0.09 ], [ - 0.13, 0.02, 0.05 ] ], 0.0045, 30, 4 ).scale( 1, 0.5, 1 ), strap );
+		add( g, G.rbox( 0.075, 0.012, 0.034, 0.005 ), M( 0x3a3c40, { rough: 0.95 } ), [ 0.03, 0.0, 0.138 ] );
+		add( g, G.rbox( 0.022, 0.007, 0.028, 0.002 ), M( 0x111111, { rough: 0.4 } ), [ 0.135, 0.004, 0.11 ] );
+		return ground( g );
 	} );
 
 	// ================= the crutch =================

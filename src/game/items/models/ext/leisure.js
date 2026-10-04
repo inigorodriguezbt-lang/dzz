@@ -230,7 +230,7 @@ export function register( reg ) {
 		add( g, G.rbox( W, T, W, 0.006 ), M( 0x7a4420, { rough: 0.5 } ) );
 		top( g, W * 0.985, W * 0.985, T, board );
 		const lava = M( 0x1e1c1c, { rough: 0.85 } ), coral = M( 0xf2eee2, { rough: 0.8 } );
-		const peb = G.sph( step * 0.32, 8, 6 ); peb.scale( 1, 0.62, 1 );
+		const peb = G.sph( step * 0.32, 7, 4 ); peb.scale( 1, 0.62, 1 );
 		const r = rng( 5 );
 		for ( let i = 0; i < N; i ++ ) for ( let j = 0; j < N; j ++ ) {
 			// a game under way: a few holes already emptied
@@ -283,7 +283,8 @@ export function register( reg ) {
 		add( g, G.rbox( a, a, a, 0.004, 3 ), M( 0x111111, { rough: 0.35 } ) );
 		const COLS = [ 0xf2f2f2, 0xf2c21a, 0xd8201e, 0xf2701a, 0x1a8a3a, 0x1a4ad6 ].map( c => M( c, { rough: 0.25 } ) );
 		const r = rng( 21 );
-		const sticker = G.rbox( st, 0.0012, st, 0.0016, 1 );
+		// flat stickers (a rounded one per cell cost 5k triangles on a 6 cm toy)
+		const sticker = G.box( st, 0.0012, st );
 		for ( let i = 0; i < 3; i ++ ) for ( let j = 0; j < 3; j ++ ) {
 			const u = ( i - 1 ) * cell, v = ( j - 1 ) * cell;
 			add( g, sticker, COLS[ Math.floor( r() * 6 ) ], [ u, a - 0.0003, v ] );

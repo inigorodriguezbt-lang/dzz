@@ -2,7 +2,7 @@
 // Printed packaging (pill bottle labels, aerosol wraps, kit patches) comes from pack.js.
 import * as THREE from 'three';
 import { M, MAT, G, PI, add, group, ground, fabric, labelTex, labelUV, canvasTex, worldTex, shade, css, facet, hashStr, glyph } from './lib.js';
-import { packInfo, wrapTex, panelTex, boxAtlas, boxUV, ridged, tubeTex, tubeUV, rrect, text as ptext, barcode, rng, screenMat } from './pack.js';
+import { packInfo, wrapTex, panelTex, boxAtlas, boxUV, ridged, tubeTex, tubeUV, rrect, text as ptext, barcode, rng, screenMat, holdUpright } from './pack.js';
 
 const flatLabel = ( spec, o = {} ) => M( 0xffffff, { map: labelTex( spec ), rough: o.rough ?? 0.6, metal: o.metal ?? 0 } );
 const printed = ( map, o = {} ) => M( 0xffffff, { map, rough: o.rough ?? 0.55, metal: o.metal ?? 0, side: o.side } );
@@ -90,7 +90,7 @@ export function registerGearModels( reg ) {
 			const spec = { style: 'plain', ...s.label };
 			add( g, band( r * 1.008, h * 0.12, h * 0.62, 28 ), printed( wrapTex( spec, packInfo( spec, def, 'med' ), 2 * PI * r, h * 0.5, { max: 512 } ), { rough: 0.55 } ) );
 		}
-		return g;
+		return holdUpright( g, h, r, { view: [ 0.13, - 0.12, - 0.3 ] } );
 	} );
 	function capTex( c ) {
 		return canvasTex( 'cap:' + c, 128, 128, ( ctx, W ) => {
@@ -176,12 +176,12 @@ export function registerGearModels( reg ) {
 			add( g, G.box( w * 0.96, 0.004, d * 0.98 ), M( shade( c, - 0.35 ), { rough: 0.85 } ), [ 0, h * 0.62, 0 ] );
 			const zip = M( 0x1a1a1a, { rough: 0.45, metal: 0.4 } );
 			add( g, G.box( w * 0.92, 0.003, 0.005 ), zip, [ 0, h * 0.62 + 0.002, d * 0.49 ] );
-			for ( const x of [ - w * 0.2, w * 0.3 ] ) { add( g, G.box( 0.012, 0.004, 0.008 ), MAT.darkMetal(), [ x, h * 0.62, d * 0.5 + 0.003 ] ); add( g, G.box( 0.006, 0.022, 0.003 ), MAT.rubber(), [ x, h * 0.62 - 0.022, d * 0.5 + 0.006 ] ); }
+			// two zip sliders with short cord pulls lying along the zip
+			for ( const x of [ - w * 0.2, w * 0.3 ] ) { add( g, G.box( 0.012, 0.004, 0.008 ), MAT.darkMetal(), [ x, h * 0.62, d * 0.49 ] ); add( g, G.box( 0.018, 0.003, 0.004 ), MAT.rubber(), [ x + 0.014, h * 0.62 + 0.001, d * 0.49 ] ); }
 			// MOLLE webbing across the back (as many rows as the flat of the back has room for), two straps down the front
 			const web = fabric( shade( c, - 0.2 ), 'weave', shade( c, - 0.32 ), { rep: 6, rough: 0.95 } );
 			const rr = h * 0.38, rows = Math.floor( ( h - rr * 1.6 ) / 0.022 );
 			for ( let i = 0; i < rows; i ++ ) add( g, G.box( w * 0.86, 0.014, 0.0025 ), web, [ 0, rr * 0.8 + i * 0.022, - d / 2 - 0.0004 ] );
-			if ( h > 0.05 ) for ( const x of [ - w * 0.3, w * 0.3 ] ) add( g, G.box( 0.022, h - rr * 1.4, 0.003 ), web, [ x, rr * 0.7, d / 2 + 0.0006 ] );
 			if ( s.cross !== null ) {
 				const patch = canvasTex( 'kit-patch:' + c + ':' + ( s.cross ?? 0xffffff ), 128, 128, ( ctx, W ) => {
 					ctx.fillStyle = css( shade( c, - 0.15 ) ); rrect( ctx, 2, 2, W - 4, W - 4, 14 ); ctx.fill();
@@ -227,8 +227,8 @@ export function registerGearModels( reg ) {
 		const body = tubeUV( tubeBody( r, bodyL, 1.5 ).rotateY( PI ) );
 		add( g, body, printed( tubeTex( spec, packInfo( spec, def, def?.cat === 'medical' ? 'med' : 'chem' ), bodyL, 2 * PI * r, { x0: 0.05, x1: 0.92 } ), { rough: 0.35, metal: 0.15 } ), [ - L * 0.06, r, 0 ] );
 		// the crimp, its serrated seal
-		add( g, G.box( 0.012, 0.0026, r * 2.9 ), M( shade( spec.bg ?? 0xffffff, - 0.06 ), { rough: 0.5 } ), [ - L * 0.06 - bodyL / 2 - 0.004, r * 0.07, 0 ] );
-		for ( let i = 0; i < 9; i ++ ) add( g, G.box( 0.0008, 0.003, r * 2.85 ), M( shade( spec.bg ?? 0xffffff, - 0.25 ) ), [ - L * 0.06 - bodyL / 2 - 0.0095 + i * 0.0012, r * 0.07, 0 ] );
+		add( g, G.box( 0.012, 0.0026, r * 2.9 ), M( shade( spec.bg ?? 0xffffff, - 0.06 ), { rough: 0.5 } ), [ - L * 0.06 - bodyL / 2 - 0.004, r - 0.0013, 0 ] );
+		for ( let i = 0; i < 9; i ++ ) add( g, G.box( 0.0008, 0.003, r * 2.85 ), M( shade( spec.bg ?? 0xffffff, - 0.25 ) ), [ - L * 0.06 - bodyL / 2 - 0.0095 + i * 0.0012, r - 0.0015, 0 ] );
 		// the shoulder, the neck and the knurled cap
 		add( g, G.cylX( r * 0.98, 0.006, 18, r * 0.5 ), M( spec.bg ?? 0xffffff, { rough: 0.35 } ), [ - L * 0.06 + bodyL / 2 + 0.003, r, 0 ] );
 		const cap = ridged( r * 0.62, L * 0.12, 14, 0.06 ).rotateZ( - PI / 2 );
@@ -237,11 +237,13 @@ export function registerGearModels( reg ) {
 	} );
 
 	reg( 'ivbag', ( s, def ) => {
+		if ( s.style === 'bladder' ) return bladder( s );
 		const g = group(), W = 0.13, Ln = 0.2, c = s.color ?? 0x9a1a1a;
 		// the bag lies flat: welded rim, the fluid pillow inside it, the printed scale, the hanger tab and two ports
 		const bag = G.rbox( Ln * 0.9, 0.022, W * 0.88, 0.011, 3 );
 		add( g, bag, M( c, { rough: 0.12, transparent: true, opacity: 0.8 } ), [ 0, 0.001, 0 ] );
-		add( g, G.rbox( Ln, 0.0018, W, 0.006, 1 ), M( 0xe8eef0, { rough: 0.2, transparent: true, opacity: 0.55 } ) );
+		const film = M( 0xe8eef0, { rough: 0.2, transparent: true, opacity: 0.55 } );
+		add( g, G.rbox( Ln, 0.0018, W, 0.006, 1 ), film );
 		const label = canvasTex( 'ivbag:' + ( s.text || '' ) + c, 256, 192, ( ctx, Wd, H ) => {
 			ctx.fillStyle = '#fbfbf6'; ctx.fillRect( 0, 0, Wd, H );
 			ctx.fillStyle = css( shade( c, - 0.2 ) ); ctx.fillRect( 0, 0, Wd, H * 0.24 );
@@ -252,15 +254,45 @@ export function registerGearModels( reg ) {
 			barcode( ctx, Wd * 0.3, H * 0.62, Wd * 0.62, H * 0.3, hashStr( s.text || 'iv' ) );
 		} );
 		add( g, G.box( Ln * 0.5, 0.0006, W * 0.62 ), printed( label, { rough: 0.6 } ), [ - Ln * 0.04, 0.0235, 0 ] );
-		add( g, G.box( 0.02, 0.0016, 0.03 ), M( 0xe8eef0, { rough: 0.3, transparent: true, opacity: 0.6 } ), [ - Ln / 2 - 0.008, 0, 0 ] );
+		add( g, G.box( 0.02, 0.0016, 0.03 ), film, [ - Ln / 2 - 0.008, 0, 0 ] );
 		add( g, new THREE.TorusGeometry( 0.006, 0.0012, 4, 12 ).rotateX( PI / 2 ), MAT.white(), [ - Ln / 2 - 0.008, 0.0012, 0 ] );
 		for ( const z of [ - 0.018, 0.018 ] ) {
 			add( g, G.cylX( 0.003, 0.03, 8 ), M( 0xf2f2ee, { rough: 0.4 } ), [ Ln / 2 + 0.012, 0.004, z ] );
 			add( g, G.cylX( 0.0042, 0.008, 10 ), M( z < 0 ? 0x2a6ad6 : 0xf2f2ee, { rough: 0.45 } ), [ Ln / 2 + 0.03, 0.004, z ] );
 		}
-		if ( s.tube !== false ) add( g, G.tube( [ [ Ln / 2 + 0.03, 0.004, 0.018 ], [ Ln / 2 + 0.07, 0.003, 0.04 ], [ Ln / 2 + 0.05, 0.003, 0.08 ], [ Ln / 2 - 0.02, 0.003, 0.085 ] ], 0.0022, 16, 5 ), MAT.glass( 0xffffff, 0.55 ) );
+		if ( s.tube !== false ) add( g, G.tube( [ [ Ln / 2 + 0.03, 0.004, 0.018 ], [ Ln / 2 + 0.07, 0.003, 0.04 ], [ Ln / 2 + 0.05, 0.003, 0.08 ], [ Ln / 2 - 0.02, 0.003, 0.085 ] ], 0.0022, 16, 5 ), film );
 		return g;
 	} );
+
+	// a hydration reservoir lying flat: the tinted bag with water in it, the wide screw cap and its handle bar, the
+	// hose out of the bottom with the bite valve, printed fill marks
+	function bladder( s ) {
+		const g = group(), c = s.color ?? 0x3a8ad6, Ln = 0.32, W = 0.18;
+		const bag = organicPillow( Ln, W, 0.035 );
+		add( g, bag, M( c, { rough: 0.12, transparent: true, opacity: 0.55 } ) );
+		add( g, organicPillow( Ln * 0.9, W * 0.86, 0.028 ), M( 0xbfe0f0, { rough: 0.05, transparent: true, opacity: 0.35 } ), [ 0.01, 0.002, 0 ] );
+		add( g, G.box( Ln * 0.98, 0.003, 0.014 ), M( shade( c, - 0.2 ), { rough: 0.4 } ), [ 0, 0.001, W / 2 - 0.006 ] );
+		const marks = canvasTex( 'bladder-marks', 256, 64, ( ctx, Wd, H ) => {
+			ctx.clearRect( 0, 0, Wd, H ); ctx.fillStyle = '#e8f4fa'; ctx.fillRect( 0, 0, Wd, H );
+			ctx.fillStyle = '#1a3a5a'; for ( let i = 1; i <= 4; i ++ ) { const x = Wd * ( 0.1 + i * 0.18 ); ctx.fillRect( x, H * 0.2, 2, H * 0.4 ); ptext( ctx, `${( i * 0.5 ).toFixed( 1 )} L`, x, H * 0.78, 40, 13, { color: '#1a3a5a' } ); }
+			ptext( ctx, 'MAUKA · 2 L', Wd * 0.12, H * 0.4, 50, 12, { weight: '900', color: '#1a3a5a' } );
+		} );
+		add( g, G.box( Ln * 0.5, 0.0006, 0.035 ), printed( marks, { rough: 0.5 } ), [ 0.02, 0.0365, 0.03 ] );
+		// the wide cap at one end, the slide bar at the other
+		add( g, ridged( 0.032, 0.012, 20, 0.04 ), M( 0x1e1f22, { rough: 0.5 } ), [ - Ln * 0.3, 0.026, 0 ] );
+		add( g, G.box( 0.012, 0.012, W * 0.9 ), M( 0x1e1f22, { rough: 0.5 } ), [ Ln / 2 - 0.006, 0.006, 0 ] );
+		add( g, G.tube( [ [ - Ln / 2 + 0.02, 0.01, - W * 0.35 ], [ - Ln / 2 - 0.04, 0.008, - W * 0.4 ], [ - Ln / 2 - 0.05, 0.006, - W * 0.1 ], [ - Ln / 2 - 0.02, 0.006, W * 0.25 ], [ - Ln / 2 + 0.06, 0.006, W * 0.42 ] ], 0.005, 30, 6 ), MAT.glass( 0xd8eef8, 0.55 ) );
+		add( g, G.cylX( 0.007, 0.03, 10, 0.006 ), M( 0x1e1f22, { rough: 0.6 } ), [ - Ln / 2 + 0.075, 0.006, W * 0.42 ] );
+		return ground( g );
+	}
+	// a soft flat bag: rounded corners, puffed in the middle
+	function organicPillow( L, W, T ) {
+		const geo = G.rbox( L, T, W, T * 0.48, 3 );
+		const p = geo.attributes.position;
+		for ( let i = 0; i < p.count; i ++ ) { const x = p.getX( i ) / ( L / 2 ), z = p.getZ( i ) / ( W / 2 ), k = Math.max( 0.15, 1 - Math.pow( Math.max( Math.abs( x ), Math.abs( z ) ), 6 ) ); p.setY( i, p.getY( i ) * k ); }
+		geo.computeVertexNormals();
+		return geo;
+	}
 
 	reg( 'splint', ( s ) => {
 		const g = group();
@@ -317,7 +349,7 @@ export function registerGearModels( reg ) {
 		const capC = s.cap ?? 0xf2f2f2;
 		const cap = G.lathe( [ [ r * 0.96, bodyTop - h * 0.005 ], [ r * 0.98, bodyTop + h * 0.12 ], [ r * 0.9, bodyTop + h * 0.2 ], [ r * 0.8, bodyTop + h * 0.215 ], [ 0, bodyTop + h * 0.215 ] ], seg );
 		add( g, cap, s.clearCap ? M( capC, { rough: 0.1, transparent: true, opacity: 0.45 } ) : M( capC, { rough: 0.35 } ) );
-		return g;
+		return holdUpright( g, h, r );
 	} );
 
 	// ================= tools =================
@@ -496,7 +528,11 @@ export function registerGearModels( reg ) {
 		add( g, G.dome( 0.02, 18, 4 ).scale( 1, 0.12, 1 ), MAT.glass( 0xffffff, 0.18 ), [ 0, 0.0102, - 0.012 ] );
 		add( g, new THREE.TorusGeometry( 0.006, 0.0014, 4, 12 ), M( 0x1a1a1a ), [ 0, 0.0015, 0.069 ], [ PI / 2, 0, 0 ] );
 		add( g, G.tube( [ [ 0, 0.0015, 0.075 ], [ 0.01, 0.0015, 0.1 ], [ - 0.01, 0.0015, 0.13 ], [ 0.02, 0.0015, 0.15 ] ], 0.0015, 14, 4 ), M( 0xd02a2a, { rough: 0.8 } ) );
-		return ground( g );
+		ground( g );
+		// held out flat on the palm, its face up to the eye, the plate's arrow pointing away
+		g.userData.hold = { p: [ 0, 0.003, 0.03 ], a: [ 0, 0, - 1 ], f: [ 0, 1, 0 ], r: 0.012 };
+		g.userData.view = { at: [ 0.07, - 0.1, - 0.29 ], axis: [ 0, 0.45, - 1 ], front: [ 0, 1, 0.45 ] };
+		return g;
 	} );
 
 	reg( 'map', () => {
@@ -863,7 +899,7 @@ export function registerGearModels( reg ) {
 		add( inner, G.tube( [ [ 0.014, H * 0.92, T / 2 + 0.012 ], [ 0.03, H * 0.9, T / 2 + 0.02 ], [ 0.045, H * 0.82, T / 2 + 0.03 ], [ 0.04, H * 0.76, T / 2 + 0.035 ] ], 0.0022, 12, 4 ), M( 0x1e1f22, { rough: 0.6 } ) );
 		if ( ! s.bare ) {
 			// the cover: fabric over the lower body, a seam round it, two flaps with snaps over the shoulders
-			const cover = fabric( c, 'weave', shade( c, - 0.06 ), { rep: 14, rough: 0.95 } );
+			const cover = M( c, { rough: 0.96 } );
 			const cs = new THREE.Shape();
 			cs.moveTo( - W / 2 - 0.004, H * 0.66 ); cs.lineTo( - W / 2 - 0.004, 0.016 ); cs.quadraticCurveTo( - W / 2 - 0.004, - 0.004, - W / 2 + 0.016, - 0.004 ); cs.lineTo( W / 2 - 0.016, - 0.004 ); cs.quadraticCurveTo( W / 2 + 0.004, - 0.004, W / 2 + 0.004, 0.016 ); cs.lineTo( W / 2 + 0.004, H * 0.66 ); cs.lineTo( - W / 2 - 0.004, H * 0.66 );
 			const cg = new THREE.ExtrudeGeometry( cs, { depth: T - bev * 1.6, bevelEnabled: true, bevelThickness: bev * 0.92, bevelSize: bev * 0.92, bevelSegments: 3, curveSegments: 4 } ).translate( 0, 0, bev * 0.8 );
@@ -901,7 +937,7 @@ export function registerGearModels( reg ) {
 		// the NATO jerry can: three handles, the X pressings, the weld seam round the middle, the spout and its lever
 		const [ w, h, d ] = [ 0.345, 0.47, 0.165 ];
 		const paint = M( c, { rough: 0.62, metal: 0.35 } ), steel = M( shade( c, - 0.2 ), { rough: 0.5, metal: 0.5 } );
-		add( g, G.rbox( w, h * 0.88, d, 0.02, 3 ), paint );
+		add( g, G.rbox( w, h * 0.88, d, 0.02, 2 ), paint );
 		add( g, G.rbox( w * 1.012, h * 0.88 * 1.005, 0.008, 0.004, 1 ), steel, [ 0, - h * 0.002, 0 ] );
 		for ( const z of [ - 1, 1 ] ) {
 			// a raised rim round each face and the X in it
@@ -1234,20 +1270,36 @@ export function registerGearModels( reg ) {
 		const g = group(), [ w, t, d ] = s.size || [ 0.22, 0.03, 0.15 ];
 		const c = s.color ?? 0x2a4a6a, fg = s.fg ?? 0xf2e6c8;
 		const thin = t < 0.012; // comics and magazines: soft covers flush with the pages
-		const art = canvasTex( 'book-cover:' + JSON.stringify( s ), 384, Math.round( 384 * d / w ), ( ctx, W, H ) => {
-			const g2 = ctx.createLinearGradient( 0, 0, W, H ); g2.addColorStop( 0, css( shade( c, 0.12 ) ) ); g2.addColorStop( 1, css( shade( c, - 0.18 ) ) );
-			ctx.fillStyle = g2; ctx.fillRect( 0, 0, W, H );
-			const r = rng( hashStr( s.title || '' ) );
-			// a frame, the illustration, the title, the author, the publisher's mark
-			ctx.strokeStyle = css( fg ); ctx.globalAlpha = 0.6; ctx.lineWidth = 3; ctx.strokeRect( W * 0.05, H * 0.06, W * 0.9, H * 0.88 ); ctx.globalAlpha = 1;
-			if ( s.glyph ) {
-				ctx.fillStyle = css( shade( c, 0.25 ) ); ctx.beginPath(); ctx.arc( W * 0.5, H * 0.6, H * 0.22, 0, PI * 2 ); ctx.fill();
-				glyph( ctx, s.glyph, W * 0.5, H * 0.6, H * 0.36, css( fg ), css( c ) );
+		const art = canvasTex( 'book-cover2:' + JSON.stringify( s ), 384, Math.round( 384 * d / w ), ( ctx, W, H ) => {
+			const r = rng( hashStr( s.title || '' ) ), fgc = css( fg ), bgc = css( c );
+			ctx.fillStyle = bgc; ctx.fillRect( 0, 0, W, H );
+			// cloth / card grain and a soft vignette
+			for ( let i = 0; i < 1400; i ++ ) { ctx.fillStyle = r() < 0.5 ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.04)'; ctx.fillRect( r() * W, r() * H, 2, 1 ); }
+			const vg = ctx.createRadialGradient( W / 2, H / 2, H * 0.2, W / 2, H / 2, W * 0.75 ); vg.addColorStop( 0, 'rgba(0,0,0,0)' ); vg.addColorStop( 1, 'rgba(0,0,0,0.28)' );
+			ctx.fillStyle = vg; ctx.fillRect( 0, 0, W, H );
+			if ( thin ) {
+				// a comic: the masthead, a starburst, the price box, the issue
+				ptext( ctx, s.title || '', W * 0.5, H * 0.16, W * 0.92, H * 0.2, { weight: '900', family: '"Arial Black", Arial, sans-serif', color: fgc, outline: '#111', outlineW: 0.12 } );
+				ctx.fillStyle = css( shade( c, 0.35 ) ); ctx.beginPath();
+				for ( let i = 0; i < 24; i ++ ) { const a = i / 24 * PI * 2, rr = i % 2 ? H * 0.22 : H * 0.34; ctx.lineTo( W * 0.5 + Math.cos( a ) * rr, H * 0.6 + Math.sin( a ) * rr ); }
+				ctx.fill();
+				if ( s.glyph ) glyph( ctx, s.glyph, W * 0.5, H * 0.6, H * 0.4, fgc, bgc );
+				ctx.fillStyle = '#ffffff'; ctx.fillRect( W * 0.04, H * 0.82, W * 0.16, H * 0.14 ); ctx.strokeStyle = '#111'; ctx.lineWidth = 2; ctx.strokeRect( W * 0.04, H * 0.82, W * 0.16, H * 0.14 );
+				ptext( ctx, s.sub || '#1', W * 0.12, H * 0.865, W * 0.14, H * 0.06, { weight: '900', color: '#111' } );
+				ptext( ctx, '$3.99', W * 0.12, H * 0.925, W * 0.14, H * 0.045, { color: '#111' } );
+				return;
 			}
-			ptext( ctx, s.title || '', W * 0.5, H * 0.22, W * 0.84, H * 0.14, { weight: '900', family: thin ? '"Arial Black", Arial, sans-serif' : 'Georgia, "Times New Roman", serif', color: css( fg ), shadow: 'rgba(0,0,0,0.3)' } );
-			if ( s.sub ) ptext( ctx, s.sub, W * 0.5, H * 0.35, W * 0.7, H * 0.06, { weight: 'bold', color: css( fg ) } );
+			// a hardback / paperback: the title panel, the device, the author, the publisher's mark
+			ctx.strokeStyle = fgc; ctx.lineWidth = 2; ctx.strokeRect( W * 0.045, H * 0.05, W * 0.91, H * 0.9 );
+			ctx.fillStyle = fgc; ctx.fillRect( W * 0.045, H * 0.1, W * 0.91, H * 0.27 );
+			ptext( ctx, s.title || '', W * 0.5, H * 0.21, W * 0.84, H * 0.13, { weight: '900', family: '"Arial Black", Arial, sans-serif', color: bgc } );
+			if ( s.sub ) ptext( ctx, s.sub, W * 0.5, H * 0.32, W * 0.78, H * 0.055, { weight: 'bold', family: 'Georgia, "Times New Roman", serif', italic: true, color: bgc } );
+			if ( s.glyph ) {
+				ctx.strokeStyle = fgc; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc( W * 0.5, H * 0.6, H * 0.17, 0, PI * 2 ); ctx.stroke();
+				glyph( ctx, s.glyph, W * 0.5, H * 0.6, H * 0.26, fgc, bgc );
+			}
 			const authors = [ 'K. KAHANANUI', 'L. M. AKANA', 'D. FERREIRA', 'J. NAKAMURA', 'P. KEALOHA', 'R. SILVA' ];
-			ptext( ctx, thin ? ( s.sub || '' ) + '  $3.99' : authors[ Math.floor( r() * authors.length ) ], W * 0.5, H * 0.88, W * 0.7, H * 0.05, { color: css( fg ) } );
+			ptext( ctx, authors[ Math.floor( r() * authors.length ) ], W * 0.5, H * 0.86, W * 0.6, H * 0.055, { weight: 'bold', color: fgc } );
 		} );
 		const cover = M( 0xffffff, { map: art, rough: thin ? 0.4 : 0.7 } );
 		const coverC = M( c, { rough: thin ? 0.4 : 0.7 } );
@@ -1544,6 +1596,23 @@ export function registerGearModels( reg ) {
 	reg( 'folded', ( s ) => { // tarp, cloth, rags
 		const g = group(), [ w, h, d ] = s.size || [ 0.3, 0.05, 0.22 ], c = s.color ?? 0x2a5aa8;
 		const m = s.print ? fabric( c, s.print, s.color2 ?? 0xffffff, { rep: s.rep ?? 2 } ) : s.grommets ? fabric( c, 'weave', shade( c, - 0.12 ), { rep: 8, rough: 0.6 } ) : M( c, { rough: s.rough ?? 0.8 } );
+		if ( s.style === 'rags' ) {
+			// torn strips of old cloth in a loose heap, a frayed edge or two, a stain
+			const cloth = M( 0xffffff, { map: canvasTex( 'rags:' + c, 128, 128, ( ctx, W ) => {
+				ctx.fillStyle = css( c ); ctx.fillRect( 0, 0, W, W );
+				const r = rng( 3 ); for ( let i = 0; i < 1800; i ++ ) { ctx.fillStyle = r() < 0.5 ? 'rgba(0,0,0,0.07)' : 'rgba(255,255,255,0.06)'; ctx.fillRect( r() * W, r() * W, 2, 1 ); }
+				ctx.fillStyle = 'rgba(120,90,50,0.25)'; ctx.beginPath(); ctx.ellipse( W * 0.6, W * 0.4, 18, 12, 0.4, 0, PI * 2 ); ctx.fill();
+				ctx.strokeStyle = 'rgba(60,40,20,0.3)'; ctx.lineWidth = 1; for ( let y = 0; y < W; y += 4 ) { ctx.beginPath(); ctx.moveTo( 0, y ); ctx.lineTo( 3 + r() * 4, y ); ctx.stroke(); }
+			}, { repeat: true } ), rough: 0.95, side: THREE.DoubleSide } );
+			for ( let i = 0; i < 4; i ++ ) {
+				const sheet = new THREE.PlaneGeometry( w * ( 0.9 - i * 0.12 ), d * ( 0.5 + ( i % 2 ) * 0.25 ), 8, 5 ).rotateX( - PI / 2 );
+				const p = sheet.attributes.position, rr = rng( 11 + i );
+				for ( let k = 0; k < p.count; k ++ ) p.setY( k, 0.004 + Math.abs( Math.sin( p.getX( k ) * 60 + i ) * Math.cos( p.getZ( k ) * 50 ) ) * 0.012 + rr() * 0.003 );
+				sheet.computeVertexNormals();
+				add( g, sheet, cloth, [ ( i - 1.5 ) * 0.012, i * 0.005, ( i % 2 - 0.5 ) * 0.02 ], [ 0, i * 0.9 + 0.3, 0 ] );
+			}
+			return ground( g );
+		}
 		// the folded layers, each a little off the one below, their folded edges rounded
 		const n = Math.max( 2, Math.round( h / 0.012 ) ), lh = h / n;
 		for ( let i = 0; i < n; i ++ ) add( g, G.rbox( w * ( 1 - ( i % 2 ) * 0.015 ), lh * 1.02, d * ( 1 - ( i % 3 ) * 0.01 ), lh * 0.5, 2 ), m, [ ( i % 2 ) * 0.004 - 0.002, i * lh, ( i % 3 - 1 ) * 0.003 ], [ 0, ( i % 2 - 0.5 ) * 0.02, 0 ] );
@@ -1580,7 +1649,7 @@ export function registerGearModels( reg ) {
 	reg( 'stone', ( s ) => {
 		const g = group(), r = s.r ?? 0.06;
 		// a few water-worn basalt stones: rounded, pitted, their tops lighter where they dried
-		const tex = gradTex( s.color ?? 0x4a4644 );
+		const tex = gradTex();
 		for ( const [ x, z, k, seed ] of [ [ 0, 0, 1, 1 ], [ r * 1.3, r * 0.5, 0.65, 2 ], [ - r * 0.6, r * 1.1, 0.5, 3 ] ] ) {
 			const geo = new THREE.IcosahedronGeometry( r * k, 2 );
 			const p = geo.attributes.position, rr = rng( seed * 77 );
@@ -1591,15 +1660,16 @@ export function registerGearModels( reg ) {
 				p.setXYZ( i, v.x * f * 1.15, v.y * f * 0.62, v.z * f );
 			}
 			geo.computeVertexNormals();
-			add( g, geo, M( 0xffffff, { map: tex, rough: 0.9 } ), [ x, 0, z ], [ 0, seed, 0 ] );
+			add( g, geo, M( s.color ?? 0x4a4644, { map: tex, rough: 0.9 } ), [ x, 0, z ], [ 0, seed, 0 ] );
 		}
 		return ground( g );
 	} );
-	function gradTex( c ) {
-		return canvasTex( 'stone:' + c, 64, 64, ( ctx, W ) => {
-			const gr = ctx.createLinearGradient( 0, 0, 0, W ); gr.addColorStop( 0, css( shade( c, 0.08 ) ) ); gr.addColorStop( 1, css( shade( c, - 0.4 ) ) );
+	// pits and grains over white, multiplied by the stone's own colour; lighter on top where it dried
+	function gradTex() {
+		return canvasTex( 'stone-grain', 64, 64, ( ctx, W ) => {
+			const gr = ctx.createLinearGradient( 0, 0, 0, W ); gr.addColorStop( 0, '#ffffff' ); gr.addColorStop( 1, '#a8a8a8' );
 			ctx.fillStyle = gr; ctx.fillRect( 0, 0, W, W );
-			const r = rng( 5 ); for ( let i = 0; i < 300; i ++ ) { ctx.fillStyle = r() < 0.6 ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.08)'; ctx.fillRect( r() * W, r() * W, 1 + r(), 1 + r() ); }
+			const r = rng( 5 ); for ( let i = 0; i < 320; i ++ ) { ctx.fillStyle = r() < 0.7 ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.3)'; ctx.fillRect( r() * W, r() * W, 1 + r(), 1 + r() ); }
 		} );
 	}
 	reg( 'feathers', () => {

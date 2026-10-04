@@ -121,7 +121,7 @@ defineItems( [
 	tool( 'canteen', 'Canteen', 'canteen', { w: 0.35, size: 2, liquid: 1, metal: true, rarity: 'uncommon', tags: [ 'military', 'outdoor', 'hunting' ],
 		model: { type: 'canteen', color: 0x5a6a3a }, desc: 'Holds 1 L. Boils on a fire.' } ),
 	tool( 'hydration_bladder', 'Hydration bladder', 'bottle', { w: 0.2, size: 2, liquid: 2, rarity: 'uncommon', tags: [ 'outdoor', 'sports', 'military' ],
-		model: { type: 'ivbag', color: 0x3a8ad6, text: '2 L' }, desc: 'Holds 2 L.' } ),
+		model: { type: 'ivbag', style: 'bladder', color: 0x3a8ad6, text: '2 L' }, desc: 'Holds 2 L.' } ),
 	tool( 'cooking_pot', 'Cooking pot', 'pot', { w: 0.9, size: 3, liquid: 2, metal: true, tags: [ 'kitchen', 'house', 'restaurant', 'outdoor' ],
 		model: { type: 'pot' }, desc: 'Boils water. Cooks rice.' } ),
 
