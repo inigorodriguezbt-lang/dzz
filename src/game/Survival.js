@@ -50,12 +50,14 @@ export const AIL = {
 	// the most a fever adds to the body's temperature (°C): leptospirosis and an infected cut together are no hotter
 	feverMax: 1.2,
 };
-const AIL_KEYS = [ 'sting', 'centipede', 'sunburn', 'burn', 'heat', 'lepto', 'cut', 'cough', 'sprain', 'eye' ];
+// (vog and bends: the senses domain's hazards, items/ext/senses — they build and clear there, Survival saves and shows them)
+const AIL_KEYS = [ 'sting', 'centipede', 'sunburn', 'burn', 'heat', 'lepto', 'cut', 'cough', 'sprain', 'eye', 'vog', 'bends' ];
 // condition labels: [ id, label, kind, from ] (shown from that severity)
 const AIL_LABEL = {
 	sting: [ 'Jellyfish sting', 'bad', 0.05 ], centipede: [ 'Centipede bite', 'bad', 0.05 ], sunburn: [ 'Sunburn', 'warn', 0.25 ],
 	burn: [ 'Burns', 'warn', 0.1 ], lepto: [ 'Leptospirosis', 'bad', 0.05 ], cut: [ 'Infected cut', 'bad', 0.02 ],
 	cough: [ 'Cough', 'warn', 0.25 ], sprain: [ 'Sprained wrist', 'warn', 0.05 ], eye: [ 'Sore eyes', 'warn', 0.3 ],
+	vog: [ 'Vog', 'bad', 0.08 ], bends: [ 'The bends', 'bad', 0.05 ],
 };
 const clamp01 = ( v ) => v < 0 ? 0 : v > 1 ? 1 : v;
 
@@ -66,6 +68,7 @@ export class Survival {
 		// other modules' say in damage and movement (kept across deaths, unlike the body): see addHurtGuard / addMoveMod
 		this.hurtGuards = [];
 		this.moveMods = [];
+		this.airSources = [];
 		this.reset();
 	}
 
@@ -74,6 +77,9 @@ export class Survival {
 	// fn( m ) changes { speed, canSprint, canJump } after the base rules, creative included (a shield's weight, a
 	// suitcase in tow; a mod that shouldn't apply in creative checks it)
 	addMoveMod( fn ) { if ( ! this.moveMods.includes( fn ) ) this.moveMods.push( fn ); return fn; }
+	// fn( dt ) -> true while it supplies air under water (a scuba set, a rebreather: the senses domain); it uses its own gas
+	addAirSource( fn ) { if ( ! this.airSources.includes( fn ) ) this.airSources.push( fn ); return fn; }
+	_airOn( dt ) { for ( const fn of this.airSources ) if ( fn( dt ) ) return true; return false; }
 
 	reset() {
 		this.health = 100; this.blood = 5000;
@@ -158,6 +164,8 @@ export class Survival {
 		if ( this.energy < 20 ) m -= 15;
 		// heat, a fever and a fresh bite take the wind out of you
 		m -= this.heat * 25 + this.lepto * 20 + this.centipede * 10;
+		// vog in the lungs, nitrogen in the joints
+		m -= this.vog * 30 + this.bends * 25;
 		return Math.max( 20, m );
 	}
 
@@ -393,7 +401,7 @@ export class Survival {
 			+ ( p?.sprinting ? 40 : p?.moving ? 14 : 0 ) + Math.max( 0, 40 - this.stamina ) * 0.8 - ( steady ? 14 : 0 );
 		hr = Math.round( Math.max( 40, Math.min( 190, hr ) ) );
 		const sys = Math.round( 118 * ( 0.5 + 0.5 * Math.min( 1, this.blood / 5000 ) ) + this.stress * 0.12 + this.panic * 0.2 - ( steady ? 10 : 0 ) - this.heat * 10 );
-		const spo2 = Math.round( 98 - this.cough * 4 - ( this.blood < 3000 ? 3 : 0 ) - ( this.lepto > 0.6 ? 2 : 0 ) );
+		const spo2 = Math.round( 98 - this.cough * 4 - ( this.blood < 3000 ? 3 : 0 ) - ( this.lepto > 0.6 ? 2 : 0 ) - this.vog * 9 );
 		return { temp: Math.round( this.temp * 10 ) / 10, hr, sys, dia: Math.round( sys * 0.64 ), spo2, rr: Math.round( 14 + this.panic * 0.08 + this.cough * 6 + ( 100 - this.stamina ) * 0.06 ),
 			lungs: this.cough > 0.25 ? 'Wheezing' : 'Lungs clear', health: Math.round( this.health ), blood: Math.round( this.blood / 100 ) / 10 };
 	}
@@ -549,8 +557,8 @@ export class Survival {
 		else if ( this.thirst < 15 ) this.msg( 'thirsty', 'Thirsty', 'warn', 120 );
 		if ( this.energy < 10 ) this.msg( 'tired', 'Exhausted', 'warn', 180 );
 
-		// breath under water
-		if ( p.underwater ) {
+		// breath under water (unless an air source, a scuba set or a rebreather, is breathing for you)
+		if ( p.underwater && ! this._airOn( dt ) ) {
 			this.breath = Math.max( 0, this.breath - dt * 2.6 );
 			if ( this.breath <= 0 ) { this.health -= dt * 6; this.damageFlash = Math.max( this.damageFlash, 0.4 ); }
 		} else this.breath = Math.min( 100, this.breath + dt * 20 );

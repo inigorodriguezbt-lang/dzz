@@ -183,7 +183,7 @@ export class Game {
 	// grading inputs for the renderer
 	grade() {
 		const S = this.survival, p = this.player;
-		return {
+		const out = {
 			damage: S.damageFlash,
 			lowBlood: THREE.MathUtils.clamp( ( 3800 - S.blood ) / 2200, 0, 1 ),
 			drunk: S.drunk, sick: S.sick * 0.6 + S.infection * 0.4,
@@ -194,6 +194,9 @@ export class Game {
 			flash: this.flash || 0,
 			fade: this.fade || 0,
 		};
+		// night vision, thermal, a mask's lenses and the vog (items/ext/senses) add their uniforms
+		this.senses?.grade?.( out );
+		return out;
 	}
 
 	// exposure bias on top of the renderer's auto exposure (which handles day, night and shade): interiors a
