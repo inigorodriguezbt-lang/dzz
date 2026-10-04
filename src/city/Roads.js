@@ -175,8 +175,10 @@ export class Roads {
 		this.propBatches = {};
 		for ( const key in MODELS ) {
 			const geo = MODELS[ key ].geo || ( MODELS[ key ].geo = MODELS[ key ].build() );
+			// (the far band draws the model's lighter build when it has one)
+			const lo = MODELS[ key ].lod ? ( MODELS[ key ].lodGeo || ( MODELS[ key ].lodGeo = MODELS[ key ].lod() ) ) : geo;
 			const near = new Batch( G, key + '-n', geo, M.prop, PROP_ATTRS, { shadow: true } );
-			const far = new Batch( G, key + '-f', geo, M.prop, PROP_ATTRS );
+			const far = new Batch( G, key + '-f', lo, M.prop, PROP_ATTRS );
 			this.propBatches[ key ] = [ [ near, 0, NEAR_BAND ], [ far, NEAR_BAND, MODELS[ key ].maxD ] ];
 			this.batches.push( near, far );
 		}

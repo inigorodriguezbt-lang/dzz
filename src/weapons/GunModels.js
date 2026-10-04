@@ -101,6 +101,7 @@ function layDown( inner, rotX = - PI / 2 ) {
 }
 
 registerModelBuilder( 'gun', ( spec, def ) => {
+	// (v2: the models/*.js rebuild; the signature of this source re-renders cached icons)
 	const data = gunData( def );
 	const mats = weaponMaterials();
 	const inner = instantiate( data.baked, mats, true );
@@ -118,6 +119,7 @@ registerModelBuilder( 'gun', ( spec, def ) => {
 } );
 
 registerModelBuilder( 'mag', ( spec, def ) => {
+	// (v2: the models/*.js rebuild; the signature of this source re-renders cached icons)
 	const inner = instantiate( magData( def ).baked, weaponMaterials(), true );
 	return layDown( inner );
 } );
@@ -135,6 +137,7 @@ export function buildAttachmentView( def, mode = 'view' ) {
 	return { obj: instantiate( d.baked, weaponMaterials( mode ), false ), info: d.info };
 }
 registerModelBuilder( 'attachment', ( spec, def ) => {
+	// (v2: the models/*.js rebuild; the signature of this source re-renders cached icons)
 	const d = attachmentData( def );
 	const inner = instantiate( d.baked, weaponMaterials(), true );
 	return layDown( inner, spec.kind === 'supp' || spec.kind === 'light' ? 0 : 0 );
@@ -152,7 +155,10 @@ export function buildMeleeView( def, mode = 'view' ) {
 	const d = meleeData( def );
 	return { obj: instantiate( d.baked, weaponMaterials( mode ), false ), info: d.info };
 }
-registerModelBuilder( 'melee', ( spec, def ) => layDown( instantiate( meleeData( def ).baked, weaponMaterials(), true ), meleeData( def ).info.flat ? 0 : - PI / 2 ) );
+registerModelBuilder( 'melee', ( spec, def ) => {
+	// (v2: the models/*.js rebuild; the signature of this source re-renders cached icons)
+	return layDown( instantiate( meleeData( def ).baked, weaponMaterials(), true ), meleeData( def ).info.flat ? 0 : - PI / 2 );
+} );
 
 const THROW_CACHE = new Map();
 export function throwableData( def ) {
@@ -163,6 +169,7 @@ export function throwableData( def ) {
 }
 export function buildThrowableView( def, mode = 'view' ) { return instantiate( throwableData( def ).baked, weaponMaterials( mode ), false ); }
 registerModelBuilder( 'throwable', ( spec, def ) => {
+	// (v2: the models/*.js rebuild; the signature of this source re-renders cached icons)
 	const inner = instantiate( throwableData( def ).baked, weaponMaterials(), true );
 	// spec.lay: how a long thrown thing lies (a knife, a string of firecrackers: on its side)
 	return layDown( inner, spec.lay ?? ( spec.kind === 'molotov' ? PI / 2 : 0 ) );

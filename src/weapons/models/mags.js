@@ -1,6 +1,6 @@
 // Magazines: curved and straight box magazines from a band profile, drums, belt boxes. Mag frame: top centre at the
 // origin (where it seats in the magwell), body down -y, front +x.
-import { PI, Parts, topRound } from './kit.js';
+import { THREE, PI, Parts, topRound } from './kit.js';
 
 // ---- magazines ----------------------------------------------------------------------------------------------------
 // Mag frame: top centre at the origin (where it seats in the magwell), body down -y, front +x.
@@ -63,10 +63,27 @@ export function magParts( def, P = new Parts() ) {
 	if ( shp === 'box' || shp === 'box_pkm' ) {
 		const pk = shp === 'box_pkm';
 		const [ sx, sy, sz ] = pk ? [ 0.13, 0.135, 0.078 ] : [ 0.135, 0.12, 0.085 ];
-		P.box( 'od', - sx / 2, sx / 2, - sy, - 0.01, - sz / 2, sz / 2, 0.006 );
-		P.box( pk ? 'od' : 'od', - sx / 2 - 0.002, sx / 2 + 0.002, - 0.022, - 0.006, - sz / 2 - 0.002, sz / 2 + 0.002, 0.004 ); // lid
-		if ( pk ) { P.box( 'blk', - 0.03, 0.03, - 0.006, 0.0, - 0.005, 0.005, 0.002 ); P.cylZ( 'blk', 0, - 0.05, sz / 2, sz / 2 + 0.004, 0.012, 8 ); }
-		else { P.box( 'rubber', - sx / 2 + 0.01, sx / 2 - 0.01, - sy * 0.6, - sy * 0.4, sz / 2, sz / 2 + 0.003, 0.002 ); }
+		// the PKM's pressed-steel can, the M249's moulded plastic box
+		const m = pk ? 'olivM' : 'green';
+		const face = ( s, d ) => s > 0 ? [ sz / 2 - 0.001, sz / 2 + d ] : [ - sz / 2 - d, - sz / 2 + 0.001 ];
+		P.box( m, - sx / 2, sx / 2, - sy, - 0.012, - sz / 2, sz / 2, pk ? 0.003 : 0.006 );
+		P.box( m, - sx / 2 - 0.0015, sx / 2 + 0.0015, - 0.024, - 0.007, - sz / 2 - 0.0015, sz / 2 + 0.0015, pk ? 0.002 : 0.004 ); // lid
+		if ( pk ) {
+			// stiffening panels pressed into the sides and ends, the lid's latch and wire handle
+			for ( const s of [ - 1, 1 ] ) {
+				P.box( m, - sx / 2 + 0.014, sx / 2 - 0.014, - sy + 0.016, - 0.036, ...face( s, 0.0016 ), 0.0012 );
+				P.box( m, s > 0 ? sx / 2 - 0.001 : - sx / 2 - 0.0016, s > 0 ? sx / 2 + 0.0016 : - sx / 2 + 0.001, - sy + 0.016, - 0.036, - sz / 2 + 0.012, sz / 2 - 0.012, 0.0012 );
+			}
+			P.box( 'blk', sx / 2 - 0.001, sx / 2 + 0.0045, - 0.046, - 0.014, - 0.011, 0.011, 0.0015 );
+			P.cylZ( 'blk', sx / 2 + 0.002, - 0.046, - 0.013, 0.013, 0.0022, 8 );
+			P.put( 'blk', new THREE.TorusGeometry( 0.024, 0.0017, 5, 12, PI ).rotateY( PI / 2 ), [ 0.035, - 0.007, 0 ] );
+		} else {
+			// moulded ribs down the sides, a window onto the belt, the latch, the strap loops at the ends
+			for ( const s of [ - 1, 1 ] ) for ( const x of [ - 0.056, 0.056 ] ) P.box( m, x - 0.004, x + 0.004, - sy + 0.01, - 0.028, ...face( s, 0.0024 ), 0.0012 );
+			P.box( 'smoke', - 0.044, 0.044, - sy * 0.72, - 0.04, sz / 2 - 0.0005, sz / 2 + 0.0012, 0.001 );
+			P.box( 'blk', sx / 2 - 0.001, sx / 2 + 0.005, - 0.04, - 0.012, - 0.014, 0.014, 0.002 );
+			for ( const s of [ - 1, 1 ] ) P.box( 'blk', s * sx / 2 - 0.004, s * sx / 2 + 0.004, - 0.032, - 0.02, - 0.03, 0.03, 0.002 );
+		}
 		// belt stub: links + rounds leading up into the feed tray
 		for ( let i = 0; i < 4; i ++ ) {
 			const x = - 0.03 + i * 0.0105;
@@ -85,10 +102,24 @@ export function magParts( def, P = new Parts() ) {
 		P.extS( S.mat, inner, w / 2 + 0.0012, 0.001 );
 	}
 	if ( S.studs ) for ( const s of [ - 1, 1 ] ) P.cylZ( 'poly', - d * 0.3, - 0.03, s * w / 2, s * ( w / 2 + 0.004 ), 0.005, 8 );
+	// the STANAG's two pressed ribs down each flank, following the curve
+	if ( shp === 'stanag' ) for ( const f of [ - 0.26, 0.2 ] ) {
+		const strip = bandProfile( L * 0.78, 0.004, 0.004, ( S.bend || 0 ) * 0.78, S.pw || 1.6, 6, 0.001 ).map( ( [ x, y, r ] ) => [ x + f * d, y - L * 0.1, r ] );
+		P.extS( S.mat, strip, w / 2 + 0.0007, 0.0005 );
+	}
+	// the AK's locking lug at the front of the top and the catch lug at the back
+	if ( shp === 'akm' || shp === 'ak74' ) {
+		P.box( S.mat, d * 0.5 - 0.002, d * 0.5 + 0.004, - 0.012, - 0.002, - w * 0.32, w * 0.32, 0.0015 );
+		P.box( S.mat, - d * 0.5 - 0.003, - d * 0.5 + 0.002, - 0.022, - 0.014, - w * 0.3, w * 0.3, 0.0012 );
+	}
+	// a pistol magazine's witness holes down its back
+	if ( shp === 'pistol' ) for ( let i = 0; i < 4; i ++ ) for ( const s of [ - 1, 1 ] ) P.cylZ( 'rubber', - d * 0.5 + 0.005, - 0.025 - i * 0.02, s * w / 2, s * ( w / 2 + 0.0004 ), 0.0018, 8 );
 	// base plate at the end of the curve
 	const bx = S.bend || 0, by = - L;
 	const ang = S.bend ? Math.atan2( ( S.bend * ( S.pw || 1.6 ) ), L ) : 0;
 	P.boxC( S.base, bx, by - 0.004, 0, ( S.d1 ?? d ) + 0.006, 0.009, w + 0.004, 0.003, [ 0, 0, ang ] );
+	// the base plate's grip ridge (a lip at its back on the pistol and STANAG plates)
+	if ( shp === 'pistol' || shp === 'stanag' ) P.boxC( S.base, bx - ( S.d1 ?? d ) * 0.5 - 0.001, by - 0.006, 0, 0.004, 0.006, w + 0.002, 0.0015, [ 0, 0, ang ] );
 	// feed lips + the top round
 	P.box( S.mat === 'smoke' ? 'poly' : S.mat, - d / 2, d / 2 * 0.6, - 0.012, 0.0, - w / 2 - 0.0005, w / 2 + 0.0005, 0.0015 );
 	topRound( P, - d * 0.1, 0.004, def.magazine?.caliber, Math.min( d * 0.8, 0.07 ) );

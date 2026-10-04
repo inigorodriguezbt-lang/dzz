@@ -34,15 +34,23 @@ export const MAT = {
 	coat: { color: 0x5b4a86, metalness: 1.0, roughness: 0.08, lens: 1 },
 	gray: { color: 0x2a2c2f, metalness: 0.05, roughness: 0.66, grip: 1, fin: 'poly' },
 	wood: { color: 0x9a5c36, metalness: 0.0, roughness: 0.5, fin: 'wood' },
+	hardwood: { color: 0x6e4024, metalness: 0.0, roughness: 0.46, fin: 'wood' }, // oiled birch / beech service stocks
 	walnut: { color: 0x4f301c, metalness: 0.0, roughness: 0.42, fin: 'wood' },
 	walnutC: { color: 0x3e2515, metalness: 0.0, roughness: 0.6, grip: 1, fin: 'wood' }, // cut checkering
 	lam: { color: 0x5e2a18, metalness: 0.0, roughness: 0.4, fin: 'wood' },
 	koa: { color: 0xa8652f, metalness: 0.0, roughness: 0.4, fin: 'wood' },
 	shellac: { color: 0x6a2f19, metalness: 0.0, roughness: 0.3, fin: 'wood' }, // the SKS's red shellac
 	steel: { color: 0xa7abb0, metalness: 1.0, roughness: 0.3, fin: 'metal', bare: 0xc9cdd2 },
+	// colour case-hardened receivers (double guns, lever actions): blues, straws and greys mottled by the noise
+	case: { color: 0x6b6c70, metalness: 0.9, roughness: 0.3, fin: 'metal', bare: 0xb8bbbf, tint: 1 },
 	chrome: { color: 0xd2d5d9, metalness: 1.0, roughness: 0.16 },
 	blade: { color: 0xc3c7cb, metalness: 1.0, roughness: 0.22, fin: 'metal', bare: 0xd6d9dc },
 	darkblade: { color: 0x3b3e42, metalness: 0.8, roughness: 0.4, fin: 'metal', bare: 0xa5a9ae },
+	satin: { color: 0x9a9ea3, metalness: 1.0, roughness: 0.4, fin: 'metal', bare: 0xc4c7ca }, // a blade's brushed flats
+	hamon: { color: 0xd4d8db, metalness: 0.7, roughness: 0.46 }, // the frosted hardened edge of a katana
+	galv: { color: 0x878c90, metalness: 0.85, roughness: 0.48, fin: 'metal', bare: 0xb4b8bb }, // galvanised pipe
+	leather: { color: 0x5a3a22, metalness: 0.0, roughness: 0.62, fin: 'poly' },
+	hickory: { color: 0xa47a4c, metalness: 0.0, roughness: 0.44, fin: 'wood' }, // tool handles: pale, straight grain
 	rust: { color: 0x6a4a36, metalness: 0.5, roughness: 0.75, fin: 'matte' },
 	brass: { color: 0xcfa24c, metalness: 1.0, roughness: 0.3 },
 	copper: { color: 0xc07a4e, metalness: 1.0, roughness: 0.34 },
@@ -50,6 +58,7 @@ export const MAT = {
 	rubber: { color: 0x19191a, metalness: 0.0, roughness: 0.9, grip: 1, fin: 'matte' },
 	orange: { color: 0xe0561c, metalness: 0.0, roughness: 0.5 },
 	red: { color: 0xa21d17, metalness: 0.0, roughness: 0.48 },
+	yellow: { color: 0xd8b02a, metalness: 0.0, roughness: 0.55 }, // stencil paint
 	green2: { color: 0x2c6a2e, metalness: 0.0, roughness: 0.5 },
 	plum: { color: 0x4a2219, metalness: 0.0, roughness: 0.58, fin: 'poly' },
 	polyP: { color: 0x2a2423, metalness: 0.0, roughness: 0.6, grip: 1, fin: 'poly' }, // the AK-74M's plum-black polymer
@@ -60,13 +69,17 @@ export const MAT = {
 	cloth: { color: 0x2d2a26, metalness: 0.0, roughness: 0.95 },
 	white: { color: 0xe9e6de, metalness: 0.0, roughness: 0.5 },
 	aluBright: { color: 0x9aa1a8, metalness: 1.0, roughness: 0.34, fin: 'matte' },
-	glassG: { color: 0x2e6a3a, metalness: 0.1, roughness: 0.08, transparent: true, opacity: 0.72 },
+	glassG: { color: 0x23523a, metalness: 0.1, roughness: 0.08, transparent: true, opacity: 0.72 },
 	lens: { color: 0x10263a, metalness: 0.6, roughness: 0.06, transparent: true, opacity: 0.35, lens: 1 },
 	lensDark: { color: 0x0a1822, metalness: 0.9, roughness: 0.05, lens: 1 },
+	// a reflex sight's front glass: its amber coating reflects, the scene shows through
+	lensF: { color: 0x6a3a18, metalness: 0.9, roughness: 0.04, transparent: true, opacity: 0.3, lens: 1 },
+	lensW: { color: 0xe4ecef, metalness: 0.3, roughness: 0.04 }, // a light's lens over the reflector
+	supp: { color: 0x2a2b2c, metalness: 0.35, roughness: 0.62, fin: 'metal', bare: 0x8a8c8e }, // high-temperature cerakote
 	glow: { color: 0x111111, emissive: 0x5cff5c, emissiveIntensity: 0.6, metalness: 0, roughness: 0.4 },
 	glowO: { color: 0x111111, emissive: 0xff8a2a, emissiveIntensity: 0.6, metalness: 0, roughness: 0.4 },
 	fiber: { color: 0x331100, emissive: 0xff5a20, emissiveIntensity: 1.2, metalness: 0, roughness: 0.3 },
-	rag: { color: 0xb8a58a, metalness: 0.0, roughness: 0.95 },
+	rag: { color: 0x9a8a70, metalness: 0.0, roughness: 0.95 },
 	fuel: { color: 0x9a6a20, metalness: 0.0, roughness: 0.1, transparent: true, opacity: 0.8 },
 	...ARMS_MAT,
 };
@@ -92,13 +105,23 @@ const WPN_SURFACE = /* glsl */`
 {
 	vec3 op = vWObj;
 	float n1 = wNoise( op * 140.0 ), n2 = wNoise( op * 700.0 + 3.1 );
+	// the fine noise is a sparkle at arm's length; seen closer (a sight at the eye) its cells would read as tiles
+	n2 = mix( 0.5, n2, 0.2 + 0.8 * smoothstep( 0.15, 0.45, length( fwidth( op * 700.0 ) ) ) );
 	#if defined( WPN_METAL ) || defined( WPN_POLY ) || defined( WPN_MATTE )
-	diffuseColor.rgb *= 0.9 + 0.2 * n1;
-	roughnessFactor = clamp( roughnessFactor * ( 0.82 + 0.36 * n2 ), 0.05, 1.0 );
+	diffuseColor.rgb *= 0.93 + 0.14 * n1;
+	roughnessFactor = clamp( roughnessFactor * ( 0.85 + 0.3 * n2 ), 0.05, 1.0 );
+	#endif
+	#ifdef WPN_CASE
+	float cA = wNoise( op * 55.0 + 1.7 ), cB = wNoise( op * 120.0 + 5.3 );
+	vec3 tint = mix( vec3( 0.42, 0.5, 0.78 ), vec3( 1.25, 1.0, 0.62 ), smoothstep( 0.35, 0.7, cA ) );
+	tint = mix( tint, vec3( 0.7, 0.55, 0.85 ), smoothstep( 0.6, 0.85, cB ) * 0.6 );
+	diffuseColor.rgb *= mix( vec3( 1.0 ), tint, 0.75 );
 	#endif
 	#ifdef WPN_WOOD
 	float w = wNoise( op * vec3( 5.0, 40.0, 40.0 ) );
-	float ring = fract( length( op.yz + vec2( 0.31, 0.17 ) ) * 120.0 + w * 3.0 + wNoise( op * vec3( 2.5, 9.0, 9.0 ) ) * 4.5 );
+	// the growth rings round a log axis that wanders (a warp of a few rings), so the figure isn't ruled lines
+	vec2 warp = vec2( wNoise( op * vec3( 1.5, 6.0, 6.0 ) ), wNoise( op * vec3( 1.5, 6.0, 6.0 ) + 4.7 ) ) - 0.5;
+	float ring = fract( length( op.yz + vec2( 0.31, 0.17 ) + warp * 0.028 ) * 120.0 + w * 3.0 + wNoise( op * vec3( 2.5, 9.0, 9.0 ) ) * 4.5 );
 	float late = smoothstep( 0.5, 0.8, ring ) * ( 1.0 - smoothstep( 0.88, 1.0, ring ) );
 	float pore = smoothstep( 0.62, 0.9, wNoise( op * vec3( 30.0, 1100.0, 1100.0 ) ) );
 	diffuseColor.rgb *= ( 1.0 - 0.3 * late ) * ( 1.0 - 0.2 * pore ) * ( 0.86 + 0.28 * w );
@@ -125,10 +148,11 @@ const WPN_SURFACE = /* glsl */`
 const WPN_GRAIN = /* glsl */`
 #if defined( WPN_METAL ) || defined( WPN_POLY ) || defined( WPN_GRIP )
 {
-	float h = wNoise( vWObj * 520.0 ) * 0.00003;
+	// (each bump fades out where its cells grow past a few pixels: up close they'd show as square facets)
+	float h = wNoise( vWObj * 520.0 ) * 0.00003 * smoothstep( 0.12, 0.4, length( fwidth( vWObj * 520.0 ) ) );
 	#ifdef WPN_GRIP
 	// moulded stipple on grips and pads: fine raised bumps (in the gun's frame, so every part has the same grain)
-	h += smoothstep( 0.4, 0.8, wNoise( vWObj * 1250.0 ) ) * 0.00005;
+	h += smoothstep( 0.4, 0.8, wNoise( vWObj * 1250.0 ) ) * 0.00005 * smoothstep( 0.03, 0.15, length( fwidth( vWObj * 1250.0 ) ) );
 	#endif
 	vec2 dH = vec2( dFdx( h ), dFdy( h ) );
 	vec3 sx = dFdx( - vViewPosition ), sy = dFdy( - vViewPosition );
@@ -171,10 +195,11 @@ export function weaponMaterials( mode = 'world' ) {
 		if ( fin ) {
 			m.defines[ 'WPN_' + fin.toUpperCase() ] = '';
 			if ( d.grip ) m.defines.WPN_GRIP = '';
+			if ( d.tint ) m.defines.WPN_CASE = '';
 			if ( view && fin !== 'matte' ) m.defines.WPN_EDGE = '';
 		}
 		const extra = fin ? weaponShader( m, new THREE.Color( d.bare ?? d.color ) ) : null;
-		const key = ( view ? 'wpn-view' : 'wpn' ) + ( fin ? '-' + fin : '' ) + ( d.grip ? '-grip' : '' );
+		const key = ( view ? 'wpn-view' : 'wpn' ) + ( fin ? '-' + fin : '' ) + ( d.grip ? '-grip' : '' ) + ( d.tint ? '-case' : '' );
 		if ( view ) patchMaterial( m, key, extra, { noCloudShadow: true } );
 		else patchMaterial( m, key, extra );
 		out[ k ] = m;
@@ -225,6 +250,8 @@ export function bevelBox( sx, sy, sz, r ) {
 		for ( const v of [ a, b, c ] ) { pos.push( v[ 0 ], v[ 1 ], v[ 2 ] ); nor.push( v[ 3 ], v[ 4 ], v[ 5 ] ); wr.push( w ); }
 	};
 	const quad = ( a, b, c, d, w ) => { tri( a, b, c, w ); tri( a, c, d, w ); };
+	// a broad radius is a moulded or machined round, not an edge that rubs through: it wears less
+	const ew = Math.min( 1, 0.0035 / r );
 	// the point of face ( axis k, side s ) towards the corner signs sg = [ sx, sy, sz ]
 	const fv = ( k, s, sg ) => {
 		const v = [ 0, 0, 0, 0, 0, 0 ];
@@ -241,12 +268,12 @@ export function bevelBox( sx, sy, sz, r ) {
 		const b = ( a + 1 ) % 3, c = ( a + 2 ) % 3;
 		for ( const sa of [ - 1, 1 ] ) for ( const sb of [ - 1, 1 ] ) {
 			const at = ( sc ) => { const o = [ 0, 0, 0 ]; o[ a ] = sa; o[ b ] = sb; o[ c ] = sc; return o; };
-			quad( fv( a, sa, at( - 1 ) ), fv( a, sa, at( 1 ) ), fv( b, sb, at( 1 ) ), fv( b, sb, at( - 1 ) ), 0.9 );
+			quad( fv( a, sa, at( - 1 ) ), fv( a, sa, at( 1 ) ), fv( b, sb, at( 1 ) ), fv( b, sb, at( - 1 ) ), 0.9 * ew );
 		}
 	}
 	for ( const sx of [ - 1, 1 ] ) for ( const sy of [ - 1, 1 ] ) for ( const sz of [ - 1, 1 ] ) {
 		const sg = [ sx, sy, sz ];
-		tri( fv( 0, sx, sg ), fv( 1, sy, sg ), fv( 2, sz, sg ), 1 );
+		tri( fv( 0, sx, sg ), fv( 1, sy, sg ), fv( 2, sz, sg ), ew );
 	}
 	const g = new THREE.BufferGeometry();
 	g.setAttribute( 'position', new THREE.Float32BufferAttribute( pos, 3 ) );
@@ -573,8 +600,9 @@ export function buis( P, rx, fx, y, sh, mat = 'blk' ) {
 	r.box( mat, rx - 0.014, rx + 0.012, y, y + 0.0065, - 0.0112, 0.0112, 0.0012 );
 	r.box( mat, rx - 0.014, rx + 0.012, y - 0.0045, y + 0.001, 0.0098, 0.0118, 0.0006 );
 	r.box( mat, rx - 0.014, rx + 0.012, y - 0.0045, y + 0.001, - 0.0118, - 0.0098, 0.0006 );
-	r.cylZ( 'steel', rx - 0.002, y + 0.003, 0.0112, 0.0142, 0.0034, 10 );
-	r.cylZ( 'rubber', rx - 0.002, y + 0.003, 0.0141, 0.0145, 0.0011, 6 );
+	// (the drums in the sight's own finish: a folding sight is one draw)
+	r.cylZ( mat, rx - 0.002, y + 0.003, 0.0112, 0.0142, 0.0034, 10 );
+	r.cylZ( mat, rx - 0.002, y + 0.003, 0.0141, 0.0145, 0.0011, 6 );
 	// protective ears and the aperture leaf between them (the windage drum on the right)
 	for ( const s of [ - 1, 1 ] ) r.ext( mat, [ [ rx - 0.0075, y + 0.006 ], [ rx + 0.0075, y + 0.006 ], [ rx + 0.0035, sh + 0.0072, 0.003 ], [ rx - 0.0045, sh + 0.0072, 0.003 ] ], s * 0.0062, s * 0.0102, 0.0007 );
 	r.extFront( mat, [ [ - 0.006, y + 0.005 ], [ 0.006, y + 0.005 ], [ 0.0055, sh + 0.0042, 0.003 ], [ - 0.0055, sh + 0.0042, 0.003 ] ], rx - 0.0015, rx + 0.0015, 0.0004, 3, [ circle( 0, sh, 0.0019, 12 ) ] );
@@ -583,7 +611,7 @@ export function buis( P, rx, fx, y, sh, mat = 'blk' ) {
 	f.box( mat, fx - 0.012, fx + 0.012, y, y + 0.0065, - 0.0112, 0.0112, 0.0012 );
 	f.box( mat, fx - 0.012, fx + 0.012, y - 0.0045, y + 0.001, 0.0098, 0.0118, 0.0006 );
 	f.box( mat, fx - 0.012, fx + 0.012, y - 0.0045, y + 0.001, - 0.0118, - 0.0098, 0.0006 );
-	f.cylZ( 'steel', fx, y + 0.003, 0.0112, 0.0142, 0.0034, 10 );
+	f.cylZ( mat, fx, y + 0.003, 0.0112, 0.0142, 0.0034, 10 );
 	for ( const s of [ - 1, 1 ] ) f.ext( mat, [ [ fx - 0.007, y + 0.006 ], [ fx + 0.007, y + 0.006 ], [ fx + 0.0035, sh + 0.0045, 0.0025 ], [ fx - 0.0035, sh + 0.0045, 0.0025 ] ], s * 0.0048, s * 0.0084, 0.0007 );
 	f.box( mat, fx - 0.0035, fx + 0.0035, y + 0.005, y + 0.0105, - 0.0048, 0.0048, 0.001 );
 	f.cylY( mat, fx, y + 0.0095, sh - 0.007, 0.0026, 0, 10 );

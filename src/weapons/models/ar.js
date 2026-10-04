@@ -1,5 +1,5 @@
 // The AR-15 family: M4A1, M16A4, HK416, a civilian AR.
-import { THREE, PI, Parts, circle, grip, pistolGrip, trigger, triggerGuard } from './kit.js';
+import { THREE, PI, Parts, circle, slot, grip, pistolGrip, trigger, triggerGuard, pins, screw, swivel, buis, muzzleDevice } from './kit.js';
 
 // a polygon circle (for holes: sight apertures, slots)
 
@@ -89,24 +89,27 @@ function carStock( P, x0 ) {
 export function arRifle( o ) {
 	const P = new Parts();
 	const v = o.v || 'm4';
+	// the barrel's length runs from the chamber (x 0.065, inside the upper): 14.5" carbines, the M16's 20", a 16" civilian
 	const barrelL = { m4: 0.368, m16: 0.508, '416': 0.368, civ: 0.406 }[ v ];
-	const bEnd = 0.126 + barrelL;
-	const hgEnd = { m4: 0.3, m16: 0.43, '416': 0.37, civ: 0.405 }[ v ];
+	const bEnd = 0.065 + barrelL - ( v === 'm4' ? 0.025 : 0 );
+	const hgEnd = { m4: 0.292, m16: 0.43, '416': 0.37, civ: 0.4 }[ v ];
 	const g = arReceiver( P );
 	// stock
 	let stockX;
 	if ( v === 'm16' ) {
 		// fixed A2 stock: the tube is inside it
 		P.cyl( 'alu', - 0.14, - 0.128, 0.019, 0.004, 0, 16 );
-		P.extS( 'poly', [ [ - 0.14, 0.022, 0.003 ], [ - 0.43, 0.025, 0.006 ], [ - 0.436, - 0.088, 0.006 ], [ - 0.4, - 0.09, 0.004 ], [ - 0.2, - 0.045, 0.02 ], [ - 0.14, - 0.032, 0.006 ] ], 0.0172, 0.0045 );
-		P.box( 'rubber', - 0.447, - 0.432, - 0.09, 0.026, - 0.0185, 0.0185, 0.004 );
+		P.extR( 'poly', [ [ - 0.14, 0.022, 0.003 ], [ - 0.43, 0.025, 0.006 ], [ - 0.436, - 0.088, 0.006 ], [ - 0.4, - 0.09, 0.004 ], [ - 0.2, - 0.045, 0.02 ], [ - 0.14, - 0.032, 0.006 ] ], 0.0172, 0.0055 );
+		P.extS( 'rubber', [ [ - 0.432, 0.026 ], [ - 0.447, 0.026, 0.004 ], [ - 0.447, - 0.09, 0.004 ], [ - 0.432, - 0.09 ] ], 0.0185, 0.003 );
 		P.box( 'poly', - 0.425, - 0.39, - 0.07, - 0.024, 0.0165, 0.0185, 0.0015 ); // trapdoor
-		P.box( 'blk', - 0.36, - 0.34, - 0.062, - 0.052, - 0.012, 0.012, 0.002 ); // sling swivel
+		for ( let i = 0; i < 6; i ++ ) P.box( 'rubber', - 0.4482, - 0.4472, 0.016 - i * 0.02, 0.022 - i * 0.02, - 0.016, 0.016, 0 );
+		swivel( P, - 0.35, - 0.062, 0, 0.008 );
 		stockX = - 0.447;
 	} else stockX = carStock( P, - 0.128 );
 	// barrel: phosphate, the M4 profile steps down past the front sight
-	const fsx = v === 'm16' ? 0.545 : v === 'm4' ? 0.34 : 0;
-	P.lathe( 'blk', [ [ 0.126, 0 ], [ 0.126, 0.0096 ], [ 0.29, 0.0094 ], [ 0.292, 0.0082 ], [ bEnd - 0.004, 0.0078 ], [ bEnd, 0.0074 ], [ bEnd, 0 ] ], 0, 0, 16 );
+	const fsx = v === 'm16' ? bEnd - 0.055 : v === 'm4' ? bEnd - 0.096 : 0;
+	const step = Math.min( 0.29, bEnd - 0.12 );
+	P.lathe( 'blk', [ [ 0.126, 0 ], [ 0.126, 0.0096 ], [ step, 0.0094 ], [ step + 0.002, 0.0082 ], [ bEnd - 0.004, 0.0078 ], [ bEnd, 0.0074 ], [ bEnd, 0 ] ], 0, 0, 16 );
 	// handguard
 	if ( v === 'm4' || v === 'm16' ) {
 		// rail system: an octagon with a rail on each flat, vents on the chamfers, ladder covers left and below
@@ -137,10 +140,18 @@ export function arRifle( o ) {
 		P.rail( 'alu', 0.13, hgEnd - 0.004, 0.036, 0.0105, 'right' );
 		P.rail( 'alu', 0.13, hgEnd - 0.004, - 0.036, 0.0105, 'left' );
 	} else {
-		P.cyl( 'alu', 0.126, hgEnd, 0.026, 0, 0, 8, 0.026, PI / 8 );
+		// free-float M-LOK handguard: a slim octagon, the slots down its flanks and belly, the top rail
+		const o8 = [];
+		for ( let i = 0; i < 8; i ++ ) { const a = ( i + 0.5 ) / 8 * PI * 2; o8.push( [ Math.cos( a ) * 0.0272, Math.sin( a ) * 0.0272 - 0.002, 0.002 ] ); }
+		P.extFront( 'alu', o8, 0.126, hgEnd, 0.0015 );
 		P.rail( 'alu', 0.128, hgEnd - 0.002, 0.041, 0.0105, 'top' );
 		P.box( 'alu', 0.128, hgEnd - 0.002, 0.022, 0.035, - 0.011, 0.011, 0.001 );
-		for ( let i = 0; i < 6; i ++ ) for ( const s of [ - 1, 1 ] ) P.boxC( 'rubber', 0.16 + i * 0.04, - 0.004, s * 0.0254, 0.024, 0.008, 0.002, 0.001 );
+		for ( let i = 0; i < 6; i ++ ) {
+			const x = 0.15 + i * ( hgEnd - 0.18 ) / 5;
+			for ( const s of [ - 1, 1 ] ) P.extS( 'rubber', slot( x, x + 0.03, - 0.002, 0.0036, 3 ), 0.0004, 0.0002, s * 0.0252 );
+			P.boxC( 'rubber', x + 0.015, - 0.0275, 0, 0.032, 0.0006, 0.0072, 0.0012 );
+		}
+		P.lathe( 'alu', [ [ 0.126, 0.0262 ], [ 0.134, 0.0262 ] ], 0, 0, 18 );
 	}
 	// front sight: the A2 base on the gas block (m4, m16) or a folding sight (416, civ)
 	const sightH = 0.066;
@@ -151,7 +162,7 @@ export function arRifle( o ) {
 		P.cylY( 'blk', fsx, 0.043, 0.05, 0.0042, 0, 10 );
 		P.box( 'blk', fsx - 0.0019, fsx + 0.0019, 0.049, sightH, - 0.0015, 0.0015, 0.0003 );
 		P.box( 'blk', fsx - 0.005, fsx + 0.015, - 0.028, - 0.012, - 0.0038, 0.0038, 0.0012 ); // bayonet lug
-		P.put( 'steel', new THREE.TorusGeometry( 0.0085, 0.0014, 6, 14 ), [ fsx - 0.004, - 0.024, 0 ] ); // sling swivel
+		swivel( P, fsx - 0.004, - 0.012, 0, 0.0085 );
 		P.cylZ( 'steel', fsx - 0.012, 0.0, - 0.0142, 0.0142, 0.0016, 8 ); // taper pins
 		P.cylZ( 'steel', fsx + 0.012, 0.0, - 0.0142, 0.0142, 0.0016, 8 );
 	} else {
@@ -162,8 +173,7 @@ export function arRifle( o ) {
 		f.box( 'blk', x - 0.0019, x + 0.0019, 0.05, sightH, - 0.0015, 0.0015, 0.0003 );
 	}
 	// A2 birdcage: five slots round the top and sides, the bottom closed
-	P.lathe( 'blk', [ [ bEnd - 0.002, 0.0 ], [ bEnd - 0.002, 0.0096 ], [ bEnd + 0.005, 0.0111 ], [ bEnd + 0.046, 0.0113 ], [ bEnd + 0.052, 0.0104 ], [ bEnd + 0.052, 0.0046 ], [ bEnd + 0.05, 0.0 ] ], 0, 0, 18 );
-	for ( let i = 0; i < 5; i ++ ) { const a = ( i - 2 ) * 0.62; P.boxC( 'rubber', bEnd + 0.03, Math.cos( a ) * 0.0108, Math.sin( a ) * 0.0108, 0.026, 0.0012, 0.0036, 0, [ - a, 0, 0 ] ); }
+	const mz = muzzleDevice( P, 'birdcage', bEnd, 0.0109, 0.052 );
 	// rear sight: a folding aperture (the M16's is in its carry handle)
 	const rearX = - 0.1;
 	if ( v === 'm16' ) {
@@ -183,14 +193,14 @@ export function arRifle( o ) {
 	const hideWithOptic = v === 'm16' ? [ 'carry' ] : [ 'buisR', 'buisF' ];
 	return {
 		P, info: {
-			sightH, rearX, eyeBack: 0.085, muzzle: [ bEnd + 0.052, 0, 0 ], eject: [ 0.01, 0.01, 0.018 ],
+			sightH, rearX, eyeBack: 0.085, muzzle: [ mz, 0, 0 ], eject: [ 0.01, 0.01, 0.018 ],
 			mag: { p: [ 0.083, - 0.022, 0 ], rake: 0 },
 			optic: [ - 0.03, 0.0448 ], light: [ hgEnd - 0.05, 0.0, 0.0388 ], hideWithOptic,
 			grips: {
 				R: grip( [ g.p.x, g.p.y, 0 ], [ g.a.x, g.a.y, 0 ], [ 0.05, 0.15, 1 ], 0.017, { trig: [ 0.0, - 0.058, 0 ] } ),
 				L: grip( [ Math.min( 0.23, hgEnd - 0.07 ), - 0.004, 0 ], [ 1, 0.1, 0 ], [ 0, - 0.75, - 0.66 ], 0.03 ),
 			},
-			stock: stockX, len: bEnd + 0.052 - stockX, charge: 'charge', bolt: 'bolt', boltTravel: 0.075,
+			stock: stockX, len: mz - stockX, charge: 'charge', bolt: 'bolt', boltTravel: 0.075,
 		},
 	};
 }

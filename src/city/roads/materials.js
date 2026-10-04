@@ -559,38 +559,111 @@ function makeWireMaterial() {
 }
 
 // ---- instanced props: vertex colour + pbr = ( roughness, metalness, flag ) --------------------------------------
-// flag 0 plain, 0.5 takes the instance tint, 1 lamp bulb (lit at night on flickering lamps)
-// instance attributes: iTint (rgb), iMisc = ( flicker, seed, dirt, - )
+// flag: whole part = material class (meshkit T: 1 lamp bulb, 2 timber, 3 concrete, 4 bare / galvanised metal, 5 painted
+// metal, 6 plastic, 7 rubber, 8 fabric, 9 retroreflective, 10 hazard stripes, 11 HESCO mesh), + 0.5 takes the tint;
+// instance attributes: iTint (rgb), iMisc = ( flicker, seed, dirt, - ). The wear is laid out in the model's own space
+// so it stays put on the prop (and differs per instance by its seed).
 
 function makePropMaterial() {
 	const mat = new THREE.MeshStandardMaterial( { color: 0xffffff, roughness: 0.7, metalness: 0, vertexColors: true } );
-	const U = { tNoise: { value: noiseTexture() } };
+	const U = { tNoise: { value: noiseTexture() }, tConc: { value: tex( 'concrete_d' ) } };
 	patchMaterial( mat, 'roads-prop', ( sh ) => {
 		Object.assign( sh.uniforms, U );
 		pull( sh );
 		sh.vertexShader = sh.vertexShader
-			.replace( '#include <common>', '#include <common>\nattribute vec3 pbr; attribute vec3 iTint; attribute vec4 iMisc; varying vec3 vPbr; varying vec3 vTint; varying vec4 vMisc; varying vec3 vObj;' )
-			.replace( '#include <begin_vertex>', '#include <begin_vertex>\nvPbr = pbr; vTint = iTint; vMisc = iMisc; vObj = position;' );
+			.replace( '#include <common>', '#include <common>\nattribute vec3 pbr; attribute vec3 iTint; attribute vec4 iMisc; varying vec3 vPbr; varying vec3 vTint; varying vec4 vMisc; varying vec3 vObj; varying vec3 vObjN;' )
+			.replace( '#include <begin_vertex>', '#include <begin_vertex>\nvPbr = pbr; vTint = iTint; vMisc = iMisc; vObj = position; vObjN = normal;' );
 		sh.fragmentShader = beforeMain( sh.fragmentShader, /* glsl */`
-			uniform sampler2D tNoise;
-			varying vec3 vPbr; varying vec3 vTint; varying vec4 vMisc; varying vec3 vObj;
+			uniform sampler2D tNoise, tConc;
+			varying vec3 vPbr; varying vec3 vTint; varying vec4 vMisc; varying vec3 vObj; varying vec3 vObjN;
 			${FLICKER_GLSL}
 		` );
 		sh.fragmentShader = sh.fragmentShader
 			.replace( '#include <color_fragment>', /* glsl */`#include <color_fragment>
 				float pFlag = vPbr.z;
-				if ( pFlag > 0.25 && pFlag < 0.75 ) diffuseColor.rgb *= vTint;
+				float pCls = floor( pFlag + 0.01 );
+				float pRough = vPbr.x, pMetal = vPbr.y;
+				// (a varying constant can come out a hair under its value: compare against the class, not fract)
+				if ( pFlag - pCls > 0.25 ) diffuseColor.rgb *= vTint;
 				{
+					vec3 op = vObj;
+					vec3 on = normalize( vObjN );
+					float sd = vMisc.y * 17.0;
 					vec4 n1 = texture2D( tNoise, vWorldPos.xz * 0.37 + vWorldPos.y * 0.21 );
-					diffuseColor.rgb *= 0.86 + 0.26 * n1.r;
+					vec4 nO = texture2D( tNoise, op.xz * 0.55 + op.y * 0.31 + sd );
+					// streaks that run down the prop (rain, rust, grime)
+					vec4 nV = texture2D( tNoise, vec2( ( op.x + op.z ) * 2.7 + sd, op.y * 0.07 ) );
+					vec3 col = diffuseColor.rgb * ( 0.88 + 0.22 * n1.r );
+					vec3 rustC = vec3( 0.14, 0.05, 0.016 ) * ( 0.7 + 0.6 * nO.g );
+					if ( pCls > 1.5 && pCls < 2.5 ) {
+						// weathered timber: grain along its length, drying checks, a creosote-dark wet butt, sun-greyed top
+						float grain = texture2D( tNoise, vec2( ( op.x - op.z ) * 2.3 + sd, op.y * 0.05 ) ).g;
+						col *= 0.74 + 0.5 * grain;
+						float check = smoothstep( 0.74, 0.8, texture2D( tNoise, vec2( ( op.x + op.z ) * 4.0 + sd, op.y * 0.018 ) ).b );
+						col *= 1.0 - 0.6 * check;
+						col = mix( col * vec3( 0.5, 0.45, 0.4 ), col, smoothstep( 0.25, 1.7, op.y ) );
+						col = mix( col, vec3( dot( col, vec3( 0.3, 0.59, 0.11 ) ) ) * 1.2, smoothstep( 3.0, 9.0, op.y ) * 0.45 );
+					} else if ( pCls > 2.5 && pCls < 3.5 ) {
+						// concrete: triplanar scan, rain streaks, darker at the foot
+						vec3 an = abs( on );
+						vec3 t = texture2D( tConc, op.zy * 0.45 + sd ).rgb * an.x + texture2D( tConc, op.xz * 0.45 + sd ).rgb * an.y + texture2D( tConc, op.xy * 0.45 + sd ).rgb * an.z;
+						col *= mix( vec3( dot( t, vec3( 0.3, 0.59, 0.11 ) ) ), t, 0.35 ) / 0.16;
+						col *= 1.0 - 0.16 * smoothstep( 0.55, 0.85, nV.r );
+						col *= 0.85 + 0.15 * smoothstep( 0.0, 0.25, op.y );
+					} else if ( pCls > 3.5 && pCls < 4.5 ) {
+						// galvanised / bare metal: spangle, white-rust bloom, dark runs, a few rust spots
+						col *= 0.9 + 0.2 * texture2D( tNoise, op.xy * 2.3 + op.z * 1.7 + sd ).a;
+						col = mix( col, vec3( 0.36, 0.36, 0.34 ), smoothstep( 0.6, 0.8, nO.g ) * 0.3 );
+						col *= 1.0 - 0.28 * smoothstep( 0.62, 0.9, nV.r );
+						float rs = smoothstep( 0.8, 0.9, nO.b );
+						col = mix( col, rustC, rs );
+						pRough = mix( pRough, 0.85, rs + 0.2 ); pMetal = mix( pMetal, 0.15, rs );
+					} else if ( pCls > 4.5 && pCls < 5.5 ) {
+						// painted steel: chipped through to rust at edges and low down, rust weeping below the chips,
+						// paint chalky and faded on top
+						float chip = smoothstep( 0.7, 0.76, nO.r * 0.75 + nO.b * 0.25 + ( 1.0 - smoothstep( 0.0, 0.35, op.y ) ) * 0.22 );
+						col = mix( col, rustC, chip );
+						pRough = mix( pRough, 0.9, chip ); pMetal = mix( pMetal, 0.2, chip );
+						float run = smoothstep( 0.62, 0.86, nV.b ) * smoothstep( 0.5, 0.72, nO.r );
+						col = mix( col, rustC * 1.2, run * 0.45 );
+						col = mix( col, vec3( dot( col, vec3( 0.3, 0.59, 0.11 ) ) ) * 1.15 + 0.015, 0.28 * smoothstep( 0.3, 0.9, on.y ) );
+					} else if ( pCls > 5.5 && pCls < 6.5 ) {
+						// plastic: UV-faded where the sun hits, scuffed
+						col = mix( col, vec3( dot( col, vec3( 0.3, 0.59, 0.11 ) ) ) * 1.15 + 0.02, 0.1 + 0.3 * smoothstep( 0.0, 0.9, on.y ) );
+						col *= 1.0 - 0.15 * smoothstep( 0.72, 0.9, nO.r );
+					} else if ( pCls > 6.5 && pCls < 7.5 ) {
+						col = mix( col, vec3( 0.09, 0.085, 0.08 ), 0.45 * smoothstep( 0.2, 0.9, on.y ) );
+					} else if ( pCls > 7.5 && pCls < 8.5 ) {
+						col *= 0.86 + 0.28 * texture2D( tNoise, op.xy * 7.0 + op.z * 5.0 + sd ).a;
+					} else if ( pCls > 9.5 && pCls < 10.5 ) {
+						// hazard stripes: orange (or red) and white, sloping down to the middle
+						float st = fract( ( abs( op.x ) - op.y ) / 0.32 );
+						float w = smoothstep( 0.46, 0.5, st ) - smoothstep( 0.96, 1.0, st );
+						col = mix( col, vec3( 0.72, 0.72, 0.68 ), w );
+						col *= 1.0 - 0.25 * smoothstep( 0.7, 0.9, nO.r );
+					} else if ( pCls > 10.5 && pCls < 11.5 ) {
+						// HESCO: beige geotextile behind a 7.6 cm welded wire grid
+						vec3 an = abs( on );
+						vec2 q = an.x > 0.5 ? op.zy : an.z > 0.5 ? op.xy : op.xz;
+						vec2 g = abs( fract( q / 0.076 ) - 0.5 );
+						float fw = max( fwidth( q.x ), fwidth( q.y ) ) / 0.076;
+						float wire = 1.0 - smoothstep( 0.06 - fw, 0.06 + fw, 0.5 - max( g.x, g.y ) );
+						wire = mix( wire, 0.25, smoothstep( 0.15, 0.5, fw ) );
+						col *= 0.85 + 0.25 * texture2D( tNoise, q * 3.0 + sd ).g;
+						col = mix( col, vec3( 0.2, 0.2, 0.19 ), wire * 0.8 );
+						pMetal = wire * 0.6; pRough = mix( pRough, 0.5, wire );
+					}
+					// dust and debris settle on what faces up
+					col = mix( col, vec3( 0.3, 0.28, 0.24 ), smoothstep( 0.6, 0.95, on.y ) * ( 0.1 + 0.3 * nO.g ) * step( pCls, 8.5 ) );
 					// grime creeping up from the ground, scaled by the instance's dirt
-					diffuseColor.rgb *= 1.0 - vMisc.z * 0.35 * smoothstep( 0.9, 0.0, vObj.y ) * n1.g;
+					col *= 1.0 - vMisc.z * 0.35 * smoothstep( 0.9, 0.0, vObj.y ) * n1.g;
+					diffuseColor.rgb = col;
 				}
 			` )
-			.replace( '#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = vPbr.x;' )
-			.replace( '#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\nmetalnessFactor = vPbr.y;' )
+			.replace( '#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = pRough;' )
+			.replace( '#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\nmetalnessFactor = pMetal;' )
 			.replace( '#include <emissivemap_fragment>', /* glsl */`#include <emissivemap_fragment>
-				if ( pFlag > 0.75 ) {
+				if ( pCls > 0.5 && pCls < 1.5 ) {
 					float lit = vMisc.x * smoothstep( 0.3, 0.7, uNight ) * flickerAt( vMisc.y );
 					totalEmissiveRadiance += vec3( 9.0, 6.4, 3.4 ) * lit;
 					diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 1.0, 0.85, 0.6 ), lit );
@@ -939,38 +1012,34 @@ export function makeCarMaterial( u ) {
 								lens = max( lens, th );
 							}
 						}
-						// side panel gaps, door handles and the fuel door (on the sides only)
-						if ( abs( ln.x ) > 0.55 && lp.y > uDoorY.x - 0.04 && lp.y < uDoorY.z + 0.02 ) {
+						// panel gaps, door handles and the fuel door: hairlines, so only up close (one pair of
+						// derivatives for all of them)
+						bool closeUp = length( vWorldPos - cameraPosition ) < 40.0;
+						vec2 fw = max( vec2( fwidth( lp.z ), fwidth( lp.y ) ), vec2( 1e-4 ) );
+						float fwx = max( fwidth( ax ), 1e-4 );
+						if ( closeUp && abs( ln.x ) > 0.55 && lp.y > uDoorY.x - 0.04 && lp.y < uDoorY.z + 0.02 ) {
 							float gap = 0.0;
-							float yIn = boxAA( lp.y, uDoorY.x, uDoorY.z + 0.03 );
-							if ( uDoors.x < 90.0 ) {
-								gap += ( lineAA( lp.z - uDoors.x, 0.003 ) + lineAA( lp.z - uDoors.y, 0.003 ) ) * yIn;
-								gap += lineAA( lp.y - uDoorY.x, 0.003 ) * boxAA( lp.z, uDoors.x, uDoors.y );
-							}
-							if ( uDoors.z < 90.0 ) {
-								gap += ( lineAA( lp.z - uDoors.z, 0.003 ) + lineAA( lp.z - uDoors.w, 0.003 ) ) * yIn;
-								gap += lineAA( lp.y - uDoorY.x, 0.003 ) * boxAA( lp.z, uDoors.z, uDoors.w );
-							}
+							float yIn = step( uDoorY.x, lp.y );
+							float yG = bandAA( lp.y - uDoorY.x, 0.003, fw.y );
+							if ( uDoors.x < 90.0 ) gap += ( bandAA( lp.z - uDoors.x, 0.003, fw.x ) + bandAA( lp.z - uDoors.y, 0.003, fw.x ) ) * yIn + yG * step( uDoors.x, lp.z ) * step( lp.z, uDoors.y );
+							if ( uDoors.z < 90.0 ) gap += ( bandAA( lp.z - uDoors.z, 0.003, fw.x ) + bandAA( lp.z - uDoors.w, 0.003, fw.x ) ) * yIn + yG * step( uDoors.z, lp.z ) * step( lp.z, uDoors.w );
 							col *= 1.0 - 0.75 * clamp( gap, 0.0, 1.0 );
-							float hy = uDoorY.z - 0.1;
+							float hy = bandAA( lp.y - ( uDoorY.z - 0.1 ), 0.022, fw.y );
 							float hdl = 0.0;
-							if ( uDoors.x < 90.0 ) hdl += rectAA( vec2( lp.z, lp.y ), vec2( uDoors.y - 0.24, hy - 0.022 ), vec2( uDoors.y - 0.1, hy + 0.022 ) );
-							if ( uDoors.z < 90.0 ) hdl += rectAA( vec2( lp.z, lp.y ), vec2( uDoors.w - 0.24, hy - 0.022 ), vec2( uDoors.w - 0.1, hy + 0.022 ) );
-							col = mix( col, uMisc.y > 0.5 ? vec3( 0.03 ) : mix( vec3( 0.02 ), vec3( 0.3 ), step( 0.4, fract( vCar2.x * 5.1 ) ) ), clamp( hdl, 0.0, 1.0 ) );
+							if ( uDoors.x < 90.0 ) hdl += bandAA( lp.z - ( uDoors.y - 0.17 ), 0.07, fw.x );
+							if ( uDoors.z < 90.0 ) hdl += bandAA( lp.z - ( uDoors.w - 0.17 ), 0.07, fw.x );
+							col = mix( col, uMisc.y > 0.5 ? vec3( 0.03 ) : mix( vec3( 0.02 ), vec3( 0.3 ), step( 0.4, fract( vCar2.x * 5.1 ) ) ), clamp( hdl, 0.0, 1.0 ) * hy );
 							// the fuel door on the rear quarter
-							float fd = 0.0;
 							if ( ( lp.x > 0.0 ) == ( fract( vCar2.x * 3.7 ) < 0.5 ) && uDoors.x < 90.0 ) {
-								vec2 c = vec2( max( uDoors.y, uDoors.z < 90.0 ? uDoors.w : uDoors.y ) + 0.3, uDoorY.z - 0.13 );
-								vec2 d = abs( vec2( lp.z, lp.y ) - c );
-								fd = lineAA( max( d.x, d.y ) - 0.075, 0.003 );
+								vec2 d = abs( vec2( lp.z, lp.y ) - vec2( max( uDoors.y, uDoors.z < 90.0 ? uDoors.w : uDoors.y ) + 0.3, uDoorY.z - 0.13 ) );
+								col *= 1.0 - 0.6 * bandAA( max( d.x, d.y ) - 0.075, 0.003, max( fw.x, fw.y ) );
 							}
-							col *= 1.0 - 0.6 * fd;
 						}
 						// hood and trunk lid gaps on top
-						if ( ln.y > 0.35 ) {
+						if ( closeUp && ln.y > 0.35 ) {
 							float hg = 0.0;
-							if ( uLids.z < 90.0 ) hg += ( lineAA( lp.z - uLids.w, 0.003 ) * step( ax, uArch.x * 0.9 ) + lineAA( ax - uArch.x * 0.88, 0.003 ) * boxAA( lp.z, uLids.z, uLids.w ) ) * step( uLidY.y, lp.y );
-							if ( uLids.x < 90.0 ) hg += ( lineAA( lp.z - uLids.x, 0.003 ) * step( ax, uArch.x * 0.88 ) + lineAA( ax - uArch.x * 0.86, 0.003 ) * boxAA( lp.z, uLids.x, uLids.y ) ) * step( uLidY.x, lp.y );
+							if ( uLids.z < 90.0 ) hg += ( bandAA( lp.z - uLids.w, 0.003, fw.x ) * step( ax, uArch.x * 0.9 ) + bandAA( ax - uArch.x * 0.88, 0.003, fwx ) * step( uLids.z, lp.z ) * step( lp.z, uLids.w ) ) * step( uLidY.y, lp.y );
+							if ( uLids.x < 90.0 ) hg += ( bandAA( lp.z - uLids.x, 0.003, fw.x ) * step( ax, uArch.x * 0.88 ) + bandAA( ax - uArch.x * 0.86, 0.003, fwx ) * step( uLids.x, lp.z ) * step( lp.z, uLids.y ) ) * step( uLidY.x, lp.y );
 							col *= 1.0 - 0.7 * clamp( hg, 0.0, 1.0 );
 						}
 					}
@@ -1051,7 +1120,8 @@ export function makeCarMaterial( u ) {
 					// (the loose door / lid panels are in unit coordinates: no sills there)
 					float low = uPanel > 0.5 ? 0.0 : 1.0 - smoothstep( 0.2, 0.75, lp.y - uArch.w * 0.5 );
 					float rm = smoothstep( 1.0 - ra * 0.55, 1.04 - ra * 0.55, n1.b * 0.55 + n2.r * 0.45 + low * 0.45 * sqrt( ra ) ) * ( 1.0 - lens );
-					if ( part <= 2 || part == 4 ) {
+					// (most wrecks have no rust at all: skip its texture work)
+					if ( ( part <= 2 || part == 4 ) && ( rm > 0.002 || ra > 0.05 ) ) {
 						// the rust texture is a light, yellowish scan: keep its detail, give it iron oxide's dark red-brown
 						float rl = min( 1.5, dot( texture2D( tRust, lp.zy * 0.8 + lp.x ).rgb, vec3( 0.3, 0.59, 0.11 ) ) / 0.3 );
 						vec3 rc = mix( vec3( 0.07, 0.025, 0.01 ), vec3( 0.2, 0.07, 0.02 ), smoothstep( 0.5, 1.3, rl ) ) * ( 0.6 + 0.4 * rl );
@@ -1070,14 +1140,14 @@ export function makeCarMaterial( u ) {
 						float up = smoothstep( 0.5, 0.92, ln.y ) * ( 0.25 + 0.45 * n1.g ) * ( uPanel > 0.5 ? 0.5 : 1.0 );
 						col = mix( col, vec3( 0.3, 0.28, 0.24 ), up * 0.45 );
 						cRough = mix( cRough, 0.75, up );
-						if ( part == 0 && abs( ln.x ) > 0.6 ) col *= 1.0 - 0.16 * smoothstep( 0.55, 0.85, texture2D( tNoise, vec2( lp.z * 3.1, lp.y * 0.07 ) ).r ) * smoothstep( uDoorY.z + 0.05, uDoorY.z - 0.3, lp.y );
+						if ( part == 0 && abs( ln.x ) > 0.6 && lp.y < uDoorY.z + 0.05 ) col *= 1.0 - 0.16 * smoothstep( 0.55, 0.85, texture2D( tNoise, vec2( lp.z * 3.1, lp.y * 0.07 ) ).r ) * smoothstep( uDoorY.z + 0.05, uDoorY.z - 0.3, lp.y );
 					}
 					// fire
 					if ( burn > 0.01 ) {
 						vec3 ch = mix( vec3( 0.014 ), vec3( 0.17, 0.075, 0.03 ), smoothstep( 0.4, 0.8, n1.r ) );
-						ch = mix( ch, vec3( 0.32, 0.3, 0.28 ), smoothstep( 0.72, 0.95, n2.b ) * 0.55 );
+						ch = mix( ch, vec3( 0.32, 0.3, 0.28 ), smoothstep( 0.72, 0.95, n2.g ) * 0.45 );
 						// white ash on top, rust bloom low down
-						ch = mix( ch, vec3( 0.38, 0.37, 0.35 ), smoothstep( 0.6, 0.95, ln.y ) * smoothstep( 0.35, 0.7, n2.g ) * 0.7 );
+						ch = mix( ch, vec3( 0.38, 0.37, 0.35 ), smoothstep( 0.6, 0.95, ln.y ) * smoothstep( 0.4, 0.75, n1.g ) * 0.6 );
 						ch = mix( ch, vec3( 0.14, 0.05, 0.02 ), smoothstep( 0.45, 0.8, n1.b ) * 0.6 * smoothstep( 1.2, 0.3, lp.y ) );
 						col = mix( col, ch, burn );
 						cRough = mix( cRough, 0.95, burn ); cMetal = mix( cMetal, 0.0, burn );

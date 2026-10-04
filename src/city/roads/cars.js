@@ -169,16 +169,22 @@ function lathe( sk, prof, seg, c, side, hex, tag, ctr, a0 = 0, a1 = Math.PI * 2 
 // tyre and rim of one wheel at the origin, outer face +x: [ { geo, hex, tag } ] (turned round for the left side)
 const RIM_HEX = [ 0xb4b7ba, 0x9da1a5, 0x3b3e2c, 0xc9c9c2 ];
 function wheelParts( r, h, lod, look ) {
-	const sk = new Skin();
 	const ri = r * 0.64;
-	const seg = lod ? 8 : 14;
-	const tyre = lod ? [ [ ri, - h * 0.9 ], [ r, - h * 0.5 ], [ r, h * 0.5 ], [ ri, h * 0.94 ] ]
-		: [ [ ri, - h * 0.9 ], [ r * 0.95, - h * 0.88 ], [ r, - h * 0.45 ], [ r, h * 0.45 ], [ r * 0.985, h * 0.8 ], [ r * 0.9, h ], [ r * 0.76, h * 1.02 ], [ ri, h * 0.94 ] ];
-	lathe( sk, tyre, seg, [ 0, 0, 0 ], 1, 0x161616, TAG.tyre, [ r * 0.8, 0 ] );
 	const rimHex = look.black ? 0x1c1d1e : RIM_HEX[ look.rim ] || RIM_HEX[ 0 ];
-	const rim = lod ? [ [ ri, h * 0.94 ], [ 0, h * 0.62 ] ]
-		: look.rim === 2 ? [ [ ri, h * 0.94 ], [ ri * 0.9, h * 0.8 ], [ ri * 0.8, h * 0.82 ], [ ri * 0.62, h * 0.5 ], [ ri * 0.3, h * 0.55 ], [ ri * 0.18, h * 0.85 ], [ 0, h * 0.86 ] ]
-			: [ [ ri, h * 0.94 ], [ ri * 0.9, h * 0.62 ], [ ri * 0.55, h * 0.48 ], [ ri * 0.26, h * 0.62 ], [ ri * 0.12, h * 0.74 ], [ 0, h * 0.75 ] ];
+	if ( lod ) {
+		// far: a six-sided tread band and a flat rim disc (the shader still paints the rim pattern)
+		const t = new THREE.CylinderGeometry( r, r, h * 2, 6, 1, true );
+		t.rotateZ( Math.PI / 2 );
+		const d = new THREE.CircleGeometry( r * 0.9, 6 );
+		d.rotateY( Math.PI / 2 ); d.translate( h, 0, 0 );
+		return [ { geo: t, hex: 0x161616, tag: TAG.tyre }, { geo: d, hex: rimHex, tag: TAG.rim } ];
+	}
+	const sk = new Skin();
+	const seg = 11;
+	const tyre = [ [ ri, - h * 0.9 ], [ r * 0.97, - h * 0.85 ], [ r, - h * 0.4 ], [ r, h * 0.45 ], [ r * 0.95, h * 0.9 ], [ r * 0.78, h * 1.02 ], [ ri, h * 0.94 ] ];
+	lathe( sk, tyre, seg, [ 0, 0, 0 ], 1, 0x161616, TAG.tyre, [ r * 0.8, 0 ] );
+	const rim = look.rim === 2 ? [ [ ri, h * 0.94 ], [ ri * 0.82, h * 0.82 ], [ ri * 0.62, h * 0.5 ], [ ri * 0.22, h * 0.6 ], [ 0, h * 0.86 ] ]
+		: [ [ ri, h * 0.94 ], [ ri * 0.9, h * 0.62 ], [ ri * 0.5, h * 0.5 ], [ ri * 0.18, h * 0.7 ], [ 0, h * 0.74 ] ];
 	// (the rim face is a dish: its normals face out of the wheel, away from a point deep inside it)
 	lathe( sk, rim, seg, [ 0, 0, 0 ], 1, rimHex, TAG.rim, [ ri * 0.5, - h * 3 ] );
 	return sk.geometries( 0.75 );
@@ -241,7 +247,7 @@ function lowerSection( S, hw, z, ya, cabin, floorY, flare ) {
 	return p;
 }
 // points kept per LOD (indices into the full section)
-const SEC_IDX = [ null, [ 0, 2, 4, 5, 6, 8, 10 ], [ 0, 2, 4, 6, 8, 10 ] ];
+const SEC_IDX = [ [ 0, 2, 3, 4, 5, 6, 7, 8, 9, 10 ], [ 0, 2, 4, 6, 8, 10 ], [ 0, 4, 6, 8, 10 ] ];
 
 function buildCar( type, lod ) {
 	const S = SPECS[ type ], D = CAR_DIMS[ type ], L = S.look;
@@ -260,7 +266,7 @@ function buildCar( type, lod ) {
 	const keep = lod < 2 ? null : S.low || ( nb <= 6 ? null : [ 0, 2, nb >> 1, nb - 3, nb - 1 ] );
 	const zs = new Set( S.body.filter( ( s, i ) => ! keep || keep.includes( i ) ).map( s => s[ 0 ] ) );
 	if ( lod === 0 ) for ( let i = 0; i < S.body.length - 1; i ++ ) {
-		const a = S.body[ i ][ 0 ], c = S.body[ i + 1 ][ 0 ], n = Math.floor( ( c - a ) / 0.6 );
+		const a = S.body[ i ][ 0 ], c = S.body[ i + 1 ][ 0 ], n = Math.floor( ( c - a ) / 0.8 );
 		for ( let k = 1; k < n; k ++ ) zs.add( a + ( c - a ) * k / n );
 	}
 	if ( lod === 0 && ! S.bed ) { zs.add( zA ); zs.add( zA + 0.04 ); zs.add( zD - 0.04 ); zs.add( zD ); }
@@ -271,7 +277,7 @@ function buildCar( type, lod ) {
 		.filter( ( z, i, a ) => i === 0 || z - a[ i - 1 ] > 0.02 ).map( z => ( { z, ya: 0, lift: false, o: 0 } ) );
 	for ( const [ z0, z1, za ] of arches ) {
 		list.push( { z: z0, ya: 0, lift: false, o: 0 }, { z: z1, ya: 0, lift: false, o: 1 } );
-		const n = lod ? 2 : 6;
+		const n = lod ? 2 : 4;
 		for ( let k = 0; k <= n; k ++ ) {
 			const dz = - Math.cos( Math.PI * k / n ) * Ra;
 			list.push( { z: k === 0 ? z0 : k === n ? z1 : za + dz, ya: r + Math.sqrt( Math.max( 0, Ra * Ra - dz * dz ) ), lift: true, o: k === 0 ? 1 : 0 } );
@@ -306,11 +312,11 @@ function buildCar( type, lod ) {
 	push( zA, 0 );
 	for ( const [ t, f ] of front ) push( zA + ( zB - zA ) * t, f );
 	push( zB, 1 );
-	if ( lod < 2 ) {
+	if ( lod === 0 || ( lod === 1 && cab.pillars ) ) {
 		if ( cab.pillarB < zC && cab.pillarB > zB ) { push( cab.pillarB - 0.06, 1 ); push( cab.pillarB + 0.06, 1 ); }
 		if ( cab.pillars ) for ( let z = zB + cab.pillars; z < zC - 0.3; z += cab.pillars ) { push( z - 0.07, 1 ); push( z + 0.07, 1 ); }
-		if ( cab.glassTo !== undefined && cab.glassTo > zB && cab.glassTo < zC ) push( cab.glassTo, 1 );
 	}
+	if ( lod < 2 && cab.glassTo !== undefined && cab.glassTo > zB && cab.glassTo < zC ) push( cab.glassTo, 1 );
 	push( zC, 1 );
 	for ( const [ t, f ] of rear ) push( zC + ( zD - zC ) * t, f );
 	push( zD, 0 );
@@ -320,9 +326,11 @@ function buildCar( type, lod ) {
 	const gst = gs.map( g => {
 		const B = [ g.wb, g.yb ], R = [ g.wr, g.yr ];
 		const top = [ [ g.wr * 0.93, g.yr + 0.03 * g.f ], [ g.wr * 0.5, g.yr + 0.05 * g.f ], [ 0, g.yr + 0.055 * g.f ] ];
-		const pts = lod === 2 ? [ B, R, top[ 2 ] ] : [ B, lerp( B, R, lo ), lerp( B, R, hi ), R, ...top ];
+		const pts = lod === 2 ? [ B, R, top[ 2 ] ] : lod === 1 ? [ B, lerp( B, R, lo ), lerp( B, R, hi ), R, top[ 2 ] ] : [ B, lerp( B, R, lo ), lerp( B, R, hi ), R, ...top ];
 		return { z: g.z, pts };
 	} );
+	// what each segment of the glasshouse section is: f frame (paint), w window (or paint), t top (roof or screen)
+	const GK = [ [ 'f', 'w', 'f', 'f', 't', 't' ], [ 'f', 'w', 'f', 't' ], [ 'w', 't' ] ][ lod ];
 	const windowAt = ( zm ) => {
 		let glass = zm > zB && zm < zC;
 		if ( cab.pillarB < zC && Math.abs( zm - cab.pillarB ) < 0.07 ) glass = false;
@@ -335,17 +343,16 @@ function buildCar( type, lod ) {
 	const G = [ GLASS, TAG.glass ], SCR = [ GLASS, TAG.screen ];
 	loft( sk, gst, ( k, A, C ) => {
 		const zm = ( A.z + C.z ) / 2;
-		const screen = zm < zB || zm > zC;
-		if ( lod === 2 ) return k === 0 ? ( windowAt( zm ) ? G : PAINT ) : screen ? SCR : PAINT;
-		if ( k === 1 ) return windowAt( zm ) ? G : PAINT;
-		if ( k <= 3 ) return PAINT;
-		return screen ? SCR : PAINT;
+		const kind = GK[ k ];
+		if ( kind === 'w' ) return windowAt( zm ) ? G : PAINT;
+		if ( kind === 't' ) return zm < zB || zm > zC ? SCR : PAINT;
+		return PAINT;
 	} );
 	sk.emit( b, 0.62 );
 	// ---- bumpers, lamps' housings, plates ----
 	const f = S.body[ 0 ], rr = S.body[ S.body.length - 1 ];
 	const mil = !! S.military;
-	if ( lod < 2 && ! mil ) {
+	if ( lod === 0 && ! mil ) {
 		for ( const [ s, dir ] of [ [ f, - 1 ], [ rr, 1 ] ] ) {
 			const y0 = s[ 1 ] - 0.03, y1 = s[ 1 ] + ( S.bus ? 0.26 : 0.19 );
 			bumper( b, s[ 0 ], dir, y0, y1, hw * s[ 4 ] * 1.01, S.bus ? 0.07 : 0.085, S.bus ? 0.15 : 0.32, type === CAR.PICKUP && dir > 0 ? [ 0xa8abae, TAG.chrome ] : [ 0x1a1a1b, TAG.gloss ], lod );
@@ -358,11 +365,11 @@ function buildCar( type, lod ) {
 			b.torus( 0.05, 0.015, 4, 8, 0x1a1a1a, TAG.trim, { x: s * hw * 0.62, y: f[ 1 ] + 0.06, z: zF - 0.16, ry: Math.PI / 2 } );
 			b.box( 0.06, 0.06, 0.1, 0x1a1a1a, TAG.trim, { x: s * hw * 0.5, y: rr[ 1 ] + 0.04, z: zR + 0.14 } );
 		}
-	} else {
-		b.box( D.W * 0.96, 0.14, 0.12, 0x1b1b1b, TAG.trim, { y: f[ 1 ] + 0.08, z: zF + 0.03 } );
-		b.box( D.W * 0.96, 0.14, 0.12, 0x1b1b1b, TAG.trim, { y: rr[ 1 ] + 0.06, z: zR - 0.03 } );
+	} else if ( lod === 1 ) {
+		b.box( D.W * f[ 4 ] * 1.01, 0.2, 0.14, 0x1b1b1b, TAG.trim, { y: f[ 1 ] + 0.07, z: zF + 0.01 } );
+		b.box( D.W * rr[ 4 ] * 1.01, 0.2, 0.14, 0x1b1b1b, TAG.trim, { y: rr[ 1 ] + 0.07, z: zR - 0.01 } );
 	}
-	if ( ! mil && lod < 2 ) {
+	if ( ! mil && lod === 0 ) {
 		const yf = f[ 1 ] + 0.08, yr = rr[ 1 ] + ( S.bus ? 0.38 : 0.28 );
 		b.box( 0.3, 0.15, 0.01, 0xe8e6dc, TAG.plate, { y: yf, z: zF - 0.066 } );
 		b.box( 0.3, 0.15, 0.01, 0xe8e6dc, TAG.plate, { y: yr, z: zR + 0.006 } );
@@ -379,7 +386,7 @@ function buildCar( type, lod ) {
 		for ( const s of [ - 1, 1 ] ) {
 			const x = s * ( wb + 0.15 ), y = yb + 0.14;
 			if ( lod === 0 ) {
-				b.sphere( 0.5, 8, 5, 0xffffff, TAG.paint, { x, y, z: zm, sx: 0.2, sy: 0.12, sz: 0.09 } );
+				b.sphere( 0.5, 6, 4, 0xffffff, TAG.paint, { x, y, z: zm, sx: 0.2, sy: 0.12, sz: 0.09 } );
 				b.box( 0.15, 0.085, 0.01, 0x6f777c, TAG.chrome, { x, y, z: zm + 0.04 } );
 				b.box( 0.12, 0.03, 0.06, BLACK, TAG.trim, { x: s * ( wb + 0.05 ), y: y - 0.03, z: zm } );
 			} else b.box( 0.18, 0.11, 0.08, 0xffffff, TAG.paint, { x, y, z: zm } );
@@ -497,8 +504,8 @@ function buildCar( type, lod ) {
 		for ( const za of axles( type ) ) for ( const s of [ - 1, 1 ] ) {
 			const tri = [];
 			const c = [ s * ( hw + 0.005 ), r * 0.95, za ];
-			for ( let k = 0; k < 5; k ++ ) {
-				const a0 = Math.PI * k / 5, a1 = Math.PI * ( k + 1 ) / 5;
+			for ( let k = 0; k < 3; k ++ ) {
+				const a0 = Math.PI * k / 3, a1 = Math.PI * ( k + 1 ) / 3;
 				tri.push( c, [ c[ 0 ], r + Math.sin( a0 ) * Ra, za + Math.cos( a0 ) * Ra ], [ c[ 0 ], r + Math.sin( a1 ) * Ra, za + Math.cos( a1 ) * Ra ] );
 			}
 			b.tris( tri, 0x050505, TAG.under, [ 0, c[ 1 ], za ] );
@@ -532,7 +539,8 @@ function buildCar( type, lod ) {
 	const parts = wheelParts( r, L.tw, lod, L );
 	const ax = axles( type );
 	for ( const z of ax ) for ( const s of [ - 1, 1 ] ) {
-		if ( lod > 1 ) { b.cyl( r, r, L.tw * 2, 6, 0x141414, TAG.tyre, { x: s * D.tr, y: r, z, axis: 'x' } ); continue; }
+		// (low: one dark block per axle, showing below the sides)
+		if ( lod > 1 ) { if ( s > 0 ) b.box( ( D.tr + L.tw ) * 2, r * 1.7, r * 1.7, 0x141414, TAG.tyre, { y: r * 0.9, z } ); continue; }
 		placeWheel( b, parts, s * D.tr, r, z, s );
 		if ( DUALS[ type ] && z === D.zr ) placeWheel( b, parts, s * ( D.tr - L.tw * 2 - 0.03 ), r, z, s );
 	}

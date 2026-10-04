@@ -2,6 +2,7 @@
 // (linear vertex colour), tagged (pbr = roughness, metalness, flag  or  part id) and merged into one
 // non-indexed BufferGeometry per model.
 import * as THREE from 'three';
+import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _e = new THREE.Euler(), _s = new THREE.Vector3(), _p = new THREE.Vector3();
 const _c = new THREE.Color();
@@ -133,9 +134,12 @@ export class MB {
 		g.setAttribute( 'color', new THREE.Float32BufferAttribute( this.col, 3 ) );
 		if ( tagSize === 3 ) g.setAttribute( tagName, new THREE.Float32BufferAttribute( this.tag, 3 ) );
 		else g.setAttribute( tagName, new THREE.Float32BufferAttribute( this.tag.filter( ( _, i ) => i % 3 < tagSize ), tagSize ) );
-		g.computeBoundingBox();
-		g.computeBoundingSphere();
-		return g;
+		// indexed: vertices shared by smooth panels are shaded once per pass (hundreds of instances, shadow cascades)
+		const m = mergeVertices( g, 1e-5 );
+		g.dispose();
+		m.computeBoundingBox();
+		m.computeBoundingSphere();
+		return m;
 	}
 }
 
