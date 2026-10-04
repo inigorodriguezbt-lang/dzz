@@ -7,8 +7,10 @@ import { register as tech } from './tech.js';
 import { register as gear } from './gear.js';
 import { register as leisure } from './leisure.js';
 import { register as placeables } from './placeables.js';
+import { register as mobility } from './mobility.js';
+import { register as senses } from './senses.js';
 import { register as sites } from '../../sites/models.js';
 
 export function registerDomainModels( reg ) {
-	for ( const f of [ kitchen, pharmacy, outdoors, arms, tech, gear, leisure, placeables, sites ] ) f( reg );
+	for ( const f of [ kitchen, pharmacy, outdoors, arms, tech, gear, leisure, placeables, sites, mobility, senses ] ) f( reg );
 }
