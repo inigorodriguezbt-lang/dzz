@@ -19,8 +19,8 @@ function mp5() {
 	// ejection port and the bolt's carrier behind it
 	P.box( 'rubber', - 0.004, 0.05, - 0.004, 0.016, hz - 0.0006, hz + 0.0002, 0.0018 );
 	const bolt = P.sub( 'bolt', 0.02, 0.006, 0.012 );
-	bolt.box( 'steel', - 0.07, 0.048, - 0.002, 0.014, 0.0105, 0.0152, 0.0012 );
-	bolt.cylZ( 'steel', 0.044, 0.004, 0.011, 0.0156, 0.0028, 8 );
+	bolt.box( 'steelD', - 0.07, 0.048, - 0.002, 0.014, 0.0105, 0.0152, 0.0012 );
+	bolt.cylZ( 'steelD', 0.044, 0.004, 0.011, 0.0156, 0.0028, 8 );
 	// cocking tube with its end cap, the handle's slot on the left; the front sight's base and hooded post
 	P.cyl( 'blk', 0.124, 0.212, 0.0112, 0.02, 0, 16 );
 	P.lathe( 'blk', [ [ 0.21, 0.0115 ], [ 0.214, 0.0122 ], [ 0.222, 0.0122 ], [ 0.224, 0.009 ], [ 0.224, 0.0 ] ], 0.02, 0, 16 );
@@ -59,11 +59,11 @@ function mp5() {
 	for ( const s of [ - 1, 1 ] ) P.cyl( 'blk', - 0.322, - 0.13, 0.0042, - 0.006, s * 0.0135, 10 );
 	P.extFront( 'blk', [ [ - 0.019, - 0.074, 0.006 ], [ 0.019, - 0.074, 0.006 ], [ 0.0205, 0.02, 0.006 ], [ - 0.0205, 0.02, 0.006 ] ], - 0.333, - 0.318, 0.002 );
 	P.extS( 'rubber', [ [ - 0.332, 0.022 ], [ - 0.344, 0.022, 0.004 ], [ - 0.344, - 0.076, 0.004 ], [ - 0.332, - 0.076 ] ], 0.0195, 0.003 );
-	P.put( 'steel', new THREE.TorusGeometry( 0.0065, 0.0012, 5, 12 ), [ - 0.128, 0.0, - 0.019 ], [ 0, PI / 2, 0 ] );
+	P.put( 'steelD', new THREE.TorusGeometry( 0.0065, 0.0012, 5, 12 ), [ - 0.128, 0.0, - 0.019 ], [ 0, PI / 2, 0 ] );
 	// claw mount (with an optic)
 	const m = P.sub( 'mount', 0, 0.03, 0 );
 	m.box( 'blk', - 0.06, 0.06, 0.03, 0.036, - 0.0115, 0.0115, 0.002 );
-	for ( const x of [ - 0.05, 0.05 ] ) { m.box( 'blk', x - 0.007, x + 0.007, 0.022, 0.036, - 0.018, 0.018, 0.002 ); m.cylZ( 'steel', x, 0.027, 0.018, 0.022, 0.003, 8 ); }
+	for ( const x of [ - 0.05, 0.05 ] ) { m.box( 'blk', x - 0.007, x + 0.007, 0.022, 0.036, - 0.018, 0.018, 0.002 ); m.cylZ( 'blk', x, 0.027, 0.018, 0.022, 0.003, 8 ); }
 	m.rail( 'blk', - 0.058, 0.058, 0.042, 0.0105 );
 	// the cocking handle in its slot (it does not move with the bolt)
 	const ch = P.sub( 'charge', 0.17, 0.02, - 0.012 );
@@ -118,7 +118,7 @@ function uzi() {
 	for ( const s of [ - 1, 1 ] ) P.cylZ( 'steel', - 0.137, - 0.002, s * 0.0185, s * 0.0215, 0.004, 10 );
 	P.extS( 'blk', [ [ - 0.356, 0.018 ], [ - 0.372, 0.018, 0.004 ], [ - 0.372, - 0.07, 0.006 ], [ - 0.356, - 0.07, 0.004 ] ], 0.02, 0.0025,
 		0, [ [ [ - 0.36, 0.006, 0.002 ], [ - 0.368, 0.006, 0.002 ], [ - 0.368, - 0.056, 0.002 ], [ - 0.36, - 0.056, 0.002 ] ] ] );
-	P.put( 'steel', new THREE.TorusGeometry( 0.0065, 0.0012, 5, 12 ), [ 0.14, - 0.03, - 0.0205 ], [ 0, PI / 2, 0 ] );
+	P.put( 'steelD', new THREE.TorusGeometry( 0.0065, 0.0012, 5, 12 ), [ 0.14, - 0.03, - 0.0205 ], [ 0, PI / 2, 0 ] );
 	// the cocking knob on the cover (it rides with the bolt)
 	const ch = P.sub( 'charge', 0.09, 0.038, 0 );
 	ch.box( 'blk', 0.086, 0.094, 0.034, 0.041, - 0.0025, 0.0025, 0.001 );

@@ -137,7 +137,7 @@ export function ammoBoxModel( spec, def ) {
 		// a few loose rounds beside the box
 		for ( let i = 0; i < 3; i ++ ) cartridge( P, - 0.02 + i * 0.012, ( CAL[ cal ]?.r || 0.005 ), dims[ 2 ] / 2 + 0.012 + i * 0.013, cal, null, 1 );
 	}
-	const o = instantiate( P.bake(), mats, true );
+	const o = instantiate( P.bake(), mats, true, true );
 	g.add( o );
 	return g;
 }

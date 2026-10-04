@@ -15,7 +15,8 @@ function pump870( o ) {
 	P.extS( 'blued', [ [ 0.11, bot + 0.004 ], [ 0.124, bot + 0.012, 0.006 ], [ 0.124, 0.013, 0.004 ], [ 0.11, top - 0.001 ] ], hz - 0.0015, 0.0012 );
 	// ejection port with the bolt behind it, the loading port and its lifter underneath
 	P.box( 'rubber', 0.004, 0.074, - 0.013, 0.012, hz - 0.0003, hz + 0.0003, 0.0015 );
-	P.box( 'steel', 0.024, 0.072, - 0.0075, 0.0065, hz, hz + 0.0005, 0.0015 );
+	P.box( 'steelD', 0.024, 0.072, - 0.0075, 0.0065, hz, hz + 0.0005, 0.0015 );
+	P.box( 'rubber', 0.046, 0.05, - 0.0075, 0.0065, hz + 0.0004, hz + 0.0007, 0 ); // the extractor's cut
 	P.box( 'rubber', - 0.02, 0.086, bot - 0.0006, bot + 0.0004, - 0.012, 0.012, 0.002 );
 	P.box( 'blued', - 0.012, 0.078, bot - 0.0012, bot, - 0.009, 0.009, 0.0015 );
 	// trigger plate: the guard, the cross-bolt safety, the action release, the pins
@@ -83,7 +84,7 @@ function spas() {
 	const bEnd = 0.5, hz = 0.0165, sightH = 0.04;
 	P.extS( 'blk', [ [ - 0.078, - 0.036 ], [ 0.112, - 0.036 ], [ 0.122, - 0.026, 0.006 ], [ 0.122, 0.016, 0.006 ], [ 0.11, 0.024, 0.006 ], [ - 0.07, 0.024, 0.006 ], [ - 0.078, 0.016 ] ], hz, 0.0018 );
 	P.box( 'rubber', 0.002, 0.072, - 0.012, 0.016, hz - 0.0004, hz + 0.0004, 0.002 );
-	P.box( 'steel', 0.024, 0.07, - 0.007, 0.011, hz, hz + 0.0006, 0.0015 );
+	P.box( 'steelD', 0.024, 0.07, - 0.007, 0.011, hz, hz + 0.0006, 0.0015 );
 	P.box( 'rubber', - 0.02, 0.084, - 0.0368, - 0.0356, - 0.0115, 0.0115, 0.002 );
 	pins( P, [ [ - 0.06, - 0.026, 0.0026 ], [ 0.096, - 0.026, 0.0026 ] ], hz );
 	P.cylZ( 'blk', - 0.045, - 0.022, - hz - 0.0015, hz + 0.0015, 0.0032, 12 );
@@ -153,7 +154,7 @@ export function doubleBarrel( o ) {
 	for ( const s of [ - 1, 1 ] ) {
 		const h = P.sub( s > 0 ? 'hammerR' : 'hammerL', - 0.035, 0.012, s * 0.012 );
 		h.extS( 'blued', [ [ - 0.03, 0.005 ], [ - 0.02, 0.012 ], [ - 0.03, 0.032, 0.004 ], [ - 0.038, 0.028 ], [ - 0.034, 0.012 ] ], 0.003, 0.001, s * 0.013 );
-		for ( let i = 0; i < 3; i ++ ) h.box( 'rubber', - 0.037 + i * 0.003, - 0.0358 + i * 0.003, 0.027 + i * 0.0012, 0.031 + i * 0.0012, s * 0.013 - 0.0032, s * 0.013 + 0.0032, 0 );
+		for ( let i = 0; i < 3; i ++ ) h.box( 'blued', - 0.037 + i * 0.003, - 0.0358 + i * 0.003, 0.027 + i * 0.0012, 0.031 + i * 0.0012, s * 0.013 - 0.0032, s * 0.013 + 0.0032, 0 );
 	}
 	// the barrels, the top rib and the joining rib underneath, the bead; the forend (they swing together)
 	const b = P.sub( 'barrels', 0.07, - 0.022, 0 );
@@ -165,9 +166,9 @@ export function doubleBarrel( o ) {
 	b.box( 'blued', 0.068, bEnd - 0.004, - 0.014, - 0.006, - 0.008, 0.008, 0.002 );
 	b.sphere( 'brass', bEnd - 0.01, 0.0158, 0, 0.0022, 10 );
 	b.extR( 'walnut', [ [ 0.1, - 0.01 ], [ sawed ? 0.24 : 0.33, - 0.01 ], [ sawed ? 0.244 : 0.334, - 0.024, 0.006 ], [ sawed ? 0.23 : 0.32, - 0.032, 0.006 ], [ 0.11, - 0.034, 0.006 ] ], 0.0195, 0.007 );
-	b.box( 'steel', 0.104, 0.124, - 0.036, - 0.026, - 0.006, 0.006, 0.0015 );
+	b.box( 'blued', 0.104, 0.124, - 0.036, - 0.026, - 0.006, 0.006, 0.0015 );
 	const sh = b.sub( 'shells', 0.068, 0, 0 );
-	for ( const s of [ - 1, 1 ] ) { sh.cyl( 'brass', 0.066, 0.07, 0.0118, 0, s * 0.0115, 14 ); sh.cyl( 'rubber', 0.0655, 0.0662, 0.0028, 0, s * 0.0115, 8 ); }
+	for ( const s of [ - 1, 1 ] ) { sh.cyl( 'brass', 0.066, 0.07, 0.0118, 0, s * 0.0115, 14 ); sh.cyl( 'brass', 0.0655, 0.0662, 0.0028, 0, s * 0.0115, 8 ); }
 	// two triggers in the guard
 	triggerGuard( P, 'blued', - 0.035, 0.04, - 0.029, 0.026, 0.005 );
 	trigger( P, - 0.012, - 0.03, 0.017 );

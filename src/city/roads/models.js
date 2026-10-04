@@ -663,12 +663,19 @@ function tent( lod = 0 ) {
 	const b = new MB();
 	const O = 0x4f5a3a, HX = 2.4, HZ = 1.9, WALL = 0.75, RIDGE = 2.3;
 	const tri = [];
+	// the canvas sags between the poles: three roof bays, each dipping in the middle
+	const bays = lod ? 1 : 3, sag = lod ? 0 : 0.07;
 	for ( const s of [ - 1, 1 ] ) {
-		const p = ( x, y, z ) => [ x, y, z ];
-		tri.push( p( - HX, WALL, s * HZ ), p( HX, WALL, s * HZ ), p( HX, RIDGE, 0 ), p( - HX, WALL, s * HZ ), p( HX, RIDGE, 0 ), p( - HX, RIDGE, 0 ) );
-		tri.push( p( - HX, 0, s * HZ * 1.03 ), p( HX, 0, s * HZ * 1.03 ), p( HX, WALL, s * HZ ), p( - HX, 0, s * HZ * 1.03 ), p( HX, WALL, s * HZ ), p( - HX, WALL, s * HZ ) );
+		for ( let k = 0; k < bays * 2; k ++ ) {
+			const x0 = - HX + 2 * HX * k / ( bays * 2 ), x1 = - HX + 2 * HX * ( k + 1 ) / ( bays * 2 );
+			const d0 = k % 2 ? sag : 0, d1 = k % 2 ? 0 : sag;
+			const e = ( x, d ) => [ x, WALL - d * 0.5, s * HZ ], r = ( x, d ) => [ x, RIDGE - d * 0.3, 0 ];
+			tri.push( e( x0, d0 ), e( x1, d1 ), r( x1, d1 ), e( x0, d0 ), r( x1, d1 ), r( x0, d0 ) );
+		}
+		tri.push( [ - HX, 0, s * HZ * 1.03 ], [ HX, 0, s * HZ * 1.03 ], [ HX, WALL, s * HZ ], [ - HX, 0, s * HZ * 1.03 ], [ HX, WALL, s * HZ ], [ - HX, WALL, s * HZ ] );
 	}
 	b.tris( tri, O, T.fabric, [ 0, 0.4, 0 ] );
+	if ( ! lod ) for ( const s of [ - 1, 1 ] ) b.box( HX * 2, 0.06, 0.04, 0x3e472c, T.fabric, { y: WALL + 0.02, z: s * HZ } ); // eave hem
 	for ( const s of [ - 1, 1 ] ) {
 		const x = s * HX;
 		const end = [ [ x, 0, - HZ * 1.03 ], [ x, 0, HZ * 1.03 ], [ x, WALL, HZ ], [ x, 0, - HZ * 1.03 ], [ x, WALL, HZ ], [ x, WALL, - HZ ], [ x, WALL, - HZ ], [ x, WALL, HZ ], [ x, RIDGE, 0 ] ];

@@ -36,7 +36,7 @@ function arReceiver( P, g0 ) {
 	// trigger guard, trigger, pins
 	triggerGuard( P, 'alu', - 0.036, 0.048, - 0.047, 0.031, 0.0045 );
 	trigger( P, 0.0, - 0.049 );
-	for ( const [ x, y, r ] of [ [ - 0.108, - 0.023, 0.0029 ], [ 0.098, - 0.023, 0.0029 ], [ - 0.016, - 0.034, 0.0017 ], [ 0.012, - 0.034, 0.0017 ] ] ) P.cylZ( r > 0.002 ? 'steel' : 'blk', x, y, - lz - 0.0009, lz + 0.0009, r, 10 );
+	for ( const [ x, y, r ] of [ [ - 0.108, - 0.023, 0.0029 ], [ 0.098, - 0.023, 0.0029 ], [ - 0.016, - 0.034, 0.0017 ], [ 0.012, - 0.034, 0.0017 ] ] ) P.cylZ( r > 0.002 ? 'steelD' : 'blk', x, y, - lz - 0.0009, lz + 0.0009, r, 10 );
 	// selector (left lever, right stub), bolt catch (left), mag release and its fence (right)
 	P.cylZ( 'blk', - 0.061, - 0.028, - lz - 0.0016, - lz, 0.0056, 12 );
 	P.extS( 'blk', [ [ - 0.063, - 0.025 ], [ - 0.04, - 0.029, 0.002 ], [ - 0.042, - 0.034, 0.002 ], [ - 0.063, - 0.031 ] ], 0.0008, 0.0003, - lz - 0.0022 );

@@ -77,14 +77,14 @@ export function magData( def ) {
 export function buildGunView( def, mode = 'view' ) {
 	const data = gunData( def );
 	const mats = weaponMaterials( mode );
-	const obj = instantiate( data.baked, mats, false );
+	const obj = instantiate( data.baked, mats, false, true );
 	const parts = obj.userData.parts;
 	if ( parts.mount ) parts.mount.visible = false;
 	return { obj, info: data.info, parts };
 }
 
 export function buildMagView( def, mode = 'view' ) {
-	const obj = instantiate( magData( def ).baked, weaponMaterials( mode ), false );
+	const obj = instantiate( magData( def ).baked, weaponMaterials( mode ), false, true );
 	obj.name = def.id;
 	return obj;
 }
@@ -100,17 +100,25 @@ function layDown( inner, rotX = - PI / 2 ) {
 	return g;
 }
 
+// a baked gun without its optic mount (the item model shows the gun as found)
+function withoutMount( baked ) {
+	if ( ! baked.subs.mount ) return baked;
+	const subs = { ...baked.subs };
+	delete subs.mount;
+	return { ...baked, subs, pal: undefined };
+}
+
 registerModelBuilder( 'gun', ( spec, def ) => {
-	// (v2: the models/*.js rebuild; the signature of this source re-renders cached icons)
+	// (v3: drawn with the palette, finishes intact on the ground; the signature of this source re-renders cached icons)
+	// (the optic mount is left out: an instancer would draw a hidden part anyway)
 	const data = gunData( def );
 	const mats = weaponMaterials();
-	const inner = instantiate( data.baked, mats, true );
-	if ( inner.userData.parts.mount ) inner.userData.parts.mount.visible = false;
+	const inner = instantiate( withoutMount( data.baked ), mats, true, true );
 	const f = def.firearm;
 	if ( f?.feed === 'mag' && f.mags?.length && data.info.mag ) {
 		const mdef = getItem( f.mags[ 0 ] );
 		if ( mdef ) {
-			const m = instantiate( magData( mdef ).baked, mats, true );
+			const m = instantiate( magData( mdef ).baked, mats, true, true );
 			m.position.set( ...data.info.mag.p ); m.rotation.z = data.info.mag.rake || 0;
 			inner.add( m );
 		}
@@ -119,8 +127,8 @@ registerModelBuilder( 'gun', ( spec, def ) => {
 } );
 
 registerModelBuilder( 'mag', ( spec, def ) => {
-	// (v2: the models/*.js rebuild; the signature of this source re-renders cached icons)
-	const inner = instantiate( magData( def ).baked, weaponMaterials(), true );
+	// (v3: drawn with the palette; the signature of this source re-renders cached icons)
+	const inner = instantiate( magData( def ).baked, weaponMaterials(), true, true );
 	return layDown( inner );
 } );
 
@@ -134,13 +142,13 @@ export function attachmentData( def ) {
 }
 export function buildAttachmentView( def, mode = 'view' ) {
 	const d = attachmentData( def );
-	return { obj: instantiate( d.baked, weaponMaterials( mode ), false ), info: d.info };
+	return { obj: instantiate( d.baked, weaponMaterials( mode ), false, true ), info: d.info };
 }
 registerModelBuilder( 'attachment', ( spec, def ) => {
-	// (v2: the models/*.js rebuild; the signature of this source re-renders cached icons)
+	// (v3: drawn with the palette; the signature of this source re-renders cached icons)
 	const d = attachmentData( def );
-	const inner = instantiate( d.baked, weaponMaterials(), true );
-	return layDown( inner, spec.kind === 'supp' || spec.kind === 'light' ? 0 : 0 );
+	const inner = instantiate( d.baked, weaponMaterials(), true, true );
+	return layDown( inner, 0 );
 } );
 
 const MELEE_CACHE = new Map();
@@ -153,11 +161,11 @@ export function meleeData( def ) {
 }
 export function buildMeleeView( def, mode = 'view' ) {
 	const d = meleeData( def );
-	return { obj: instantiate( d.baked, weaponMaterials( mode ), false ), info: d.info };
+	return { obj: instantiate( d.baked, weaponMaterials( mode ), false, true ), info: d.info };
 }
 registerModelBuilder( 'melee', ( spec, def ) => {
-	// (v2: the models/*.js rebuild; the signature of this source re-renders cached icons)
-	return layDown( instantiate( meleeData( def ).baked, weaponMaterials(), true ), meleeData( def ).info.flat ? 0 : - PI / 2 );
+	// (v3: drawn with the palette; the signature of this source re-renders cached icons)
+	return layDown( instantiate( meleeData( def ).baked, weaponMaterials(), true, true ), meleeData( def ).info.flat ? 0 : - PI / 2 );
 } );
 
 const THROW_CACHE = new Map();
@@ -167,10 +175,10 @@ export function throwableData( def ) {
 	THROW_CACHE.set( def.id, d );
 	return d;
 }
-export function buildThrowableView( def, mode = 'view' ) { return instantiate( throwableData( def ).baked, weaponMaterials( mode ), false ); }
+export function buildThrowableView( def, mode = 'view' ) { return instantiate( throwableData( def ).baked, weaponMaterials( mode ), false, true ); }
 registerModelBuilder( 'throwable', ( spec, def ) => {
-	// (v2: the models/*.js rebuild; the signature of this source re-renders cached icons)
-	const inner = instantiate( throwableData( def ).baked, weaponMaterials(), true );
+	// (v3: drawn with the palette; the signature of this source re-renders cached icons)
+	const inner = instantiate( throwableData( def ).baked, weaponMaterials(), true, true );
 	// spec.lay: how a long thrown thing lies (a knife, a string of firecrackers: on its side)
 	return layDown( inner, spec.lay ?? ( spec.kind === 'molotov' ? PI / 2 : 0 ) );
 } );

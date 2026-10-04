@@ -33,20 +33,24 @@ export const MAT = {
 	// a coated objective seen from the front: a deep glass that reflects tinted (the coating)
 	coat: { color: 0x5b4a86, metalness: 1.0, roughness: 0.08, lens: 1 },
 	gray: { color: 0x2a2c2f, metalness: 0.05, roughness: 0.66, grip: 1, fin: 'poly' },
-	wood: { color: 0x9a5c36, metalness: 0.0, roughness: 0.5, fin: 'wood' },
-	hardwood: { color: 0x6e4024, metalness: 0.0, roughness: 0.46, fin: 'wood' }, // oiled birch / beech service stocks
-	walnut: { color: 0x4f301c, metalness: 0.0, roughness: 0.42, fin: 'wood' },
-	walnutC: { color: 0x3e2515, metalness: 0.0, roughness: 0.6, grip: 1, fin: 'wood' }, // cut checkering
-	lam: { color: 0x5e2a18, metalness: 0.0, roughness: 0.4, fin: 'wood' },
-	koa: { color: 0xa8652f, metalness: 0.0, roughness: 0.4, fin: 'wood' },
-	shellac: { color: 0x6a2f19, metalness: 0.0, roughness: 0.3, fin: 'wood' }, // the SKS's red shellac
+	// (stained and oiled stocks read a shade darker and browner than their raw colour: the brighter, redder values
+	// these had read as orange plastic in the sun)
+	wood: { color: 0x7c4b2e, metalness: 0.0, roughness: 0.5, fin: 'wood' },
+	hardwood: { color: 0x613a22, metalness: 0.0, roughness: 0.46, fin: 'wood' }, // oiled birch / beech service stocks
+	walnut: { color: 0x4a2e1c, metalness: 0.0, roughness: 0.42, fin: 'wood' },
+	walnutC: { color: 0x3a2416, metalness: 0.0, roughness: 0.6, grip: 1, fin: 'wood' }, // cut checkering
+	lam: { color: 0x512618, metalness: 0.0, roughness: 0.4, fin: 'wood' },
+	koa: { color: 0x96592c, metalness: 0.0, roughness: 0.4, fin: 'wood' },
+	shellac: { color: 0x5a2818, metalness: 0.0, roughness: 0.3, fin: 'wood' }, // the SKS's red shellac
 	steel: { color: 0xa7abb0, metalness: 1.0, roughness: 0.3, fin: 'metal', bare: 0xc9cdd2 },
+	// machined steel in use: pins, swivels, a bolt seen through its port (polished steel there read as a white label)
+	steelD: { color: 0x5e6267, metalness: 0.9, roughness: 0.42, fin: 'metal', bare: 0xa3a7ac },
 	// colour case-hardened receivers (double guns, lever actions): blues, straws and greys mottled by the noise
 	case: { color: 0x6b6c70, metalness: 0.9, roughness: 0.3, fin: 'metal', bare: 0xb8bbbf, tint: 1 },
 	chrome: { color: 0xd2d5d9, metalness: 1.0, roughness: 0.16 },
-	blade: { color: 0xc3c7cb, metalness: 1.0, roughness: 0.22, fin: 'metal', bare: 0xd6d9dc },
+	blade: { color: 0xc3c7cb, metalness: 1.0, roughness: 0.22, fin: 'metal', bare: 0xd6d9dc, brush: 1 },
 	darkblade: { color: 0x3b3e42, metalness: 0.8, roughness: 0.4, fin: 'metal', bare: 0xa5a9ae },
-	satin: { color: 0x9a9ea3, metalness: 1.0, roughness: 0.4, fin: 'metal', bare: 0xc4c7ca }, // a blade's brushed flats
+	satin: { color: 0x9a9ea3, metalness: 1.0, roughness: 0.4, fin: 'metal', bare: 0xc4c7ca, brush: 1 }, // a blade's brushed flats
 	hamon: { color: 0xd4d8db, metalness: 0.7, roughness: 0.46 }, // the frosted hardened edge of a katana
 	galv: { color: 0x878c90, metalness: 0.85, roughness: 0.48, fin: 'metal', bare: 0xb4b8bb }, // galvanised pipe
 	leather: { color: 0x5a3a22, metalness: 0.0, roughness: 0.62, fin: 'poly' },
@@ -60,7 +64,9 @@ export const MAT = {
 	red: { color: 0xa21d17, metalness: 0.0, roughness: 0.48 },
 	yellow: { color: 0xd8b02a, metalness: 0.0, roughness: 0.55 }, // stencil paint
 	green2: { color: 0x2c6a2e, metalness: 0.0, roughness: 0.5 },
-	plum: { color: 0x4a2219, metalness: 0.0, roughness: 0.58, fin: 'poly' },
+	plum: { color: 0x3e1d16, metalness: 0.0, roughness: 0.58, fin: 'poly' },
+	// a moulded grip's textured panel: the frame's polymer, rougher (a black rubber patch read as a sticker)
+	polyT: { color: 0x242527, metalness: 0.0, roughness: 0.8, grip: 1, fin: 'poly' },
 	polyP: { color: 0x2a2423, metalness: 0.0, roughness: 0.6, grip: 1, fin: 'poly' }, // the AK-74M's plum-black polymer
 	bakelite: { color: 0x47200f, metalness: 0.0, roughness: 0.4, fin: 'poly' },
 	smoke: { color: 0x3a3630, metalness: 0.0, roughness: 0.25, transparent: true, opacity: 0.82 },
@@ -86,13 +92,72 @@ export const MAT = {
 
 // The finish, worked out in the gun's own frame (every part's geometry is in it, so the noise lines up across parts):
 // value noise mottles the colour and the sheen, a fine grain bumps the normal, worn edges (the `wear` attribute: 1 on
-// bevels, 0 on faces) go through to bare metal, and wood gets growth rings round an axis along the gun.
+// bevels, 0 on faces) go through to bare metal, wood gets growth rings round an axis along the gun, and brushed steel
+// (a blade's flats) streaks along the part.
+// A finish's own material compiles only its finish (WPN_METAL, ...). The palette material (WPN_PAL) looks each part's
+// colour, roughness, metalness, bare metal and finish up in a small table by the part's index (its uv.x): a whole model
+// draws in one call and one program, in the hands, on the ground (the item instancer keeps it whole) and in icons.
+const WPN_FLAGS = /* glsl */`
+#ifdef WPN_PAL
+#define W_METAL ( abs( vPalF.x - 1.0 ) < 0.5 )
+#define W_POLY ( abs( vPalF.x - 2.0 ) < 0.5 )
+#define W_WOOD ( abs( vPalF.x - 3.0 ) < 0.5 )
+#define W_MATTE ( abs( vPalF.x - 4.0 ) < 0.5 )
+#define W_GRIP ( vPalF.y > 0.5 )
+#define W_CASE ( vPalF.z > 0.5 )
+#define W_BRUSH ( vPalF.w > 0.5 )
+#define WBARE vPalB.rgb
+#else
+#ifdef WPN_METAL
+#define W_METAL true
+#else
+#define W_METAL false
+#endif
+#ifdef WPN_POLY
+#define W_POLY true
+#else
+#define W_POLY false
+#endif
+#ifdef WPN_WOOD
+#define W_WOOD true
+#else
+#define W_WOOD false
+#endif
+#ifdef WPN_MATTE
+#define W_MATTE true
+#else
+#define W_MATTE false
+#endif
+#ifdef WPN_GRIP
+#define W_GRIP true
+#else
+#define W_GRIP false
+#endif
+#ifdef WPN_CASE
+#define W_CASE true
+#else
+#define W_CASE false
+#endif
+#ifdef WPN_BRUSH
+#define W_BRUSH true
+#else
+#define W_BRUSH false
+#endif
+#define WBARE uBare
+#endif
+`;
 const WPN_PARS = /* glsl */`
 varying vec3 vWObj;
 #ifdef WPN_EDGE
 varying float vWear;
 #endif
 uniform vec3 uBare;
+#ifdef WPN_PAL
+varying vec4 vPalA;
+varying vec4 vPalB;
+varying vec4 vPalF;
+#endif
+${WPN_FLAGS}
 float wHash( vec3 p ) { p = fract( p * 0.3183099 + 0.1 ); p *= 17.0; return fract( p.x * p.y * p.z * ( p.x + p.y + p.z ) ); }
 float wNoise( vec3 x ) {
 	vec3 i = floor( x ), f = fract( x );
@@ -103,57 +168,78 @@ float wNoise( vec3 x ) {
 `;
 const WPN_SURFACE = /* glsl */`
 {
+	#ifdef WPN_PAL
+	metalnessFactor = vPalB.a;
+	#endif
 	vec3 op = vWObj;
-	float n1 = wNoise( op * 140.0 ), n2 = wNoise( op * 700.0 + 3.1 );
-	// the fine noise is a sparkle at arm's length; seen closer (a sight at the eye) its cells would read as tiles
-	n2 = mix( 0.5, n2, 0.2 + 0.8 * smoothstep( 0.15, 0.45, length( fwidth( op * 700.0 ) ) ) );
-	#if defined( WPN_METAL ) || defined( WPN_POLY ) || defined( WPN_MATTE )
-	diffuseColor.rgb *= 0.93 + 0.14 * n1;
-	roughnessFactor = clamp( roughnessFactor * ( 0.85 + 0.3 * n2 ), 0.05, 1.0 );
-	#endif
-	#ifdef WPN_CASE
-	float cA = wNoise( op * 55.0 + 1.7 ), cB = wNoise( op * 120.0 + 5.3 );
-	vec3 tint = mix( vec3( 0.42, 0.5, 0.78 ), vec3( 1.25, 1.0, 0.62 ), smoothstep( 0.35, 0.7, cA ) );
-	tint = mix( tint, vec3( 0.7, 0.55, 0.85 ), smoothstep( 0.6, 0.85, cB ) * 0.6 );
-	diffuseColor.rgb *= mix( vec3( 1.0 ), tint, 0.75 );
-	#endif
-	#ifdef WPN_WOOD
-	float w = wNoise( op * vec3( 5.0, 40.0, 40.0 ) );
-	// the growth rings round a log axis that wanders (a warp of a few rings), so the figure isn't ruled lines
-	vec2 warp = vec2( wNoise( op * vec3( 1.5, 6.0, 6.0 ) ), wNoise( op * vec3( 1.5, 6.0, 6.0 ) + 4.7 ) ) - 0.5;
-	float ring = fract( length( op.yz + vec2( 0.31, 0.17 ) + warp * 0.028 ) * 120.0 + w * 3.0 + wNoise( op * vec3( 2.5, 9.0, 9.0 ) ) * 4.5 );
-	float late = smoothstep( 0.5, 0.8, ring ) * ( 1.0 - smoothstep( 0.88, 1.0, ring ) );
-	float pore = smoothstep( 0.62, 0.9, wNoise( op * vec3( 30.0, 1100.0, 1100.0 ) ) );
-	diffuseColor.rgb *= ( 1.0 - 0.3 * late ) * ( 1.0 - 0.2 * pore ) * ( 0.86 + 0.28 * w );
-	roughnessFactor = clamp( roughnessFactor + 0.14 * late + 0.1 * pore, 0.05, 1.0 );
-	#endif
+	// brushed steel: the noise drawn out along the part, fine across it (streaks, not a hammered mottle)
+	vec3 nq = W_BRUSH ? op * vec3( 0.07, 1.0, 1.0 ) : op;
+	// the mottle in octaves (35 mm, 7 mm, 1.4 mm, 0.36 mm cells), each shown only while its cells are a few to ~30
+	// pixels across: a fixed scale read as soft blotches with a sight at the eye and as sparkle on the ground
+	float f0 = length( fwidth( nq * 35.0 ) ), f1 = length( fwidth( nq * 140.0 ) ), f2 = length( fwidth( nq * 700.0 ) ), f3 = length( fwidth( nq * 2800.0 ) );
+	#define WOCT( f ) ( smoothstep( 0.03, 0.1, f ) * ( 1.0 - smoothstep( 0.4, 0.8, f ) ) )
+	float o0 = WOCT( f0 ), o1 = WOCT( f1 ), o2 = WOCT( f2 ), o3 = WOCT( f3 );
+	// (an octave out of range costs nothing: mostly two of the four are drawn)
+	float n0 = o0 > 0.0 ? wNoise( nq * 35.0 + 9.1 ) : 0.5, n1 = o1 > 0.0 ? wNoise( nq * 140.0 ) : 0.5;
+	float n2 = o2 > 0.0 ? wNoise( nq * 700.0 + 3.1 ) : 0.5, n3 = o3 > 0.0 ? wNoise( nq * 2800.0 + 5.7 ) : 0.5;
+	float mott = ( n0 - 0.5 ) * o0 * 0.8 + ( n1 - 0.5 ) * o1 + ( n2 - 0.5 ) * o2 * 0.7 + ( n3 - 0.5 ) * o3 * 0.5;
+	float sheen = ( n0 - 0.5 ) * o0 * 0.5 + ( n1 - 0.5 ) * o1 * 0.5 + ( n2 - 0.5 ) * o2 + ( n3 - 0.5 ) * o3 * 0.8;
+	if ( W_METAL || W_POLY || W_MATTE ) {
+		// (a glossy finish, bluing or polished steel, shows a mottle as hammered blotches in its reflections: the
+		// smoother the finish, the fainter)
+		float gl = smoothstep( 0.18, 0.5, roughnessFactor );
+		diffuseColor.rgb *= 1.0 + mott * ( 0.05 + 0.09 * gl );
+		roughnessFactor = clamp( roughnessFactor * ( 1.0 + sheen * ( 0.12 + 0.18 * gl ) ), 0.05, 1.0 );
+	}
+	if ( W_CASE ) {
+		// (the colours swirled by a warped lookup, marbled the way the bone charcoal leaves them, not in round spots)
+		vec3 cq = op * 55.0 + ( wNoise( op * 18.0 + 2.3 ) - 0.5 ) * 2.6;
+		float cA = wNoise( cq + 1.7 ), cB = wNoise( cq * 2.1 + 5.3 );
+		vec3 tint = mix( vec3( 0.45, 0.52, 0.78 ), vec3( 1.2, 1.0, 0.66 ), smoothstep( 0.3, 0.75, cA ) );
+		tint = mix( tint, vec3( 0.72, 0.58, 0.85 ), smoothstep( 0.6, 0.88, cB ) * 0.5 );
+		diffuseColor.rgb *= mix( vec3( 1.0 ), tint, 0.62 );
+	}
+	if ( W_WOOD ) {
+		float w = wNoise( op * vec3( 4.0, 45.0, 45.0 ) );
+		// the growth rings round a log axis along the part that wanders a little: on the long faces they run as
+		// straight grain with a gentle drift, on the ends and round the curves they open into the cathedral figure
+		// (a stronger warp drew contour-map whorls everywhere)
+		vec2 warp = vec2( wNoise( op * vec3( 1.5, 6.0, 6.0 ) ), wNoise( op * vec3( 1.5, 6.0, 6.0 ) + 4.7 ) ) - 0.5;
+		float ring = fract( length( op.yz + vec2( 0.31, 0.17 ) + warp * 0.02 ) * 150.0 + w * 1.3 + wNoise( op * vec3( 2.0, 7.0, 7.0 ) ) * 1.8 );
+		float late = smoothstep( 0.55, 0.8, ring ) * ( 1.0 - smoothstep( 0.86, 1.0, ring ) );
+		float pore = smoothstep( 0.62, 0.9, wNoise( op * vec3( 30.0, 1100.0, 1100.0 ) ) );
+		diffuseColor.rgb *= ( 1.0 - 0.2 * late ) * ( 1.0 - 0.16 * pore ) * ( 0.88 + 0.24 * w );
+		roughnessFactor = clamp( roughnessFactor + 0.1 * late + 0.1 * pore, 0.05, 1.0 );
+	}
 	#ifdef WPN_EDGE
-	// patchy: only where the low noise is high does an edge wear through
-	float wm = smoothstep( 0.55, 0.85, vWear * smoothstep( 0.42, 0.78, wNoise( op * 60.0 + 7.3 ) ) + ( n2 - 0.5 ) * 0.35 );
-	#if defined( WPN_METAL )
-	diffuseColor.rgb = mix( diffuseColor.rgb, uBare, wm * 0.7 );
-	metalnessFactor = mix( metalnessFactor, 1.0, wm );
-	roughnessFactor = mix( roughnessFactor, 0.3, wm );
-	#elif defined( WPN_POLY )
-	diffuseColor.rgb *= 1.0 + 0.7 * wm;
-	roughnessFactor = mix( roughnessFactor, 0.85, wm );
-	#elif defined( WPN_WOOD )
-	diffuseColor.rgb *= 1.0 + 0.3 * wm;
-	roughnessFactor = mix( roughnessFactor, 0.7, wm );
-	#endif
+	// patchy: only where the low noise is high does an edge wear through, its border broken up a few mm at a time
+	// (not by the fine sparkle noise: that turned every edge into salt and pepper)
+	float wm = smoothstep( 0.55, 0.85, vWear * smoothstep( 0.42, 0.78, wNoise( op * 60.0 + 7.3 ) ) + ( wNoise( op * 260.0 + 1.7 ) - 0.5 ) * 0.3 );
+	if ( W_METAL ) {
+		diffuseColor.rgb = mix( diffuseColor.rgb, WBARE, wm * 0.65 );
+		metalnessFactor = mix( metalnessFactor, 1.0, wm );
+		roughnessFactor = mix( roughnessFactor, 0.3, wm );
+	} else if ( W_POLY ) {
+		diffuseColor.rgb *= 1.0 + 0.6 * wm;
+		roughnessFactor = mix( roughnessFactor, 0.85, wm );
+	} else if ( W_WOOD ) {
+		diffuseColor.rgb *= 1.0 + 0.3 * wm;
+		roughnessFactor = mix( roughnessFactor, 0.7, wm );
+	}
 	#endif
 }
 `;
 // a fine cast / blasted grain on metal and polymer (a bump from the noise's screen derivatives)
 const WPN_GRAIN = /* glsl */`
-#if defined( WPN_METAL ) || defined( WPN_POLY ) || defined( WPN_GRIP )
+#if defined( WPN_PAL ) || defined( WPN_METAL ) || defined( WPN_POLY ) || defined( WPN_GRIP )
 {
-	// (each bump fades out where its cells grow past a few pixels: up close they'd show as square facets)
-	float h = wNoise( vWObj * 520.0 ) * 0.00003 * smoothstep( 0.12, 0.4, length( fwidth( vWObj * 520.0 ) ) );
-	#ifdef WPN_GRIP
+	// (each bump fades out where its cells grow past a few pixels: up close they'd show as square facets; the
+	// derivatives are taken outside any branch, a palette part's finish only scales the height)
+	vec3 gq = W_BRUSH ? vWObj * vec3( 0.07, 1.0, 1.0 ) : vWObj;
+	float h = wNoise( gq * 520.0 ) * 0.00003 * smoothstep( 0.12, 0.4, length( fwidth( gq * 520.0 ) ) );
 	// moulded stipple on grips and pads: fine raised bumps (in the gun's frame, so every part has the same grain)
-	h += smoothstep( 0.4, 0.8, wNoise( vWObj * 1250.0 ) ) * 0.00005 * smoothstep( 0.03, 0.15, length( fwidth( vWObj * 1250.0 ) ) );
-	#endif
+	h += ( W_GRIP ? 1.0 : 0.0 ) * smoothstep( 0.4, 0.8, wNoise( vWObj * 1250.0 ) ) * 0.00005 * smoothstep( 0.03, 0.15, length( fwidth( vWObj * 1250.0 ) ) );
+	h *= W_METAL || W_POLY || W_GRIP ? 1.0 : 0.0;
 	vec2 dH = vec2( dFdx( h ), dFdy( h ) );
 	vec3 sx = dFdx( - vViewPosition ), sy = dFdy( - vViewPosition );
 	vec3 r1 = cross( sy, normal ), r2 = cross( normal, sx );
@@ -162,17 +248,45 @@ const WPN_GRAIN = /* glsl */`
 }
 #endif
 `;
-function weaponShader( m, bare ) {
+// pal: the palette table (a DataTexture) for the palette material
+function weaponShader( m, bare, pal = null ) {
 	return ( shader ) => {
 		shader.uniforms.uBare = { value: bare };
+		if ( pal ) shader.uniforms.uPal = { value: pal };
 		shader.vertexShader = shader.vertexShader
-			.replace( '#include <common>', '#include <common>\nvarying vec3 vWObj;\n#ifdef WPN_EDGE\nattribute float wear;\nvarying float vWear;\n#endif' )
-			.replace( '#include <begin_vertex>', '#include <begin_vertex>\nvWObj = position;\n#ifdef WPN_EDGE\nvWear = wear;\n#endif' );
+			.replace( '#include <common>', '#include <common>\nvarying vec3 vWObj;\n#ifdef WPN_EDGE\nattribute float wear;\nvarying float vWear;\n#endif\n#ifdef WPN_PAL\nuniform highp sampler2D uPal;\nvarying vec4 vPalA;\nvarying vec4 vPalB;\nvarying vec4 vPalF;\n#endif' )
+			.replace( '#include <begin_vertex>', '#include <begin_vertex>\nvWObj = position;\n#ifdef WPN_EDGE\nvWear = wear;\n#endif\n#ifdef WPN_PAL\n{ int pi = int( uv.x + 0.5 ); vPalA = texelFetch( uPal, ivec2( pi, 0 ), 0 ); vPalB = texelFetch( uPal, ivec2( pi, 1 ), 0 ); vPalF = texelFetch( uPal, ivec2( pi, 2 ), 0 ); }\n#endif' );
 		shader.fragmentShader = shader.fragmentShader
 			.replace( '#include <common>', '#include <common>\n' + WPN_PARS )
+			// (the palette's colour and roughness go in before the world's wetness darkens and smooths them)
+			.replace( '#include <color_fragment>', '#include <color_fragment>\n#ifdef WPN_PAL\ndiffuseColor.rgb *= vPalA.rgb;\n#endif' )
+			.replace( '#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n#ifdef WPN_PAL\nroughnessFactor = vPalA.a;\n#endif' )
 			.replace( '#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\n' + WPN_SURFACE )
 			.replace( '#include <normal_fragment_maps>', '#include <normal_fragment_maps>\n' + WPN_GRAIN );
 	};
+}
+
+// The palette: every opaque, unlit finish (not glass, lenses' tinted glass or glowing inserts) gets an index; a model's
+// parts in those finishes merge into one mesh whose uv.x is each vertex's index (the finishes don't use uvs). Its table
+// (3 rows: colour + roughness, bare metal + metalness, finish flags) is a float texture the vertex shader reads.
+export const PAL = '~pal';
+const palettable = ( d ) => !! d && ! d.transparent && ! d.emissive;
+const FIN_CODE = { metal: 1, poly: 2, wood: 3, matte: 4 };
+const PAL_KEYS = Object.keys( MAT ).filter( ( k ) => palettable( MAT[ k ] ) );
+const PAL_INDEX = new Map( PAL_KEYS.map( ( k, i ) => [ k, i ] ) );
+let palTex = null;
+function paletteTexture() {
+	if ( palTex ) return palTex;
+	const n = PAL_KEYS.length, data = new Float32Array( n * 3 * 4 ), c = new THREE.Color();
+	PAL_KEYS.forEach( ( k, i ) => {
+		const d = MAT[ k ];
+		c.set( d.color ); data.set( [ c.r, c.g, c.b, d.roughness ], i * 4 );
+		c.set( d.bare ?? d.color ); data.set( [ c.r, c.g, c.b, d.metalness ], ( n + i ) * 4 );
+		data.set( [ FIN_CODE[ d.fin ] || 0, d.grip ? 1 : 0, d.tint ? 1 : 0, d.brush ? 1 : 0 ], ( 2 * n + i ) * 4 );
+	} );
+	palTex = new THREE.DataTexture( data, n, 3, THREE.RGBAFormat, THREE.FloatType );
+	palTex.needsUpdate = true;
+	return palTex;
 }
 
 const MATS = {};
@@ -181,6 +295,7 @@ const MATS = {};
 export function weaponMaterials( mode = 'world' ) {
 	if ( MATS[ mode ] ) return MATS[ mode ];
 	const out = {};
+	const view = mode === 'view';
 	for ( const k in MAT ) {
 		const d = MAT[ k ];
 		const m = new THREE.MeshStandardMaterial( {
@@ -189,22 +304,54 @@ export function weaponMaterials( mode = 'world' ) {
 		} );
 		if ( d.transparent ) { m.depthWrite = ! d.lens; }
 		m.name = 'wpn_' + k;
-		const view = mode === 'view';
 		m.defines = view ? { NO_ATMOS_FOG: '' } : {};
 		const fin = d.fin;
 		if ( fin ) {
 			m.defines[ 'WPN_' + fin.toUpperCase() ] = '';
 			if ( d.grip ) m.defines.WPN_GRIP = '';
 			if ( d.tint ) m.defines.WPN_CASE = '';
+			if ( d.brush ) m.defines.WPN_BRUSH = '';
 			if ( view && fin !== 'matte' ) m.defines.WPN_EDGE = '';
 		}
 		const extra = fin ? weaponShader( m, new THREE.Color( d.bare ?? d.color ) ) : null;
-		const key = ( view ? 'wpn-view' : 'wpn' ) + ( fin ? '-' + fin : '' ) + ( d.grip ? '-grip' : '' ) + ( d.tint ? '-case' : '' );
+		const key = ( view ? 'wpn-view' : 'wpn' ) + ( fin ? '-' + fin : '' ) + ( d.grip ? '-grip' : '' ) + ( d.tint ? '-case' : '' ) + ( d.brush ? '-brush' : '' );
 		if ( view ) patchMaterial( m, key, extra, { noCloudShadow: true } );
 		else patchMaterial( m, key, extra );
 		out[ k ] = m;
 	}
+	// the palette material: white, its parts' finishes from the table
+	const m = new THREE.MeshStandardMaterial( { color: 0xffffff, metalness: 1, roughness: 1 } );
+	m.name = 'wpn_palette';
+	m.defines = view ? { NO_ATMOS_FOG: '', WPN_PAL: '', WPN_EDGE: '' } : { WPN_PAL: '' };
+	const extra = weaponShader( m, new THREE.Color(), paletteTexture() );
+	if ( view ) patchMaterial( m, 'wpn-view-pal', extra, { noCloudShadow: true } );
+	else patchMaterial( m, 'wpn-pal', extra );
+	out[ PAL ] = m;
 	MATS[ mode ] = out;
+	return out;
+}
+
+// a baked part's meshes for drawing with the palette: [ [ material key, geometry ] ], the palette's merged part first
+function paletteGeo( baked ) {
+	if ( baked.pal ) return baked.pal;
+	const out = [], geos = [];
+	for ( const k in baked.geo ) {
+		const pk = MAT[ k ] ? k : 'blk';
+		if ( ! palettable( MAT[ pk ] ) ) { out.push( [ k, baked.geo[ k ] ] ); continue; }
+		const src = baked.geo[ k ], n = src.attributes.position.count, idx = PAL_INDEX.get( pk );
+		const g = new THREE.BufferGeometry();
+		for ( const a of [ 'position', 'normal', 'wear' ] ) g.setAttribute( a, src.attributes[ a ] );
+		const uv = new Float32Array( n * 2 );
+		for ( let i = 0; i < n; i ++ ) uv[ i * 2 ] = idx;
+		g.setAttribute( 'uv', new THREE.BufferAttribute( uv, 2 ) );
+		geos.push( g );
+	}
+	if ( geos.length ) {
+		const m = geos.length === 1 ? geos[ 0 ] : mergeGeometries( geos, false );
+		m.computeBoundingBox(); m.computeBoundingSphere();
+		out.unshift( [ PAL, m ] );
+	}
+	baked.pal = out;
 	return out;
 }
 
@@ -452,11 +599,13 @@ export class Parts {
 }
 
 // Object3D from a baked part tree. Sub-part geometry is in the parent frame; its group sits at the pivot.
-export function instantiate( baked, mats, shadows = false ) {
+// batch: draw the opaque finishes with the palette, one mesh per part (the views, and the item models: the world's
+// instancer keeps a non-plain material whole, so a dropped gun is one instanced draw with its finishes intact)
+export function instantiate( baked, mats, shadows = false, batch = false ) {
 	const g = new THREE.Group();
 	g.name = baked.name || '';
-	for ( const k in baked.geo ) {
-		const mesh = new THREE.Mesh( baked.geo[ k ], mats[ k ] || mats.blk );
+	for ( const [ k, geo ] of batch ? paletteGeo( baked ) : Object.entries( baked.geo ) ) {
+		const mesh = new THREE.Mesh( geo, mats[ k ] || mats.blk );
 		mesh.castShadow = shadows && ! mats[ k ]?.transparent; mesh.receiveShadow = shadows;
 		if ( baked.pivot.lengthSq() > 0 ) mesh.position.copy( baked.pivot ).negate();
 		g.add( mesh );
@@ -464,7 +613,7 @@ export function instantiate( baked, mats, shadows = false ) {
 	g.userData.parts = {};
 	for ( const k in baked.subs ) {
 		const sb = baked.subs[ k ];
-		const child = instantiate( sb, mats, shadows );
+		const child = instantiate( sb, mats, shadows, batch );
 		// child meshes are in the parent frame: the group sits at the pivot, meshes offset back by the pivot
 		child.position.copy( sb.pivot ).sub( baked.pivot );
 		child.userData.rest = child.position.clone();
@@ -561,7 +710,7 @@ export const slot = ( x0, x1, y, h, n = 4 ) => {
 // ---- shared sub-assemblies ---------------------------------------------------------------------------------------------
 
 // pins through a receiver (both sides), [ [ x, y ], ... ] at half width hz
-export function pins( P, list, hz, r = 0.0018, mat = 'steel' ) {
+export function pins( P, list, hz, r = 0.0018, mat = 'steelD' ) {
 	for ( const [ x, y, rr ] of list ) P.cylZ( mat, x, y, - hz - 0.0006, hz + 0.0006, rr ?? r, 10 );
 }
 
@@ -585,12 +734,12 @@ export function screw( P, x, y, z, axis = 'z', s = 1, r = 0.0022, mat = 'blk', h
 // a sling swivel: its stud and the loop hanging from it, on the underside at ( x, y ) (or on a side: side = ±1, ring in xy)
 export function swivel( P, x, y, z = 0, r = 0.0078, side = 0 ) {
 	if ( side ) {
-		P.cylZ( 'steel', x, y, z, z + side * 0.004, 0.0032, 8 );
-		P.put( 'steel', new THREE.TorusGeometry( r, 0.00115, 5, 14 ), [ x, y - r * 0.7, z + side * 0.005 ] );
+		P.cylZ( 'steelD', x, y, z, z + side * 0.004, 0.0032, 8 );
+		P.put( 'steelD', new THREE.TorusGeometry( r, 0.00115, 5, 14 ), [ x, y - r * 0.7, z + side * 0.005 ] );
 		return;
 	}
-	P.cylY( 'steel', x, y - 0.004, y, 0.0032, z, 8 );
-	P.put( 'steel', new THREE.TorusGeometry( r, 0.00115, 5, 14 ), [ x, y - 0.004 - r * 0.8, z ] );
+	P.cylY( 'steelD', x, y - 0.004, y, 0.0032, z, 8 );
+	P.put( 'steelD', new THREE.TorusGeometry( r, 0.00115, 5, 14 ), [ x, y - 0.004 - r * 0.8, z ] );
 }
 
 // folding back-up iron sights clamped on a top rail (rails top at y): the rear aperture at rx, the front post at fx, the

@@ -207,7 +207,7 @@ export function attachmentParts( def ) {
 			P.lathe( 'supp', [ [ - 0.001, 0.0 ], [ - 0.001, r * 0.66 ], [ 0.002, r * 0.76 ], [ 0.031, r * 0.76 ] ], 0, 0, 20 );
 			knurl( P, 'supp', 0.012, 0, 0, r * 0.76 + 0.0003, 0.016, 'x', 20 );
 		} else {
-			knurl( P, m, 0.016, 0, 0, r + 0.0006, 0.02, 'x', 24 );
+			knurl( P, m, 0.021, 0, 0, r + 0.0003, 0.02, 'x', 24 );
 			if ( ! big ) {
 				// the QD latch on the collar
 				P.box( 'blk', 0.006, 0.026, r + 0.0004, r + 0.0034, - 0.0035, 0.0035, 0.001 );

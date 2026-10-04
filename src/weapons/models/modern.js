@@ -26,7 +26,7 @@ export function scar() {
 	// the bolt carrier behind the port (it cycles: 'bolt')
 	const bolt = P.sub( 'bolt', 0.0, 0.002, 0.012 );
 	bolt.box( 'blk', - 0.1, 0.03, - 0.0075, 0.0125, 0.0105, 0.0162, 0.0012 );
-	bolt.box( 'steel', 0.012, 0.03, - 0.004, 0.009, 0.0158, 0.0166, 0.0005 );
+	bolt.box( 'steelD', 0.012, 0.03, - 0.004, 0.009, 0.0158, 0.0166, 0.0005 );
 	bolt.box( 'blk', - 0.026, - 0.008, - 0.004, 0.005, 0.016, 0.0167, 0.0006 );
 	// the hinge for the stock, and the sling point beside it
 	P.box( 'tanM', - 0.191, - 0.177, - 0.0145, 0.034, - 0.0165, 0.0165, 0.003 );
@@ -72,7 +72,7 @@ export function scar() {
 	const ch = P.sub( 'charge', 0.1, 0.02, - 0.018 );
 	ch.box( 'blk', 0.095, 0.106, 0.0165, 0.0255, - 0.0285, - 0.0165, 0.0015 );
 	ch.cylZ( 'blk', 0.101, 0.021, - 0.042, - 0.0265, 0.0058, 12, 0.0052 );
-	ch.cylZ( 'rubber', 0.101, 0.021, - 0.0425, - 0.0418, 0.0045, 10 );
+	ch.cylZ( 'blk', 0.101, 0.021, - 0.0425, - 0.0418, 0.0045, 10 );
 	return { P, info: {
 		sightH: 0.07, rearX: - 0.15, eyeBack: 0.09, muzzle: [ mz, 0, 0 ], eject: [ 0.02, 0.012, 0.018 ], mag: { p: [ 0.083, - 0.022, 0 ], rake: 0 },
 		optic: [ - 0.03, 0.0468 ], light: [ 0.2, 0.0, 0.0303 ], hideWithOptic: [ 'buisR', 'buisF' ],
@@ -96,7 +96,7 @@ export function g36() {
 	P.extS( 'gray', [ [ - 0.064, - 0.004 ], [ - 0.038, - 0.008, 0.004 ], [ - 0.036, 0.02 ], [ - 0.06, 0.02, 0.006 ] ], 0.0035, 0.0012, hz + 0.0025 );
 	const bolt = P.sub( 'bolt', 0.0, 0.005, 0.012 );
 	bolt.box( 'blk', - 0.09, 0.028, - 0.004, 0.014, 0.0105, 0.0168, 0.0012 );
-	bolt.box( 'steel', 0.012, 0.028, - 0.001, 0.011, 0.016, 0.0172, 0.0005 );
+	bolt.box( 'steelD', 0.012, 0.028, - 0.001, 0.011, 0.016, 0.0172, 0.0005 );
 	// handguard: deeper and wider, four rows of vent slots each side and a row underneath, the end cap
 	const hg = [ [ - 0.0215, - 0.036, 0.008 ], [ 0.0215, - 0.036, 0.008 ], [ 0.0215, 0.024, 0.006 ], [ 0.015, 0.031, 0.004 ], [ - 0.015, 0.031, 0.004 ], [ - 0.0215, 0.024, 0.006 ] ];
 	P.extFront( 'gray', hg, 0.074, 0.3, 0.003, 3 );
@@ -105,7 +105,7 @@ export function g36() {
 	P.extFront( 'gray', [ [ - 0.019, - 0.034, 0.008 ], [ 0.019, - 0.034, 0.008 ], [ 0.019, 0.022, 0.006 ], [ 0.013, 0.028, 0.004 ], [ - 0.013, 0.028, 0.004 ], [ - 0.019, 0.022, 0.006 ] ], 0.3, 0.312, 0.002 );
 	// the bayonet lug and front sling loop under the handguard's end, pins through the front
 	P.box( 'blk', 0.3, 0.33, - 0.024, - 0.012, - 0.006, 0.006, 0.0015 );
-	P.put( 'steel', new THREE.TorusGeometry( 0.0075, 0.0013, 5, 14 ), [ 0.292, - 0.045, 0 ] );
+	P.put( 'steelD', new THREE.TorusGeometry( 0.0075, 0.0013, 5, 14 ), [ 0.292, - 0.045, 0 ] );
 	pins( P, [ [ 0.06, - 0.022, 0.0022 ], [ 0.29, - 0.022, 0.0022 ] ], 0.0215 );
 	// barrel, gas block and the flash hider
 	P.lathe( 'blk', [ [ 0.31, 0 ], [ 0.31, 0.0115 ], [ 0.33, 0.0112 ], [ 0.335, 0.0098 ], [ bEnd - 0.01, 0.0094 ], [ bEnd - 0.008, 0.0085 ], [ bEnd, 0.0085 ], [ bEnd, 0 ] ], 0, 0, 16 );
@@ -173,7 +173,7 @@ export function aug() {
 	P.box( 'green', - 0.31, - 0.24, - 0.012, 0.018, - hz - 0.0016, - hz + 0.0004, 0.004 );
 	const bolt = P.sub( 'bolt', - 0.27, 0.003, 0.015 );
 	bolt.box( 'blk', - 0.32, - 0.22, - 0.006, 0.013, 0.012, 0.0222, 0.0015 );
-	bolt.box( 'steel', - 0.25, - 0.232, - 0.003, 0.01, 0.022, 0.0228, 0.0006 );
+	bolt.box( 'steelD', - 0.25, - 0.232, - 0.003, 0.01, 0.022, 0.0228, 0.0006 );
 	// the butt's rubber pad and its cheek-weld ridge, sling loop
 	P.extS( 'rubber', [ [ - 0.428, 0.032 ], [ - 0.442, 0.031, 0.006 ], [ - 0.442, - 0.074, 0.008 ], [ - 0.428, - 0.076 ] ], hz - 0.001, 0.005 );
 	for ( const s of [ - 1, 1 ] ) P.extS( 'green', [ [ - 0.42, 0.01 ], [ - 0.27, 0.014 ], [ - 0.27, - 0.012, 0.01 ], [ - 0.42, - 0.03, 0.01 ] ], 0.0012, 0.0008, s * ( hz + 0.0004 ) );
@@ -245,7 +245,7 @@ export function fal() {
 	// ejection port (right) with the carrier behind it
 	P.box( 'rubber', 0.0, 0.074, - 0.0065, 0.0185, hz - 0.0006, hz + 0.0003, 0.002 );
 	const bolt = P.sub( 'bolt', 0.03, 0.006, 0.012 );
-	bolt.box( 'steel', - 0.05, 0.072, - 0.004, 0.016, 0.0095, 0.0152, 0.0012 );
+	bolt.box( 'steelD', - 0.05, 0.072, - 0.004, 0.016, 0.0095, 0.0152, 0.0012 );
 	bolt.box( 'rubber', 0.012, 0.028, 0.0, 0.012, 0.015, 0.0155, 0.0005 );
 	// charging handle slot (left) and the carry handle folded down along the left of the receiver
 	P.extS( 'rubber', slot( - 0.02, 0.112, 0.012, 0.0025 ), 0.0004, 0.0002, - hz );

@@ -101,7 +101,7 @@ export function sks() {
 	// the carrier with its handle, in the port (it cycles)
 	const bolt = P.sub( 'bolt', 0.05, 0.005, 0.015 );
 	bolt.box( 'blued', - 0.03, 0.07, - 0.0035, 0.0085, 0.0112, 0.0152, 0.001 );
-	bolt.box( 'steel', - 0.026, 0.004, - 0.002, 0.007, 0.0148, 0.0156, 0.0005 );
+	bolt.box( 'steelD', - 0.026, 0.004, - 0.002, 0.007, 0.0148, 0.0156, 0.0005 );
 	bolt.cylZ( 'blued', 0.06, 0.003, 0.0152, 0.028, 0.0034, 10, 0.0038 );
 	bolt.sphere( 'blued', 0.06, 0.003, 0.0292, 0.0052, 10, [ 1, 1, 0.85 ] );
 	return { P, info: {

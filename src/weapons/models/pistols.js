@@ -107,7 +107,7 @@ export function pistol( o ) {
 		if ( v === 'makarov' ) for ( const s of [ - 1, 1 ] ) P.cylZ( 'bakelite', gtx - S.gd * 0.5 - sx * 0.022, gty - cy * 0.022, s * ( hz + 0.0016 ), s * ( hz + 0.0026 ), 0.004, 12 );
 	} else {
 		// the moulded grip's texture panel and the Glock's backstrap ridge
-		for ( const s of [ - 1, 1 ] ) P.extS( 'rubber', [ [ gtx - 0.007 - sx * 0.024, gty - cy * 0.024 ], [ gtx - S.gd + 0.006 - sx * 0.024, gty - cy * 0.024 ], [ gtx - S.gd + 0.008 - sx * 0.08, gty - cy * 0.08, 0.004 ], [ gtx - 0.007 - sx * 0.08, gty - cy * 0.08, 0.004 ] ], 0.0004, 0.0002, s * ( hz - 0.0008 ) );
+		for ( const s of [ - 1, 1 ] ) P.extS( 'polyT', [ [ gtx - 0.007 - sx * 0.024, gty - cy * 0.024 ], [ gtx - S.gd + 0.006 - sx * 0.024, gty - cy * 0.024 ], [ gtx - S.gd + 0.008 - sx * 0.08, gty - cy * 0.08, 0.004 ], [ gtx - 0.007 - sx * 0.08, gty - cy * 0.08, 0.004 ] ], 0.0004, 0.0002, s * ( hz - 0.0008 ) );
 	}
 	// beavertail: the 1911's grip safety; a small tang on the others
 	if ( S.beaver ) {
@@ -126,7 +126,7 @@ export function pistol( o ) {
 	if ( S.hammer ) {
 		const h = P.sub( 'hammer', xr + 0.004, - 0.004, 0 );
 		h.extS( 'blued', [ [ xr + 0.006, - 0.008 ], [ xr + 0.006, 0.006 ], [ xr - 0.006, 0.016, 0.004 ], [ xr - 0.012, 0.012 ], [ xr - 0.004, 0.0 ], [ xr - 0.002, - 0.01 ] ], 0.0035, 0.001 );
-		for ( let i = 0; i < 3; i ++ ) h.box( 'rubber', xr - 0.0105 + i * 0.0032, xr - 0.0092 + i * 0.0032, 0.011 + i * 0.0016, 0.0145 + i * 0.0016, - 0.0036, 0.0036, 0 );
+		for ( let i = 0; i < 3; i ++ ) h.box( 'blued', xr - 0.0105 + i * 0.0032, xr - 0.0092 + i * 0.0032, 0.011 + i * 0.0016, 0.0145 + i * 0.0016, - 0.0036, 0.0036, 0 );
 	}
 	return {
 		P, info: {
@@ -270,11 +270,11 @@ export function revolver( o ) {
 	// crane and cylinder (swing out to the left)
 	const crane = P.sub( 'crane', cx1, - 0.032, - 0.006 );
 	crane.box( mat, cx1 - 0.002, cx1 + 0.009, - 0.036, - 0.018, - 0.009, 0.004, 0.002 );
-	crane.cyl( 'steel', cx1, cx1 + bl * 0.9, 0.0032, - 0.021, 0, 10 ); // ejector rod
-	crane.cyl( 'steel', cx1 + bl * 0.9, cx1 + bl * 0.9 + 0.006, 0.0044, - 0.021, 0, 12 );
+	crane.cyl( mat, cx1, cx1 + bl * 0.9, 0.0032, - 0.021, 0, 10 ); // ejector rod
+	crane.cyl( mat, cx1 + bl * 0.9, cx1 + bl * 0.9 + 0.006, 0.0044, - 0.021, 0, 12 );
 	const cyl = crane.sub( 'cyl', 0, cy, 0 );
 	cyl.lathe( mat, [ [ cx0, 0 ], [ cx0, cr * 0.82 ], [ cx0 + 0.002, cr ], [ cx1 - 0.002, cr ], [ cx1, cr * 0.9 ], [ cx1, 0 ] ], cy, 0, 24 );
-	cyl.cyl( 'steel', cx0 - 0.0018, cx0 + 0.0002, cr * 0.84, cy, 0, 18 );
+	cyl.cyl( mat, cx0 - 0.0018, cx0 + 0.0002, cr * 0.84, cy, 0, 18 );
 	for ( let i = 0; i < 6; i ++ ) {
 		// flutes between the chambers, the chamber mouths at the front, the rims in the star at the back
 		const a = i / 6 * PI * 2 + PI / 6;
@@ -286,7 +286,7 @@ export function revolver( o ) {
 	// hammer with its checkered spur, trigger, guard
 	const h = P.sub( 'hammer', cx0 - 0.016, 0.002, 0 );
 	h.extS( mat, [ [ cx0 - 0.012, - 0.006 ], [ cx0 - 0.012, 0.012 ], [ cx0 - 0.03, 0.022, 0.004 ], [ cx0 - 0.034, 0.016 ], [ cx0 - 0.022, 0.004 ], [ cx0 - 0.02, - 0.01 ] ], 0.0035, 0.0012 );
-	for ( let i = 0; i < 4; i ++ ) h.box( 'rubber', cx0 - 0.0335 + i * 0.0035, cx0 - 0.0322 + i * 0.0035, 0.0165 + i * 0.0012, 0.0205 + i * 0.0012, - 0.0036, 0.0036, 0 );
+	for ( let i = 0; i < 4; i ++ ) h.box( mat, cx0 - 0.0335 + i * 0.0035, cx0 - 0.0322 + i * 0.0035, 0.0165 + i * 0.0012, 0.0205 + i * 0.0012, - 0.0036, 0.0036, 0 );
 	triggerGuard( P, mat, - 0.025, 0.012, - 0.036, 0.024, 0.004 );
 	trigger( P, - 0.008, - 0.038, 0.016 );
 	// grip: the frame's strap, the stocks (wood on the .357, finger-grooved rubber on the .44)

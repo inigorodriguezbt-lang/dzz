@@ -882,7 +882,9 @@ const CAR_VERT = /* glsl */`
 `;
 
 export function makeCarMaterial( u ) {
-	const mat = new THREE.MeshStandardMaterial( { color: 0xffffff, roughness: 0.4, metalness: 0.2, vertexColors: true, side: THREE.DoubleSide } );
+	// bodies are single-sided (late depth testing with discard would shade the inside of every shell too); the loose
+	// door and lid panels are double-sided (the left doors are mirrored instances)
+	const mat = new THREE.MeshStandardMaterial( { color: 0xffffff, roughness: 0.4, metalness: 0.2, vertexColors: true, side: u.panel ? THREE.DoubleSide : THREE.FrontSide } );
 	const type = u.panel ? - 1 : carTypeOf( u );
 	const L = type >= 0 ? carLook( type ) : null;
 	const v4 = ( a ) => ( { value: new THREE.Vector4( ...( a || [ 0, 0, 0, 0 ] ) ) } );
@@ -955,6 +957,8 @@ export function makeCarMaterial( u ) {
 						int ci = int( vCar.x + 0.5 );
 						col = uPal[ ci ];
 						if ( ci == 20 ) col = mix( col, vec3( 0.015, 0.05, 0.3 ), boxAA( lp.y, uDoorY.z - 0.25, uDoorY.z - 0.1 ) * step( 0.5, abs( lp.x ) / max( uArch.x, 0.01 ) ) );
+						// TheBus: gold below, orange and red bands, white round the windows
+						if ( uMisc.z > 1.5 ) col = lp.y < 0.72 ? vec3( 0.8, 0.46, 0.02 ) : lp.y < 0.84 ? vec3( 0.75, 0.15, 0.01 ) : lp.y < 0.94 ? vec3( 0.42, 0.012, 0.01 ) : vec3( 0.78, 0.78, 0.75 );
 						// a week in the sun and salt air: faded, dusty clear coat
 						float fade = 0.3 + 0.35 * n1.g;
 						col = mix( col, vec3( dot( col, vec3( 0.3, 0.59, 0.11 ) ) ) * 1.08 + 0.015, fade * 0.3 );
@@ -1227,6 +1231,8 @@ export function makeCarMaterial( u ) {
 			` )
 			.replace( '#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = cRough;' )
 			.replace( '#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\nmetalnessFactor = cMetal;' )
+			// (three flips a double-sided normal by the screen winding, which a mirrored instance reverses)
+			.replace( '#include <normal_fragment_begin>', '#include <normal_fragment_begin>\nnormal *= vMir; nonPerturbedNormal = normal;' )
 			.replace( '#include <lights_fragment_maps>', '#include <lights_fragment_maps>\nradiance *= cEnv;' );
 	} );
 	return mat;

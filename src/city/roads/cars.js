@@ -129,8 +129,9 @@ class Skin {
 }
 
 // Loft right-half profiles ( [ x, y ] from the bottom centre round to the top centre, counter-clockwise seen from
-// the front) along the stations, mirrored to the left; kind( k, A, C ) gives segment k's [ hex, tag ] or null
-function loft( sk, st, kind ) {
+// the front) along the stations, mirrored to the left; kind( k, A, C ) gives segment k's [ hex, tag ] or null; flip:
+// the same surface facing inwards
+function loft( sk, st, kind, flip = false ) {
 	for ( let i = 0; i < st.length - 1; i ++ ) {
 		const A = st[ i ], C = st[ i + 1 ];
 		const flat = Math.abs( C.z - A.z ) < 1e-5; // an arch edge: the face looks along z, into the opening
@@ -140,7 +141,7 @@ function loft( sk, st, kind ) {
 			const a0 = A.pts[ k ], a1 = A.pts[ k + 1 ], c0 = C.pts[ k ], c1 = C.pts[ k + 1 ];
 			const dx = a1[ 0 ] - a0[ 0 ] + c1[ 0 ] - c0[ 0 ], dy = a1[ 1 ] - a0[ 1 ] + c1[ 1 ] - c0[ 1 ];
 			for ( const s of [ 1, - 1 ] ) {
-				const out = flat ? [ 0, 0, C.lift ? 1 : - 1 ] : [ s * dy, - dx, 0 ];
+				const out = flat ? [ 0, 0, C.lift ? 1 : - 1 ] : flip ? [ - s * dy, dx, 0 ] : [ s * dy, - dx, 0 ];
 				sk.quad( [ s * a0[ 0 ], a0[ 1 ], A.z ], [ s * a1[ 0 ], a1[ 1 ], A.z ], [ s * c1[ 0 ], c1[ 1 ], C.z ], [ s * c0[ 0 ], c0[ 1 ], C.z ], m[ 0 ], m[ 1 ], out );
 			}
 		}
@@ -172,22 +173,30 @@ function wheelParts( r, h, lod, look ) {
 	const ri = r * 0.64;
 	const rimHex = look.black ? 0x1c1d1e : RIM_HEX[ look.rim ] || RIM_HEX[ 0 ];
 	if ( lod ) {
-		// far: a six-sided tread band and a flat rim disc (the shader still paints the rim pattern)
-		const t = new THREE.CylinderGeometry( r, r, h * 2, 6, 1, true );
+		// far: an eight-sided tread band and a flat rim disc (the shader still paints the rim pattern)
+		const t = new THREE.CylinderGeometry( r, r, h * 2, 8, 1, true );
 		t.rotateZ( Math.PI / 2 );
-		const d = new THREE.CircleGeometry( r * 0.9, 6 );
+		const d = new THREE.CircleGeometry( r * 0.9, 8 );
 		d.rotateY( Math.PI / 2 ); d.translate( h, 0, 0 );
-		return [ { geo: t, hex: 0x161616, tag: TAG.tyre }, { geo: d, hex: rimHex, tag: TAG.rim } ];
+		const di = new THREE.CircleGeometry( r * 0.9, 8 );
+		di.rotateY( - Math.PI / 2 ); di.translate( - h, 0, 0 );
+		return [ { geo: t, hex: 0x161616, tag: TAG.tyre }, { geo: d, hex: rimHex, tag: TAG.rim }, { geo: di, hex: 0x101010, tag: TAG.tyre } ];
 	}
 	const sk = new Skin();
-	const seg = 11;
-	const tyre = [ [ ri, - h * 0.9 ], [ r * 0.97, - h * 0.85 ], [ r, - h * 0.4 ], [ r, h * 0.45 ], [ r * 0.95, h * 0.9 ], [ r * 0.78, h * 1.02 ], [ ri, h * 0.94 ] ];
+	// (round silhouette first: 16 sides, few profile steps; the shader draws the tread and sidewall)
+	const seg = 16;
+	const tyre = [ [ ri, - h * 0.9 ], [ r, - h * 0.45 ], [ r, h * 0.45 ], [ r * 0.93, h * 0.97 ], [ ri, h * 0.94 ] ];
 	lathe( sk, tyre, seg, [ 0, 0, 0 ], 1, 0x161616, TAG.tyre, [ r * 0.8, 0 ] );
-	const rim = look.rim === 2 ? [ [ ri, h * 0.94 ], [ ri * 0.82, h * 0.82 ], [ ri * 0.62, h * 0.5 ], [ ri * 0.22, h * 0.6 ], [ 0, h * 0.86 ] ]
-		: [ [ ri, h * 0.94 ], [ ri * 0.9, h * 0.62 ], [ ri * 0.5, h * 0.5 ], [ ri * 0.18, h * 0.7 ], [ 0, h * 0.74 ] ];
+	const rim = look.rim === 2 ? [ [ ri, h * 0.94 ], [ ri * 0.62, h * 0.5 ], [ ri * 0.22, h * 0.6 ], [ 0, h * 0.86 ] ]
+		: [ [ ri, h * 0.94 ], [ ri * 0.88, h * 0.62 ], [ ri * 0.42, h * 0.5 ], [ 0, h * 0.72 ] ];
 	// (the rim face is a dish: its normals face out of the wheel, away from a point deep inside it)
 	lathe( sk, rim, seg, [ 0, 0, 0 ], 1, rimHex, TAG.rim, [ ri * 0.5, - h * 3 ] );
-	return sk.geometries( 0.75 );
+	const parts = sk.geometries( 0.75 );
+	// the back of the wheel (seen from under the car)
+	const di = new THREE.CircleGeometry( ri, 10 );
+	di.rotateY( - Math.PI / 2 ); di.translate( - h * 0.8, 0, 0 );
+	parts.push( { geo: di, hex: 0x101010, tag: TAG.tyre } );
+	return parts;
 }
 
 function placeWheel( b, parts, x, y, z, side ) {
@@ -348,6 +357,16 @@ function buildCar( type, lod ) {
 		if ( kind === 't' ) return zm < zB || zm > zC ? SCR : PAINT;
 		return PAINT;
 	} );
+	// the bodies are single-sided (the hidden inside of a shell costs a whole extra layer of shading): up close the
+	// glasshouse gets its inside too, so a broken window or an open door shows the headliner, the pillars and the far
+	// glass rather than the sky
+	if ( lod === 0 ) loft( sk, gst, ( k, A, C ) => {
+		const zm = ( A.z + C.z ) / 2;
+		const kind = GK[ k ];
+		if ( kind === 'w' && windowAt( zm ) ) return G;
+		if ( kind === 't' && ( zm < zB || zm > zC ) ) return SCR;
+		return kind === 't' ? [ 0x3a3833, TAG.interior ] : [ 0x1c1b19, TAG.interior ];
+	}, true );
 	sk.emit( b, 0.62 );
 	// ---- bumpers, lamps' housings, plates ----
 	const f = S.body[ 0 ], rr = S.body[ S.body.length - 1 ];
@@ -499,6 +518,11 @@ function buildCar( type, lod ) {
 			if ( lod === 0 ) for ( const z of [ zB + 0.1, zC - 0.1 ] ) b.box( 0.05, 0.06, 0.08, BLACK, TAG.trim, { x, y: cab.roof + 0.04, z } );
 		}
 	}
+	// far and low: a dark block filling the cabin (single-sided shells: an open door would show the sky through the car)
+	if ( lod > 0 && ! S.bus ) {
+		const yb = S.body[ 2 ][ 1 ] + 0.1, yt = S.body[ Math.min( 4, nb - 2 ) ][ 2 ];
+		b.box( hw * 1.7, yt - yb, zD - zA - 0.1, DASH, TAG.interior, { y: ( yb + yt ) / 2, z: ( zA + zD ) / 2 } );
+	}
 	// the dark wheel openings at a distance (the low LOD has no arches)
 	if ( lod === 2 ) {
 		for ( const za of axles( type ) ) for ( const s of [ - 1, 1 ] ) {
@@ -532,8 +556,11 @@ function buildCar( type, lod ) {
 		const sx = big ? - hw * 0.45 : - hw * 0.42;
 		b.torus( 0.18, 0.02, 4, 10, 0x111111, TAG.trim, { x: sx, y: yb + 0.02, z: zA + 0.5, rx: 1.15 } );
 		b.cyl( 0.025, 0.03, 0.3, 5, 0x111111, TAG.trim, { x: sx, y: yb - 0.06, z: zA + 0.38, rx: - 0.42 } );
-		// trunk / cargo floor (an open lid shows it)
-		if ( S.trunk && S.trunk[ 2 ] === 'lid' ) b.box( iw * 0.95, 0.02, S.trunk[ 1 ] - S.trunk[ 0 ] - 0.15, 0x161514, TAG.interior, { y: rr[ 1 ] + 0.18, z: ( S.trunk[ 0 ] + S.trunk[ 1 ] ) / 2 } );
+		// trunk tub (an open lid shows it): a box turned inside out, floor and walls facing in
+		if ( S.trunk && S.trunk[ 2 ] === 'lid' ) {
+			const y0 = rr[ 1 ] + 0.17, y1 = S.body[ S.body.length - 3 ][ 3 ];
+			b.box( iw * 0.98, y1 - y0, S.trunk[ 1 ] - S.trunk[ 0 ] - 0.12, 0x161514, TAG.interior, { y: ( y0 + y1 ) / 2, z: ( S.trunk[ 0 ] + S.trunk[ 1 ] ) / 2 - 0.02, flip: true } );
+		}
 	}
 	// ---- wheels ----
 	const parts = wheelParts( r, L.tw, lod, L );
@@ -655,7 +682,8 @@ export function carSpec( type ) { return SPECS[ type ]; }
 
 // what the car shader paints per body type (car-local metres): head / tail lamps ( y centre, half height, inner x,
 // outer x ), grille ( y0, y1, half width, style ), ends ( front z, rear z, front plate y, rear plate y ), wheel
-// ( track half, tyre half width, third axle z or 99, rim style ), misc ( plates, military, police, spokes )
+// ( track half, tyre half width, third axle z or 99, rim style ), misc ( plates, military, livery: 1 police 2 TheBus,
+// spokes )
 export function carLook( type ) {
 	const S = SPECS[ type ], D = CAR_DIMS[ type ], L = S.look, hw = D.W / 2;
 	const f = S.body[ 0 ], rr = S.body[ S.body.length - 1 ];
@@ -665,7 +693,7 @@ export function carLook( type ) {
 		grille: [ L.grille[ 0 ], L.grille[ 1 ], L.grille[ 2 ] * hw, L.grille[ 3 ] ],
 		ends: [ f[ 0 ], rr[ 0 ], f[ 1 ] + 0.08, rr[ 1 ] + ( S.bus ? 0.38 : 0.28 ) ],
 		wheel: [ D.tr, L.tw, AXLE3[ type ] ? D.zr + AXLE3[ type ] : 99, L.black ? 4 : L.rim ],
-		misc: [ S.military ? 0 : 1, S.military ? 1 : 0, S.police ? 1 : 0, L.spokes || 5 ],
+		misc: [ S.military ? 0 : 1, S.military ? 1 : 0, S.police ? 1 : S.bus ? 2 : 0, L.spokes || 5 ],
 	};
 }
 
