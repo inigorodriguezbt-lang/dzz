@@ -40,6 +40,9 @@ export function layout( site ) {
 	const P = ( t, x, z, yaw = 0, o = {} ) => { L.props.push( { t, x, z, yaw, ...o } ); };
 	const fn = BUILD[ site.kind ];
 	if ( fn ) fn( site, L, P, R );
+	// set dressing (litter, a washing line, a sign) from a stream of its own, so the loot spots never move
+	const dress = DRESS[ site.kind ];
+	if ( dress ) dress( site, L, P, rng( site.seed ^ 0x5d3e ) );
 	return L;
 }
 
@@ -324,6 +327,57 @@ const BUILD = {
 		const table = s.rich ? 'site_stash_rich' : 'site_stash';
 		ring( L, 0, 0, s.rich ? 6 : 5, 0.7, 1.4, R, [ 1, 0.95, 0.85, 0.7, 0.55, 0.45 ], table );
 	},
+};
+
+// litter piles and the odd extra prop (nothing here holds loot or changes what does)
+const litter = ( P, R, set, x, z, n, r ) => P( 'litter', x + range( R, - 0.3, 0.3 ), z + range( R, - 0.3, 0.3 ), R() * 6, { set, n, r } );
+const DRESS = {
+	roadside( s, L, P, R ) { const c = L.props[ 0 ] || { x: 0, z: 0 }; litter( P, R, 'street', c.x, c.z, 6, 1.7 ); },
+	bus_stop( s, L, P, R ) { litter( P, R, 'street', 0.3, 0.7, 7, 1.5 ); },
+	crash_car( s, L, P, R ) {
+		if ( s.ev === 'crash' ) { litter( P, R, 'crash', - 4, ( s.hw || 4 ) + 1.4, 7, 2.5 ); return; }
+		litter( P, R, 'crash', 0.6, 2.2, 8, 2 );
+		litter( P, R, 'street', - 1.5, - 3, 4, 1.4 );
+	},
+	beach_camp( s, L, P, R ) { litter( P, R, 'beach', 0.4, 0.6, 5, 1.6 ); },
+	campsite( s, L, P, R ) {
+		litter( P, R, 'camp', 0.2, 0.9, 8, 2.2 );
+		// a washing line strung behind the tent
+		P( 'clothesline', range( R, - 0.4, 0.4 ), - 4.1, range( R, - 0.15, 0.15 ), { len: 3 } );
+	},
+	hiker( s, L, P, R ) { litter( P, R, 'camp', 0.6, - 0.4, 3, 1.2 ); },
+	fishing_spot( s, L, P, R ) { litter( P, R, 'fish', - 0.3, 0.1, 6, 1.4 ); },
+	checkpoint( s, L, P, R ) {
+		if ( s.ev === 'roadblock' ) { const hw = s.hw || 4; litter( P, R, 'police', 9, hw + 2.6, 7, 2 ); litter( P, R, 'police', 2, hw * 0.4, 6, 2.5 ); return; }
+		litter( P, R, 'police', 0.6, 0.7, 8, 1.8 );
+		litter( P, R, 'police', 3.2, 2.6, 6, 1.6 );
+	},
+	military_checkpoint( s, L, P, R ) {
+		if ( s.ev === 'checkpoint' ) { const sd = s.sd || 1; litter( P, R, 'mil', - 11.6, sd * ( ( s.hw || 4 ) + 3.2 ), 8, 1.8 ); return; }
+		// brass behind the nest, HESCO closing the flank, a warning sign
+		litter( P, R, 'mil', 0, 0.45, 10, 1.4 );
+		litter( P, R, 'mil', - 4.6, 0.2, 5, 1.6 );
+		P( 'hesco', 3.85, 1.3, range( R, - 0.05, 0.05 ), { n: 2 } );
+		P( 'warn_sign', - 3.9, 1.7, range( R, - 0.3, 0.3 ), { cell: 'restricted' } );
+	},
+	heli_crash( s, L, P, R ) {
+		litter( P, R, 'wreck', 2.5, - 2.2, 9, 3 );
+		litter( P, R, 'wreck', - 5, 3, 7, 2.6 );
+		litter( P, R, 'mil', 5, 1.5, 6, 1.5 );
+	},
+	fema_camp( s, L, P, R ) {
+		litter( P, R, 'relief', 0.5, 2.2, 10, 3 );
+		litter( P, R, 'relief', 6.4, 0.2, 7, 2.2 );
+		litter( P, R, 'relief', - 7, 2.6, 5, 1.8 );
+		// somebody's washing between two tents, chairs out front
+		P( 'clothesline', - 3.3, - 2.95, 0, { len: 3.2 } );
+		P( 'camp_chair', 2.4, - 1.9, range( R, 2.6, 3.6 ), { c: 0x3a5a7a } );
+		if ( R() < 0.6 ) P( 'camp_chair', 4.6, - 2.0, range( R, 2.6, 3.6 ), { c: 0x7d2f2a } );
+	},
+	farm_stand( s, L, P, R ) { litter( P, R, 'farm', 0.2, 1.1, 6, 1.4 ); },
+	picnic( s, L, P, R ) { litter( P, R, 'picnic', 0, 0.1, 7, 1.7 ); },
+	body( s, L, P, R ) { litter( P, R, 'street', range( R, - 0.8, 0.8 ), range( R, 0.8, 1.4 ), 3, 0.9 ); },
+	supply_drop( s, L, P, R ) { litter( P, R, 'drop', 0.6, 1.2, 7, 1.8 ); },
 };
 
 // every slot's item key: the site key and the slot index

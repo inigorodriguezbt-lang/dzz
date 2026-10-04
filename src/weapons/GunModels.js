@@ -1,6 +1,7 @@
 // Procedural weapon models: a parametric gun generator (AR / AK / pistols / revolvers / SMGs / shotguns / bolt
 // actions / battle rifles / bullpups / LMGs / bows), magazines, ammo boxes, attachments, melee weapons and
-// throwables. Every model is assembled from bevelled boxes, lathed and extruded profiles, merged per material.
+// throwables. Every model is assembled from bevelled boxes, lathed and extruded profiles, merged per material; the views
+// and the item models draw the opaque finishes through one palette material (models/kit.js), one call per part.
 //
 // Gun frame: +x towards the muzzle, +y up, +z = the gun's right side (ejection port), bore axis on y = 0,
 // x = 0 at the trigger. Moving parts (slide, bolt, pump, cylinder, barrels, lever, trigger, hammer, mag…) are

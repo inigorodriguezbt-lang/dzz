@@ -52,7 +52,7 @@ const CAN_COLS = [ 0xc8322a, 0x2a62b0, 0x3a8a4a, 0xb8bcc0, 0xe0b028, 0x2a2a2e ];
 
 // a sandbag: a superellipsoid slumped flat underneath, its top sagging, a seam pinched round the middle
 function bagGeo( L, H, W, R ) {
-	const g = new THREE.SphereGeometry( 1, 8, 6 );
+	const g = new THREE.SphereGeometry( 1, 8, 4 );
 	const p = g.attributes.position;
 	const bulge = 0.85 + R() * 0.25, lean = ( R() - 0.5 ) * 0.12, twist = ( R() - 0.5 ) * 0.1;
 	for ( let i = 0; i < p.count; i ++ ) {
@@ -74,7 +74,7 @@ function bag( k, x, y, z, yaw, R, c = BAG, o = {} ) {
 // ---- litter: small things dropped around a scene ------------------------------------------------------------------------
 
 const LITTER = {
-	camp: [ 'can', 'can', 'wrapper', 'bottle', 'paper', 'twig', 'twig' ],
+	camp: [ 'can', 'can', 'wrapper', 'bottle', 'paper', 'twig' ],
 	beach: [ 'can', 'bottle', 'wrapper', 'flipflop', 'cup', 'can' ],
 	street: [ 'can', 'cup', 'paper', 'wrapper', 'bottle', 'news' ],
 	police: [ 'cup', 'paper', 'brass9', 'brass9', 'brass9', 'glove', 'wrapper' ],
@@ -83,8 +83,11 @@ const LITTER = {
 	picnic: [ 'cup', 'plate', 'can', 'wrapper', 'napkin', 'plate' ],
 	wreck: [ 'shard', 'shard', 'brass', 'cable', 'shard', 'paper' ],
 	fish: [ 'can', 'bottle', 'line', 'wrapper', 'twig' ],
+	crash: [ 'shard_b', 'shard_b', 'hubcap', 'paper', 'cable', 'bottle', 'shard_b' ],
+	farm: [ 'peel', 'rotten', 'rotten', 'carton', 'wrapper', 'peel' ],
+	drop: [ 'strap', 'strap', 'foam', 'foam', 'carton', 'foam' ],
 };
-const LITTER_DECAL = { camp: 'twigs', beach: 'litter', street: 'litter', police: 'brass', mil: 'brass', relief: 'litter', picnic: 'litter', wreck: 'brass', fish: 'litter' };
+const LITTER_DECAL = { camp: 'twigs', beach: 'litter', street: 'litter', police: 'brass', mil: 'brass', relief: 'litter', picnic: 'litter', wreck: 'brass', fish: 'litter', crash: 'glass', farm: 'litter', drop: 'boots' };
 
 function litterPiece( k, t, x, z, R ) {
 	const y = k.groundAt( x, z ), yaw = R() * PI * 2;
@@ -150,8 +153,26 @@ function litterPiece( k, t, x, z, R ) {
 			k.part( geo.box( 0.05, 0.012, 0.012 ), 'plastic', 0xe04a2a, [ 0.05, 0.006, 0 ], null, null, FINE );
 			break;
 		}
+		case 'shard_b': // a broken bit of bumper or lamp
+			k.part( faces( [ [ [ 0, 0.01, 0 ], [ 0.12 + R() * 0.1, 0.012, 0.03 ], [ 0.04, 0.03, 0.1 + R() * 0.06 ] ] ] ), 'print', pickc( R, [ 0x1a1a1a, 0x1a1a1a, 0x8a1a16, 0xdedcd2 ] ), null, null, null, { fine: true, cell: CELLS.plain } );
+			break;
+		case 'hubcap':
+			k.part( geo.cyl( 0.2, 0.19, 0.03, 12 ), 'metal', 0xa8acb0, [ 0, 0.01, 0 ], [ ( R() - 0.5 ) * 0.2, 0, ( R() - 0.5 ) * 0.2 ], null, FINE );
+			break;
+		case 'peel': // a banana skin, three tongues splayed
+			for ( let i = 0; i < 3; i ++ ) k.part( geo.box( 0.09, 0.006, 0.022 ), 'matte', 0xb89a3a, [ Math.cos( i * 2.1 ) * 0.04, 0.004, Math.sin( i * 2.1 ) * 0.04 ], [ 0, - i * 2.1, 0 ], null, FINE );
+			break;
+		case 'rotten': // windfall gone soft
+			k.part( geo.sph( 0.05, 6, 4 ), 'matte', pickc( R, [ 0x5a4428, 0x6a5a2a, 0x8a5a2a ] ), [ 0, 0.025, 0 ], null, [ 1.1, 0.6, 1 ], FINE );
+			break;
+		case 'strap': // a cut length of webbing
+			k.part( sheet( 0.6, 0.05, 4, 1, ( px ) => Math.abs( Math.sin( px * 8 ) ) * 0.02 + 0.004 ), 'cloth', 0x4f5530, null, null, null, FINE );
+			break;
+		case 'foam': // packing foam
+			k.part( geo.box( 0.1 + R() * 0.1, 0.04, 0.06 + R() * 0.06 ), 'matte', 0xe8e4d8, [ 0, 0.02, 0 ], [ 0, 0, ( R() - 0.5 ) * 0.4 ], null, FINE );
+			break;
 		default: // a dead twig
-			k.part( geo.cylX( 0.006 + R() * 0.006, 0.25 + R() * 0.3, 4 ), 'wood', 0x5a4632, [ 0, 0.006, 0 ], null, null, FINE );
+			k.part( geo.cylX( 0.005 + R() * 0.005, 0.15 + R() * 0.2, 4 ), 'wood', 0x4a3e30, [ 0, 0.006, 0 ], null, null, FINE );
 	}
 	k.pop();
 }
@@ -166,7 +187,27 @@ export const PROPS = {
 			const a = R() * PI * 2, d = Math.sqrt( R() ) * r;
 			litterPiece( k, pickc( R, set ), Math.cos( a ) * d, Math.sin( a ) * d, R );
 		}
-		if ( o.decal !== false ) k.groundDecal( LITTER_DECAL[ o.set ] || 'litter', 0, 0, r * 1.5, R() * 6 );
+		// (the decal's drawn wrappers and casings are real size at about 2 m across)
+		if ( o.decal !== false ) k.groundDecal( LITTER_DECAL[ o.set ] || 'litter', 0, 0, Math.min( 2.2, r * 1.5 ), R() * 6 );
+	},
+
+	// a washing line between two sticks, a towel and some clothes pegged on it
+	clothesline( k, o, R ) {
+		const len = o.len ?? 3, h = 1.5, sag = 0.12;
+		for ( const s of [ - 1, 1 ] ) k.cyl( 0.02, 0.026, h + 0.1, 'wood', 0x6a5038, [ s * len / 2, - 0.1, 0 ], [ 0, 0, - s * 0.07 ], 5 );
+		const a = [ - len / 2 + 0.1, h, 0 ], b = [ len / 2 - 0.1, h, 0 ];
+		rope( k, a, b, sag, 0.004 );
+		const yAt = ( x ) => { const t = ( x - a[ 0 ] ) / ( b[ 0 ] - a[ 0 ] ); return h - sag * 4 * t * ( 1 - t ); };
+		let x = a[ 0 ] + 0.25 + R() * 0.2;
+		while ( x < b[ 0 ] - 0.45 ) {
+			const w = 0.35 + R() * 0.3, d = 0.4 + R() * 0.35, towel = R() < 0.4, y0 = ( yAt( x ) + yAt( x + w ) ) / 2, ph = R() * 6;
+			// folded over the line: hanging down both sides, a little swing in it
+			const g = geo.grid( 3, 4, ( u, v ) => [ x + u * w, y0 - v * d + Math.sin( u * PI ) * 0.01, Math.sin( v * 2.4 + ph + u ) * 0.03 * v + 0.012 ] );
+			if ( towel ) k.part( g, 'print', 0xffffff, null, null, null, { cell: [ CELLS.towel0, CELLS.towel1, CELLS.towel3 ][ Math.floor( R() * 3 ) ] } );
+			else k.part( g, 'cloth', pickc( R, CLOTH_COLS ) );
+			for ( const px of [ x + 0.05, x + w - 0.05 ] ) k.box( 0.012, 0.05, 0.02, 'plastic', pickc( R, [ 0xd8382e, 0x2f7ec2, 0xf2cf2a ] ), [ px, yAt( px ) - 0.03, 0 ], null, FINE );
+			x += w + 0.15 + R() * 0.3;
+		}
 	},
 
 	// ---- luggage and spills ------------------------------------------------------------------------------------------
@@ -303,9 +344,9 @@ export const PROPS = {
 		k.cyl( 0.3, 0.27, 0.86, 'paint', 0x2f5a3a, null, null, 14 );
 		// vertical ribs pressed into the steel
 		for ( let i = 0; i < 8; i ++ ) { const a = i / 8 * PI * 2; k.box( 0.03, 0.7, 0.02, 'paint', 0x2a5234, [ Math.cos( a ) * 0.29, 0.08, Math.sin( a ) * 0.29 ], [ 0, - a + HALF, 0 ] ); }
-		k.part( geo.torus( 0.3, 0.02, 5, 18 ), 'paint', 0x2a4f33, [ 0, 0.86, 0 ], [ HALF, 0, 0 ] );
+		k.part( geo.torus( 0.3, 0.02, 4, 16 ), 'paint', 0x2a4f33, [ 0, 0.86, 0 ], [ HALF, 0, 0 ] );
 		// the liner folded over the rim, the lid knocked askew
-		k.part( geo.torus( 0.305, 0.025, 4, 14 ), 'plastic', 0x161618, [ 0, 0.83, 0 ], [ HALF, 0, 0 ], [ 1, 1, 1.5 ] );
+		k.part( geo.torus( 0.305, 0.025, 3, 12 ), 'plastic', 0x161618, [ 0, 0.83, 0 ], [ HALF, 0, 0 ], [ 1, 1, 1.5 ] );
 		k.push( [ 0, 0.88, 0 ], [ 0.12, R() * 6, 0.18 ] );
 		k.part( geo.dome( 0.31, 14, 4 ), 'paint', 0x2a4f33, null, null, [ 1, 0.35, 1 ] );
 		k.box( 0.2, 0.06, 0.1, 'matte', 0x111111, [ 0, 0.02, 0.24 ] );
@@ -355,13 +396,13 @@ export const PROPS = {
 		const h = bodyHeight( 1.15, R );
 		// a rounded bag hugging the body, tapered at both ends, creased where the plastic folds
 		const bag = ( x, z ) => Math.max( h( x, z ), 0.09 * Math.sqrt( Math.max( 0, 1 - ( z / 0.3 ) ** 2 ) ) ) * ( 1 - ( x / 1.0 ) ** 8 ) + ( vnoise( x * 9, z * 9, 11 ) - 0.5 ) * 0.012;
-		k.part( sheet( 2.0, 0.6, 24, 10, bag ), 'plastic', 0x16171a, null, null, null, { drape: true } );
+		k.part( sheet( 2.0, 0.6, 18, 8, bag ), 'plastic', 0x16171a, null, null, null, { drape: true } );
 		// the zip down the middle, its pull with a tag, the carry handles
 		const pts = [];
 		for ( let i = 0; i <= 16; i ++ ) { const x = - 0.9 + i / 16 * 1.75; pts.push( [ x, bag( x, 0.04 ) + 0.006, 0.04 ] ); }
-		k.part( geo.tube( pts, 0.008, 24, 4 ), 'metal', 0x8a8e92, null, null, null, { drape: true } );
+		k.part( geo.tube( pts, 0.008, 16, 3 ), 'metal', 0x8a8e92, null, null, null, { drape: true } );
 		k.part( geo.box( 0.05, 0.004, 0.08 ), 'print', 0xffffff, [ 0.88, bag( 0.85, 0.04 ) + 0.01, 0.1 ], [ 0, 0.5, 0 ], null, { cell: CELLS.tag, drape: true } );
-		for ( const x of [ - 0.6, 0.05, 0.6 ] ) for ( const z of [ - 0.29, 0.29 ] ) k.part( geo.torus( 0.04, 0.008, 4, 8, Math.PI ), 'cloth', 0x2a2a2a, [ x, 0.02, z ], [ 0, 0, 0 ] );
+		for ( const x of [ - 0.6, 0.05, 0.6 ] ) for ( const z of [ - 0.29, 0.29 ] ) k.part( geo.torus( 0.04, 0.008, 3, 5, Math.PI ), 'cloth', 0x2a2a2a, [ x, 0.02, z ], [ 0, 0, 0 ] );
 	},
 
 	// a body under a blanket, the shoes showing (when no character can stand in for the dead)
@@ -502,10 +543,10 @@ export const PROPS = {
 			const rho = e * Math.sin( t * HALF ) * ( 1 - sag ) * s, y = H * Math.cos( t * HALF ) * ( 1 - sag * 0.7 ) * ( 1 + ( s - 1 ) * 1.4 );
 			return [ Math.cos( th ) * rho, y, Math.sin( th ) * rho ];
 		};
-		k.part( geo.grid( 24, 7, ( u, v ) => at( u * PI * 2, v, 1 ) ), 'cloth', body, null, null, null, { grime: 0.4 } );
+		k.part( geo.grid( 20, 6, ( u, v ) => at( u * PI * 2, v, 1 ) ), 'cloth', body, null, null, null, { grime: 0.4 } );
 		// the fly: down to a hem above the ground, rolled up over the door
 		const tb = ( th ) => 0.84 - ( open ? 0.38 : 0 ) * Math.max( 0, Math.cos( th - HALF ) ) ** 8;
-		k.part( geo.grid( 24, 6, ( u, v ) => { const th = u * PI * 2; return at( th, v * tb( th ), 1.05 ); } ), 'cloth', c, null, null, null, { grime: 0.15 } );
+		k.part( geo.grid( 20, 5, ( u, v ) => { const th = u * PI * 2; return at( th, v * tb( th ), 1.05 ); } ), 'cloth', c, null, null, null, { grime: 0.15 } );
 		if ( open ) {
 			const pts = [];
 			for ( let i = 0; i <= 8; i ++ ) { const th = HALF - 0.6 + i / 8 * 1.2; pts.push( at( th, tb( th ), 1.07 ) ); }
@@ -523,7 +564,7 @@ export const PROPS = {
 			const pts = [];
 			for ( let i = 0; i <= 10; i ++ ) pts.push( at( a, 1 - i / 10, 1.065 ) );
 			for ( let i = 1; i <= 10; i ++ ) pts.push( at( a + PI, i / 10, 1.065 ) );
-			k.part( geo.tube( pts, 0.008, 20, 3 ), 'plastic', 0x2a2a2a );
+			k.part( geo.tube( pts, 0.008, 20, 3 ), 'plastic', 0x2a2a2a, null, null, null, FINE );
 		}
 		// guy lines off the fly's panels; pegs at the corners
 		for ( const th of [ 0, PI, 3 * HALF ] ) {
@@ -560,7 +601,7 @@ export const PROPS = {
 		if ( open ) {
 			// the doorway: a dark inside, the two flaps rolled and tied at the sides
 			k.part( faces( [ [ [ - W / 2 + 0.06, 0, L / 2 - 0.25 ], [ W / 2 - 0.06, 0, L / 2 - 0.25 ], [ 0, H - 0.08, L / 2 - 0.25 ] ] ] ), 'cloth', 0x121210 );
-			k.part( inward( geo.quad( [ - W / 2, 0, L / 2 ], [ W / 2, 0, L / 2 ], [ W / 2, 0, - L / 2 ], [ - W / 2, 0, - L / 2 ], 1, 1 ) ), 'cloth', 0x1c1c1a, [ 0, 0.02, 0 ] );
+			k.part( geo.quad( [ - W / 2, 0, L / 2 ], [ W / 2, 0, L / 2 ], [ W / 2, 0, - L / 2 ], [ - W / 2, 0, - L / 2 ], 1, 1 ), 'cloth', 0x1c1c1a, [ 0, 0.02, 0 ] );
 			for ( const s of [ - 1, 1 ] ) {
 				const pts = [ [ 0, H, L / 2 + 0.02 ], [ s * W * 0.2, H * 0.62, L / 2 + 0.05 ], [ s * W * 0.36, H * 0.3, L / 2 + 0.05 ], [ s * W / 2, 0.02, L / 2 + 0.02 ] ];
 				k.part( geo.tube( pts, 0.04, 6, 5 ), 'cloth', shade( c, - 0.12 ) );
@@ -581,7 +622,7 @@ export const PROPS = {
 		for ( let i = 0; i < 11; i ++ ) {
 			const a = i / 11 * PI * 2 + R() * 0.2, r = 0.48 + R() * 0.05, s = 0.1 + R() * 0.05;
 			k.part( geo.dodeca( s ), 'matte', shade( 0x4a4744, ( R() - 0.5 ) * 0.45 ), [ Math.cos( a ) * r, 0.03, Math.sin( a ) * r ], [ R() * 3, R() * 3, R() * 3 ], [ 1.25, 0.75, 1 ] );
-			k.part( geo.dodeca( s * 0.7 ), 'matte', 0x1c1a18, [ Math.cos( a ) * ( r - s * 0.45 ), 0.03, Math.sin( a ) * ( r - s * 0.45 ) ], [ R() * 3, R() * 3, R() * 3 ], [ 1, 0.7, 1 ] );
+			k.part( geo.ico( s * 0.7, 0 ), 'matte', 0x1c1a18, [ Math.cos( a ) * ( r - s * 0.45 ), 0.03, Math.sin( a ) * ( r - s * 0.45 ) ], [ R() * 3, R() * 3, R() * 3 ], [ 1, 0.7, 1 ] );
 		}
 		k.groundDecal( 'char', 0, 0, 1.25, R() * 6 );
 		// a bed of white ash, charred logs burnt through in the middle and fallen in, their ends greyed
@@ -589,9 +630,9 @@ export const PROPS = {
 		for ( let i = 0; i < 4; i ++ ) {
 			const a = i / 4 * PI + R() * 0.5, len = 0.5 + R() * 0.2, r = 0.045 + R() * 0.02;
 			k.push( [ Math.cos( a ) * 0.06, 0.05 + i * 0.025, Math.sin( a ) * 0.06 ], [ 0, a, ( R() - 0.5 ) * 0.4 ] );
-			k.part( geo.cylX( r, len * 0.55, 7, r * 0.75 ), 'wood', 0x1b1714, [ len * 0.2, 0, 0 ] );
-			k.part( geo.cylX( r * 0.98, len * 0.4, 7 ), 'wood', i % 2 ? 0x2a211a : 0x5a4534, [ - len * 0.27, 0, 0 ] );
-			k.part( geo.cylX( r * 0.8, 0.02, 7 ), 'matte', 0x9a958e, [ len * 0.48, 0, 0 ] );
+			k.part( geo.cylX( r, len * 0.55, 6, r * 0.75 ), 'wood', 0x1b1714, [ len * 0.2, 0, 0 ] );
+			k.part( geo.cylX( r * 0.98, len * 0.4, 6 ), 'wood', i % 2 ? 0x2a211a : 0x5a4534, [ - len * 0.27, 0, 0 ] );
+			k.part( geo.cylX( r * 0.8, 0.02, 6 ), 'matte', 0x9a958e, [ len * 0.48, 0, 0 ] );
 			k.pop();
 		}
 		for ( let i = 0; i < 9; i ++ ) k.part( geo.ico( 0.02 + R() * 0.02, 0 ), 'matte', 0x141210, [ ( R() - 0.5 ) * 0.5, 0.015, ( R() - 0.5 ) * 0.5 ], [ R() * 3, R() * 3, 0 ], [ 1.4, 0.6, 1 ], FINE );
@@ -624,9 +665,8 @@ export const PROPS = {
 			k.part( geo.cylX( r * 0.92, 0.012, 10 ), 'wood', 0xb08a5a, [ x, r * 0.9, 0 ] );
 			k.part( geo.torus( r * 0.5, 0.006, 3, 10 ), 'matte', 0x8a6a44, [ x * 1.008, r * 0.9, 0 ], [ 0, HALF, 0 ] );
 		}
-		// a branch stub, a bit of bark come away on the top where people sat
+		// a branch stub
 		k.part( geo.cone( 0.04, 0.12, 5 ), 'wood', 0x4a3a2a, [ L * 0.2, r * 1.6, r * 0.5 ], [ 0.8, 0, 0.3 ] );
-		k.box( L * 0.4, 0.004, r * 0.6, 'wood', 0x9a7a52, [ - L * 0.1, r * 1.88, 0 ] );
 		k.collider( L / 2, r * 0.9, r, [ 0, r * 0.9, 0 ], 0, 'wood' );
 	},
 
@@ -716,9 +756,9 @@ export const PROPS = {
 
 	bucket( k, o, R ) {
 		const c = o.c ?? 0xe8e6df;
-		k.part( geo.lathe( [ [ 0.145, 0 ], [ 0.165, 0.36 ], [ 0.175, 0.37 ], [ 0.16, 0.37 ], [ 0.14, 0.02 ], [ 0, 0.02 ] ], 16 ), 'plastic', c, null, null, null, { grime: 0.3 } );
-		for ( const y of [ 0.27, 0.32 ] ) k.part( geo.torus( 0.163 + y * 0.03, 0.006, 4, 18 ), 'plastic', shade( c, - 0.08 ), [ 0, y, 0 ], [ HALF, 0, 0 ] );
-		k.part( geo.torus( 0.17, 0.004, 4, 12, PI ), 'metal', 0x9a9a9a, [ 0, 0.37, 0 ], [ 0, 0, - 0.3 ] );
+		k.part( geo.lathe( [ [ 0.145, 0 ], [ 0.165, 0.36 ], [ 0.175, 0.37 ], [ 0.16, 0.37 ], [ 0.14, 0.02 ], [ 0, 0.02 ] ], 12 ), 'plastic', c, null, null, null, { grime: 0.3 } );
+		for ( const y of [ 0.27, 0.32 ] ) k.part( geo.torus( 0.163 + y * 0.03, 0.006, 3, 14 ), 'plastic', shade( c, - 0.08 ), [ 0, y, 0 ], [ HALF, 0, 0 ] );
+		k.part( geo.torus( 0.17, 0.004, 3, 10, PI ), 'metal', 0x9a9a9a, [ 0, 0.37, 0 ], [ 0, 0, - 0.3 ] );
 		// murky water a hand down
 		k.part( geo.cyl( 0.15, 0.15, 0.005, 12 ), 'plastic', 0x4a5a48, [ 0, 0.26, 0 ] );
 		k.collider( 0.17, 0.19, 0.17, [ 0, 0.19, 0 ], 0, 'wood' );
@@ -934,8 +974,8 @@ export const PROPS = {
 		for ( let i = 0; i < p.count; i ++ ) { const x = p.getX( i ), y = p.getY( i ), z = p.getZ( i ); if ( Math.hypot( x, z ) > 0.2 ) { const f = 1 - vnoise( Math.atan2( z, x ) * 2, y * 4, seed ) * 0.04; p.setX( i, x * f ); p.setZ( i, z * f ); } }
 		g.computeVertexNormals();
 		k.part( g, 'paint', c, null, null, null, { grime: 0.35 } );
-		for ( const y of [ 0.29, 0.59 ] ) k.part( geo.torus( 0.292, 0.012, 4, 20 ), 'paint', shade( c, - 0.1 ), [ 0, y, 0 ], [ HALF, 0, 0 ] );
-		for ( const y of [ 0.005, 0.88 ] ) k.part( geo.torus( 0.28, 0.014, 4, 20 ), 'metal', 0x5a4434, [ 0, y, 0 ], [ HALF, 0, 0 ] );
+		for ( const y of [ 0.29, 0.59 ] ) k.part( geo.torus( 0.292, 0.012, 3, 16 ), 'paint', shade( c, - 0.1 ), [ 0, y, 0 ], [ HALF, 0, 0 ] );
+		for ( const y of [ 0.005, 0.88 ] ) k.part( geo.torus( 0.28, 0.014, 3, 16 ), 'metal', 0x5a4434, [ 0, y, 0 ], [ HALF, 0, 0 ] );
 		k.cyl( 0.03, 0.03, 0.012, 'metal', 0x2a2a2a, [ 0.15, 0.88, 0.05 ], null, 8 );
 		k.cyl( 0.02, 0.02, 0.012, 'metal', 0x2a2a2a, [ - 0.17, 0.88, - 0.04 ], null, 6 );
 		k.collider( 0.29, 0.44, 0.29, [ 0, 0.44, 0 ], 0, 'metal' );
@@ -947,16 +987,18 @@ export const PROPS = {
 		const w = o.w ?? 4.6, d = o.d ?? 4;
 		const poles = [ [ 1, 1 ], [ - 1, 1 ], [ 1, - 1 ], [ - 1, - 1 ] ].map( ( [ x, z ] ) => [ x * w * 0.36, z * d * 0.36, 2.05 + ( R() - 0.5 ) * 0.15 ] );
 		poles.push( [ ( R() - 0.5 ) * 0.4, ( R() - 0.5 ) * 0.4, 2.35 ] );
-		const g = geo.grid( 12, 10, ( u, v ) => {
+		const net = ( u, v ) => {
 			const x = ( u - 0.5 ) * w, z = ( v - 0.5 ) * d;
 			let y = 0;
 			for ( const [ px, pz, ph ] of poles ) y = Math.max( y, ph - Math.hypot( x - px, z - pz ) ** 1.35 * 0.32 );
-			// the skirt drops to the ground near the edges
-			const e = Math.max( Math.abs( u - 0.5 ), Math.abs( v - 0.5 ) ) * 2;
-			if ( e > 0.8 ) y *= 1 - ( ( e - 0.8 ) / 0.2 ) ** 1.5 * 0.55;
-			return [ x, y + ( vnoise( x * 1.5, z * 1.5, 5 ) - 0.5 ) * 0.14 + k.groundAt( x, z ) * ( e > 0.8 ? 1 : 0 ), z ];
-		} );
-		k.part( g, 'print', 0xffffff, null, null, null, { cell: CELLS.camo_net } );
+			// the skirt slopes down towards the ground over the outer third
+			const e = Math.max( Math.abs( u - 0.5 ), Math.abs( v - 0.5 ) ) * 2, f = e > 0.65 ? ( ( e - 0.65 ) / 0.35 ) ** 1.4 : 0;
+			y *= 1 - f * 0.5;
+			return [ x, y + ( vnoise( x * 1.5, z * 1.5, 5 ) - 0.5 ) * 0.14 + k.groundAt( x, z ) * f, z ];
+		};
+		// in tiles about a metre across, each the whole net texture: the garnish's cut-outs come out at their real size
+		const tu = Math.max( 2, Math.round( w / 1.2 ) ), tv = Math.max( 2, Math.round( d / 1.2 ) );
+		for ( let i = 0; i < tu; i ++ ) for ( let j = 0; j < tv; j ++ ) k.part( geo.grid( 3, 3, ( u, v ) => net( ( i + u ) / tu, ( j + v ) / tv ) ), 'print', 0xffffff, null, null, null, { cell: CELLS.camo_net } );
 		for ( const [ x, z, ph ] of poles ) {
 			k.cyl( 0.025, 0.025, ph - 0.03, 'wood', 0x5a4a34, [ x, 0, z ], null, 5 );
 			k.cyl( 0.16, 0.16, 0.02, 'plastic', 0x2e3222, [ x, ph - 0.05, z ], null, 8 );
@@ -970,7 +1012,7 @@ export const PROPS = {
 	// concertina wire on screw pickets, the coils a little uneven
 	razor_wire( k, o, R ) {
 		const len = o.len ?? 3, turns = Math.round( len / 0.22 ), pts = [];
-		const n = turns * 8;
+		const n = turns * 6;
 		for ( let i = 0; i <= n; i ++ ) {
 			const t = i / n, a = t * turns * PI * 2, rr = 0.4 * ( 1 + ( vnoise( t * turns, 0.5, 21 ) - 0.5 ) * 0.2 ) * ( 1 - Math.sin( t * PI ) * 0.06 );
 			pts.push( [ - len / 2 + t * len, 0.42 + Math.sin( a ) * rr, Math.cos( a ) * rr ] );
@@ -1038,9 +1080,10 @@ export const PROPS = {
 		k.part( geo.cylX( 0.11, 1.75, 8 ), 'cloth', shade( c, - 0.06 ), [ 0, Hw - 0.24, hd + 0.1 ] );
 		for ( const x of [ - 0.6, 0.6 ] ) k.box( 0.04, 0.3, 0.005, 'cloth', 0x2a4f8a, [ x, Hw - 0.42, hd + 0.21 ] );
 		k.part( inward( geo.box( W - 0.08, Hw, D - 0.08 ) ), 'matte', 0x2a2c30 );
-		k.part( inward( geo.quad( [ hw - 0.04, Hw, hd - 0.04 ], [ - hw + 0.04, Hw, hd - 0.04 ], [ - hw + 0.04, Ht - 0.05, 0 ], [ hw - 0.04, Ht - 0.05, 0 ], 1, 1 ) ), 'matte', 0x33353a );
-		k.part( inward( geo.quad( [ - hw + 0.04, Hw, - hd + 0.04 ], [ hw - 0.04, Hw, - hd + 0.04 ], [ hw - 0.04, Ht - 0.05, 0 ], [ - hw + 0.04, Ht - 0.05, 0 ], 1, 1 ) ), 'matte', 0x33353a );
-		k.push( [ - 0.4, 0, 1.0 ], [ 0, 0.05, 0 ] ); PROPS.cot( k, {}, R ); k.boxes.pop(); k.pop();
+		// (these two face down, into the tent, as built)
+		k.part( geo.quad( [ hw - 0.04, Hw, hd - 0.04 ], [ - hw + 0.04, Hw, hd - 0.04 ], [ - hw + 0.04, Ht - 0.12, 0 ], [ hw - 0.04, Ht - 0.12, 0 ], 1, 1 ), 'matte', 0x33353a );
+		k.part( geo.quad( [ - hw + 0.04, Hw, - hd + 0.04 ], [ hw - 0.04, Hw, - hd + 0.04 ], [ hw - 0.04, Ht - 0.12, 0 ], [ - hw + 0.04, Ht - 0.12, 0 ], 1, 1 ), 'matte', 0x33353a );
+		k.push( [ - 0.4, 0, 1.0 ], [ 0, 0.05, 0 ] ); PROPS.cot( k, { bare: true }, R ); k.boxes.pop(); k.pop();
 		// clear windows on the front and back, some with their covers down
 		for ( const z of [ - 1, 1 ] ) for ( const x of [ - 2.1, 2.1 ] ) {
 			k.box( 0.9, 0.6, 0.006, 'plastic', 0x34414c, [ x, 1.0, z * ( hd + 0.012 ) ] );
@@ -1052,7 +1095,7 @@ export const PROPS = {
 		else if ( R() < 0.4 ) k.box( 0.8, 0.8, 0.01, 'print', 0xffffff, [ 1.1, 0.95, hd + 0.03 ], null, { cell: CELLS.medical } );
 		// guys and pegs along the walls; sandbags weighting the front corners
 		for ( const s of [ - 1, 1 ] ) for ( const x of [ - hw, 0, hw ] ) guy( k, [ x * 0.98, Hw - 0.05, s * ( hd + 0.1 ) ], x * 1.12, s * ( hd + 1.0 ) );
-		for ( const x of [ - hw, hw ] ) { bag( k, x, 0, hd + 0.25, 0.1, R, 0x8a8f96 ); if ( R() < 0.6 ) bag( k, x + 0.05, 0.13, hd + 0.25, 0.3, R, 0x8a8f96 ); }
+		for ( const x of [ - hw, hw ] ) bag( k, x, 0, hd + 0.25, 0.1, R, 0x8a8f96 );
 		k.groundDecal( 'boots', 0, hd + 1.2, 2.8, R() * 6 );
 		k.collider( W / 2, Ht / 2, D / 2, [ 0, Ht / 2, 0 ], 0, 'wood', 'noclimb' );
 	},
@@ -1060,9 +1103,17 @@ export const PROPS = {
 	// a cot with its canvas sagging; often somebody's blanket and pillow still on it
 	cot( k, o, R ) {
 		const F = o.c ?? 0x5a5e44, M = 'metal';
+		if ( o.bare ) {
+			// (seen through a tent's door: the canvas on its rails is all that shows)
+			for ( const z of [ - 0.33, 0.33 ] ) rod( k, [ - 0.95, 0.42, z ], [ 0.95, 0.42, z ], 0.014, M, 0x8a8e92, 4 );
+			k.part( geo.quad( [ - 0.95, 0.43, 0.33 ], [ 0.95, 0.43, 0.33 ], [ 0.95, 0.43, - 0.33 ], [ - 0.95, 0.43, - 0.33 ], 2, 2, ( u, v ) => - Math.sin( PI * v ) * 0.04 ), 'cloth', F );
+			for ( const x of [ - 0.8, 0.8 ] ) rod( k, [ x, 0, 0 ], [ x, 0.42, 0 ], 0.012, M, 0x8a8e92, 4 );
+			k.collider( 0.95, 0.22, 0.33, [ 0, 0.22, 0 ], 0, 'wood' );
+			return;
+		}
 		for ( const z of [ - 0.33, 0.33 ] ) rod( k, [ - 0.95, 0.42, z ], [ 0.95, 0.42, z ], 0.014, M, 0x8a8e92, 6 );
 		for ( const x of [ - 0.95, 0.95 ] ) rod( k, [ x, 0.42, - 0.33 ], [ x, 0.42, 0.33 ], 0.012, M, 0x8a8e92, 5 );
-		for ( const x of [ - 0.8, 0, 0.8 ] ) { rod( k, [ x, 0, - 0.33 ], [ x, 0.42, 0.33 ], 0.01, M, 0x8a8e92, 5 ); rod( k, [ x, 0, 0.33 ], [ x, 0.42, - 0.33 ], 0.01, M, 0x8a8e92, 5 ); }
+		for ( const x of [ - 0.8, 0, 0.8 ] ) { rod( k, [ x, 0, - 0.33 ], [ x, 0.42, 0.33 ], 0.01, M, 0x8a8e92, 4 ); rod( k, [ x, 0, 0.33 ], [ x, 0.42, - 0.33 ], 0.01, M, 0x8a8e92, 4 ); }
 		k.part( geo.quad( [ - 0.95, 0.43, 0.33 ], [ 0.95, 0.43, 0.33 ], [ 0.95, 0.43, - 0.33 ], [ - 0.95, 0.43, - 0.33 ], 6, 3, ( u, v ) => - Math.sin( PI * v ) * ( 0.035 + 0.015 * Math.sin( PI * u ) ) ), 'cloth', F );
 		if ( ! o.bare && R ) {
 			const k2 = R();
@@ -1094,8 +1145,8 @@ export const PROPS = {
 			for ( let r = 0; r < 2; r ++ ) for ( let i = 0; i < 3; i ++ ) for ( let j = 0; j < 3; j ++ ) {
 				if ( r === 1 && i === 2 && j > 0 ) continue;
 				const p = [ - 0.36 + i * 0.36, y0 + r * 0.47, - 0.32 + j * 0.32 ];
-				k.part( geo.lathe( [ [ 0.14, 0 ], [ 0.145, 0.04 ], [ 0.14, 0.34 ], [ 0.06, 0.42 ], [ 0.03, 0.44 ], [ 0, 0.44 ] ], 10 ), 'plastic', 0x6aa0d8, p );
-				k.cyl( 0.035, 0.035, 0.03, 'plastic', 0x1f4fa8, [ p[ 0 ], p[ 1 ] + 0.44, p[ 2 ] ], null, 6 );
+				k.part( geo.lathe( [ [ 0.14, 0 ], [ 0.142, 0.34 ], [ 0.05, 0.43 ], [ 0, 0.44 ] ], 8 ), 'plastic', 0x6aa0d8, p );
+				k.part( geo.cyl( 0.035, 0.035, 0.03, 6, true ), 'plastic', 0x1f4fa8, [ p[ 0 ], p[ 1 ] + 0.425, p[ 2 ] ] );
 			}
 			k.box( 1.12, 0.01, 0.98, 'print', 0xffffff, [ 0, y0 + 0.455, 0 ], null, { cell: CELLS.carton } );
 			topY = y0 + 0.47;
@@ -1128,8 +1179,8 @@ export const PROPS = {
 
 	generator( k, o, R ) {
 		const Y = 0xd9a52a, F = 0x1a1a1a;
-		for ( const z of [ - 0.25, 0.25 ] ) { rod( k, [ - 0.35, 0.05, z ], [ 0.35, 0.05, z ], 0.015, 'metal', F, 6 ); rod( k, [ - 0.35, 0.55, z ], [ 0.35, 0.55, z ], 0.015, 'metal', F, 6 ); }
-		for ( const x of [ - 0.35, 0.35 ] ) for ( const z of [ - 0.25, 0.25 ] ) rod( k, [ x, 0.05, z ], [ x, 0.55, z ], 0.015, 'metal', F, 6 );
+		for ( const z of [ - 0.25, 0.25 ] ) { rod( k, [ - 0.35, 0.05, z ], [ 0.35, 0.05, z ], 0.015, 'metal', F, 4 ); rod( k, [ - 0.35, 0.55, z ], [ 0.35, 0.55, z ], 0.015, 'metal', F, 4 ); }
+		for ( const x of [ - 0.35, 0.35 ] ) for ( const z of [ - 0.25, 0.25 ] ) rod( k, [ x, 0.05, z ], [ x, 0.55, z ], 0.015, 'metal', F, 4 );
 		k.rbox( 0.42, 0.3, 0.36, 0.03, 'metal', 0x3a3a3a, [ - 0.08, 0.06, 0 ], null, { seg: 1 } );
 		k.rbox( 0.5, 0.16, 0.38, 0.05, 'plastic', Y, [ 0, 0.42, 0 ], null, { seg: 1, grime: 0.2 } );
 		k.cyl( 0.04, 0.04, 0.03, 'plastic', 0x1a1a1a, [ 0.12, 0.58, 0.05 ], null, 8 );
@@ -1194,7 +1245,7 @@ export const PROPS = {
 		// a bunch of bananas hung from the beam on a cord
 		rod( k, [ - 0.85, 2.02, 0.2 ], [ - 0.85, 1.62, 0.2 ], 0.004, 'matte', ROPE, 3, FINE );
 		k.cyl( 0.025, 0.02, 0.5, 'wood', 0x5a6a2a, [ - 0.85, 1.15, 0.2 ], null, 5 );
-		for ( let i = 0; i < 4; i ++ ) banana( k, [ - 0.85, 1.25 + i * 0.1, 0.2 ], i * 1.6 + R(), R, 0x9ab03a );
+		for ( let i = 0; i < 7; i ++ ) { const a = i * 2.2 + R(); banana( k, [ - 0.85 + Math.cos( a ) * 0.03, 0.98 + i * 0.06, 0.2 - Math.sin( a ) * 0.03 ], a, R, 0xb8b840, 0.95 ); }
 		// the price board leaning on the counter, cartons under it
 		k.box( 0.6, 0.6, 0.02, 'print', 0xffffff, [ 1.0, 0.0, D / 2 + 0.2 ], [ - 0.18, - 0.15, 0 ], { cell: CELLS.chalk } );
 		k.box( 0.5, 0.35, 0.4, 'print', 0xffffff, [ - 0.6, 0, - 0.1 ], [ 0, 0.1, 0 ], { cell: CELLS.carton } );
@@ -1209,7 +1260,7 @@ export const PROPS = {
 		const f = ( o.fruit ?? 0 ) % 4;
 		if ( f === 0 ) {
 			// hands of apple bananas
-			for ( let i = 0; i < 3; i ++ ) banana( k, [ - 0.15 + i * 0.15, 0.14 + R() * 0.03, ( R() - 0.5 ) * 0.1 ], R() * 6, R, 0xe0c23a, true );
+			for ( let i = 0; i < 4; i ++ ) banana( k, [ - 0.2 + ( i % 2 ) * 0.22, 0.1 + Math.floor( i / 2 ) * 0.04, ( Math.floor( i / 2 ) - 0.5 ) * 0.14 ], ( i % 2 ) * PI + ( R() - 0.5 ) * 0.4, R, 0xe0c23a, 0.05 );
 		} else for ( let i = 0; i < 9; i ++ ) {
 			const x = ( ( i % 3 ) - 1 ) * 0.16, z = ( Math.floor( i / 3 ) - 1 ) * 0.11, y = 0.17 + R() * 0.03;
 			if ( f === 1 ) {
@@ -1315,13 +1366,12 @@ export const PROPS = {
 			for ( const x of [ - 0.35, 0.35 ] ) k.box( 0.07, 0.008, 0.3, 'cloth', O, [ x, H - 0.02, D / 2 + 0.1 ], [ 1.2, 0, 0 ] );
 			k.part( inward( geo.box( W - 0.04, H - 0.2, D - 0.04 ) ), 'wood', 0x5a4a34, [ 0, 0.18, 0 ] );
 			const fill = geo.grid( 5, 4, ( u, v ) => [ ( u - 0.5 ) * ( W - 0.06 ), H - 0.12 + vnoise( u * 4, v * 4, 23 ) * 0.07, ( v - 0.5 ) * ( D - 0.06 ) ] );
-			k.part( fill, 'matte', 0xd8cfb0 );
+			k.part( inward( fill ), 'matte', 0xd8cfb0 );
 			k.push( [ 0, 0, D / 2 + 0.55 ], [ - 1.2, 0, 0 ] );
 			k.box( W, 0.04, D, 'wood', 0xa88a5e );
 			for ( const x of [ - 0.4, 0, 0.4 ] ) k.box( 0.05, 0.03, D - 0.1, 'wood', 0x8a7350, [ x, 0.04, 0 ] );
 			k.pop();
 		} else k.box( W, 0.04, D, 'wood', 0xa88a5e, [ 0, H, 0 ] );
-		k.groundDecal( 'soil', 0, 0, 2.2, R() * 6 );
 		k.collider( W / 2 + 0.05, H / 2, D / 2 + 0.05, [ 0, H / 2, 0 ], 0, 'wood' );
 	},
 
@@ -1338,7 +1388,7 @@ export const PROPS = {
 			const a0 = i / n * PI * 2, a1 = ( i + 1 ) / n * PI * 2;
 			k.part( geo.grid( 3, 7, ( u, v ) => at( a0 + ( a1 - a0 ) * u, 0.05 + v * 0.95 ) ), 'cloth', cols[ i % 2 ], null, null, null, { drape: true } );
 			// the seam tape down the gore's edge
-			k.part( geo.grid( 1, 7, ( u, v ) => { const p = at( a0 + ( u - 0.5 ) * 0.025, 0.05 + v * 0.95 ); p[ 1 ] += 0.008; return p; } ), 'cloth', 0x4a4e34, null, null, null, { drape: true } );
+			k.part( geo.grid( 1, 7, ( u, v ) => { const p = at( a0 + ( u - 0.5 ) * 0.025, 0.05 + v * 0.95 ); p[ 1 ] += 0.008; return p; } ), 'cloth', 0x4a4e34, null, null, null, { drape: true, fine: true } );
 		}
 		// the hem round the skirt, the vent band at the top
 		k.part( geo.grid( 36, 1, ( u, v ) => { const p = at( u * PI * 2, 0.95 + v * 0.05 ); p[ 1 ] += 0.008; return p; } ), 'cloth', 0x4a4e34, null, null, null, { drape: true } );
@@ -1409,16 +1459,17 @@ export const PROPS = {
 	},
 };
 
-// a hand of bananas: a crown with fingers curving up off it ( p: the crown, yaw: which way it faces)
-function banana( k, p, yaw, R, col, lying = false ) {
-	k.push( p, [ lying ? HALF * 0.9 : 0, yaw, 0 ] );
+// a hand of bananas: five fingers fanned off a crown, curving up at their tips. Built pointing +x from p, turned
+// by yaw; tilt raises the hand about its crown (near 0 in a crate: the fingers lie flat and curl up)
+function banana( k, p, yaw, R, col, tilt = 0 ) {
+	k.push( p, [ 0, yaw, tilt ] );
 	for ( let i = 0; i < 5; i ++ ) {
-		const g = new THREE.CylinderGeometry( 0.014, 0.018, 0.16, 5, 3 );
+		const g = new THREE.CylinderGeometry( 0.016, 0.013, 0.17, 4, 2, true ).rotateZ( - HALF );
 		const pos = g.attributes.position;
-		for ( let j = 0; j < pos.count; j ++ ) { const y = pos.getY( j ) + 0.08; pos.setX( j, pos.getX( j ) + y * y * 1.6 ); }
+		for ( let j = 0; j < pos.count; j ++ ) { const x = pos.getX( j ) + 0.085; pos.setY( j, pos.getY( j ) + x * x * 1.5 ); }
 		g.computeVertexNormals();
-		k.part( g, 'matte', shade( col, ( R() - 0.5 ) * 0.15 ), [ ( i - 2 ) * 0.028, 0.0, 0.02 + Math.abs( i - 2 ) * 0.008 ], [ - 0.5, 0, - 0.35 + ( i - 2 ) * 0.06 ] );
+		k.part( g, 'matte', shade( col, ( R() - 0.5 ) * 0.15 ), [ 0.085, 0, ( i - 2 ) * 0.03 ], [ 0, ( i - 2 ) * 0.12, 0 ] );
 	}
-	k.part( geo.box( 0.15, 0.03, 0.03 ), 'matte', 0x6a6a3a, [ 0, - 0.08, 0 ] );
+	k.part( geo.box( 0.04, 0.03, 0.15 ), 'matte', 0x6a6a3a, [ 0, 0, 0 ] );
 	k.pop();
 }

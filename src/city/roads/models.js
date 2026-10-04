@@ -290,20 +290,56 @@ function busShelter( lod = 0 ) {
 	}
 	b.box( 4.3, 0.08, 1.85, FR, T.paint, { y: 2.54, z: 0.05, rx: 0.04 } );
 	b.box( 4.32, 0.22, 0.06, 0xd9a520, T.paint, { y: 2.47, z: - 0.86 } ); // fascia
-	b.box( 3.85, 2.05, 0.02, 0x6d8288, T.glass, { y: 1.3, z: 0.7 } ); // back glazing
-	b.box( 0.02, 2.05, 1.25, 0x6d8288, T.glass, { x: - 1.95, y: 1.3, z: 0.05 } );
+	// the glazed back and end: frames and rails; the tempered panes have shattered (shelters are the first thing
+	// broken) and left a fringe of shards in their frames
+	b.box( 3.85, 0.05, 0.05, FR, T.paint, { y: 0.28, z: 0.7 } );
+	b.box( 3.85, 0.05, 0.05, FR, T.paint, { y: 2.3, z: 0.7 } );
+	for ( const x of [ - 0.65, 0.65 ] ) b.box( 0.05, 2.05, 0.05, FR, T.paint, { x, y: 1.3, z: 0.7 } );
+	b.box( 0.05, 0.05, 1.25, FR, T.paint, { x: - 1.95, y: 0.28, z: 0.05 } );
+	b.box( 0.05, 0.05, 1.25, FR, T.paint, { x: - 1.95, y: 2.3, z: 0.05 } );
 	if ( ! lod ) {
-		b.box( 3.85, 0.05, 0.05, FR, T.paint, { y: 0.28, z: 0.7 } );
-		b.box( 3.85, 0.05, 0.05, FR, T.paint, { y: 2.3, z: 0.7 } );
-		for ( const x of [ - 0.65, 0.65 ] ) b.box( 0.05, 2.05, 0.05, FR, T.paint, { x, y: 1.3, z: 0.7 } );
-		b.box( 0.05, 0.05, 1.25, FR, T.paint, { x: - 1.95, y: 0.28, z: 0.05 } );
-		b.box( 3.0, 0.12, 0.006, 0xe6e6e0, T.shiny, { y: 1.6, z: 0.69 } ); // frosted safety band on the glass
+		let sd = 11;
+		const rnd = () => { sd = ( sd * 16807 ) % 2147483647; return sd / 2147483647; };
+		const tri = [];
+		// a pane from ( u0, v0 ) to ( u1, v1 ) in its plane; at( u, v ) -> [ x, y, z ]
+		const pane = ( u0, u1, v0, v1, at, keep ) => {
+			const W = u1 - u0;
+			for ( const [ v, dir, hmax ] of [ [ v0, 1, 0.32 ], [ v1, - 1, 0.14 ] ] ) {
+				// a jagged fringe along the rail: teeth of random height, a few long daggers
+				const n = Math.max( 3, Math.round( W / 0.11 ) );
+				for ( let k = 0; k < n; k ++ ) {
+					const a = u0 + W * k / n, c = u0 + W * ( k + 1 ) / n;
+					const h = ( rnd() < 0.15 ? 2.2 : 1 ) * hmax * ( 0.15 + 0.85 * rnd() ) * keep;
+					tri.push( at( a, v ), at( c, v ), at( a + ( c - a ) * rnd(), v + dir * h ) );
+				}
+			}
+			// corners that held
+			for ( const [ u, v, du, dv ] of [ [ u0, v0, 1, 1 ], [ u1, v1, - 1, - 1 ] ] ) if ( rnd() < 0.7 ) tri.push( at( u, v ), at( u + du * ( 0.15 + 0.3 * rnd() ), v ), at( u, v + dv * ( 0.2 + 0.4 * rnd() ) ) );
+		};
+		const back = ( u, v ) => [ u, v, 0.7 ], end = ( u, v ) => [ - 1.95, v, u ];
+		pane( - 1.9, - 0.675, 0.305, 2.275, back, 1 );
+		pane( - 0.625, 0.625, 0.305, 2.275, back, 0.6 );
+		pane( 0.675, 1.9, 0.305, 2.275, back, 1.2 );
+		pane( - 0.6, 0.65, 0.305, 2.275, end, 0.8 );
+		// both faces (a pane has no thickness)
+		const two = [];
+		for ( let i = 0; i < tri.length; i += 3 ) two.push( tri[ i ], tri[ i + 1 ], tri[ i + 2 ], tri[ i ], tri[ i + 2 ], tri[ i + 1 ] );
+		b.tris( two, 0x8fa4a8, T.glass );
 		b.box( 0.6, 0.12, 0.006, 0x1d6db5, T.shiny, { x: - 1.4, y: 2.45, z: - 0.893 } ); // TheBus logo plate
 	}
-	// advertising panel at the open end
+	// advertising case at the open end, a faded tourism poster on both faces (sea, sand, sun, headline)
 	b.box( 0.14, 1.85, 1.3, FR, T.paint, { x: 1.95, y: 1.2, z: 0.05 } );
-	b.box( 0.02, 1.6, 1.1, 0xe8a54a, T.shiny, { x: 2.03, y: 1.25, z: 0.05 } );
-	b.box( 0.02, 0.5, 0.8, 0x1d6db5, T.shiny, { x: 2.04, y: 1.6, z: 0.05 } );
+	for ( const s of [ - 1, 1 ] ) {
+		const x = 1.95 + s * 0.072;
+		b.box( 0.006, 1.6, 1.1, 0xd9cfa8, T.shiny, { x, y: 1.25, z: 0.05 } );
+		if ( lod ) continue;
+		b.box( 0.006, 0.82, 1.06, 0x3f93b0, T.shiny, { x: x + s * 0.002, y: 1.6, z: 0.05 } );
+		b.box( 0.006, 0.12, 1.06, 0x2a6f8f, T.shiny, { x: x + s * 0.003, y: 1.25, z: 0.05 } );
+		b.cyl( 0.16, 0.16, 0.006, 12, 0xeea23a, T.shiny, { x: x + s * 0.004, y: 1.72, z: 0.05 + s * 0.22, axis: 'x' } );
+		b.box( 0.006, 0.1, 0.8, 0xf2f0e8, T.shiny, { x: x + s * 0.004, y: 1.92, z: 0.05 } );
+		b.box( 0.006, 0.05, 0.5, 0x2a2622, T.shiny, { x: x + s * 0.004, y: 0.68, z: 0.05 } );
+		b.box( 0.006, 0.12, 0.12, 0xb8231d, T.shiny, { x: x + s * 0.004, y: 0.6, z: 0.05 - s * 0.38 } );
+	}
 	// perforated steel bench
 	b.box( 2.4, 0.04, 0.42, 0x6b7275, T.steel, { y: 0.46, z: 0.4 } );
 	if ( ! lod ) b.box( 2.4, 0.3, 0.03, 0x6b7275, T.steel, { y: 0.66, z: 0.62, rx: - 0.12 } );
@@ -558,19 +594,33 @@ function meter() {
 	return b.build();
 }
 
+// boom barrier: the drive cabinet on a plinth (tapered, with a hooded top, the door and its lock), the pivot hub with
+// the arm clamp on the road side and the counterweight behind it
 function boomBase() {
 	const b = new MB();
-	b.box( 0.4, 1.0, 0.36, 0xd4a020, T.paint, { y: 0.5 } );
-	b.box( 0.44, 0.06, 0.4, 0x333333, T.iron, { y: 1.02 } );
-	b.box( 0.3, 0.3, 0.3, 0x333333, T.iron, { x: - 0.3, y: 0.9 } ); // counterweight
-	b.box( 0.46, 0.06, 0.42, CONC, T.concrete, { y: 0.03 } );
-	b.box( 0.02, 0.2, 0.16, 0x111111, T.plastic, { x: 0.205, y: 0.6 } ); // access panel
+	const Y = 0xd4a020, HUB = 0x3a3c3e;
+	b.box( 0.5, 0.08, 0.44, CONC, T.concrete, { y: 0.04 } );
+	b.box( 0.36, 0.02, 0.3, 0x55595c, T.galv, { y: 0.09 } ); // base flange
+	b.taper( 0.32, 0.28, 0.29, 0.26, 0.86, Y, T.paint, { y: 0.1 } );
+	b.box( 0.34, 0.05, 0.31, Y, T.paint, { y: 0.985, rx: 0.06 } ); // hooded top
+	b.box( 0.006, 0.6, 0.2, 0x8c6a14, T.paint, { x: - 0.151, y: 0.5 } ); // door seam
+	b.box( 0.006, 0.56, 0.17, Y, T.paint, { x: - 0.153, y: 0.5 } );
+	b.cyl( 0.012, 0.012, 0.02, 8, 0xb0b0b0, T.steel, { x: - 0.16, y: 0.62, z: 0.06, axis: 'x' } ); // lock
+	b.box( 0.006, 0.08, 0.2, 0x1a1a1a, T.plastic, { x: - 0.152, y: 0.85 } ); // vent
+	// pivot: hub disc, shaft, the arm clamp reaching out over the road, the counterweight plate behind
+	b.cyl( 0.11, 0.11, 0.07, 14, HUB, T.iron, { x: 0.18, y: 0.92, axis: 'x' } );
+	b.cyl( 0.03, 0.03, 0.05, 8, 0x8a8d90, T.steel, { x: 0.235, y: 0.92, axis: 'x' } );
+	b.box( 0.26, 0.13, 0.09, 0xb4b8bb, T.alu, { x: 0.33, y: 0.92 } );
+	b.cyl( 0.03, 0.03, 0.08, 8, 0x8a8d90, T.steel, { x: - 0.19, y: 0.92, axis: 'x' } );
+	b.box( 0.07, 0.24, 0.2, 0x2a2b2c, T.iron, { x: - 0.25, y: 0.9 } ); // counterweight
 	return b.build();
 }
-// unit-length arm along +x (scaled by the boom length)
+// unit-length arm along +x (scaled by the boom length): a flattened aluminium tube in red and white bands, a rubber tip
 function boomArm() {
 	const b = new MB();
-	for ( let k = 0; k < 10; k ++ ) b.box( 0.1, 0.09, 0.07, k % 2 ? 0xe8e8e2 : 0xc1281c, T.shiny, { x: 0.2 + ( k + 0.5 ) * 0.1, y: 0.92 } );
+	const n = 10, x0 = 0.05;
+	for ( let k = 0; k < n; k ++ ) b.cyl( 0.05, 0.05, ( 1 - x0 ) / n, 8, k % 2 ? 0xe8e8e2 : 0xc1281c, T.shiny, { x: x0 + ( k + 0.5 ) * ( 1 - x0 ) / n, y: 0.92, axis: 'x', sz: 0.65 } );
+	b.cyl( 0.052, 0.052, 0.012, 8, BLACK, T.rubber, { x: 1.0, y: 0.92, axis: 'x', sz: 0.66 } );
 	return b.build();
 }
 
@@ -600,12 +650,43 @@ function floodlight( lod = 0 ) {
 	return b.build();
 }
 
+// a filled body bag lying on the ground, head at -z: heavy vinyl slumped over the body (head, shoulders, chest, hips,
+// legs, the feet tenting it up), flat underneath, a U-shaped zip and webbing handles
+const BAG_W = [ [ - 0.95, 0.1, 0.06 ], [ - 0.85, 0.2, 0.14 ], [ - 0.68, 0.19, 0.15 ], [ - 0.55, 0.27, 0.15 ], [ - 0.42, 0.3, 0.2 ], [ - 0.15, 0.29, 0.21 ], [ 0.1, 0.28, 0.19 ], [ 0.35, 0.24, 0.14 ], [ 0.6, 0.2, 0.12 ], [ 0.8, 0.18, 0.17 ], [ 0.93, 0.13, 0.13 ], [ 0.98, 0.06, 0.05 ] ];
 function bodyBag() {
 	const b = new MB();
-	b.sphere( 0.5, 12, 6, 0xffffff, T.tintShiny, { y: 0.14, sx: 0.55, sy: 0.3, sz: 1.85 } );
-	b.sphere( 0.5, 8, 5, 0xffffff, T.tintShiny, { y: 0.2, z: - 0.72, sx: 0.4, sy: 0.3, sz: 0.4 } );
-	b.box( 0.02, 0.01, 1.4, 0x9a9a9a, T.steel, { y: 0.285, z: 0.05 } ); // zip
-	for ( const z of [ - 0.75, 0.0, 0.75 ] ) for ( const s of [ - 1, 1 ] ) b.box( 0.06, 0.03, 0.12, 0x1a1a1a, T.fabric, { x: s * 0.29, y: 0.14, z } ); // carry handles
+	// lofted half-ellipse sections ( z, half width, height ), the top a little flattened like slack vinyl
+	const seg = 10, rows = BAG_W.length;
+	const g = new THREE.BufferGeometry(), pos = [], idx = [];
+	for ( const [ z, w, h ] of BAG_W ) for ( let k = 0; k <= seg; k ++ ) {
+		const a = Math.PI * k / seg, c = Math.cos( a ), s = Math.sin( a );
+		pos.push( c * w * ( 1 + 0.06 * s ), Math.pow( s, 0.75 ) * h + 0.005, z );
+	}
+	for ( let r = 0; r < rows - 1; r ++ ) for ( let k = 0; k < seg; k ++ ) {
+		const i = r * ( seg + 1 ) + k, j = i + seg + 1;
+		idx.push( i, i + 1, j, i + 1, j + 1, j );
+	}
+	// close the ends
+	for ( const r of [ 0, rows - 1 ] ) for ( let k = 1; k < seg; k ++ ) {
+		const o = r * ( seg + 1 );
+		if ( r ) idx.push( o, o + k, o + k + 1 ); else idx.push( o, o + k + 1, o + k );
+	}
+	g.setAttribute( 'position', new THREE.Float32BufferAttribute( pos, 3 ) );
+	g.setIndex( idx );
+	// (wound for outward faces: the index runs round the section counter-clockwise seen from the head)
+	g.computeVertexNormals();
+	b.add( g, 0xffffff, [ 0.62, 0, 6.5 ] );
+	// zip: down the middle and round the head end, the pull at the shoulder
+	const zip = [];
+	for ( let r = 1; r < rows - 2; r ++ ) zip.push( [ 0, BAG_W[ r ][ 2 ] + 0.006, BAG_W[ r ][ 0 ] ] );
+	b.tube( zip, 0.008, 4, 0x2a2a2a, T.plastic );
+	b.box( 0.03, 0.012, 0.06, 0x9a9a9a, T.steel, { x: 0.03, y: BAG_W[ 4 ][ 2 ] + 0.012, z: BAG_W[ 4 ][ 0 ] } );
+	// webbing carry handles along both sides
+	for ( const z of [ - 0.5, 0.05, 0.6 ] ) for ( const s of [ - 1, 1 ] ) {
+		const r = BAG_W.findIndex( q => q[ 0 ] > z );
+		const w = BAG_W[ r ][ 1 ];
+		b.box( 0.03, 0.06, 0.14, 0x1a1a1a, T.fabric, { x: s * ( w + 0.01 ), y: 0.05, z } );
+	}
 	return b.build();
 }
 
@@ -613,8 +694,11 @@ function bodyBag() {
 function tire() {
 	const b = new MB();
 	const r = 0.33, h = 0.11, ri = 0.21;
-	b.lathe( [ [ ri, - h * 0.9 ], [ r * 0.95, - h * 0.95 ], [ r, - h * 0.5 ], [ r, h * 0.5 ], [ r * 0.95, h * 0.95 ], [ ri, h * 0.9 ] ], 16, 0x161616, T.rubber, { y: r, axis: 'z' } );
-	b.cyl( ri, ri, h * 1.5, 14, 0x6a5040, T.iron, { y: r, axis: 'z' } );
+	b.lathe( [ [ ri, - h * 0.9 ], [ r * 0.95, - h * 0.95 ], [ r, - h * 0.5 ], [ r, h * 0.5 ], [ r * 0.95, h * 0.95 ], [ ri, h * 0.9 ] ], 20, 0x161616, T.rubber, { y: r, axis: 'z' } );
+	// the steel wheel: a dish set in from both faces (painted, so the shader chips it to rust), the dark hub bore
+	b.lathe( [ [ 0.0, - h * 0.4 ], [ ri * 0.35, - h * 0.4 ], [ ri * 0.8, - h * 0.55 ], [ ri, - h * 0.85 ] ], 14, 0x45484a, T.iron, { y: r, axis: 'z' } );
+	b.lathe( [ [ ri, h * 0.85 ], [ ri * 0.8, h * 0.55 ], [ ri * 0.35, h * 0.4 ], [ 0.0, h * 0.4 ] ], 14, 0x45484a, T.iron, { y: r, axis: 'z' } );
+	for ( const s of [ - 1, 1 ] ) b.cyl( ri * 0.22, ri * 0.22, 0.004, 10, 0x0c0c0c, T.rubber, { y: r, z: s * h * 0.41, axis: 'z' } );
 	return b.build();
 }
 

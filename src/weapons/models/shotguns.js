@@ -16,7 +16,6 @@ function pump870( o ) {
 	// ejection port with the bolt behind it, the loading port and its lifter underneath
 	P.box( 'rubber', 0.004, 0.074, - 0.013, 0.012, hz - 0.0003, hz + 0.0003, 0.0015 );
 	P.box( 'steelD', 0.024, 0.072, - 0.0075, 0.0065, hz, hz + 0.0005, 0.0015 );
-	P.box( 'rubber', 0.046, 0.05, - 0.0075, 0.0065, hz + 0.0004, hz + 0.0007, 0 ); // the extractor's cut
 	P.box( 'rubber', - 0.02, 0.086, bot - 0.0006, bot + 0.0004, - 0.012, 0.012, 0.002 );
 	P.box( 'blued', - 0.012, 0.078, bot - 0.0012, bot, - 0.009, 0.009, 0.0015 );
 	// trigger plate: the guard, the cross-bolt safety, the action release, the pins

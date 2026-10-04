@@ -1,7 +1,22 @@
 // Item models for the sites' own items (register( reg ), added to render/ItemModels.js through models/ext/index.js):
 // a stash note (a folded sheet of lined paper, scrawled with directions and a sketch) and a treasure map (an old
 // creased chart with a red X). Model conventions as render/ItemModels.js: metres, origin at the bottom centre.
-import { M, G, PI, add, group, canvasTex } from '../models/lib.js';
+import * as THREE from 'three';
+import { M, PI, add, group, canvasTex } from '../models/lib.js';
+
+// a sheet of paper w x d lying on xz, its far edge curling up by curl and bowed across by bow; u0, u1: the part of
+// the texture it shows across
+function paperGeo( w, d, curl, bow, u0 = 0, u1 = 1, v0 = 0, v1 = 1 ) {
+	const g = new THREE.PlaneGeometry( w, d, 4, 4 ).rotateX( - PI / 2 );
+	const p = g.attributes.position, uv = g.attributes.uv;
+	for ( let i = 0; i < p.count; i ++ ) {
+		const x = p.getX( i ), z = p.getZ( i ), tz = z / d + 0.5, tx = x / w;
+		p.setY( i, curl * tz ** 3 + bow * ( 1 - ( 2 * tx ) ** 2 ) + 0.0008 );
+		uv.setXY( i, u0 + uv.getX( i ) * ( u1 - u0 ), v0 + uv.getY( i ) * ( v1 - v0 ) );
+	}
+	g.computeVertexNormals();
+	return g;
+}
 
 function noteTex() {
 	return canvasTex( 'sites:note', 256, 192, ( ctx, W, H ) => {
@@ -29,6 +44,10 @@ function noteTex() {
 		ctx.beginPath(); ctx.moveTo( 196, 159 ); ctx.lineTo( 196, 170 ); ctx.stroke();
 		ctx.strokeStyle = '#b3262a'; ctx.lineWidth = 3.5;
 		ctx.beginPath(); ctx.moveTo( 218, 150 ); ctx.lineTo( 234, 166 ); ctx.moveTo( 234, 150 ); ctx.lineTo( 218, 166 ); ctx.stroke();
+		// a coffee ring, a dirty thumbprint, the fold down the middle
+		ctx.strokeStyle = 'rgba(120,80,40,0.35)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc( 70, 150, 22, 0.3, PI * 1.8 ); ctx.stroke();
+		ctx.fillStyle = 'rgba(70,55,40,0.18)'; ctx.beginPath(); ctx.ellipse( 236, 40, 9, 12, 0.4, 0, PI * 2 ); ctx.fill();
+		ctx.strokeStyle = 'rgba(0,0,0,0.12)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo( W / 2, 0 ); ctx.lineTo( W / 2, H ); ctx.stroke();
 	} );
 }
 
@@ -53,29 +72,37 @@ function mapTex() {
 		// a compass rose
 		ctx.fillStyle = '#4a321c'; ctx.beginPath(); ctx.moveTo( 220, 20 ); ctx.lineTo( 226, 44 ); ctx.lineTo( 220, 40 ); ctx.lineTo( 214, 44 ); ctx.closePath(); ctx.fill();
 		ctx.font = 'bold 14px serif'; ctx.textAlign = 'center'; ctx.fillText( 'N', 220, 16 );
-		// fold creases
+		// fold creases, worn pale along their ridges
 		ctx.strokeStyle = 'rgba(80,55,25,0.35)'; ctx.lineWidth = 1.5;
 		ctx.beginPath(); ctx.moveTo( W / 2, 0 ); ctx.lineTo( W / 2, H ); ctx.moveTo( 0, H / 2 ); ctx.lineTo( W, H / 2 ); ctx.stroke();
+		ctx.strokeStyle = 'rgba(240,225,190,0.35)'; ctx.lineWidth = 1;
+		ctx.beginPath(); ctx.moveTo( W / 2 + 2, 0 ); ctx.lineTo( W / 2 + 2, H ); ctx.moveTo( 0, H / 2 + 2 ); ctx.lineTo( W, H / 2 + 2 ); ctx.stroke();
+		// a scorched, ragged edge
+		let s = 11;
+		const r = () => ( s = ( s * 16807 ) % 2147483647 ) / 2147483647;
+		ctx.fillStyle = 'rgba(40,24,10,0.85)';
+		for ( let i = 0; i < 90; i ++ ) {
+			const t = r() * 4, e = Math.floor( t ), f = ( t - e ) * W, d = 2 + r() * 7;
+			const [ x, y ] = [ [ f, 0 ], [ W, f ], [ f, H ], [ 0, f ] ][ e ];
+			ctx.beginPath(); ctx.arc( x, y, d, 0, PI * 2 ); ctx.fill();
+		}
 	} );
 }
 
 export function register( reg ) {
-	// a sheet folded in half, lying a little open
+	// a sheet folded in half, lying a little open: each half shows its half of the page, the open one curling
 	reg( 'sites_note', () => {
-		const g = group(), m = M( 0xffffff, { map: noteTex(), rough: 0.95 } );
-		const a = G.box( 0.09, 0.0015, 0.13 ), b = G.box( 0.09, 0.0015, 0.13 );
-		add( g, a, m, [ - 0.045, 0, 0 ] );
-		add( g, b, m, [ 0.044, 0.004, 0 ], [ 0, 0, 0.12 ] );
+		const g = group(), m = M( 0xffffff, { map: noteTex(), rough: 0.95, side: THREE.DoubleSide } );
+		add( g, paperGeo( 0.09, 0.13, 0.003, 0.0015, 0, 0.5 ), m, [ - 0.045, 0, 0 ] );
+		add( g, paperGeo( 0.09, 0.13, 0.006, 0.002, 0.5, 1 ), m, [ 0.044, 0.002, 0 ], [ 0, 0, 0.14 ] );
 		return g;
 	} );
 	// a creased chart, folded in four and opened out
 	reg( 'sites_tmap', () => {
-		const g = group(), m = M( 0xffffff, { map: mapTex(), rough: 0.9 } );
+		const g = group(), m = M( 0xffffff, { map: mapTex(), rough: 0.9, side: THREE.DoubleSide } );
 		for ( const [ x, z, rz, rx ] of [ [ - 0.055, - 0.055, 0.05, - 0.04 ], [ 0.055, - 0.055, - 0.06, - 0.03 ], [ - 0.055, 0.055, 0.04, 0.05 ], [ 0.055, 0.055, - 0.05, 0.04 ] ] ) {
-			const q = G.box( 0.11, 0.0018, 0.11 );
-			// each quarter shows its part of the chart
-			const uv = q.attributes.uv;
-			for ( let i = 0; i < uv.count; i ++ ) uv.setXY( i, ( x > 0 ? 0.5 : 0 ) + uv.getX( i ) * 0.5, ( z > 0 ? 0 : 0.5 ) + uv.getY( i ) * 0.5 );
+			// each quarter shows its part of the chart, bowed where it was folded
+			const q = paperGeo( 0.11, 0.11, z > 0 ? 0.004 : 0.001, 0.002, x > 0 ? 0.5 : 0, x > 0 ? 1 : 0.5, z > 0 ? 0 : 0.5, z > 0 ? 0.5 : 1 );
 			add( g, q, m, [ x, 0.003, z ], [ rx, 0, rz ] );
 		}
 		return g;

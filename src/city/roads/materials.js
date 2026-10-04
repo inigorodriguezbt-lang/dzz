@@ -964,6 +964,11 @@ export function makeCarMaterial( u ) {
 						col = mix( col, vec3( dot( col, vec3( 0.3, 0.59, 0.11 ) ) ) * 1.08 + 0.015, fade * 0.3 );
 						cRough = mix( 0.28, 0.6, n1.r * fade );
 					}
+					// the cabin trim: charcoal, grey or tan per car (the vertex colour is its shade)
+					if ( part == 9 ) {
+						float it = fract( vCar2.x * 5.3 );
+						col *= it < 0.45 ? vec3( 0.6 ) : it < 0.8 ? vec3( 1.0, 0.98, 0.95 ) : vec3( 1.22, 1.0, 0.72 );
+					}
 					// ---- what is painted on the shell: lamps, grille, panel gaps, handles, fuel door ----
 					if ( body && part <= 1 && outside ) {
 						float ax = abs( lp.x );
@@ -1208,17 +1213,9 @@ export function makeCarMaterial( u ) {
 							else if ( lp.z > uDoors.z + 0.05 && lp.z < uDoors.w ) hole = ( fl & ( left ? 4 : 8 ) ) != 0;
 						}
 						if ( ( fl & 16 ) != 0 && lp.z > uLids.x && lp.z < uLids.y && lp.y > uLidY.x && abs( lp.x ) < uArch.x * 0.92 && part != 3 && part != 4 && part != 9 ) hole = true;
+						// an open hood: its skin went up with the lid, the modelled engine bay (part 9) shows
+						if ( ( fl & 32 ) != 0 && lp.z > uLids.z && lp.z < uLids.w && lp.y > uLidY.y && abs( lp.x ) < uArch.x * 0.9 && part != 3 && part != 4 && part != 9 ) hole = true;
 						if ( hole ) discard;
-						// an open hood shows the engine bay: the block, the battery, hoses and caps
-						if ( ( fl & 32 ) != 0 && lp.z > uLids.z && lp.z < uLids.w && lp.y > uLidY.y && abs( lp.x ) < uArch.x * 0.9 && part != 3 && part != 4 ) {
-							vec2 e = vec2( lp.x / uArch.x, ( lp.z - uLids.z ) / max( uLids.w - uLids.z, 0.1 ) );
-							float blk = boxAA( abs( e.x ), - 1.0, 0.42 ) * boxAA( e.y, 0.25, 0.85 );
-							col = mix( vec3( 0.018, 0.017, 0.016 ), vec3( 0.07, 0.07, 0.072 ) * ( 0.7 + 0.5 * n2.g ), blk );
-							col = mix( col, vec3( 0.025, 0.025, 0.03 ), rectAA( e, vec2( 0.52, 0.55 ), vec2( 0.8, 0.85 ) ) );
-							col = mix( col, vec3( 0.5, 0.42, 0.08 ), ( 1.0 - smoothstep( 0.03, 0.05, length( ( e - vec2( - 0.6, 0.4 ) ) * vec2( uArch.x, uLids.w - uLids.z ) ) ) ) );
-							col = mix( col, vec3( 0.012 ), lineAA( e.y - 0.22 - 0.05 * sin( e.x * 9.0 ), 0.02 ) );
-							cRough = 0.7; cMetal = 0.5 * blk;
-						}
 					}
 					// the inside of the shell (seen through the holes) is dark; an open door or lid shows its trim panel
 					if ( ! outside ) { col = uPanel > 0.5 ? vec3( 0.07, 0.066, 0.06 ) * ( 0.8 + 0.4 * n2.g ) : vec3( 0.018 ); cRough = 0.9; cMetal = 0.0; }

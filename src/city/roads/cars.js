@@ -21,7 +21,8 @@ const TAG = {
 	rim: P( 4, 0.35, 0.8 ), glass: P( 5, 0.05, 0 ), screen: P( 6, 0.05, 0 ), head: P( 7, 0.1, 0.2 ), tail: P( 8, 0.2, 0 ), interior: P( 9, 0.9, 0 ),
 	red: P( 10, 0.3, 0 ), blue: P( 11, 0.3, 0 ), plate: P( 12, 0.5, 0.2 ), canvas: P( 13, 0.95, 0 ),
 };
-const BLACK = 0x0d0d0d, UNDER = 0x0a0a09, GLASS = 0x0b0e10, SEAT = 0x2a2724, DASH = 0x1d1c1a;
+// (the cabin colours are mid shades: the shader tints part 9 charcoal, grey or tan per car; darker read as a void)
+const BLACK = 0x0d0d0d, UNDER = 0x0a0a09, GLASS = 0x0b0e10, SEAT = 0x5e5a53, DASH = 0x34322f, CARPET = 0x3c3935, HEADLINER = 0x9a958b;
 
 // lower body stations: [ z, yBottom, yBelt, yTop, width fraction ]; cabin: z stations [ zA, zB, zC, zD ],
 // roof height, roof half-width fraction, glass rule; regions for the shader. (Roads.js reads body[ 2 ], body[ 3 ],
@@ -50,7 +51,7 @@ const SPECS = {
 	[ CAR.PICKUP ]: {
 		body: [ [ - 2.7, 0.43, 0.7, 0.8, 0.92 ], [ - 2.62, 0.35, 0.86, 0.96, 0.97 ], [ - 2.35, 0.33, 1.0, 1.1, 1 ], [ - 1.25, 0.32, 1.06, 1.15, 1 ], [ - 1.0, 0.32, 1.08, 1.17, 1 ], [ 0.62, 0.32, 1.08, 1.17, 1 ], [ 0.66, 0.36, 0.9, 0.96, 1 ], [ 2.62, 0.36, 0.9, 0.96, 1 ], [ 2.7, 0.44, 0.88, 0.95, 0.97 ] ],
 		cab: { z: [ - 1.0, - 0.3, 0.48, 0.6 ], roof: 1.86, w: 0.84, pillarB: 99, cPillar: true },
-		doors: [ [ - 0.95, 0.42 ], null ], trunk: [ 2.58, 2.7, 'tailgate' ], hood: [ - 2.55, - 1.05 ], bed: [ 0.66, 2.66, 0.96, 1.3 ], low: [ 0, 2, 5, 6, 8 ],
+		doors: [ [ - 0.95, 0.42 ], null ], trunk: [ 2.58, 2.7, 'tailgate' ], hood: [ - 2.55, - 1.05 ], bed: [ 0.66, 2.66, 0.96, 1.24 ], low: [ 0, 2, 5, 6, 8 ],
 		look: { rim: 3, tw: 0.13, gap: 0.07, flare: 0.015, head: [ 0.84, 0.08, 0.5, 0.95 ], tail: [ 1.08, 0.13, 0.86, 0.995 ], grille: [ 0.6, 0.88, 0.46, 2 ] },
 	},
 	[ CAR.VAN ]: {
@@ -286,7 +287,7 @@ function buildCar( type, lod ) {
 		.filter( ( z, i, a ) => i === 0 || z - a[ i - 1 ] > 0.02 ).map( z => ( { z, ya: 0, lift: false, o: 0 } ) );
 	for ( const [ z0, z1, za ] of arches ) {
 		list.push( { z: z0, ya: 0, lift: false, o: 0 }, { z: z1, ya: 0, lift: false, o: 1 } );
-		const n = lod ? 2 : 4;
+		const n = lod ? 2 : 6; // (six steps up close: four read as a trapezoid)
 		for ( let k = 0; k <= n; k ++ ) {
 			const dz = - Math.cos( Math.PI * k / n ) * Ra;
 			list.push( { z: k === 0 ? z0 : k === n ? z1 : za + dz, ya: r + Math.sqrt( Math.max( 0, Ra * Ra - dz * dz ) ), lift: true, o: k === 0 ? 1 : 0 } );
@@ -298,7 +299,7 @@ function buildCar( type, lod ) {
 		const full = lowerSection( S, hw, s.z, s.ya, inCabin( s.z ), floorY, L.flare );
 		return { z: s.z, lift: s.lift, cabin: inCabin( s.z ), pts: idx ? idx.map( k => full[ k ] ) : full, map: idx || full.map( ( _, k ) => k ) };
 	} );
-	const PAINT = [ 0xffffff, TAG.paint ], UNDERS = [ UNDER, TAG.under ], INT = [ DASH, TAG.interior ];
+	const PAINT = [ 0xffffff, TAG.paint ], UNDERS = [ UNDER, TAG.under ], INT = [ CARPET, TAG.interior ];
 	loft( sk, st, ( k, A, C ) => {
 		const k0 = A.map[ k ];
 		if ( k0 < 2 ) return UNDERS;
@@ -365,16 +366,19 @@ function buildCar( type, lod ) {
 		const kind = GK[ k ];
 		if ( kind === 'w' && windowAt( zm ) ) return G;
 		if ( kind === 't' && ( zm < zB || zm > zC ) ) return SCR;
-		return kind === 't' ? [ 0x3a3833, TAG.interior ] : [ 0x1c1b19, TAG.interior ];
+		return kind === 't' ? [ HEADLINER, TAG.interior ] : [ 0x5a5650, TAG.interior ];
 	}, true );
 	sk.emit( b, 0.62 );
 	// ---- bumpers, lamps' housings, plates ----
 	const f = S.body[ 0 ], rr = S.body[ S.body.length - 1 ];
 	const mil = !! S.military;
+	// body-colour bumper covers (cars since the 90s) with a black lower valance; chrome on the pickup, rubber on the bus
+	const BUMP = S.bus ? [ 0x1a1a1b, TAG.gloss ] : type === CAR.PICKUP ? [ 0xa8abae, TAG.chrome ] : [ 0xffffff, TAG.paint ];
 	if ( lod === 0 && ! mil ) {
 		for ( const [ s, dir ] of [ [ f, - 1 ], [ rr, 1 ] ] ) {
 			const y0 = s[ 1 ] - 0.03, y1 = s[ 1 ] + ( S.bus ? 0.26 : 0.19 );
-			bumper( b, s[ 0 ], dir, y0, y1, hw * s[ 4 ] * 1.01, S.bus ? 0.07 : 0.085, S.bus ? 0.15 : 0.32, type === CAR.PICKUP && dir > 0 ? [ 0xa8abae, TAG.chrome ] : [ 0x1a1a1b, TAG.gloss ], lod );
+			bumper( b, s[ 0 ], dir, y0, y1, hw * s[ 4 ] * 1.01, S.bus ? 0.07 : 0.085, S.bus ? 0.15 : 0.32, BUMP, lod );
+			if ( BUMP[ 0 ] === 0xffffff ) b.box( hw * s[ 4 ] * 1.5, 0.045, 0.07, 0x161616, TAG.trim, { y: y0 - 0.02, z: s[ 0 ] + dir * 0.02 } );
 		}
 	} else if ( mil ) {
 		// steel bumpers with tow shackles
@@ -385,8 +389,8 @@ function buildCar( type, lod ) {
 			b.box( 0.06, 0.06, 0.1, 0x1a1a1a, TAG.trim, { x: s * hw * 0.5, y: rr[ 1 ] + 0.04, z: zR + 0.14 } );
 		}
 	} else if ( lod === 1 ) {
-		b.box( D.W * f[ 4 ] * 1.01, 0.2, 0.14, 0x1b1b1b, TAG.trim, { y: f[ 1 ] + 0.07, z: zF + 0.01 } );
-		b.box( D.W * rr[ 4 ] * 1.01, 0.2, 0.14, 0x1b1b1b, TAG.trim, { y: rr[ 1 ] + 0.07, z: zR - 0.01 } );
+		b.box( D.W * f[ 4 ] * 1.01, 0.2, 0.14, BUMP[ 0 ], BUMP[ 1 ], { y: f[ 1 ] + 0.07, z: zF + 0.01 } );
+		b.box( D.W * rr[ 4 ] * 1.01, 0.2, 0.14, BUMP[ 0 ], BUMP[ 1 ], { y: rr[ 1 ] + 0.07, z: zR - 0.01 } );
 	}
 	if ( ! mil && lod === 0 ) {
 		const yf = f[ 1 ] + 0.08, yr = rr[ 1 ] + ( S.bus ? 0.38 : 0.28 );
@@ -421,11 +425,17 @@ function buildCar( type, lod ) {
 	if ( lod === 0 && ! S.bus && type !== CAR.MTRUCK ) {
 		// wipers parked on the foot of the windscreen (its lower part rises at about 0.6 / 0.38 of the mean slope)
 		const [ yb ] = topAt( zA );
-		const run = zB - zA, rise = cab.roof - yb, t = 0.08 / run;
-		const yw = yb + rise * Math.min( 1, t / 0.38 * 0.6 ) + 0.012;
-		for ( const x of [ - 0.3, 0.22 ] ) b.box( 0.5, 0.012, 0.03, BLACK, TAG.trim, { x: x * D.W / 1.82, y: yw, z: zA + 0.08, rx: - Math.atan2( rise * 1.58, run ), rz: 0.06 } );
+		// (right at the foot, where the cowl hides their pivots: higher up they read as dashes floating on the glass)
+		const run = zB - zA, rise = cab.roof - yb, dz = 0.035;
+		const yw = yb + rise * Math.min( 1, dz / run / 0.38 * 0.6 ) + 0.011;
+		for ( const x of [ - 0.3, 0.22 ] ) {
+			b.box( 0.52, 0.012, 0.022, 0x121212, TAG.trim, { x: x * D.W / 1.82, y: yw, z: zA + dz, rx: - Math.atan2( rise * 1.58, run ), rz: 0.05 } );
+			b.box( 0.4, 0.01, 0.012, 0x1a1a1a, TAG.gloss, { x: x * D.W / 1.82 + 0.03, y: yw + 0.014, z: zA + dz + 0.012, rx: - Math.atan2( rise * 1.58, run ), rz: 0.09 } );
+		}
+		// the antenna: on the roof of police and army trucks, else on the right fender by the windscreen (clear of the hood)
 		const roofAnt = S.police || mil;
-		b.cyl( 0.004, 0.006, roofAnt ? 0.3 : 0.55, 4, BLACK, TAG.trim, { x: hw * ( roofAnt ? 0.5 : 0.8 ), y: roofAnt ? cab.roof + 0.17 : topAt( zF + 0.6 )[ 0 ] + 0.27, z: roofAnt ? zC - 0.2 : zF + 0.6 } );
+		const [ ya, xa ] = topAt( zA - 0.25 );
+		b.cyl( 0.004, 0.006, roofAnt ? 0.3 : 0.55, 4, BLACK, TAG.trim, { x: roofAnt ? hw * 0.5 : xa, y: roofAnt ? cab.roof + 0.17 : ya + 0.265, z: roofAnt ? zC - 0.2 : zA - 0.25 } );
 		// tail pipe
 		b.cyl( 0.03, 0.03, 0.18, 6, 0x2a2826, TAG.chrome, { x: - hw * 0.55, y: rr[ 1 ] - 0.08, z: zR - 0.02, axis: 'z' } );
 	}
@@ -433,11 +443,11 @@ function buildCar( type, lod ) {
 	if ( S.bed ) {
 		const [ z0, z1, yf, yt ] = S.bed;
 		for ( const s of [ - 1, 1 ] ) {
-			b.box( 0.07, yt - yf + 0.34, z1 - z0, 0xffffff, TAG.paint, { x: s * ( hw - 0.035 ), y: ( yf - 0.34 + yt ) / 2 + 0.17, z: ( z0 + z1 ) / 2 } );
+			b.box( 0.07, yt - yf + 0.34, z1 - z0, 0xffffff, TAG.paint, { x: s * ( hw - 0.035 ), y: ( yf - 0.34 + yt ) / 2, z: ( z0 + z1 ) / 2 } ); // (sides from the sill up to the rail)
 			if ( lod < 2 ) b.box( 0.12, 0.03, z1 - z0 + 0.02, BLACK, TAG.trim, { x: s * ( hw - 0.045 ), y: yt + 0.02, z: ( z0 + z1 ) / 2 } ); // bed rail caps
 		}
 		b.box( D.W - 0.14, yt - yf, 0.07, 0xffffff, TAG.paint, { y: ( yf + yt ) / 2, z: z0 + 0.035 } );
-		b.box( D.W, yt - yf + 0.34, 0.07, 0xffffff, TAG.paint, { y: ( yf - 0.34 + yt ) / 2 + 0.17, z: z1 } );
+		b.box( D.W, yt - yf + 0.34, 0.07, 0xffffff, TAG.paint, { y: ( yf - 0.34 + yt ) / 2, z: z1 } );
 		b.box( D.W - 0.14, 0.02, z1 - z0, 0x1c1c1c, TAG.trim, { y: yf + 0.01, z: ( z0 + z1 ) / 2 } );
 		if ( lod === 0 ) for ( let k = - 3; k <= 3; k ++ ) b.box( 0.04, 0.015, z1 - z0 - 0.1, 0x262626, TAG.trim, { x: k * 0.22, y: yf + 0.025, z: ( z0 + z1 ) / 2 } ); // bed liner ribs
 	}
@@ -521,7 +531,7 @@ function buildCar( type, lod ) {
 	// far and low: a dark block filling the cabin (single-sided shells: an open door would show the sky through the car)
 	if ( lod > 0 && ! S.bus ) {
 		const yb = S.body[ 2 ][ 1 ] + 0.1, yt = S.body[ Math.min( 4, nb - 2 ) ][ 2 ];
-		b.box( hw * 1.7, yt - yb, zD - zA - 0.1, DASH, TAG.interior, { y: ( yb + yt ) / 2, z: ( zA + zD ) / 2 } );
+		b.box( hw * 1.7, yt - yb, zD - zA - 0.1, 0x48443e, TAG.interior, { y: ( yb + yt ) / 2, z: ( zA + zD ) / 2 } );
 	}
 	// the dark wheel openings at a distance (the low LOD has no arches)
 	if ( lod === 2 ) {
@@ -541,11 +551,11 @@ function buildCar( type, lod ) {
 		const yDash = topAt( zA + 0.2 )[ 0 ];
 		const iw = ( hw * 0.8 ) * 2;
 		b.box( iw, yDash - floorY + 0.06, 0.45, DASH, TAG.interior, { y: ( yDash + floorY ) / 2, z: zA + 0.2 } ); // dash
-		b.box( iw * 0.92, 0.07, 0.25, 0x111111, TAG.interior, { y: yDash + 0.06, z: zA + 0.33, rx: 0.25 } ); // dash top
+		b.box( iw * 0.92, 0.07, 0.25, 0x262422, TAG.interior, { y: yDash + 0.06, z: zA + 0.33, rx: 0.25 } ); // dash top
 		const big = type === CAR.BUS || type === CAR.MTRUCK;
 		const drv = big ? zA + 1.1 : zB + 0.42;
 		for ( const s of [ - 1, 1 ] ) seat( b, s * hw * 0.42, floorY, drv, hw * 0.62 );
-		if ( ! big ) b.box( 0.18, 0.2, 0.55, 0x161514, TAG.interior, { y: floorY + 0.1, z: drv - 0.1 } ); // console
+		if ( ! big ) b.box( 0.18, 0.2, 0.55, 0x2a2826, TAG.interior, { y: floorY + 0.1, z: drv - 0.1 } ); // console
 		if ( S.doors[ 1 ] && ! big ) {
 			const z = S.doors[ 1 ][ 0 ] + 0.5;
 			b.box( iw * 0.9, 0.13, 0.5, SEAT, TAG.interior, { y: floorY + 0.26, z } );
@@ -556,12 +566,14 @@ function buildCar( type, lod ) {
 		const sx = big ? - hw * 0.45 : - hw * 0.42;
 		b.torus( 0.18, 0.02, 4, 10, 0x111111, TAG.trim, { x: sx, y: yb + 0.02, z: zA + 0.5, rx: 1.15 } );
 		b.cyl( 0.025, 0.03, 0.3, 5, 0x111111, TAG.trim, { x: sx, y: yb - 0.06, z: zA + 0.38, rx: - 0.42 } );
-		// trunk tub (an open lid shows it): a box turned inside out, floor and walls facing in
-		if ( S.trunk && S.trunk[ 2 ] === 'lid' ) {
-			const y0 = rr[ 1 ] + 0.17, y1 = S.body[ S.body.length - 3 ][ 3 ];
-			b.box( iw * 0.98, y1 - y0, S.trunk[ 1 ] - S.trunk[ 0 ] - 0.12, 0x161514, TAG.interior, { y: ( y0 + y1 ) / 2, z: ( S.trunk[ 0 ] + S.trunk[ 1 ] ) / 2 - 0.02, flip: true } );
-		}
 	}
+	// ---- trunk tub and engine bay: boxes turned inside out (an open lid or hood shows them; every LOD, so the hole
+	// never shows the sky through the car) ----
+	if ( S.trunk && S.trunk[ 2 ] === 'lid' ) {
+		const y0 = rr[ 1 ] + 0.17, y1 = S.body[ S.body.length - 3 ][ 3 ];
+		b.box( hw * 1.57, y1 - y0, S.trunk[ 1 ] - S.trunk[ 0 ] - 0.12, 0x2c2a27, TAG.interior, { y: ( y0 + y1 ) / 2, z: ( S.trunk[ 0 ] + S.trunk[ 1 ] ) / 2 - 0.02, flip: true } );
+	}
+	if ( S.hood ) engineBay( b, S, hw, lod );
 	// ---- wheels ----
 	const parts = wheelParts( r, L.tw, lod, L );
 	const ax = axles( type );
@@ -573,6 +585,31 @@ function buildCar( type, lod ) {
 	}
 	for ( const p of parts ) p.geo.dispose();
 	return b.build( 'cpart', 3 );
+}
+
+// the engine bay under the hood: the bay itself and, up close, the engine with its cover, the radiator, air box,
+// battery, strut towers and coolant tank (part 9, so the open hood's hole keeps them; all below the closed hood)
+const BAY = P( 9, 0.55, 0.55 ), BAYP = P( 9, 0.4, 0 );
+function engineBay( b, S, hw, lod ) {
+	const [ za, h1 ] = S.hood, zb = h1 - 0.02;
+	const yTop = Math.min( bodyAt( S, za )[ 2 ], bodyAt( S, zb )[ 2 ] ) - 0.04, yF = S.body[ 2 ][ 1 ] + 0.08;
+	const bw = hw * 1.84, L = zb - za, H = yTop - yF;
+	b.box( bw, H, L, 0x2a2927, TAG.interior, { y: ( yTop + yF ) / 2, z: ( za + zb ) / 2, flip: true } );
+	if ( lod ) return;
+	const ew = bw * 0.4, eh = H * 0.55, ed = L * 0.42, ez = za + L * 0.56;
+	b.box( ew, eh, ed, 0x5a5d5f, BAY, { y: yF + 0.04 + eh / 2, z: ez } ); // block
+	b.box( ew * 0.86, 0.06, ed * 0.92, 0x161616, BAYP, { y: yF + 0.07 + eh, z: ez } ); // engine cover
+	b.box( ew * 0.5, 0.05, 0.1, 0x3a3c3e, BAY, { y: yF + 0.06 + eh, z: ez - ed * 0.5 - 0.03 } ); // intake
+	b.box( bw * 0.86, H * 0.72, 0.05, 0x1e1f20, BAY, { y: yF + H * 0.42, z: za + 0.06 } ); // radiator
+	b.box( bw * 0.7, 0.05, 0.08, 0x2a2b2c, BAY, { y: yF + H * 0.8, z: za + 0.07 } ); // its top tank
+	b.box( 0.3, 0.15, 0.26, 0x141414, BAYP, { x: bw * 0.3, y: yTop - 0.13, z: za + L * 0.3 } ); // air box
+	b.beam( [ bw * 0.18, yTop - 0.13, za + L * 0.32 ], [ ew * 0.3, yF + eh + 0.04, ez - ed * 0.3 ], 0.07, 0.07, 0x141414, BAYP ); // its duct
+	b.box( 0.26, 0.18, 0.17, 0x121212, BAYP, { x: - bw * 0.31, y: yTop - 0.14, z: za + L * 0.33 } ); // battery
+	b.cyl( 0.016, 0.016, 0.03, 6, 0x8a1a12, BAYP, { x: - bw * 0.31 + 0.07, y: yTop - 0.035, z: za + L * 0.33 } );
+	b.cyl( 0.016, 0.016, 0.03, 6, 0x1a1a1a, BAYP, { x: - bw * 0.31 - 0.07, y: yTop - 0.035, z: za + L * 0.33 } );
+	for ( const s of [ - 1, 1 ] ) b.cyl( 0.085, 0.1, H * 0.62, 10, 0x3c3b39, BAY, { x: s * ( bw / 2 - 0.13 ), y: yF + H * 0.62 / 2 + H * 0.28, z: zb - 0.2 } ); // strut towers
+	b.box( 0.13, 0.14, 0.2, 0xcfc6ae, BAYP, { x: bw * 0.32, y: yTop - 0.12, z: zb - 0.48 } ); // coolant tank
+	b.beam( [ - bw * 0.2, yF + H * 0.75, za + 0.1 ], [ - ew * 0.4, yF + eh * 0.8, ez - ed * 0.5 ], 0.045, 0.045, 0x141414, BAYP ); // hose
 }
 
 // a front seat: cushion, back and headrest
@@ -620,26 +657,31 @@ function bumper( b, zEnd, dir, y0, y1, hwB, depth, wrap, [ hex, tag ], lod ) {
 }
 
 // door panel (unit: thickness along x with the outer skin at +x, y 0..1 from the sill to the roof, z 0..1 from the
-// hinge rearwards): a curved outer skin, the window frame and glass, the trim card with an armrest inside
+// hinge rearwards): a curved outer skin on a 10 cm deep shell whose shut faces are painted like the body, the window
+// frame and glass, and inside the trim card with its armrest, pull cup, map pocket and speaker
 function buildDoor() {
 	const b = new MB();
 	const sk = new Skin();
-	const belt = 0.56;
+	const belt = 0.56, IN = - 0.1;
 	// the outer skin bulges a little at mid-height
 	const prof = [ [ 0.0, 0.0 ], [ 0.016, 0.12 ], [ 0.022, 0.34 ], [ 0.012, belt ] ];
 	for ( let k = 0; k < prof.length - 1; k ++ ) {
 		const [ x0, y0 ] = prof[ k ], [ x1, y1 ] = prof[ k + 1 ];
 		sk.quad( [ x0, y0, 0 ], [ x1, y1, 0 ], [ x1, y1, 1 ], [ x0, y0, 1 ], 0xffffff, TAG.paint, [ 1, - ( x1 - x0 ), 0 ] );
 	}
-	// edges: front / rear faces of the skin and the sill edge
-	for ( const z of [ 0, 1 ] ) sk.quad( [ - 0.04, 0, z ], [ 0.016, 0.12, z ], [ 0.012, belt, z ], [ - 0.04, belt, z ], 0xffffff, TAG.paint, [ 0, 0, z ? 1 : - 1 ] );
-	sk.quad( [ - 0.04, 0, 0 ], [ 0, 0, 0 ], [ 0, 0, 1 ], [ - 0.04, 0, 1 ], 0xffffff, TAG.paint, [ 0, - 1, 0 ] );
-	sk.quad( [ - 0.04, belt, 0 ], [ 0.012, belt, 0 ], [ 0.012, belt, 1 ], [ - 0.04, belt, 1 ], BLACK, TAG.trim, [ 0, 1, 0 ] ); // belt seal
+	// shut faces: front, rear and bottom (an open door seen edge-on shows body colour, not a black slab)
+	const shut = [ [ IN, 0.02 ], ...prof, [ IN, belt ] ];
+	for ( const z of [ 0, 1 ] ) for ( let k = 1; k < shut.length - 1; k ++ ) sk.tri( [ shut[ 0 ][ 0 ], shut[ 0 ][ 1 ], z ], [ shut[ k ][ 0 ], shut[ k ][ 1 ], z ], [ shut[ k + 1 ][ 0 ], shut[ k + 1 ][ 1 ], z ], 0xffffff, TAG.paint, [ 0, 0, z ? 1 : - 1 ] );
+	sk.quad( [ IN, 0.02, 0 ], [ 0, 0, 0 ], [ 0, 0, 1 ], [ IN, 0.02, 1 ], 0xffffff, TAG.paint, [ 0, - 1, 0 ] );
+	sk.quad( [ IN, belt, 0 ], [ 0.012, belt, 0 ], [ 0.012, belt, 1 ], [ IN, belt, 1 ], BLACK, TAG.trim, [ 0, 1, 0 ] ); // belt seal
 	sk.emit( b, 0.7 );
-	// inner trim card, armrest, pull handle
-	b.box( 0.012, belt - 0.04, 0.96, 0x2a2724, TAG.interior, { x: - 0.046, y: belt / 2, z: 0.5 } );
-	b.box( 0.05, 0.04, 0.4, 0x222120, TAG.interior, { x: - 0.07, y: belt * 0.62, z: 0.55 } );
-	b.box( 0.02, 0.05, 0.08, 0x777777, TAG.chrome, { x: - 0.056, y: belt * 0.82, z: 0.25 } );
+	// trim card (the shader tints it with the cabin), armrest, pull cup, map pocket, speaker, handle
+	b.box( 0.012, belt - 0.02, 0.97, SEAT, TAG.interior, { x: IN - 0.006, y: belt / 2 + 0.01, z: 0.5 } );
+	b.box( 0.06, 0.045, 0.42, 0x4a4740, TAG.interior, { x: IN - 0.04, y: belt * 0.64, z: 0.56 } );
+	b.box( 0.035, 0.03, 0.14, 0x2a2826, TAG.interior, { x: IN - 0.025, y: belt * 0.64 + 0.035, z: 0.7 } );
+	b.box( 0.045, 0.1, 0.55, 0x3c3935, TAG.interior, { x: IN - 0.03, y: 0.15, z: 0.55 } );
+	b.cyl( 0.075, 0.075, 0.01, 10, 0x1e1d1b, TAG.interior, { x: IN - 0.015, y: 0.2, z: 0.2, axis: 'x' } );
+	b.box( 0.02, 0.05, 0.08, 0x777777, TAG.chrome, { x: IN - 0.02, y: belt * 0.84, z: 0.25 } );
 	// window frame (thin, painted) and glass
 	b.box( 0.03, 0.035, 1, 0xffffff, TAG.paint, { y: 0.98, z: 0.5 } );
 	b.box( 0.03, 1 - belt, 0.035, 0xffffff, TAG.paint, { y: ( 1 + belt ) / 2, z: 0.982 } );

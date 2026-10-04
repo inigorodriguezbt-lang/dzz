@@ -12,7 +12,7 @@
 //   decal                   ground decals (blood, ash, soil, scorch, oil, papers, glass, skids, brass, litter,
 //                           trampled ground, char, boot prints, twigs): alpha atlas, no depth write
 // Parts marked { fine: true } (litter, brass, guy lines, pegs) merge into meshes of their own that only draw within
-// FINE_R of the camera: small things cost nothing past the distance where they'd be a pixel.
+// FINE_R of the camera and cast no shadow: small things cost nothing past the distance where they'd be a pixel.
 // Colliders added through the kit become physics boxes (yaw-only, as Physics.js has them).
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
@@ -20,7 +20,7 @@ import { patchMaterial, releaseCanvasOnUpload, G } from '../../../render/Materia
 
 export const PI = Math.PI;
 const _c = new THREE.Color();
-export const FINE_R = 55;
+export const FINE_R = 32;
 
 // ---- textures ------------------------------------------------------------------------------------------------------
 
@@ -186,15 +186,16 @@ function printAtlas() {
 		g.fillStyle = '#1f5fa8'; g.font = font( 'bold', 30 ); g.fillText( 'STOP', S * 0.5, S * 0.68 ); g.font = font( 'bold', 20 ); g.fillText( 'TheBus  52  55', S * 0.5, S * 0.84 );
 	} );
 	// woodland camouflage
-	const camo = ( g, S ) => {
+	// (sc: blob scale; a net stretched over metres wants it finer)
+	const camo = ( g, S, sc = 1 ) => {
 		g.fillStyle = '#5f6440'; g.fillRect( 0, 0, S, S );
 		const r = prng( 21 );
 		for ( const [ col, n ] of [ [ '#3e4a2a', 26 ], [ '#7b6a45', 18 ], [ '#23261a', 14 ] ] ) {
 			g.fillStyle = col;
-			for ( let i = 0; i < n; i ++ ) { const x = r() * S, y = r() * S; g.beginPath(); g.moveTo( x, y ); for ( let k = 0; k < 7; k ++ ) { const a = k / 7 * PI * 2; const rr = 14 + r() * 26; g.lineTo( x + Math.cos( a ) * rr * 1.6, y + Math.sin( a ) * rr ); } g.closePath(); g.fill(); }
+			for ( let i = 0; i < n / ( sc * sc ); i ++ ) { const x = r() * S, y = r() * S; g.beginPath(); g.moveTo( x, y ); for ( let k = 0; k < 7; k ++ ) { const a = k / 7 * PI * 2; const rr = ( 14 + r() * 26 ) * sc; g.lineTo( x + Math.cos( a ) * rr * 1.6, y + Math.sin( a ) * rr ); } g.closePath(); g.fill(); }
 		}
 	};
-	cell( 11, camo );
+	cell( 11, ( g, S ) => camo( g, S ) );
 	// humanitarian ration boxes
 	cell( 12, ( g, S ) => {
 		g.fillStyle = '#e7c34a'; g.fillRect( 0, 0, S, S );
@@ -263,14 +264,17 @@ function printAtlas() {
 		for ( let i = 0; i <= n; i ++ ) { g.beginPath(); g.moveTo( i * st, 0 ); g.lineTo( i * st, S ); g.stroke(); g.beginPath(); g.moveTo( 0, i * st ); g.lineTo( S, i * st ); g.stroke(); }
 	} );
 	// camouflage netting: the garnish cut into tongues, holes through
+	// (laid on the net in tiles about a metre across: 25 cm a hundred pixels)
 	cell( 19, ( g, S ) => {
-		camo( g, S );
+		camo( g, S, 0.55 );
 		const r = prng( 31 );
 		g.globalCompositeOperation = 'destination-out';
-		for ( let i = 0; i < 70; i ++ ) {
-			const x = r() * S, y = r() * S, w = 5 + r() * 9, h = 9 + r() * 16, a = r() * PI;
-			g.save(); g.translate( x, y ); g.rotate( a ); g.beginPath(); g.moveTo( 0, - h ); g.lineTo( w, 0 ); g.lineTo( 0, h ); g.lineTo( - w, 0 ); g.closePath(); g.fill(); g.restore();
-			for ( const ox of [ - S, S ] ) { g.save(); g.translate( x + ox, y ); g.rotate( a ); g.beginPath(); g.moveTo( 0, - h ); g.lineTo( w, 0 ); g.lineTo( 0, h ); g.lineTo( - w, 0 ); g.closePath(); g.fill(); g.restore(); }
+		for ( let i = 0; i < 170; i ++ ) {
+			const x = r() * S, y = r() * S, w = 3 + r() * 5, h = 7 + r() * 11, a = r() * PI;
+			for ( const ox of [ - S, 0, S ] ) for ( const oy of [ - S, 0, S ] ) {
+				if ( Math.abs( x + ox - S / 2 ) > S / 2 + h || Math.abs( y + oy - S / 2 ) > S / 2 + h ) continue;
+				g.save(); g.translate( x + ox, y + oy ); g.rotate( a ); g.beginPath(); g.moveTo( 0, - h ); g.lineTo( w, 0 ); g.lineTo( 0, h ); g.lineTo( - w, 0 ); g.closePath(); g.fill(); g.restore();
+			}
 		}
 		g.globalCompositeOperation = 'source-over';
 	} );
@@ -509,18 +513,18 @@ function decalAtlas() {
 		for ( let i = 0; i < 16; i ++ ) {
 			g.save(); g.translate( S * ( 0.1 + r() * 0.8 ), S * ( 0.1 + r() * 0.8 ) ); g.rotate( r() * PI );
 			const k = r();
-			if ( k < 0.35 ) { g.fillStyle = cols[ Math.floor( r() * cols.length ) ]; g.beginPath(); g.moveTo( - 6, - 3 ); g.lineTo( 5, - 4 ); g.lineTo( 7, 2 ); g.lineTo( - 4, 4 ); g.closePath(); g.fill(); g.fillStyle = 'rgba(255,255,255,0.5)'; g.fillRect( - 3, - 1, 5, 1 ); }
+			if ( k < 0.35 ) { g.fillStyle = cols[ Math.floor( r() * cols.length ) ]; g.beginPath(); g.moveTo( - 4, - 2 ); g.lineTo( 3, - 2.6 ); g.lineTo( 4.5, 1.3 ); g.lineTo( - 2.6, 2.6 ); g.closePath(); g.fill(); g.fillStyle = 'rgba(255,255,255,0.5)'; g.fillRect( - 2, - 0.6, 3.2, 0.7 ); }
 			else if ( k < 0.65 ) { g.fillStyle = '#ece6d6'; g.fillRect( - 3, - 0.8, 4.5, 1.6 ); g.fillStyle = '#c88a3a'; g.fillRect( 1.5, - 0.8, 1.6, 1.6 ); }
 			else if ( k < 0.85 ) { g.fillStyle = r() < 0.5 ? '#b8b8b4' : '#c8322a'; g.beginPath(); g.arc( 0, 0, 1.6, 0, PI * 2 ); g.fill(); }
-			else { g.fillStyle = '#f4f2ec'; g.fillRect( - 3, - 7, 6, 14 ); g.fillStyle = 'rgba(60,60,60,0.5)'; for ( let y = - 5; y < 6; y += 2 ) g.fillRect( - 2, y, 4, 0.6 ); }
+			else { g.fillStyle = '#f4f2ec'; g.fillRect( - 2, - 5, 4, 10 ); g.fillStyle = 'rgba(60,60,60,0.5)'; for ( let y = - 4; y < 4.5; y += 1.6 ) g.fillRect( - 1.4, y, 2.8, 0.5 ); }
 			g.restore();
 		}
 	} );
 	// trampled ground: worn, dusty, the grass flattened and bare in places
 	cell( 12, ( g, S, r ) => {
-		blob( g, S / 2, S / 2, S * 0.48, ( a ) => `rgba(112,96,70,${a})`, 0.5 );
-		for ( let i = 0; i < 40; i ++ ) blob( g, S / 2 + ( r() - 0.5 ) * S * 0.7, S / 2 + ( r() - 0.5 ) * S * 0.7, S * ( 0.04 + r() * 0.1 ), ( a ) => `rgba(${96 + r() * 30},${82 + r() * 24},${58 + r() * 18},${a})`, 0.35 );
-		for ( let i = 0; i < 60; i ++ ) { g.fillStyle = `rgba(70,58,40,${0.15 + r() * 0.2})`; g.fillRect( S / 2 + ( r() - 0.5 ) * S * 0.7, S / 2 + ( r() - 0.5 ) * S * 0.7, 1, 1 ); }
+		blob( g, S / 2, S / 2, S * 0.48, ( a ) => `rgba(104,94,74,${a})`, 0.28 );
+		for ( let i = 0; i < 40; i ++ ) blob( g, S / 2 + ( r() - 0.5 ) * S * 0.7, S / 2 + ( r() - 0.5 ) * S * 0.7, S * ( 0.04 + r() * 0.1 ), ( a ) => `rgba(${92 + r() * 30},${84 + r() * 24},${66 + r() * 18},${a})`, 0.2 );
+		for ( let i = 0; i < 60; i ++ ) { g.fillStyle = `rgba(70,62,48,${0.1 + r() * 0.15})`; g.fillRect( S / 2 + ( r() - 0.5 ) * S * 0.7, S / 2 + ( r() - 0.5 ) * S * 0.7, 1, 1 ); }
 	} );
 	// a fire's scar: charcoal and white ash in a burnt ring
 	cell( 13, ( g, S, r ) => {
@@ -529,14 +533,15 @@ function decalAtlas() {
 		for ( let i = 0; i < 70; i ++ ) blob( g, S / 2 + ( r() - 0.5 ) * S * 0.45, S / 2 + ( r() - 0.5 ) * S * 0.45, 1 + r() * 3.5, ( a ) => `rgba(${150 + r() * 70},${146 + r() * 66},${140 + r() * 60},${a})`, 0.7 );
 		for ( let i = 0; i < 40; i ++ ) { g.fillStyle = 'rgba(5,4,3,0.85)'; const x = S / 2 + ( r() - 0.5 ) * S * 0.55, y = S / 2 + ( r() - 0.5 ) * S * 0.55; g.fillRect( x, y, 1 + r() * 3, 1 + r() * 2 ); }
 	} );
-	// boot prints: a few walks crossing
+	// boot prints: two walks crossing (prints about 30 cm long on a decal 2.4 m across)
 	cell( 14, ( g, S, r ) => {
-		for ( let w = 0; w < 3; w ++ ) {
-			const a = r() * PI * 2, cx = S / 2 + ( r() - 0.5 ) * 30, cy = S / 2 + ( r() - 0.5 ) * 30;
-			for ( let i = - 4; i <= 4; i ++ ) {
-				const x = cx + Math.cos( a ) * i * 12 + Math.cos( a + PI / 2 ) * ( i % 2 ? 3 : - 3 ), y = cy + Math.sin( a ) * i * 12 + Math.sin( a + PI / 2 ) * ( i % 2 ? 3 : - 3 );
+		for ( let w = 0; w < 2; w ++ ) {
+			const a = r() * PI * 2, cx = S / 2 + ( r() - 0.5 ) * 20, cy = S / 2 + ( r() - 0.5 ) * 20;
+			for ( let i = - 2; i <= 2; i ++ ) {
+				const x = cx + Math.cos( a ) * i * 26 + Math.cos( a + PI / 2 ) * ( i % 2 ? 5 : - 5 ), y = cy + Math.sin( a ) * i * 26 + Math.sin( a + PI / 2 ) * ( i % 2 ? 5 : - 5 );
 				g.save(); g.translate( x, y ); g.rotate( a + PI / 2 );
-				g.fillStyle = 'rgba(52,42,30,0.45)'; g.beginPath(); g.ellipse( 0, - 2, 2.2, 3, 0, 0, PI * 2 ); g.fill(); g.beginPath(); g.ellipse( 0, 3.2, 1.8, 1.8, 0, 0, PI * 2 ); g.fill();
+				g.fillStyle = 'rgba(58,48,36,0.26)'; g.beginPath(); g.ellipse( 0, - 3, 4.2, 6.2, 0, 0, PI * 2 ); g.fill(); g.beginPath(); g.ellipse( 0, 6, 3.4, 3.4, 0, 0, PI * 2 ); g.fill();
+				g.fillStyle = 'rgba(40,32,24,0.18)'; for ( let k = - 2; k <= 2; k ++ ) g.fillRect( - 3.6, - 6 + k * 2.2, 7.2, 0.8 );
 				g.restore();
 			}
 		}
@@ -632,48 +637,9 @@ export const geo = {
 			return [ out[ 0 ] + nx * k, out[ 1 ] + ny * k, out[ 2 ] + nz * k ];
 		} );
 	},
-	// a loft along +x through rounded-rectangle sections [ x, y, halfWidth, halfHeight, roundness (2: ellipse, 4+:
-	// boxy) ], seg around; closed with caps when caps is set
-	loft( secs, seg = 16, caps = false ) {
-		const g = grid( seg, secs.length - 1, ( u, v ) => {
-			const s = secs[ Math.round( v * ( secs.length - 1 ) ) ], a = - u * PI * 2;
-			const c = Math.cos( a ), sn = Math.sin( a ), e = 2 / ( s[ 4 ] ?? 2 );
-			return [ s[ 0 ], s[ 1 ] + Math.sign( sn ) * Math.abs( sn ) ** e * s[ 3 ], Math.sign( c ) * Math.abs( c ) ** e * s[ 2 ] ];
-		} );
-		if ( ! caps ) return g;
-		const parts = [ g ];
-		for ( const end of [ 0, secs.length - 1 ] ) {
-			const s = secs[ end ], cap = new THREE.CircleGeometry( 1, seg ).scale( s[ 2 ], s[ 3 ], 1 ).rotateY( end ? PI / 2 : - PI / 2 ).translate( s[ 0 ], s[ 1 ], 0 );
-			parts.push( cap );
-		}
-		return mergeSimple( parts );
-	},
 };
 
-// several plain geometries (position, normal, uv) as one
-export function mergeSimple( list ) {
-	let nv = 0, ni = 0;
-	for ( const g of list ) { nv += g.attributes.position.count; ni += g.index ? g.index.count : g.attributes.position.count; }
-	const pos = new Float32Array( nv * 3 ), nor = new Float32Array( nv * 3 ), uv = new Float32Array( nv * 2 ), idx = [];
-	let o = 0;
-	for ( const g of list ) {
-		const n = g.attributes.position.count;
-		pos.set( g.attributes.position.array, o * 3 );
-		if ( g.attributes.normal ) nor.set( g.attributes.normal.array, o * 3 );
-		if ( g.attributes.uv ) uv.set( g.attributes.uv.array, o * 2 );
-		if ( g.index ) for ( const i of g.index.array ) idx.push( i + o ); else for ( let i = 0; i < n; i ++ ) idx.push( i + o );
-		o += n;
-		g.dispose();
-	}
-	const out = new THREE.BufferGeometry();
-	out.setAttribute( 'position', new THREE.BufferAttribute( pos, 3 ) );
-	out.setAttribute( 'normal', new THREE.BufferAttribute( nor, 3 ) );
-	out.setAttribute( 'uv', new THREE.BufferAttribute( uv, 2 ) );
-	out.setIndex( idx );
-	return out;
-}
-
-// a merged mesh of small things: drawn (and casting) only within FINE_R of the camera; three asks `visible` of every
+// a merged mesh of small things: drawn only within FINE_R of the camera; three asks `visible` of every
 // object it draws, in the main view and in each shadow map, so the test sits there (G.uCamPos: the main camera)
 const _fv = new THREE.Vector3();
 class FineMesh extends THREE.Mesh {
@@ -727,11 +693,15 @@ export class Kit {
 		_p.set( p?.[ 0 ] || 0, p?.[ 1 ] || 0, p?.[ 2 ] || 0 );
 		if ( typeof s === 'number' ) _s.setScalar( s ); else _s.set( s?.[ 0 ] ?? 1, s?.[ 1 ] ?? 1, s?.[ 2 ] ?? 1 );
 		const m = this.T.clone().multiply( _m.compose( _p, _q, _s ) );
+		// small things share two meshes a site: bare metal (pegs, brass) and the rest on the print atlas (its plain
+		// cell takes the part's colour), so the litter costs a draw or two near the camera and none further out
+		let cell = o.cell ?? null;
+		if ( o.fine && mat !== 'metal' ) { if ( mat !== 'print' ) cell = CELLS.plain; mat = 'print'; }
 		const key = o.fine ? mat + ':fine' : mat;
 		let list = this.groups.get( key );
 		if ( ! list ) { list = []; this.groups.set( key, list ); }
 		_c.set( color ?? 0xffffff );
-		list.push( { g, m, r: _c.r, g_: _c.g, b: _c.b, cell: o.cell ?? null, scale: [ _s.x, _s.y, _s.z ], drape: o.drape && this.ground ? this.base : null, grime: o.grime || 0, gb: this.base } );
+		list.push( { g, m, r: _c.r, g_: _c.g, b: _c.b, cell, scale: [ _s.x, _s.y, _s.z ], drape: o.drape && this.ground ? this.base : null, grime: o.grime || 0, gb: this.base } );
 		return this;
 	}
 	box( w, h, d, mat, color, p, r, o ) { return this.part( geo.box( w, h, d ), mat, color, p, r, null, o ); }
@@ -820,9 +790,11 @@ export class Kit {
 			bg.setIndex( new THREE.BufferAttribute( idx, 1 ) );
 			bg.computeBoundingSphere();
 			bg.computeBoundingBox();
-			const mesh = key.endsWith( ':fine' ) ? new FineMesh( bg, mat ) : new THREE.Mesh( bg, mat );
+			const fine = key.endsWith( ':fine' );
+			const mesh = fine ? new FineMesh( bg, mat ) : new THREE.Mesh( bg, mat );
 			mesh.name = B.name + ':' + key;
-			mesh.castShadow = ! mat.userData.noShadow;
+			// (small things' shadows are a few pixels: not worth a draw in each cascade)
+			mesh.castShadow = ! mat.userData.noShadow && ! fine;
 			mesh.receiveShadow = true;
 			mesh.userData.shadow = mesh.castShadow;
 			if ( key === 'decal' ) mesh.renderOrder = 2;
