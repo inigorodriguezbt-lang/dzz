@@ -79,7 +79,7 @@ defineItems( [
 	tool( 'fishing_rod_improvised', 'Improvised fishing rod', 'fishingrod', { w: 0.6, size: 6, quality: 0.6, tags: [ 'crafted' ],
 		model: { type: 'rod', len: 1.7, color: 0x6a4a2e, improvised: true }, desc: 'Cast at open water.' } ),
 	tool( 'tackle_box', 'Tackle box', 'tackle', { w: 0.8, size: 2, uses: 30, rarity: 'uncommon', tags: [ 'fishing', 'boat', 'garage', 'sports' ],
-		model: { type: 'toolbox', size: [ 0.3, 0.12, 0.16 ], color: 0x2a6a3a }, desc: 'Faster bites while carried.' } ),
+		model: { type: 'toolbox', size: [ 0.3, 0.12, 0.16 ], color: 0x2a6a3a, style: 'tackle' }, desc: 'Faster bites while carried.' } ),
 
 	// ================= repair and utility =================
 	tool( 'can_opener', 'Can opener', 'canopener', { w: 0.1, size: 0.5, tags: [ 'kitchen', 'house', 'restaurant', 'outdoor' ],
@@ -98,14 +98,14 @@ defineItems( [
 		model: { type: 'kit', style: 'pouch', size: [ 0.18, 0.05, 0.1 ], color: 0x2a2a22, cross: null, label: { bg: 0x1a1a1a, fg: 0xd4a64a, text: 'CLEANING KIT', style: 'plain', size: 0.3 } },
 		desc: 'Restores firearm condition.' } ),
 	tool( 'hand_saw', 'Hand saw', 'saw', { w: 0.6, size: 3, rarity: 'uncommon', tags: [ 'hardware', 'garage', 'work', 'farm' ],
-		model: { type: 'parts', parts: [ [ 'box', [ 0.42, 0.002, 0.1 ], 0xb8bcc2, [ 0.08, 0, 0 ], null, { metal: 0.9, rough: 0.3 } ], [ 'rbox', [ 0.12, 0.03, 0.11, 0.01 ], 0x8a3a1a, [ - 0.19, 0, 0 ] ] ] },
+		model: { type: 'parts', kind: 'handsaw', parts: [ [ 'box', [ 0.42, 0.002, 0.1 ], 0xb8bcc2, [ 0.08, 0, 0 ], null, { metal: 0.9, rough: 0.3 } ], [ 'rbox', [ 0.12, 0.03, 0.11, 0.01 ], 0x8a3a1a, [ - 0.19, 0, 0 ] ] ] },
 		desc: 'Cuts firewood.' } ),
 	tool( 'whistle', 'Whistle', 'whistle', { w: 0.02, size: 0.5, tags: [ 'sports', 'school', 'police', 'boat', 'outdoor' ],
 		model: { type: 'whistle' }, desc: 'Loud. Attracts infected.' } ),
 	tool( 'batteries', 'AA batteries', 'battery', { w: 0.025, size: 0.5, stack: 4, tags: [ 'house', 'convenience', 'hardware', 'office', 'military', 'grocery' ],
 		model: { type: 'battery' }, desc: 'Powers lights and radios.' } ),
 	tool( 'solar_charger', 'Solar charger', 'solar', { w: 0.4, size: 1, rarity: 'rare', tags: [ 'outdoor', 'sports', 'office' ],
-		model: { type: 'parts', parts: [ [ 'rbox', [ 0.22, 0.012, 0.15, 0.004 ], 0x1a2a4a, null, null, { metal: 0.4, rough: 0.2 } ], [ 'box', [ 0.2, 0.002, 0.13 ], 0x2a4a8a, [ 0, 0.012, 0 ], null, { metal: 0.6, rough: 0.15 } ], [ 'cylX', [ 0.003, 0.2 ], 0x1a1a1a, [ 0.14, 0.004, 0.05 ] ] ] },
+		model: { type: 'parts', kind: 'solar', parts: [ [ 'rbox', [ 0.22, 0.012, 0.15, 0.004 ], 0x1a2a4a, null, null, { metal: 0.4, rough: 0.2 } ], [ 'box', [ 0.2, 0.002, 0.13 ], 0x2a4a8a, [ 0, 0.012, 0 ], null, { metal: 0.6, rough: 0.15 } ], [ 'cylX', [ 0.003, 0.2 ], 0x1a1a1a, [ 0.14, 0.004, 0.05 ] ] ] },
 		desc: 'Recharges devices in sunlight.' } ),
 
 	// ================= water =================

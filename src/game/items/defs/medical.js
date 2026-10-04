@@ -28,7 +28,7 @@ defineItems( [
 	med( 'gauze', 'Gauze pads', { w: 0.08, stack: 3, size: 1, use: 5, bleed: 2, heal: 2, verb: 'Pack wounds', rarity: 'uncommon', tags: [ 'pharmacy', 'hospital', 'clinic', 'first_aid' ],
 		model: { type: 'box', size: [ 0.1, 0.035, 0.1 ], labelAxis: 'y', label: { bg: 0xffffff, fg: 0x1a4a8a, text: 'GAUZE', sub: 'Sterile pads 4×4 in', band: 0x1a4a8a, style: 'medical', glyph: 'cross', glyphColor: 0xc0282a } } } ),
 	med( 'tourniquet', 'Tourniquet', { w: 0.08, size: 1, use: 4, bleed: 3, pain: 0, verb: 'Apply tourniquet', rarity: 'rare', tags: [ 'military', 'police', 'first_aid', 'fire' ],
-		model: { type: 'parts', parts: [ [ 'rbox', [ 0.2, 0.012, 0.04, 0.004 ], 0x1a1a1a ], [ 'cylX', [ 0.006, 0.09 ], 0x2a2a2a, [ 0.02, 0.018, 0 ] ], [ 'box', [ 0.03, 0.01, 0.03 ], 0xc0282a, [ - 0.08, 0.012, 0 ] ] ] } } ),
+		model: { type: 'parts', kind: 'tourniquet', parts: [ [ 'rbox', [ 0.2, 0.012, 0.04, 0.004 ], 0x1a1a1a ], [ 'cylX', [ 0.006, 0.09 ], 0x2a2a2a, [ 0.02, 0.018, 0 ] ], [ 'box', [ 0.03, 0.01, 0.03 ], 0xc0282a, [ - 0.08, 0.012, 0 ] ] ] } } ),
 	med( 'quikclot', 'Hemostatic gauze', { w: 0.05, size: 1, use: 6, bleed: 3, heal: 6, verb: 'Pack wounds', rarity: 'rare', tags: [ 'military', 'police', 'hospital', 'fire' ],
 		model: { type: 'bar', size: [ 0.13, 0.015, 0.09 ], matte: true, label: { bg: 0x5a5a3a, fg: 0xf2f2f2, text: 'HEMOSTATIC', sub: 'Z-fold gauze', band: 0xc0282a, style: 'military', size: 0.22 } } } ),
 	med( 'suture_kit', 'Suture kit', { w: 0.15, size: 1, use: 14, bleed: 6, heal: 8, pain: 0, verb: 'Stitch wounds', rarity: 'rare', tags: [ 'hospital', 'clinic', 'vet' ],

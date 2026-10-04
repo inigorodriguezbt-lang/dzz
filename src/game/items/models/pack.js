@@ -5,7 +5,7 @@
 // textColor, subColor, glyphColor, size, glyphX/Y, textX/Y } plus `brand` (a string, or false for none).
 // Brands are invented. Textures are cached by spec and layout; canvases stay small (≤ 1024 px).
 import * as THREE from 'three';
-import { canvasTex, css, shade, hashStr, glyph, PI } from './lib.js';
+import { M, canvasTex, css, shade, hashStr, glyph, PI } from './lib.js';
 
 const SANS = 'Arial, Helvetica, "Liberation Sans", "DejaVu Sans", sans-serif';
 const HEAVY = '"Arial Black", "Helvetica Neue", Arial, "Liberation Sans", sans-serif';
@@ -14,6 +14,13 @@ const SERIF = 'Georgia, "Times New Roman", "Liberation Serif", serif';
 export function rng( seed ) {
 	let s = seed >>> 0 || 7;
 	return () => { s ^= s << 13; s ^= s >>> 17; s ^= s << 5; return ( s >>> 0 ) / 4294967296; };
+}
+
+// a lit display: the print glows by itself (an emissive map), so screens read in the dark and in icons
+export function screenMat( map, k = 0.45, rough = 0.12 ) {
+	const m = M( 0xffffff, { map, rough, key: 'screen' + k } );
+	if ( ! m.emissiveMap ) { m.emissiveMap = map; m.emissive.set( 0xffffff ); m.emissiveIntensity = k; m.needsUpdate = true; }
+	return m;
 }
 
 // ---- colour ---------------------------------------------------------------------------------------------------
